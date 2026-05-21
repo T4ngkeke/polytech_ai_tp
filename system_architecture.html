@@ -1,153 +1,501 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM System Architecture</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <title>Edu-LLM Lean MVP Architecture</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8fafc;
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
-        .mermaid-container {
+
+        :root {
+            --bg: #f0f2f8;
+            --surface: #ffffff;
+            --surface-2: #f7f8fc;
+            --border: #e2e6f0;
+            --text: #1a1e2e;
+            --text-muted: #6b7494;
+            --new: #16a34a;
+            --new-bg: #f0fdf4;
+            --new-border: #bbf7d0;
+            --changed: #b45309;
+            --changed-bg: #fffbeb;
+            --changed-border: #fde68a;
+            --kept: #4f46e5;
+            --kept-bg: #eef2ff;
+            --kept-border: #c7d2fe;
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2.5rem 1.5rem;
+        }
+
+        .wrapper {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .pill {
+            display: inline-block;
+            background: #1a1e2e;
+            color: #fff;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            padding: 0.35rem 0.9rem;
+            border-radius: 999px;
+            margin-bottom: 1.2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin-bottom: 0.6rem;
+        }
+
+        .subtitle {
+            font-size: 1rem;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.78rem;
+            font-weight: 500;
+            padding: 0.3rem 0.75rem;
+            border-radius: 6px;
+            border: 1px solid;
+        }
+
+        .legend-item.new {
+            background: var(--new-bg);
+            color: var(--new);
+            border-color: var(--new-border);
+        }
+
+        .legend-item.changed {
+            background: var(--changed-bg);
+            color: var(--changed);
+            border-color: var(--changed-border);
+        }
+
+        .legend-item.kept {
+            background: var(--kept-bg);
+            color: var(--kept);
+            border-color: var(--kept-border);
+        }
+
+        .legend-item .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .dot.new {
+            background: var(--new);
+        }
+
+        .dot.changed {
+            background: var(--changed);
+        }
+
+        .dot.kept {
+            background: var(--kept);
+        }
+
+        /* Diagram Card */
+        .diagram-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+            margin-bottom: 2.5rem;
+            overflow-x: auto;
+        }
+
+        .diagram-card .mermaid {
             display: flex;
             justify-content: center;
-            background-color: white;
-            padding: 2.5rem;
-            border-radius: 1rem;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-            overflow-x: auto;
-            border: 1px solid #e2e8f0;
+        }
+
+        /* Grid cards */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 1.4rem;
+            border: 1px solid var(--border);
+            transition: box-shadow 0.2s;
+        }
+
+        .card:hover {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .card.new {
+            border-color: var(--new-border);
+            background: var(--new-bg);
+        }
+
+        .card.changed {
+            border-color: var(--changed-border);
+            background: var(--changed-bg);
+        }
+
+        .card .tag {
+            font-size: 0.6rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.2rem 0.55rem;
+            border-radius: 4px;
+            margin-bottom: 0.8rem;
+            display: inline-block;
+        }
+
+        .card.new .tag {
+            background: var(--new-border);
+            color: var(--new);
+        }
+
+        .card.changed .tag {
+            background: var(--changed-border);
+            color: var(--changed);
+        }
+
+        .card h3 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 0.4rem;
+        }
+
+        .card p {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        .card code {
+            font-family: 'DM Mono', monospace;
+            background: rgba(0, 0, 0, 0.05);
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.78rem;
+        }
+
+        /* Schema diff table */
+        .schema-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 2rem;
+        }
+
+        .schema-section h2 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 1rem 1.4rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-2);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+
+        th {
+            text-align: left;
+            padding: 0.6rem 1rem;
+            background: var(--surface-2);
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            border-bottom: 1px solid var(--border);
+        }
+
+        td {
+            padding: 0.65rem 1rem;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .badge.new {
+            background: var(--new-bg);
+            color: var(--new);
+            border: 1px solid var(--new-border);
+        }
+
+        .badge.changed {
+            background: var(--changed-bg);
+            color: var(--changed);
+            border: 1px solid var(--changed-border);
+        }
+
+        .badge.kept {
+            background: var(--kept-bg);
+            color: var(--kept);
+            border: 1px solid var(--kept-border);
+        }
+
+        td code {
+            font-family: 'DM Mono', monospace;
+            background: rgba(0, 0, 0, 0.04);
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            font-size: 0.78rem;
         }
     </style>
 </head>
-<body class="min-h-screen p-6 md:p-10 text-slate-800">
 
-    <div class="max-w-7xl mx-auto">
-        <header class="mb-12 text-center">
-            <div class="inline-block bg-indigo-100 text-indigo-800 text-xs font-bold px-4 py-1.5 rounded-full mb-4 uppercase tracking-widest shadow-sm">
-                Contract-Driven Blueprint
-            </div>
-            <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 mb-4">
-                Edu-LLM: Full RBAC Architecture
-            </h1>
-            <p class="text-lg text-slate-600 max-w-3xl mx-auto leading-relaxed">
-                Visualizing the 3-Tier Role-Based Access Control, JWT Middleware routing, dynamic Poison Prompt injection, and async non-blocking data persistence.
-            </p>
+<body>
+    <div class="wrapper">
+
+        <header>
+            <div class="pill">Architecture v3 — Lean MVP</div>
+            <h1>Edu-LLM: Simplified RBAC Architecture</h1>
+            <p class="subtitle">Streamlined design optimized for a 20-student class. Redis layer removed to reduce
+                overhead. Ollama is retained as a compute placeholder for seamless API migration.</p>
         </header>
 
-        <main>
-            <div class="mermaid-container mb-12">
-                <div class="mermaid">
-                    %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f8fafc', 'primaryEdgeColor': '#475569', 'lineColor': '#64748b', 'fontFamily': 'Inter'}}}%%
-                    graph TD
-                        %% Define visual classes
-                        classDef default fill:#ffffff,stroke:#94a3b8,stroke-width:1px,color:#1e293b;
-                        classDef dangerous fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
-                        classDef auth fill:#fef08a,stroke:#eab308,stroke-width:2px,color:#854d0e,font-weight:bold;
-                        classDef streaming fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold;
-                        classDef route fill:#f3e8ff,stroke:#d8b4fe,stroke-width:2px,color:#6b21a8;
+        <div class="legend">
+            <div class="legend-item new">
+                <div class="dot new"></div> New feature
+            </div>
+            <div class="legend-item changed">
+                <div class="dot changed"></div> Modified component
+            </div>
+            <div class="legend-item kept">
+                <div class="dot kept"></div> Unchanged
+            </div>
+        </div>
 
-                        subgraph Frontend ["1. Frontend Layer (React)"]
-                            UI_S["👤 Student UI (/chat)<br>Pure Chat Window"]
-                            UI_T["👨‍🏫 Teacher UI (/teacher)<br>Audit & Poison Setup"]
-                            UI_A["🛠️ Admin UI (/admin)<br>Manage Users & Roles"]
-                        end
+        <div class="diagram-card">
+            <div class="mermaid">
+                %%{init: {'theme': 'base', 'themeVariables':
+                {'primaryColor':'#f8fafc','primaryEdgeColor':'#475569','lineColor':'#94a3b8','fontFamily':'DM Sans,
+                sans-serif','fontSize':'13px'}}}%%
+                graph TD
+                classDef default fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#1e293b;
+                classDef newNode fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d,font-weight:bold;
+                classDef changedNode fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#78350f,font-weight:bold;
+                classDef auth fill:#fef9c3,stroke:#eab308,stroke-width:2px,color:#713f12,font-weight:bold;
+                classDef streaming fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold;
+                classDef route fill:#f3e8ff,stroke:#c084fc,stroke-width:1.5px,color:#581c87;
+                classDef danger fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
 
-                        subgraph Backend ["2. Backend Layer (FastAPI)"]
-                            Auth["🔒 JWT Gateway<br>get_current_user() | require_teacher() | require_admin()"]
-                            
-                            Route_Admin["🛠️ Admin Routes<br>POST /api/admin/users"]
-                            Route_Teacher["👨‍🏫 Teacher Routes<br>GET /api/teacher/sessions<br>PUT /api/teacher/poison"]
-                            Route_Student["💬 Chat Route<br>POST /api/chat/stream"]
+                subgraph FE ["① Frontend Layer"]
+                UI_S["Student UI"]
+                UI_T["Teacher UI"]
+                UI_A["Admin UI"]
+                end
 
-                            PromptCtrl["💉 Prompt Controller<br>Inject Poison Prompt"]
-                            Proxy["🌊 Streaming Proxy<br>SSE Forwarding"]
-                            AsyncDB["⚡ Background Tasks<br>Async Write"]
-                        end
+                subgraph BE ["② Backend Layer (FastAPI)"]
+                Auth["JWT Gateway"]
+                R_Admin["Admin Routes"]
+                R_Teacher["Teacher Routes"]
+                R_Student["Chat Route"]
+                RateLimit["Rate Limiter\n(In-Memory/DB Check)"]
+                PromptCtrl["Prompt Controller\ninjects teacher rules"]
+                Proxy["Streaming Proxy\nSSE forwarding"]
+                AsyncDB["Background Task\ntoken-aware write"]
+                end
 
-                        subgraph Database ["3. Database Layer (PostgreSQL)"]
-                            DB_Users[("👥 Users Table<br>id, username, role")]
-                            DB_Sessions[("📑 Sessions Table<br>id, user_id, poison_mode")]
-                            DB_Messages[("💬 Messages Table<br>id, session_id, content")]
-                        end
+                subgraph DB ["③ Database Layer (PostgreSQL)"]
+                DB_Users["Users\nid · role · daily_token_quota"]
+                DB_TR["Teacher Rules\nteacher_id · student_id\nrules_json · is_active"]
+                DB_Sessions["Sessions\nid · user_id"]
+                DB_Messages["Messages\nid · prompt_tokens\ncompletion_tokens · total_tokens"]
+                DB_Usage["Usage Stats\nuser_id · date · tokens_used"]
+                end
 
-                        subgraph Compute ["4. Compute Layer (Ollama)"]
-                            LLM["🧠 Qwen 35B MoE"]
-                        end
+                subgraph COMPUTE ["④ Compute Layer"]
+                LLM["Model Endpoint\n(MVP: Ollama | Future: API)"]
+                end
 
-                        %% Connections
-                        UI_S == "JWT Token" ==> Auth
-                        UI_T == "JWT Token" ==> Auth
-                        UI_A == "JWT Token" ==> Auth
+                UI_S & UI_T & UI_A == "JWT Token" ==> Auth
 
-                        Auth -.->|"Validate Role"| DB_Users
-                        Auth ==>|"Role: admin"| Route_Admin
-                        Auth ==>|"Role: teacher"| Route_Teacher
-                        Auth ==>|"Role: student"| Route_Student
+                Auth -.->|"validate role"| DB_Users
+                Auth ==>|"admin"| R_Admin
+                Auth ==>|"teacher"| R_Teacher
+                Auth ==>|"student"| R_Student
 
-                        Route_Admin -.->|"CRUD Users & Roles"| DB_Users
-                        Route_Teacher -.->|"Read History"| DB_Messages
-                        Route_Teacher -.->|"Set poison_mode"| DB_Sessions
+                R_Admin -.->|"set daily_token_quota"| DB_Users
+                R_Teacher -.->|"read history"| DB_Messages
+                R_Teacher -.->|"write rules"| DB_TR
 
-                        Route_Student ==>|"1. Receive Prompt"| PromptCtrl
-                        PromptCtrl -.->|"2. Check poison_mode"| DB_Sessions
-                        PromptCtrl ==>|"3. Assembled Payload"| Proxy
-                        
-                        Proxy ==>|"4. POST /chat/completions"| LLM
-                        LLM ==>|"5. Stream Tokens"| Proxy
-                        Proxy ==>|"6. Server-Sent Events"| UI_S
-                        
-                        Proxy -.->|"7. Trigger Background Task"| AsyncDB
-                        AsyncDB -.->|"8. Save Q&A"| DB_Messages
+                R_Student ==> RateLimit
+                RateLimit -.->|"read quota"| DB_Users
+                RateLimit -.->|"log attempt"| DB_Usage
+                RateLimit ==>|"quota OK"| PromptCtrl
+                RateLimit -->|"429 — over limit"| UI_S
 
-                        %% Apply Classes
-                        class PromptCtrl dangerous;
-                        class Auth auth;
-                        class Proxy,LLM streaming;
-                        class Route_Admin,Route_Teacher,Route_Student route;
-                </div>
+                PromptCtrl -.->|"fetch active rules"| DB_TR
+                PromptCtrl -.->|"fetch session ctx"| DB_Sessions
+                PromptCtrl ==>|"assembled payload"| Proxy
+
+                Proxy ==>|"POST request"| LLM
+                LLM ==>|"stream tokens"| Proxy
+                Proxy ==>|"SSE to browser"| UI_S
+
+                Proxy -.->|"stream ended — trigger"| AsyncDB
+                AsyncDB -.->|"save msg + tokens"| DB_Messages
+                AsyncDB -.->|"update daily stats"| DB_Usage
+
+                class DB_TR,DB_Usage newNode;
+                class Auth auth;
+                class PromptCtrl danger;
+                class Proxy,LLM streaming;
+                class R_Admin,R_Teacher,R_Student route;
+                class DB_Users,DB_Messages changedNode;
+                class DB_Sessions default;
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card changed">
+                <span class="tag">Simplified</span>
+                <h3>Lean Rate Limiting</h3>
+                <p>Redis has been removed. Rate limiting is now handled via lightweight in-memory checks or direct DB
+                    reads against the <code>Users</code> table, perfectly adequate for a 20-student cohort without
+                    adding infrastructure overhead.</p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-yellow-200 transition hover:shadow-md">
-                    <div class="flex items-center gap-3 mb-4">
-                        <div class="bg-yellow-100 p-2 rounded-lg text-xl">🔒</div>
-                        <h3 class="text-lg font-bold text-slate-900">3-Tier RBAC Gateway</h3>
-                    </div>
-                    <p class="text-sm text-slate-600 leading-relaxed">
-                        FastAPI uses <code>Depends()</code> to enforce strict boundaries. <strong>Admins</strong> manage user roles. <strong>Teachers</strong> audit student history and toggle test conditions. <strong>Students</strong> are sandboxed exclusively to the chat interface.
-                    </p>
-                </div>
-                
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-red-200 transition hover:shadow-md">
-                    <div class="flex items-center gap-3 mb-4">
-                        <div class="bg-red-100 p-2 rounded-lg text-xl">💉</div>
-                        <h3 class="text-lg font-bold text-slate-900">Poison Controller</h3>
-                    </div>
-                    <p class="text-sm text-slate-600 leading-relaxed">
-                        The core experimental feature. Before sending the student's code to Ollama, this checks the <code>Sessions</code> table. If <code>poison_mode > 0</code>, it stealthily injects rules (e.g., "no comments, bad variables") into the System Prompt.
-                    </p>
-                </div>
-                
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-blue-200 transition hover:shadow-md">
-                    <div class="flex items-center gap-3 mb-4">
-                        <div class="bg-blue-100 p-2 rounded-lg text-xl">🌊</div>
-                        <h3 class="text-lg font-bold text-slate-900">Async Streaming I/O</h3>
-                    </div>
-                    <p class="text-sm text-slate-600 leading-relaxed">
-                        To guarantee a seamless "typewriter" effect, the proxy pipes tokens directly from the LLM to React via SSE. Database saving is handed off to a <code>BackgroundTask</code>, ensuring zero latency blockage.
-                    </p>
-                </div>
+            <div class="card changed">
+                <span class="tag">Simplified</span>
+                <h3>Direct Streaming Proxy</h3>
+                <p>The Inference Queue is gone. The Streaming Proxy now connects directly to the Compute Layer. This
+                    ensures lower latency for MVP testing and maps perfectly to standard LLM API patterns.</p>
             </div>
-        </main>
+
+            <div class="card kept">
+                <span class="tag">Unchanged</span>
+                <h3>Compute Abstraction</h3>
+                <p>The <code>Model Endpoint</code> currently points to Ollama. Because the Proxy handles standard
+                    streaming responses, migrating to Mistral API or another provider later requires only updating the
+                    endpoint URL and adding an Auth header.</p>
+            </div>
+
+            <div class="card kept">
+                <span class="tag">Unchanged</span>
+                <h3>Teacher Rules Injection</h3>
+                <p>The core logic remains intact: The <code>Prompt Controller</code> safely injects strict pedagogical
+                    guidelines into the student's prompt before it reaches the model, ensuring the AI acts as a tutor,
+                    not an answer key.</p>
+            </div>
+        </div>
+
+        <div class="schema-section">
+            <h2>Database Schema (PostgreSQL)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Table</th>
+                        <th>Status</th>
+                        <th>Core Fields</th>
+                        <th>Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>teacher_rules</code></td>
+                        <td><span class="badge new">New</span></td>
+                        <td><code>id, teacher_id, student_id, rules_json, is_active</code></td>
+                        <td>Stores the dynamic 'poisoning' prompts designed by the teacher to restrict AI behavior.</td>
+                    </tr>
+                    <tr>
+                        <td><code>usage_stats</code></td>
+                        <td><span class="badge new">New</span></td>
+                        <td><code>id, user_id, date, tokens_used, request_count</code></td>
+                        <td>Tracks exact token consumption asynchronously to enforce the daily 1M API token limit.</td>
+                    </tr>
+                    <tr>
+                        <td><code>users</code></td>
+                        <td><span class="badge changed">Modified</span></td>
+                        <td><code>id, role, daily_token_quota</code></td>
+                        <td>Contains the hard limit for each student (e.g., 50k tokens/day) used by the Rate Limiter.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>messages</code></td>
+                        <td><span class="badge changed">Modified</span></td>
+                        <td><code>id, prompt_tokens, completion_tokens</code></td>
+                        <td>Logs the exact human-AI interaction and token cost, updated by the background task
+                            post-stream.</td>
+                    </tr>
+                    <tr>
+                        <td><code>sessions</code></td>
+                        <td><span class="badge kept">Unchanged</span></td>
+                        <td><code>id, user_id</code></td>
+                        <td>Maintains standard chat session context.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
     </div>
 
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.6/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({ startOnLoad: true });
+        mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
     </script>
 </body>
+
 </html>
