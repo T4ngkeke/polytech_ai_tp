@@ -96,9 +96,9 @@ The system relies on **5 core tables** optimized for the new decoupled rule inje
 | --- | --- | --- |
 | id | UUID / Int | Primary Key |
 | user_id | FK | → Users.id |
+| applied_rule_id | FK | → TeacherRules.id — **Nullable**. `NULL` = normal session, value = session was conducted under this specific teacher rule. Set by Prompt Controller at session creation time. |
 | is_deleted | Boolean | Default: False |
 | created_at | Timestamp | Timezone-aware (UTC) |
-
 ### 5. Messages Table
 
 | Column | Type | Constraints / Notes |
@@ -147,6 +147,7 @@ The system relies on **5 core tables** optimized for the new decoupled rule inje
 | GET | `/api/teacher/sessions/{student_id}` | require_teacher | Fetch full chat history for a specific student. |
 | POST | `/api/teacher/rules` | require_teacher | Create/Update targeted teaching rules in `teacher_rules`. |
 | PUT | `/api/teacher/rules/{rule_id}/toggle` | require_teacher | Toggle `is_active` status for a specific rule. |
+| GET | `/api/teacher/rules` | require_teacher | List all rules created by this teacher. |
 
 ### C. Student Flow (Session & Chat)
 

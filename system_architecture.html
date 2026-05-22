@@ -361,7 +361,7 @@
                 subgraph DB ["③ Database Layer (PostgreSQL)"]
                 DB_Users["Users\nid · role · daily_token_quota"]
                 DB_TR["Teacher Rules\nteacher_id · student_id\nrules_json · is_active"]
-                DB_Sessions["Sessions\nid · user_id"]
+                DB_Sessions["Sessions\nid · user_id · applied_rule_id"]
                 DB_Messages["Messages\nid · prompt_tokens\ncompletion_tokens · total_tokens"]
                 DB_Usage["Usage Stats\nuser_id · date · tokens_used"]
                 end
