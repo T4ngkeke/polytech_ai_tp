@@ -1,0 +1,122 @@
+.admin-dashboard {
+  min-height: 100vh;
+  background-color: #0d0d12;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-content {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-card {
+  background: #1a1a24;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 1.5rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.admin-card h3 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #e0e0ff;
+}
+
+.table-responsive {
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.users-table th {
+  padding: 1rem;
+  color: #a0a0c0;
+  font-weight: 500;
+  font-size: 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.users-table td {
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: middle;
+}
+
+.role-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.role-badge.student {
+  background: rgba(108, 92, 231, 0.2);
+  color: #a29bfe;
+}
+
+.role-badge.teacher {
+  background: rgba(85, 239, 196, 0.2);
+  color: #55efc4;
+}
+
+.role-badge.admin {
+  background: rgba(255, 118, 117, 0.2);
+  color: #ff7675;
+}
+
+.quota-edit {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.quota-edit input {
+  width: 80px;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  color: #fff;
+}
+
+.save-btn {
+  padding: 0.5rem 0.75rem;
+  background: #6c5ce7;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.save-btn:hover {
+  background: #5b4bc4;
+}
+
+.delete-btn {
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  color: #ff7675;
+  border: 1px solid #ff7675;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover {
+  background: #ff7675;
+  color: white;
+}
