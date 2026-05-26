@@ -226,7 +226,7 @@ docker compose up -d --build
 #### 🔐 Initialize Database (First Time Only)
 After starting the containers for the first time, you MUST seed the database with initial accounts:
 ```bash
-docker compose exec backend python backend/seed.py
+docker compose exec backend python -m backend.seed
 ```
 **Default Accounts Created:**
 - `admin` / `admin123`
@@ -240,16 +240,15 @@ docker compose exec backend python backend/seed.py
 If you prefer running services outside of Docker for development:
 
 1. **Database**: Start a Postgres server (you can use `docker-compose up -d postgres`).
-2. **Backend**: 
+2. **Backend (Run from project root)**: 
    ```bash
-   cd backend
-   pip install -r requirements.txt
+   pip install -r backend/requirements.txt
    
    # Initialize the database (first time only)
-   python seed.py
+   python -m backend.seed
    
    # Start the server
-   uvicorn app.main:app --reload --port 8000
+   uvicorn backend.app.main:app --reload --port 8000
    ```
 3. **Frontend**:
    ```bash
