@@ -223,6 +223,17 @@ docker compose up -d --build
 - **Backend API**: Proxied through Nginx via `/api/` or available directly at `http://localhost:8000`.
 - **Database**: Port mapped on `5432`.
 
+#### 🔐 Initialize Database (First Time Only)
+After starting the containers for the first time, you MUST seed the database with initial accounts:
+```bash
+docker compose exec backend python backend/seed.py
+```
+**Default Accounts Created:**
+- `admin` / `admin123`
+- `teacher` / `teacher123`
+- `student1` / `student123`
+- `student2` / `student123`
+
 *(Note: The backend container uses `host.docker.internal` to reach the local host's Ollama model natively without complex networking.)*
 
 ### 🛠️ Running Natively (Development Mode)
@@ -233,6 +244,11 @@ If you prefer running services outside of Docker for development:
    ```bash
    cd backend
    pip install -r requirements.txt
+   
+   # Initialize the database (first time only)
+   python seed.py
+   
+   # Start the server
    uvicorn app.main:app --reload --port 8000
    ```
 3. **Frontend**:
