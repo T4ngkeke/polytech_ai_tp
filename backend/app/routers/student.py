@@ -8,6 +8,7 @@ GET  /api/student/sessions                   →  List own active sessions.
 GET  /api/student/sessions/{session_id}      →  Fetch message history (IDOR check required).
 """
 
+from datetime import date
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -17,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.app.auth import get_current_user
 from backend.app.database import get_db
-from backend.app.models import Session, User
+from backend.app.models import Session, User, UsageStat
 from backend.app.schemas import (
     SessionCreateRequest,
     SessionResponse,
@@ -47,6 +48,31 @@ async def create_session(
     await db.flush()
     await db.refresh(session)
     return SessionResponse.model_validate(session)
+
+
+# ===================================================================
+# GET /api/student/usage
+# ===================================================================
+
+@router.get("/usage")
+async def get_usage(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the current user's daily token quota limit and used amount."""
+    today = date.today()
+    result = await db.execute(
+        select(UsageStat).where(
+            UsageStat.user_id == current_user.id,
+            UsageStat.date == today,
+        )
+    )
+    usage = result.scalar_one_or_none()
+    
+    return {
+        "used": usage.tokens_used if usage else 0,
+        "limit": current_user.daily_token_quota
+    }
 
 
 # ===================================================================

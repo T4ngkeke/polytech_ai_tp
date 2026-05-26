@@ -33,7 +33,7 @@ from datetime import date
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.auth import get_current_user
@@ -68,6 +68,11 @@ async def save_chat_background_task(
 
     async with AsyncSessionLocal() as db:
         try:
+            with open("/home/zhud/.gemini/antigravity/brain/d34a803f-14c6-465d-82aa-9685c43d4505/scratch/bg_debug.txt", "a") as f:
+                f.write(f"BACKGROUND TASK RUNNING FOR SESSION: {session_id}\n")
+                f.write(f"USER MSG: {user_message_content}\n")
+                f.write(f"LLM MSG: {llm_message_content}\n")
+            
             # 1. Insert user message
             user_msg = Message(
                 session_id=session_id,
@@ -110,8 +115,13 @@ async def save_chat_background_task(
             )
             await db.execute(stmt)
             await db.commit()
-        except Exception:
+        except Exception as e:
+            import traceback
+            with open("/home/zhud/.gemini/antigravity/brain/d34a803f-14c6-465d-82aa-9685c43d4505/scratch/bg_error.txt", "w") as f:
+                f.write(f"BACKGROUND TASK FAILED: {repr(e)}\n")
+                f.write(traceback.format_exc())
             await db.rollback()
+            raise
             raise
 
 
@@ -167,7 +177,7 @@ async def chat_stream(
     # Query TeacherRule
     rule_result = await db.execute(
         select(TeacherRule).where(
-            TeacherRule.student_id == current_user.id,
+            or_(TeacherRule.student_id == current_user.id, TeacherRule.student_id.is_(None)),
             TeacherRule.is_active.is_(True),
         )
     )
@@ -188,7 +198,7 @@ async def chat_stream(
         if session.applied_rule_id is None:
             session.applied_rule_id = rule.id
             db.add(session)
-            await db.flush()
+            await db.commit()
 
     # Fetch last 20 messages
     msg_result = await db.execute(
@@ -223,7 +233,6 @@ async def chat_stream(
             model=settings.LLM_MODEL,
             messages=messages_payload,
             stream=True,
-            stream_options={"include_usage": True},
         )
     except Exception as e:
         raise HTTPException(

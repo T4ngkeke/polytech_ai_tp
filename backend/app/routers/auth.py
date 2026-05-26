@@ -4,16 +4,17 @@ routers/auth.py — Authentication endpoints.
 Endpoints
 ---------
 POST /api/auth/login  →  Validate credentials, return JWT with user_id only.
+GET  /api/auth/me     →  Return current user profile (id, username, role).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.auth import create_access_token, verify_password
+from backend.app.auth import create_access_token, get_current_user, verify_password
 from backend.app.database import get_db
 from backend.app.models import User
-from backend.app.schemas import LoginRequest, TokenResponse
+from backend.app.schemas import LoginRequest, TokenResponse, UserResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -51,4 +52,18 @@ async def login(
 
     access_token = create_access_token(user_id=user.id)
     return TokenResponse(access_token=access_token)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(
+    current_user: User = Depends(get_current_user),
+) -> UserResponse:
+    """
+    Return the profile of the currently authenticated user.
+
+    Used by the frontend to populate the auth store with ``userId``,
+    ``username``, and ``role`` after login (since the JWT intentionally
+    contains only ``sub``).
+    """
+    return UserResponse.model_validate(current_user)
 
