@@ -10,47 +10,38 @@
 ## 2. Directory Tree
 
 
-```
-
-```text
-File architecture_v3_lean_mvp.md successfully generated.
-
 ```text
 polytech_ai_tp/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── main.py                  # FastAPI app entry point (with BackgroundTasks)
+│   │   ├── main.py                  # FastAPI app entry point
 │   │   ├── database.py              # SQLAlchemy engine & session
 │   │   ├── models.py                # ORM models (User, TeacherRule, Session, Message, UsageStat)
 │   │   ├── schemas.py               # Pydantic request/response schemas
 │   │   ├── auth.py                  # JWT creation & get_current_user deps
 │   │   └── routers/
 │   │       ├── __init__.py
-│   │       ├── auth.py              # POST /api/auth/login
+│   │       ├── auth.py              # POST /api/auth/login, GET /api/auth/me
 │   │       ├── admin.py             # /api/admin/* (Users & Quota management)
 │   │       ├── teacher.py           # /api/teacher/* (Rules & Audit)
-│   │       ├── student.py           # /api/student/* (Session management)
-│   │       └── chat.py              # POST /api/chat/stream (Direct SSE + DB Rate Check)
+│   │       ├── student.py           # /api/student/* (Session management, Usage)
+│   │       └── chat.py              # POST /api/chat/stream (SSE + DB Rate Check)
 │   ├── .env                         # LLM_BASE_URL, DATABASE_URL, JWT_SECRET
-│   └── requirements.txt
+│   ├── requirements.txt
+│   └── Dockerfile                   # Python 3.12-slim FastAPI build
 ├── frontend/
 │   ├── public/
-│   │   └── index.html
 │   ├── src/
 │   │   ├── App.jsx                  # React Router setup
-│   │   ├── pages/
-│   │   │   ├── Login.jsx            
-│   │   │   ├── Chat.jsx             
-│   │   │   ├── Teacher.jsx          
-│   │   │   └── Admin.jsx            
-│   │   └── components/
-│   │       ├── ProtectedRoute.jsx   
-│   │       └── SessionSidebar.jsx   
-│   └── package.json
-├── docker-compose.yml               # PostgreSQL service ONLY (No Redis)
-└── architecture_v3_lean_mvp.md
-
+│   │   ├── pages/                   # Login, Chat, Teacher, Admin
+│   │   ├── components/              # UI Components, SessionSidebar, ProtectedRoute
+│   │   └── store/                   # Zustand stores (Auth, etc.)
+│   ├── package.json
+│   ├── tailwind.config.js           # Tailwind v3 config
+│   ├── nginx.conf                   # Nginx reverse proxy config for prod
+│   └── Dockerfile                   # Node builder + Nginx multi-stage build
+└── docker-compose.yml               # Postgres + Backend + Frontend Orchestration
 ```
 
 ---
@@ -156,6 +147,7 @@ The system relies on **5 core tables** optimized for the new decoupled rule inje
 | POST | `/api/student/sessions` | get_current_user | Create a new chat session. |
 | GET | `/api/student/sessions` | get_current_user | List own active sessions. |
 | GET | `/api/student/sessions/{session_id}` | get_current_user | Fetch message history. **IDOR check required.** |
+| GET | `/api/student/usage` | get_current_user | Fetch real-time token quota usage for today. |
 | POST | `/api/chat/stream` | get_current_user | Core chat endpoint. See full logic below. |
 
 ---
@@ -209,17 +201,40 @@ The system relies on **5 core tables** optimized for the new decoupled rule inje
 
 ---
 
-## 7. Execution Instruction for AI Agent
+## 7. Deployment & Run Instructions
 
-Begin by scaffolding the Lean MVP v3:
+The application is fully containerized using Docker, allowing for a single-command deployment.
 
-* [ ] Initialize standard directory structure.
-* [ ] `.env` configuration (with `LLM_BASE_URL`, `LLM_API_KEY`, `DATABASE_URL`, `JWT_SECRET`).
-* [ ] `docker-compose.yml` (PostgreSQL ONLY, remove Redis).
-* [ ] SQLAlchemy models (Update `Users`, add `TeacherRule`, add `UsageStat`, modify `Message`).
-* [ ] Implement direct DB-based rate limiter dependency.
-* [ ] Implement FastAPI router structure with DB-driven RBAC Depends chain.
-* [ ] Implement `POST /api/chat/stream` using FastAPI `BackgroundTasks` for token-aware writing and direct SSE streaming.
-* [ ] Add dummy response returns for Admin and Teacher CRUD endpoints.
+### Prerequisites
+- Docker and Docker Compose installed.
+- (Local LLM) Ollama installed on the host machine running on `http://127.0.0.1:11434`.
 
-**Stop and wait for review once the basic skeleton is created.**
+### 🚀 Running with Docker (Production/Demo Mode)
+To spin up the Postgres database, FastAPI backend, and Nginx/React frontend simultaneously:
+
+```bash
+docker compose up -d --build
+```
+- **Frontend**: Access via `http://localhost` (Port 80).
+- **Backend API**: Proxied through Nginx via `/api/` or available directly at `http://localhost:8000`.
+- **Database**: Port mapped on `5432`.
+
+*(Note: The backend container uses `host.docker.internal` to reach the local host's Ollama model natively without complex networking.)*
+
+### 🛠️ Running Natively (Development Mode)
+If you prefer running services outside of Docker for development:
+
+1. **Database**: Start a Postgres server (you can use `docker-compose up -d postgres`).
+2. **Backend**: 
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   uvicorn app.main:app --reload --port 8000
+   ```
+3. **Frontend**:
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   Access the dev server at `http://localhost:5173`.
