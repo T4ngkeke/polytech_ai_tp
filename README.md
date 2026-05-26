@@ -3,7 +3,11 @@
 
 ## 1. Project Overview
 
-**Edu-LLM (v3 Lean MVP)** is a streamlined, full-stack educational platform designed for a controlled classroom environment (approx. 20 students). It features a strict 3-tier RBAC system, real-time DB-based rate limiting, and a dynamic "Teacher Rules" injection mechanism. To minimize infrastructure overhead, all message queueing (Redis) has been removed in favor of direct API streaming with asynchronous background database writes.
+**Edu-LLM (v3 Lean MVP)** is a streamlined, full-stack educational platform
+designed for a controlled classroom environment. It features a strict 3-tier
+RBAC system, real-time DB-based rate limiting, and a dynamic "Teacher Rules"
+injection mechanism — all running on a minimal stack of FastAPI, PostgreSQL,
+and React with no external message queue required.
 
 ---
 
