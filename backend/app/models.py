@@ -1,13 +1,17 @@
 """
-models.py — SQLAlchemy ORM models for Edu-LLM v3 Lean MVP.
+models.py — SQLAlchemy ORM models for Edu-LLM v5 Class-Lab Architecture.
 
 Tables
 ------
+- system_configs  : dynamic key-value config (LLM URL, API key, model)
 - users           : platform users with RBAC roles and token quota
-- teacher_rules   : pedagogical rules injected by teachers into student prompts
-- usage_stats     : daily token consumption aggregated per user
-- sessions        : named chat sessions belonging to a user
+- classes         : teacher-owned classes with invite codes
+- class_students  : association table linking students to classes
+- labs            : labs scoped to a class
+- rules           : polymorphic 3-tier rules (class / lab / student)
+- sessions        : chat sessions scoped to a lab
 - messages        : individual messages inside a session with token tracking
+- usage_stats     : daily token consumption aggregated per user
 """
 
 import enum
@@ -26,7 +30,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -48,6 +52,13 @@ class SenderType(str, enum.Enum):
     llm = "llm"
 
 
+class RuleLevel(str, enum.Enum):
+    """Polymorphic rule target level."""
+    class_ = "class"
+    lab = "lab"
+    student = "student"
+
+
 # ---------------------------------------------------------------------------
 # Helper: server-side UTC timestamp default
 # ---------------------------------------------------------------------------
@@ -58,7 +69,28 @@ def _utcnow():
 
 
 # ---------------------------------------------------------------------------
-# 1. Users
+# 1. SystemConfig — Dynamic key-value configuration
+# ---------------------------------------------------------------------------
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<SystemConfig key={self.key!r} value={self.value!r}>"
+
+
+# ---------------------------------------------------------------------------
+# 2. User
 # ---------------------------------------------------------------------------
 
 
@@ -83,19 +115,13 @@ class User(Base):
     usage_stats: Mapped[list["UsageStat"]] = relationship(
         "UsageStat", back_populates="user", cascade="all, delete-orphan"
     )
-    # Rules *created by* this user (teacher)
-    authored_rules: Mapped[list["TeacherRule"]] = relationship(
-        "TeacherRule",
-        foreign_keys="TeacherRule.teacher_id",
-        back_populates="teacher",
-        cascade="all, delete-orphan",
+    # Classes this teacher owns
+    classes_teaching: Mapped[list["Class"]] = relationship(
+        "Class", back_populates="teacher", cascade="all, delete-orphan"
     )
-    # Rules *targeting* this user (student)
-    targeted_rules: Mapped[list["TeacherRule"]] = relationship(
-        "TeacherRule",
-        foreign_keys="TeacherRule.student_id",
-        back_populates="student",
-        cascade="all, delete-orphan",
+    # Class memberships (student side)
+    class_memberships: Mapped[list["ClassStudent"]] = relationship(
+        "ClassStudent", back_populates="student", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -103,43 +129,128 @@ class User(Base):
 
 
 # ---------------------------------------------------------------------------
-# 2. TeacherRule
+# 3. Class
 # ---------------------------------------------------------------------------
 
 
-class TeacherRule(Base):
-    __tablename__ = "teacher_rules"
+class Class(Base):
+    __tablename__ = "classes"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     teacher_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # NULL student_id means the rule applies to ALL students of this teacher
-    student_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    invite_code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False, index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
-    rules_json: Mapped[dict | list] = mapped_column(JSON, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Relationships
-    teacher: Mapped["User"] = relationship(
-        "User", foreign_keys=[teacher_id], back_populates="authored_rules"
+    teacher: Mapped["User"] = relationship("User", back_populates="classes_teaching")
+    students: Mapped[list["ClassStudent"]] = relationship(
+        "ClassStudent", back_populates="parent_class", cascade="all, delete-orphan"
     )
-    student: Mapped["User | None"] = relationship(
-        "User", foreign_keys=[student_id], back_populates="targeted_rules"
+    labs: Mapped[list["Lab"]] = relationship(
+        "Lab", back_populates="parent_class", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:  # pragma: no cover
-        return (
-            f"<TeacherRule id={self.id} teacher={self.teacher_id} "
-            f"student={self.student_id} active={self.is_active}>"
-        )
+        return f"<Class id={self.id} name={self.name!r} code={self.invite_code!r}>"
 
 
 # ---------------------------------------------------------------------------
-# 3. UsageStat
+# 4. ClassStudent — Association table
+# ---------------------------------------------------------------------------
+
+
+class ClassStudent(Base):
+    __tablename__ = "class_students"
+
+    class_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    # Relationships
+    parent_class: Mapped["Class"] = relationship("Class", back_populates="students")
+    student: Mapped["User"] = relationship("User", back_populates="class_memberships")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<ClassStudent class={self.class_id} student={self.student_id}>"
+
+
+# ---------------------------------------------------------------------------
+# 5. Lab
+# ---------------------------------------------------------------------------
+
+
+class Lab(Base):
+    __tablename__ = "labs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    class_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    # Relationships
+    parent_class: Mapped["Class"] = relationship("Class", back_populates="labs")
+    sessions: Mapped[list["Session"]] = relationship(
+        "Session", back_populates="lab", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Lab id={self.id} name={self.name!r} class={self.class_id}>"
+
+
+# ---------------------------------------------------------------------------
+# 6. Rule — Polymorphic 3-tier (class / lab / student)
+# ---------------------------------------------------------------------------
+
+
+class Rule(Base):
+    __tablename__ = "rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    level: Mapped[RuleLevel] = mapped_column(
+        Enum(RuleLevel, name="rulelevel"), nullable=False
+    )
+    # Polymorphic target — points to a Class ID, Lab ID, or User ID
+    # No FK constraint because it references different tables based on `level`
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    rules_text: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        UniqueConstraint("level", "target_id", name="uq_rule_level_target"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Rule id={self.id} level={self.level} target={self.target_id} active={self.is_active}>"
+
+
+# ---------------------------------------------------------------------------
+# 7. UsageStat
 # ---------------------------------------------------------------------------
 
 
@@ -171,7 +282,7 @@ class UsageStat(Base):
 
 
 # ---------------------------------------------------------------------------
-# 4. Session
+# 8. Session — now scoped to a Lab
 # ---------------------------------------------------------------------------
 
 
@@ -184,9 +295,9 @@ class Session(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    applied_rule_id: Mapped[uuid.UUID | None] = mapped_column(
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("teacher_rules.id", ondelete="SET NULL"),
+        ForeignKey("labs.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
@@ -198,17 +309,17 @@ class Session(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="sessions")
-    applied_rule: Mapped["TeacherRule | None"] = relationship("TeacherRule")
+    lab: Mapped["Lab | None"] = relationship("Lab", back_populates="sessions")
     messages: Mapped[list["Message"]] = relationship(
         "Message", back_populates="session", cascade="all, delete-orphan", order_by="Message.created_at"
     )
 
     def __repr__(self) -> str:  # pragma: no cover
-        return f"<Session id={self.id} user={self.user_id} deleted={self.is_deleted}>"
+        return f"<Session id={self.id} user={self.user_id} lab={self.lab_id} deleted={self.is_deleted}>"
 
 
 # ---------------------------------------------------------------------------
-# 5. Message
+# 9. Message
 # ---------------------------------------------------------------------------
 
 

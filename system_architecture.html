@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM Lean MVP Architecture</title>
+    <title>Edu-LLM v5 Class-Lab Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -309,8 +309,8 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v3 — Lean MVP</div>
-            <h1>Edu-LLM: Simplified RBAC Architecture</h1>
+            <div class="pill">Architecture v5 — Class-Lab Architecture</div>
+            <h1>Edu-LLM: Hierarchical Rules & Zero-Downtime Architecture</h1>
             <p class="subtitle">Streamlined design optimized for a 20-student class. Redis layer removed to reduce
                 overhead. Ollama is retained as a compute placeholder for seamless API migration.</p>
         </header>
@@ -349,21 +349,22 @@
 
                 subgraph BE ["② Backend Layer (FastAPI)"]
                 Auth["JWT Gateway"]
-                R_Admin["Admin Routes"]
-                R_Teacher["Teacher Routes"]
-                R_Student["Chat Route"]
+                R_Admin["Admin Routes\n(CSV Import, LLM Config)"]
+                R_Teacher["Teacher Routes\n(Classes, Labs, Rules)"]
+                R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
                 RateLimit["Rate Limiter\n(In-Memory/DB Check)"]
-                PromptCtrl["Prompt Controller\ninjects teacher rules"]
+                PromptCtrl["Prompt Controller\nMerge Class+Lab+Student rules"]
                 Proxy["Streaming Proxy\nSSE forwarding"]
                 AsyncDB["Background Task\ntoken-aware write"]
                 end
 
                 subgraph DB ["③ Database Layer (PostgreSQL)"]
+                DB_SysConf["SystemConfigs\nLLM_BASE_URL, Model (0-Downtime)"]
+                DB_Classes["Classes & Labs\ninvite_code, teacher_id"]
                 DB_Users["Users\nid · role · daily_token_quota"]
-                DB_TR["Teacher Rules\nteacher_id · student_id\nrules_json · is_active"]
-                DB_Sessions["Sessions\nid · user_id · applied_rule_id"]
-                DB_Messages["Messages\nid · prompt_tokens\ncompletion_tokens · total_tokens"]
-                DB_Usage["Usage Stats\nuser_id · date · tokens_used"]
+                DB_Rules["Hierarchical Rules\nlevel(class/lab/student) · target_id"]
+                DB_Sessions["Sessions\nid · user_id · lab_id"]
+                DB_Messages["Messages & Usage Stats"]
                 end
 
                 subgraph COMPUTE ["④ Compute Layer"]
@@ -377,68 +378,61 @@
                 Auth ==>|"teacher"| R_Teacher
                 Auth ==>|"student"| R_Student
 
-                R_Admin -.->|"set daily_token_quota"| DB_Users
-                R_Teacher -.->|"read history"| DB_Messages
-                R_Teacher -.->|"write rules"| DB_TR
+                R_Admin -.->|"CSV Upsert"| DB_Users
+                R_Admin -.->|"write LLM config"| DB_SysConf
+                R_Teacher -.->|"write Class/Lab"| DB_Classes
+                R_Teacher -.->|"write 3-tier rules"| DB_Rules
 
-                R_Student ==> RateLimit
+                R_Student -.->|"join via invite code"| DB_Classes
+                R_Student ==>|"chat in lab"| RateLimit
                 RateLimit -.->|"read quota"| DB_Users
-                RateLimit -.->|"log attempt"| DB_Usage
                 RateLimit ==>|"quota OK"| PromptCtrl
                 RateLimit -->|"429 — over limit"| UI_S
 
-                PromptCtrl -.->|"fetch active rules"| DB_TR
+                PromptCtrl -.->|"fetch Class+Lab+Student rules"| DB_Rules
                 PromptCtrl -.->|"fetch session ctx"| DB_Sessions
                 PromptCtrl ==>|"assembled payload"| Proxy
 
+                Proxy -.->|"read dynamic URL/Key"| DB_SysConf
                 Proxy ==>|"POST request"| LLM
                 LLM ==>|"stream tokens"| Proxy
                 Proxy ==>|"SSE to browser"| UI_S
 
                 Proxy -.->|"stream ended — trigger"| AsyncDB
                 AsyncDB -.->|"save msg + tokens"| DB_Messages
-                AsyncDB -.->|"update daily stats"| DB_Usage
 
-                class DB_TR,DB_Usage newNode;
+                class DB_SysConf,DB_Classes,DB_Rules newNode;
                 class Auth auth;
                 class PromptCtrl danger;
                 class Proxy,LLM streaming;
                 class R_Admin,R_Teacher,R_Student route;
-                class DB_Users,DB_Messages changedNode;
-                class DB_Sessions default;
+                class DB_Users,DB_Sessions changedNode;
             </div>
         </div>
 
         <div class="grid">
             <div class="card changed">
-                <span class="tag">Simplified</span>
-                <h3>Lean Rate Limiting</h3>
-                <p>Redis has been removed. Rate limiting is now handled via lightweight in-memory checks or direct DB
-                    reads against the <code>Users</code> table, perfectly adequate for a 20-student cohort without
-                    adding infrastructure overhead.</p>
+                <span class="tag">Zero-Friction</span>
+                <h3>Invite Code Workflow</h3>
+                <p>The tedious manual approval process is replaced with 6-character Invite Codes. Students can instantly join a class and access their assigned labs, ensuring a flawless and fast demo experience.</p>
             </div>
 
             <div class="card changed">
-                <span class="tag">Simplified</span>
-                <h3>Direct Streaming Proxy</h3>
-                <p>The Inference Queue is gone. The Streaming Proxy now connects directly to the Compute Layer. This
-                    ensures lower latency for MVP testing and maps perfectly to standard LLM API patterns.</p>
+                <span class="tag">Granular Control</span>
+                <h3>Three-Tier Rule Injection</h3>
+                <p>The Prompt Controller dynamically fetches and sequentially merges rules from three levels: <b>Class Rule</b> -> <b>Lab Rule</b> -> <b>Student Rule</b>, injecting highly targeted pedagogy directly into the LLM context.</p>
             </div>
 
-            <div class="card kept">
-                <span class="tag">Unchanged</span>
-                <h3>Compute Abstraction</h3>
-                <p>The <code>Model Endpoint</code> currently points to Ollama. Because the Proxy handles standard
-                    streaming responses, migrating to Mistral API or another provider later requires only updating the
-                    endpoint URL and adding an Auth header.</p>
+            <div class="card new">
+                <span class="tag">Zero-Downtime</span>
+                <h3>Dynamic LLM Configuration</h3>
+                <p>Crucial LLM connection details (Base URL, API Key, Model) are now fetched from the <code>SystemConfigs</code> database table rather than a static <code>.env</code> file. Admins can hot-swap AI models on the fly.</p>
             </div>
 
-            <div class="card kept">
-                <span class="tag">Unchanged</span>
-                <h3>Teacher Rules Injection</h3>
-                <p>The core logic remains intact: The <code>Prompt Controller</code> safely injects strict pedagogical
-                    guidelines into the student's prompt before it reaches the model, ensuring the AI acts as a tutor,
-                    not an answer key.</p>
+            <div class="card new">
+                <span class="tag">Context Safe</span>
+                <h3>Lab-Scoped Sessions</h3>
+                <p>Chats are no longer infinite global threads. Students create isolated <code>Chat Sessions</code> inside a specific Lab. This clears history safely, preventing catastrophic Context Window overflow for smaller local models.</p>
             </div>
         </div>
 
@@ -455,36 +449,34 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td><code>teacher_rules</code></td>
+                        <td><code>system_configs</code></td>
                         <td><span class="badge new">New</span></td>
-                        <td><code>id, teacher_id, student_id, rules_json, is_active</code></td>
-                        <td>Stores the dynamic 'poisoning' prompts designed by the teacher to restrict AI behavior.</td>
+                        <td><code>id, key, value</code></td>
+                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping.</td>
                     </tr>
                     <tr>
-                        <td><code>usage_stats</code></td>
+                        <td><code>classes & labs</code></td>
                         <td><span class="badge new">New</span></td>
-                        <td><code>id, user_id, date, tokens_used, request_count</code></td>
-                        <td>Tracks exact token consumption asynchronously to enforce the daily 1M API token limit.</td>
+                        <td><code>invite_code, teacher_id, class_id</code></td>
+                        <td>Hierarchical structure for organizing students. Uses <code>invite_code</code> for instant join.</td>
                     </tr>
                     <tr>
-                        <td><code>users</code></td>
+                        <td><code>rules</code></td>
                         <td><span class="badge changed">Modified</span></td>
-                        <td><code>id, role, daily_token_quota</code></td>
-                        <td>Contains the hard limit for each student (e.g., 50k tokens/day) used by the Rate Limiter.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><code>messages</code></td>
-                        <td><span class="badge changed">Modified</span></td>
-                        <td><code>id, prompt_tokens, completion_tokens</code></td>
-                        <td>Logs the exact human-AI interaction and token cost, updated by the background task
-                            post-stream.</td>
+                        <td><code>level, target_id, rules_text</code></td>
+                        <td>Replaces old <code>teacher_rules</code>. Uses polymorphism to store Class, Lab, and Student-specific AI rules.</td>
                     </tr>
                     <tr>
                         <td><code>sessions</code></td>
+                        <td><span class="badge changed">Modified</span></td>
+                        <td><code>id, user_id, lab_id</code></td>
+                        <td>Tightly scoped to a <code>lab_id</code>. Allows clearing history to avoid LLM context overflow.</td>
+                    </tr>
+                    <tr>
+                        <td><code>users</code></td>
                         <td><span class="badge kept">Unchanged</span></td>
-                        <td><code>id, user_id</code></td>
-                        <td>Maintains standard chat session context.</td>
+                        <td><code>id, role, daily_token_quota</code></td>
+                        <td>Supports bulk creation via Admin CSV dry-run import.</td>
                     </tr>
                 </tbody>
             </table>

@@ -1,5 +1,5 @@
 """
-main.py — FastAPI application entry point for Edu-LLM v3 Lean MVP.
+main.py — FastAPI application entry point for Edu-LLM v5 Class-Lab Architecture.
 
 Startup sequence
 ----------------
@@ -41,12 +41,12 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="Edu-LLM v3 Lean MVP",
+    title="Edu-LLM v5 Class-Lab Architecture",
     description=(
-        "Educational LLM platform with 3-tier RBAC, teacher-rule injection, "
-        "direct SSE streaming, and DB-based rate limiting."
+        "Educational LLM platform with 3-tier RBAC, hierarchical Class-Lab structure, "
+        "three-tier rule injection, dynamic LLM config, and invite-code join flow."
     ),
-    version="3.0.0",
+    version="5.0.0",
     lifespan=lifespan,
 )
 
@@ -81,4 +81,4 @@ app.include_router(chat.router)
 @app.get("/api/health", tags=["meta"])
 async def health():
     """Liveness probe — returns 200 OK when the server is up."""
-    return {"status": "ok", "version": "3.0.0"}
+    return {"status": "ok", "version": "5.0.0"}

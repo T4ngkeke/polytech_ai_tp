@@ -1,20 +1,25 @@
 """
-routers/chat.py — Streaming chat endpoint connecting to LLM.
+routers/chat.py — Streaming chat endpoint with 3-tier rule injection & dynamic LLM config.
 
 Execution Flow
 --------------
 1. Gate checks
    - Validate session ownership & is_deleted.
+   - Verify student membership in the class owning the session's lab.
    - Quota check (UsageStat tokens_used < daily_token_quota).
 
-2. Assemble LLM Payload
-   - Check active TeacherRules for this student (inject if present).
-   - If session.applied_rule_id is NULL, update it with active rule.
-   - Fetch last 20 messages from Session.
-   - Construct: system prompt (rules) + history + new user message.
+2. Three-Tier Prompt Controller
+   - Fetch session → lab_id → class_id.
+   - Query Rules table for active rules:
+     * level='class', target_id=class_id
+     * level='lab', target_id=lab_id
+     * level='student', target_id=user_id
+   - Concatenate sequentially into a Master System Prompt.
 
-3. Direct LLM proxy (AsyncOpenAI / Ollama compatible)
-   - Read LLM_BASE_URL and LLM_API_KEY from settings.
+3. Dynamic LLM Proxy (Zero-Downtime)
+   - Fetch LLM_BASE_URL, LLM_API_KEY, LLM_MODEL from SystemConfig table.
+   - Fallback to env-based config if DB rows are missing.
+   - Instantiate AsyncOpenAI client dynamically per request.
 
 4. SSE streaming + token counting
    - Yield tokens via text/event-stream.
@@ -28,29 +33,106 @@ Execution Flow
 """
 
 import json
+import logging
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.auth import get_current_user
 from backend.app.config import settings
 from backend.app.database import AsyncSessionLocal, get_db
 from backend.app.models import (
+    ClassStudent,
+    Lab,
     Message,
+    Rule,
+    RuleLevel,
     SenderType,
     Session,
-    TeacherRule,
+    SystemConfig,
     UsageStat,
     User,
 )
 from backend.app.schemas import ChatStreamRequest
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
+
+# ---------------------------------------------------------------------------
+# Helper: Fetch LLM config from SystemConfig table with env fallback
+# ---------------------------------------------------------------------------
+
+async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
+    """
+    Read LLM connection parameters from the SystemConfig table.
+    Falls back to environment-based settings if DB rows are missing.
+    """
+    result = await db.execute(
+        select(SystemConfig).where(
+            SystemConfig.key.in_(["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"])
+        )
+    )
+    configs = {row.key: row.value for row in result.scalars().all()}
+
+    return {
+        "base_url": configs.get("LLM_BASE_URL", settings.LLM_BASE_URL),
+        "api_key": configs.get("LLM_API_KEY", settings.LLM_API_KEY),
+        "model": configs.get("LLM_MODEL", settings.LLM_MODEL),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Helper: Build 3-tier system prompt
+# ---------------------------------------------------------------------------
+
+async def _build_system_prompt(
+    db: AsyncSession,
+    class_id: str | None,
+    lab_id: str | None,
+    user_id: str,
+) -> str:
+    """
+    Assemble the Master System Prompt from three rule tiers:
+    Class → Lab → Student (concatenated sequentially).
+    """
+    base_prompt = "You are a helpful AI assistant for an educational platform."
+    rule_parts: list[str] = []
+
+    # Collect target IDs and their levels
+    targets = []
+    if class_id:
+        targets.append((RuleLevel.class_, class_id))
+    if lab_id:
+        targets.append((RuleLevel.lab, lab_id))
+    targets.append((RuleLevel.student, user_id))
+
+    for level, target_id in targets:
+        result = await db.execute(
+            select(Rule).where(
+                Rule.level == level,
+                Rule.target_id == target_id,
+                Rule.is_active.is_(True),
+            )
+        )
+        rule = result.scalar_one_or_none()
+        if rule:
+            label = level.value.upper()
+            rule_parts.append(f"[{label} RULES]\n{rule.rules_text}")
+
+    if rule_parts:
+        return base_prompt + "\n\n" + "\n\n".join(rule_parts)
+    return base_prompt
+
+
+# ---------------------------------------------------------------------------
+# Background task: save messages & usage stats
+# ---------------------------------------------------------------------------
 
 async def save_chat_background_task(
     user_id: str,
@@ -68,18 +150,13 @@ async def save_chat_background_task(
 
     async with AsyncSessionLocal() as db:
         try:
-            with open("/home/zhud/.gemini/antigravity/brain/d34a803f-14c6-465d-82aa-9685c43d4505/scratch/bg_debug.txt", "a") as f:
-                f.write(f"BACKGROUND TASK RUNNING FOR SESSION: {session_id}\n")
-                f.write(f"USER MSG: {user_message_content}\n")
-                f.write(f"LLM MSG: {llm_message_content}\n")
-            
             # 1. Insert user message
             user_msg = Message(
                 session_id=session_id,
                 sender=SenderType.user,
                 content=user_message_content,
             )
-            
+
             # 2. Insert LLM message
             llm_msg = Message(
                 session_id=session_id,
@@ -94,7 +171,7 @@ async def save_chat_background_task(
             # 3. Upsert UsageStat for today
             today = date.today()
             dialect = db.bind.dialect.name
-            
+
             if dialect == "postgresql":
                 from sqlalchemy.dialects.postgresql import insert
             else:
@@ -116,13 +193,14 @@ async def save_chat_background_task(
             await db.execute(stmt)
             await db.commit()
         except Exception as e:
-            import traceback
-            with open("/home/zhud/.gemini/antigravity/brain/d34a803f-14c6-465d-82aa-9685c43d4505/scratch/bg_error.txt", "w") as f:
-                f.write(f"BACKGROUND TASK FAILED: {repr(e)}\n")
-                f.write(traceback.format_exc())
+            logger.error("Background task failed: %s", repr(e), exc_info=True)
             await db.rollback()
             raise
-            raise
+
+
+# ===================================================================
+# POST /api/chat/stream
+# ===================================================================
 
 
 @router.post("/stream")
@@ -134,12 +212,13 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Core streaming chat endpoint.
+    Core streaming chat endpoint with 3-tier rule injection and
+    dynamic LLM configuration.
     """
     # ---------------------------------------------------------
     # STEP 1: Gate checks
     # ---------------------------------------------------------
-    # Verify session
+    # Verify session ownership
     result = await db.execute(
         select(Session).where(
             Session.id == body.session_id,
@@ -153,6 +232,29 @@ async def chat_stream(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found",
         )
+
+    # Resolve lab → class for rule injection and membership check
+    class_id = None
+    lab_id = session.lab_id
+
+    if lab_id:
+        lab_result = await db.execute(select(Lab).where(Lab.id == lab_id))
+        lab = lab_result.scalar_one_or_none()
+        if lab:
+            class_id = lab.class_id
+
+            # Verify student membership in the class
+            membership = await db.execute(
+                select(ClassStudent).where(
+                    ClassStudent.class_id == class_id,
+                    ClassStudent.student_id == current_user.id,
+                )
+            )
+            if membership.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not a member of the class that owns this lab",
+                )
 
     # Check quota
     today = date.today()
@@ -170,37 +272,16 @@ async def chat_stream(
         )
 
     # ---------------------------------------------------------
-    # STEP 2: Build the LLM payload
+    # STEP 2: Three-Tier Prompt Controller
     # ---------------------------------------------------------
-    system_prompt = "You are a helpful AI assistant."
-    
-    # Query TeacherRule
-    rule_result = await db.execute(
-        select(TeacherRule).where(
-            or_(TeacherRule.student_id == current_user.id, TeacherRule.student_id.is_(None)),
-            TeacherRule.is_active.is_(True),
-        )
+    system_prompt = await _build_system_prompt(
+        db,
+        class_id=str(class_id) if class_id else None,
+        lab_id=str(lab_id) if lab_id else None,
+        user_id=str(current_user.id),
     )
-    rule = rule_result.scalars().first()
-    
-    if rule:
-        # Inject rules into system prompt
-        rules_dict = rule.rules_json
-        if isinstance(rules_dict, str):
-            try:
-                rules_dict = json.loads(rules_dict)
-            except json.JSONDecodeError:
-                pass
-                
-        system_prompt += f"\n\nTeacher Instructions:\n{json.dumps(rules_dict)}"
-        
-        # Update session.applied_rule_id if NULL
-        if session.applied_rule_id is None:
-            session.applied_rule_id = rule.id
-            db.add(session)
-            await db.commit()
 
-    # Fetch last 20 messages
+    # Fetch last 20 messages for context
     msg_result = await db.execute(
         select(Message)
         .where(Message.session_id == body.session_id)
@@ -208,29 +289,28 @@ async def chat_stream(
         .limit(20)
     )
     last_messages = msg_result.scalars().all()
-    # Reverse to chronological order
-    last_messages.reverse()
+    last_messages.reverse()  # Chronological order
 
     messages_payload = [{"role": "system", "content": system_prompt}]
     for msg in last_messages:
         role = "user" if msg.sender == SenderType.user else "assistant"
         messages_payload.append({"role": role, "content": msg.content})
-    
+
     messages_payload.append({"role": "user", "content": body.message})
 
     # ---------------------------------------------------------
-    # STEP 3 & 4: Stream and Background Task
+    # STEP 3: Dynamic LLM Proxy (Zero-Downtime)
     # ---------------------------------------------------------
+    llm_config = await _get_llm_config(db)
+
     client = AsyncOpenAI(
-        api_key=settings.LLM_API_KEY,
-        base_url=settings.LLM_BASE_URL,
+        api_key=llm_config["api_key"],
+        base_url=llm_config["base_url"],
     )
 
     try:
-        # Initialize the completion stream. 
-        # stream_options={"include_usage": True} is needed to get final token counts in SSE.
         stream = await client.chat.completions.create(
-            model=settings.LLM_MODEL,
+            model=llm_config["model"],
             messages=messages_payload,
             stream=True,
         )
@@ -240,7 +320,9 @@ async def chat_stream(
             detail=f"LLM service unavailable: {str(e)}",
         )
 
-    # Shared mutable object to capture the results from the generator
+    # ---------------------------------------------------------
+    # STEP 4: SSE Streaming + Background Task
+    # ---------------------------------------------------------
     stream_results = {
         "content": "",
         "prompt_tokens": 0,
@@ -252,23 +334,22 @@ async def chat_stream(
             async for chunk in stream:
                 if await request.is_disconnected():
                     break
-                
+
                 # Check for token usage
                 if chunk.usage:
                     stream_results["prompt_tokens"] = chunk.usage.prompt_tokens
                     stream_results["completion_tokens"] = chunk.usage.completion_tokens
-                    
+
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
                     if delta.content:
                         stream_results["content"] += delta.content
                         yield f"data: {delta.content}\n\n"
         finally:
-            # Enqueue the background task
-            # We add a fallback in case usage wasn't provided by the API
-            pt = stream_results["prompt_tokens"] or 10  # Fallback mockup
-            ct = stream_results["completion_tokens"] or 10  # Fallback mockup
-            
+            # Enqueue the background task with fallback token estimates
+            pt = stream_results["prompt_tokens"] or 10
+            ct = stream_results["completion_tokens"] or 10
+
             background_tasks.add_task(
                 save_chat_background_task,
                 user_id=current_user.id,
@@ -281,5 +362,5 @@ async def chat_stream(
 
     return StreamingResponse(
         event_generator(),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
     )

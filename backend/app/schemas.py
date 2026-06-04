@@ -1,5 +1,5 @@
 """
-schemas.py — Pydantic v2 request/response schemas for Edu-LLM v3 Lean MVP.
+schemas.py — Pydantic v2 request/response schemas for Edu-LLM v5 Class-Lab Architecture.
 
 Each router domain has its own section.  Models marked *Request* are used for
 incoming payloads; models marked *Response* are returned to the client.
@@ -31,6 +31,12 @@ class SenderType(str, Enum):
     llm = "llm"
 
 
+class RuleLevel(str, Enum):
+    class_ = "class"
+    lab = "lab"
+    student = "student"
+
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -39,6 +45,11 @@ class SenderType(str, Enum):
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=150)
     password: str = Field(..., min_length=1)
+
+
+class SignupRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=150)
+    password: str = Field(..., min_length=6)
 
 
 class TokenResponse(BaseModel):
@@ -75,30 +86,110 @@ class UpdateQuotaRequest(BaseModel):
     daily_token_quota: int = Field(..., ge=0)
 
 
+class UpdateRoleRequest(BaseModel):
+    role: UserRole
+
+
 # ---------------------------------------------------------------------------
-# TeacherRule
+# SystemConfig / LLM Config
 # ---------------------------------------------------------------------------
 
 
-class TeacherRuleBase(BaseModel):
-    rules_json: Any
-    is_active: bool = True
+class LLMConfigRequest(BaseModel):
+    base_url: str = Field(..., min_length=1)
+    api_key: str = Field(..., min_length=1)
+    model: str = Field(..., min_length=1)
 
 
-class TeacherRuleCreateRequest(TeacherRuleBase):
-    student_id: uuid.UUID | None = None  # None → applies to all students
+class LLMConfigResponse(BaseModel):
+    base_url: str
+    api_key: str
+    model: str
 
 
-class TeacherRuleResponse(TeacherRuleBase):
+# ---------------------------------------------------------------------------
+# Class
+# ---------------------------------------------------------------------------
+
+
+class ClassCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class ClassResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    name: str
     teacher_id: uuid.UUID
-    student_id: uuid.UUID | None
+    invite_code: str
+    is_deleted: bool
+    created_at: datetime
 
 
-class TeacherRuleToggleResponse(BaseModel):
+class ClassUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+# ---------------------------------------------------------------------------
+# Lab
+# ---------------------------------------------------------------------------
+
+
+class LabCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class LabResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
+    class_id: uuid.UUID
+    name: str
+    is_deleted: bool
+    is_active: bool
+    created_at: datetime
+
+
+class LabUpdateRequest(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    is_active: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# ClassStudent (Join)
+# ---------------------------------------------------------------------------
+
+
+class JoinClassRequest(BaseModel):
+    invite_code: str = Field(..., min_length=6, max_length=6)
+
+
+class JoinClassResponse(BaseModel):
+    class_id: uuid.UUID
+    class_name: str
+    joined_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Rule (Polymorphic 3-tier)
+# ---------------------------------------------------------------------------
+
+
+class RuleUpsertRequest(BaseModel):
+    level: RuleLevel
+    target_id: uuid.UUID
+    rules_text: str = Field(..., min_length=1)
+    is_active: bool = True
+
+
+class RuleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    level: RuleLevel
+    target_id: uuid.UUID
+    rules_text: str
     is_active: bool
 
 
@@ -131,7 +222,7 @@ class SessionResponse(BaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID
-    applied_rule_id: uuid.UUID | None = None
+    lab_id: uuid.UUID | None = None
     title: str | None
     is_deleted: bool
     created_at: datetime
@@ -143,7 +234,7 @@ class SessionWithMessagesResponse(BaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID
-    applied_rule_id: uuid.UUID | None = None
+    lab_id: uuid.UUID | None = None
     title: str | None
     is_deleted: bool
     created_at: datetime
@@ -179,6 +270,22 @@ class ChatStreamRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# CSV Import
+# ---------------------------------------------------------------------------
+
+
+class CSVImportPreviewResponse(BaseModel):
+    """Response for admin CSV dry-run / import."""
+    total: int = 0
+    to_create: int = 0
+    to_update: int = 0
+    conflicts: list[dict] = []
+    created: int = 0
+    updated: int = 0
+    forced: bool = False
+
+
+# ---------------------------------------------------------------------------
 # Teacher audit: student summary
 # ---------------------------------------------------------------------------
 
@@ -191,3 +298,70 @@ class StudentSummaryResponse(BaseModel):
     daily_token_quota: int
     tokens_used_today: int
     request_count_today: int
+
+
+# ---------------------------------------------------------------------------
+# Admin: Transfer, Analytics, Prune
+# ---------------------------------------------------------------------------
+
+
+class TransferClassRequest(BaseModel):
+    teacher_id: uuid.UUID
+
+
+class PruneRequest(BaseModel):
+    older_than_days: int = Field(..., ge=1)
+
+
+class PruneResponse(BaseModel):
+    sessions_deleted: int
+    messages_deleted: int
+
+
+class DailyUsage(BaseModel):
+    date: date
+    tokens: int
+    requests: int
+
+
+class AdminAnalyticsResponse(BaseModel):
+    total_tokens: int
+    total_requests: int
+    daily_breakdown: list[DailyUsage] = []
+
+
+# ---------------------------------------------------------------------------
+# Teacher: Class Analytics
+# ---------------------------------------------------------------------------
+
+
+class StudentUsageSummary(BaseModel):
+    user_id: uuid.UUID
+    username: str
+    tokens_used: int
+    request_count: int
+
+
+class ClassAnalyticsResponse(BaseModel):
+    class_id: uuid.UUID
+    total_tokens: int
+    total_requests: int
+    students: list[StudentUsageSummary] = []
+
+
+# ---------------------------------------------------------------------------
+# Student: Session Update
+# ---------------------------------------------------------------------------
+
+
+class SessionUpdateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+
+
+# ---------------------------------------------------------------------------
+# Teacher: Invite Code Reset
+# ---------------------------------------------------------------------------
+
+
+class InviteCodeResponse(BaseModel):
+    invite_code: str
