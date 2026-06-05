@@ -1,52 +1,39 @@
 """
-routers/teacher.py — Teacher endpoints for class/lab management, rules, audit,
-lifecycle control, and analytics.
+routers/teacher.py — Teacher endpoints for Edu-LLM v6.
 
-All endpoints are protected by ``require_teacher`` — users whose live DB
-role is ``teacher`` or ``admin`` can access them.
+All DB/business logic is delegated to the services/ layer.
+This router only: (1) authenticates, (2) verifies ownership, (3) calls service, (4) returns response.
 
 Endpoints
 ---------
-POST   /api/teacher/classes                                  →  Create a class with invite code.
-GET    /api/teacher/classes                                  →  List classes owned by the teacher.
-POST   /api/teacher/classes/{class_id}/labs                  →  Create a lab in a class.
-GET    /api/teacher/classes/{class_id}/labs                  →  List labs for a class.
-PUT    /api/teacher/rules                                    →  Upsert a 3-tier rule.
-GET    /api/teacher/rules                                    →  List rules (with optional filters).
-GET    /api/teacher/chat-history                             →  Fetch sessions/messages with filters.
-GET    /api/teacher/students                                 →  Active students + today's token consumption.
-DELETE /api/teacher/classes/{class_id}/students/{student_id} →  Unenroll a student.
-POST   /api/teacher/classes/{class_id}/reset-code            →  Generate new invite code.
-PUT    /api/teacher/classes/{class_id}                       →  Update class name.
-DELETE /api/teacher/classes/{class_id}                       →  Soft-delete a class.
-PUT    /api/teacher/labs/{lab_id}                            →  Update lab name / toggle is_active.
-DELETE /api/teacher/labs/{lab_id}                            →  Soft-delete a lab.
-GET    /api/teacher/analytics/classes/{class_id}             →  Class-scoped token analytics.
+POST   /api/teacher/classes
+GET    /api/teacher/classes
+POST   /api/teacher/classes/{class_id}/labs
+GET    /api/teacher/classes/{class_id}/labs
+PUT    /api/teacher/rules
+GET    /api/teacher/rules
+GET    /api/teacher/chat-history
+GET    /api/teacher/students
+DELETE /api/teacher/classes/{class_id}/students/{student_id}
+POST   /api/teacher/classes/{class_id}/reset-code
+PUT    /api/teacher/classes/{class_id}
+DELETE /api/teacher/classes/{class_id}
+PUT    /api/teacher/labs/{lab_id}
+DELETE /api/teacher/labs/{lab_id}
+GET    /api/teacher/analytics/classes/{class_id}
 """
 
-import secrets
 import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.auth import require_teacher
 from backend.app.database import get_db
-from backend.app.models import (
-    Class,
-    ClassStudent,
-    Lab,
-    Message,
-    Rule,
-    RuleLevel,
-    Session,
-    UsageStat,
-    User,
-    UserRole,
-)
+from backend.app.models import Class, ClassStudent, Lab, Session, UsageStat, User, UserRole
 from backend.app.schemas import (
     ClassAnalyticsResponse,
     ClassCreate,
@@ -56,24 +43,16 @@ from backend.app.schemas import (
     LabCreate,
     LabResponse,
     LabUpdateRequest,
+    LabUsageSummary,
     RuleResponse,
     RuleUpsertRequest,
     SessionWithMessagesResponse,
     StudentSummaryResponse,
     StudentUsageSummary,
 )
+from backend.app.services import class_service, lab_service, rule_service, analytics_service
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
-
-
-# ---------------------------------------------------------------------------
-# Helper: Generate unique 6-character invite code
-# ---------------------------------------------------------------------------
-
-def _generate_invite_code() -> str:
-    """Generate a 6-character uppercase alphanumeric code."""
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # No 0/O/1/I to avoid confusion
-    return "".join(secrets.choice(alphabet) for _ in range(6))
 
 
 # ===================================================================
@@ -87,34 +66,8 @@ async def create_class(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> ClassResponse:
-    """
-    Create a new class owned by the authenticated teacher.
-
-    Automatically generates a unique 6-character invite code for
-    zero-friction student joining.
-    """
-    # Generate unique invite code (retry on collision)
-    for _ in range(10):
-        code = _generate_invite_code()
-        existing = await db.execute(
-            select(Class).where(Class.invite_code == code)
-        )
-        if existing.scalar_one_or_none() is None:
-            break
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate unique invite code",
-        )
-
-    new_class = Class(
-        name=body.name,
-        teacher_id=teacher.id,
-        invite_code=code,
-    )
-    db.add(new_class)
-    await db.flush()
-    await db.refresh(new_class)
+    """Create a new class owned by the authenticated teacher."""
+    new_class = await class_service.create_class(db, teacher_id=teacher.id, name=body.name)
     return ClassResponse.model_validate(new_class)
 
 
@@ -129,12 +82,7 @@ async def list_classes(
     db: AsyncSession = Depends(get_db),
 ) -> list[ClassResponse]:
     """List all non-deleted classes owned by the authenticated teacher."""
-    result = await db.execute(
-        select(Class)
-        .where(Class.teacher_id == teacher.id, Class.is_deleted.is_(False))
-        .order_by(Class.created_at.desc())
-    )
-    classes = result.scalars().all()
+    classes = await class_service.list_classes_for_teacher(db, teacher_id=teacher.id)
     return [ClassResponse.model_validate(c) for c in classes]
 
 
@@ -143,43 +91,19 @@ async def list_classes(
 # ===================================================================
 
 
-@router.post(
-    "/classes/{class_id}/labs",
-    response_model=LabResponse,
-    status_code=201,
-)
+@router.post("/classes/{class_id}/labs", response_model=LabResponse, status_code=201)
 async def create_lab(
     class_id: uuid.UUID,
     body: LabCreate,
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> LabResponse:
-    """
-    Create a new lab within a class.
-
-    Verifies that the class exists and is owned by the authenticated teacher.
-    """
-    result = await db.execute(
-        select(Class).where(
-            Class.id == class_id,
-            Class.teacher_id == teacher.id,
-            Class.is_deleted.is_(False),
-        )
-    )
-    parent_class = result.scalar_one_or_none()
-    if parent_class is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Class not found or not owned by you",
-        )
-
-    lab = Lab(
-        class_id=class_id,
-        name=body.name,
-    )
-    db.add(lab)
-    await db.flush()
-    await db.refresh(lab)
+    """Create a new lab within a class the teacher owns."""
+    # Ownership check
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    lab = await lab_service.create_lab(db, class_id=class_id, name=body.name)
     return LabResponse.model_validate(lab)
 
 
@@ -195,26 +119,10 @@ async def list_labs(
     db: AsyncSession = Depends(get_db),
 ) -> list[LabResponse]:
     """List all labs for a class owned by the teacher."""
-    # Verify ownership
-    result = await db.execute(
-        select(Class).where(
-            Class.id == class_id,
-            Class.teacher_id == teacher.id,
-            Class.is_deleted.is_(False),
-        )
-    )
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Class not found or not owned by you",
-        )
-
-    labs_result = await db.execute(
-        select(Lab)
-        .where(Lab.class_id == class_id, Lab.is_deleted.is_(False))
-        .order_by(Lab.created_at.desc())
-    )
-    labs = labs_result.scalars().all()
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    labs = await lab_service.list_labs_for_class(db, class_id=class_id)
     return [LabResponse.model_validate(l) for l in labs]
 
 
@@ -229,35 +137,15 @@ async def upsert_rule(
     _teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> RuleResponse:
-    """
-    Create or update a 3-tier rule based on (level, target_id).
-
-    If a rule with the same level + target_id exists, update its
-    ``rules_text`` and ``is_active``. Otherwise, create a new rule.
-    """
-    result = await db.execute(
-        select(Rule).where(
-            Rule.level == body.level,
-            Rule.target_id == body.target_id,
-        )
+    """Create or update a 3-tier rule based on (level, target_id)."""
+    r = await rule_service.upsert_rule(
+        db,
+        level=body.level,
+        target_id=body.target_id,
+        rules_text=body.rules_text,
+        is_active=body.is_active,
     )
-    rule = result.scalar_one_or_none()
-
-    if rule is not None:
-        rule.rules_text = body.rules_text
-        rule.is_active = body.is_active
-    else:
-        rule = Rule(
-            level=body.level,
-            target_id=body.target_id,
-            rules_text=body.rules_text,
-            is_active=body.is_active,
-        )
-        db.add(rule)
-
-    await db.flush()
-    await db.refresh(rule)
-    return RuleResponse.model_validate(rule)
+    return RuleResponse.model_validate(r)
 
 
 # ===================================================================
@@ -273,14 +161,7 @@ async def list_rules(
     db: AsyncSession = Depends(get_db),
 ) -> list[RuleResponse]:
     """List rules with optional level and target_id filters."""
-    query = select(Rule)
-    if level is not None:
-        query = query.where(Rule.level == level)
-    if target_id is not None:
-        query = query.where(Rule.target_id == target_id)
-
-    result = await db.execute(query)
-    rules = result.scalars().all()
+    rules = await rule_service.list_rules(db, level=level, target_id=target_id)
     return [RuleResponse.model_validate(r) for r in rules]
 
 
@@ -298,29 +179,21 @@ async def get_chat_history(
     _teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionWithMessagesResponse]:
-    """
-    Fetch chat sessions and messages with flexible filters.
-
-    Filters: ``class_id``, ``lab_id``, ``student_id``, ``session_id``.
-    Joins through Lab → Class to scope by class when needed.
-    """
+    """Fetch chat sessions and messages with flexible filters for audit."""
     query = (
         select(Session)
         .where(Session.is_deleted.is_(False))
         .options(selectinload(Session.messages))
     )
 
-    # If filtering by specific session, just return that
     if session_id is not None:
         query = query.where(Session.id == session_id)
     else:
         if student_id is not None:
             query = query.where(Session.user_id == student_id)
-
         if lab_id is not None:
             query = query.where(Session.lab_id == lab_id)
         elif class_id is not None:
-            # Find all lab IDs belonging to this class, then filter sessions
             lab_result = await db.execute(
                 select(Lab.id).where(Lab.class_id == class_id)
             )
@@ -328,12 +201,11 @@ async def get_chat_history(
             if lab_ids:
                 query = query.where(Session.lab_id.in_(lab_ids))
             else:
-                return []  # No labs in this class
+                return []
 
     query = query.order_by(Session.created_at.desc())
     result = await db.execute(query)
     sessions = result.scalars().all()
-
     return [SessionWithMessagesResponse.model_validate(s) for s in sessions]
 
 
@@ -347,34 +219,19 @@ async def list_students(
     _teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> list[StudentSummaryResponse]:
-    """
-    List active students with their current daily token consumption.
-
-    Joins ``users`` with ``usage_stats`` for today's date.
-    Students with no usage today show ``tokens_used_today=0``.
-    """
+    """List active students with their current daily token consumption."""
     today = date.today()
-
-    # Fetch all active students
     result = await db.execute(
-        select(User).where(
-            User.role == UserRole.student,
-            User.is_deleted.is_(False),
-        )
+        select(User).where(User.role == UserRole.student, User.is_deleted.is_(False))
     )
     students = result.scalars().all()
 
     summaries = []
     for student in students:
-        # Get today's usage for this student (if any)
         usage_result = await db.execute(
-            select(UsageStat).where(
-                UsageStat.user_id == student.id,
-                UsageStat.date == today,
-            )
+            select(UsageStat).where(UsageStat.user_id == student.id, UsageStat.date == today)
         )
         usage = usage_result.scalar_one_or_none()
-
         summaries.append(
             StudentSummaryResponse(
                 id=student.id,
@@ -384,7 +241,53 @@ async def list_students(
                 request_count_today=usage.request_count if usage else 0,
             )
         )
+    return summaries
 
+
+# ===================================================================
+# GET /api/teacher/classes/{class_id}/students
+# ===================================================================
+
+
+@router.get("/classes/{class_id}/students", response_model=list[StudentSummaryResponse])
+async def list_class_students(
+    class_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[StudentSummaryResponse]:
+    """List active students enrolled in a specific class."""
+    # Ownership check
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    today = date.today()
+    result = await db.execute(
+        select(User)
+        .join(ClassStudent, ClassStudent.student_id == User.id)
+        .where(
+            ClassStudent.class_id == class_id,
+            User.role == UserRole.student,
+            User.is_deleted.is_(False)
+        )
+    )
+    students = result.scalars().all()
+
+    summaries = []
+    for student in students:
+        usage_result = await db.execute(
+            select(UsageStat).where(UsageStat.user_id == student.id, UsageStat.date == today)
+        )
+        usage = usage_result.scalar_one_or_none()
+        summaries.append(
+            StudentSummaryResponse(
+                id=student.id,
+                username=student.username,
+                daily_token_quota=student.daily_token_quota,
+                tokens_used_today=usage.tokens_used if usage else 0,
+                request_count_today=usage.request_count if usage else 0,
+            )
+        )
     return summaries
 
 
@@ -400,37 +303,11 @@ async def unenroll_student(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Remove a student from a class (delete the ClassStudent row)."""
-    # Verify class ownership
-    cls_result = await db.execute(
-        select(Class).where(
-            Class.id == class_id,
-            Class.teacher_id == teacher.id,
-            Class.is_deleted.is_(False),
-        )
-    )
-    if cls_result.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Class not found or not owned by you",
-        )
-
-    # Find the membership
-    mem_result = await db.execute(
-        select(ClassStudent).where(
-            ClassStudent.class_id == class_id,
-            ClassStudent.student_id == student_id,
-        )
-    )
-    membership = mem_result.scalar_one_or_none()
-    if membership is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student is not enrolled in this class",
-        )
-
-    await db.delete(membership)
-    await db.flush()
+    """Remove a student from a class (ownership enforced)."""
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    await class_service.kick_student(db, class_id=class_id, student_id=student_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -446,37 +323,10 @@ async def reset_invite_code(
     db: AsyncSession = Depends(get_db),
 ) -> InviteCodeResponse:
     """Generate and save a new 6-character invite code for a class."""
-    cls_result = await db.execute(
-        select(Class).where(
-            Class.id == class_id,
-            Class.teacher_id == teacher.id,
-            Class.is_deleted.is_(False),
-        )
-    )
-    cls = cls_result.scalar_one_or_none()
-    if cls is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Class not found or not owned by you",
-        )
-
-    # Generate unique code (retry on collision)
-    for _ in range(10):
-        code = _generate_invite_code()
-        existing = await db.execute(
-            select(Class).where(Class.invite_code == code)
-        )
-        if existing.scalar_one_or_none() is None:
-            break
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate unique invite code",
-        )
-
-    cls.invite_code = code
-    db.add(cls)
-    await db.flush()
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    code = await class_service.reset_invite_code(db, cls)
     return InviteCodeResponse(invite_code=code)
 
 
@@ -492,25 +342,11 @@ async def update_class(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> ClassResponse:
-    """Update the name of a class."""
-    cls_result = await db.execute(
-        select(Class).where(
-            Class.id == class_id,
-            Class.teacher_id == teacher.id,
-            Class.is_deleted.is_(False),
-        )
-    )
-    cls = cls_result.scalar_one_or_none()
-    if cls is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Class not found or not owned by you",
-        )
-
-    cls.name = body.name
-    db.add(cls)
-    await db.flush()
-    await db.refresh(cls)
+    """Rename a class (ownership enforced)."""
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    cls = await class_service.rename_class(db, cls, name=body.name)
     return ClassResponse.model_validate(cls)
 
 
@@ -525,24 +361,11 @@ async def soft_delete_class(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Soft-delete a class: sets ``is_deleted = True``."""
-    cls_result = await db.execute(
-        select(Class).where(
-            Class.id == class_id,
-            Class.teacher_id == teacher.id,
-            Class.is_deleted.is_(False),
-        )
-    )
-    cls = cls_result.scalar_one_or_none()
-    if cls is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Class not found or not owned by you",
-        )
-
-    cls.is_deleted = True
-    db.add(cls)
-    await db.flush()
+    """Soft-delete a class (ownership enforced)."""
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    await class_service.soft_delete_class(db, cls)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -558,39 +381,10 @@ async def update_lab(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> LabResponse:
-    """Update a lab's name and/or toggle its is_active status."""
-    # Fetch lab
-    lab_result = await db.execute(
-        select(Lab).where(Lab.id == lab_id, Lab.is_deleted.is_(False))
-    )
-    lab = lab_result.scalar_one_or_none()
-    if lab is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Lab not found",
-        )
-
-    # Verify ownership through class
-    cls_result = await db.execute(
-        select(Class).where(
-            Class.id == lab.class_id,
-            Class.teacher_id == teacher.id,
-        )
-    )
-    if cls_result.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to modify this lab",
-        )
-
-    if body.name is not None:
-        lab.name = body.name
-    if body.is_active is not None:
-        lab.is_active = body.is_active
-
-    db.add(lab)
-    await db.flush()
-    await db.refresh(lab)
+    """Update a lab's name and/or toggle its is_active status (ownership enforced)."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    lab = await lab_service.update_lab(db, lab, name=body.name, is_active=body.is_active)
     return LabResponse.model_validate(lab)
 
 
@@ -605,33 +399,10 @@ async def soft_delete_lab(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Soft-delete a lab: sets ``is_deleted = True``."""
-    lab_result = await db.execute(
-        select(Lab).where(Lab.id == lab_id, Lab.is_deleted.is_(False))
-    )
-    lab = lab_result.scalar_one_or_none()
-    if lab is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Lab not found",
-        )
-
-    # Verify ownership through class
-    cls_result = await db.execute(
-        select(Class).where(
-            Class.id == lab.class_id,
-            Class.teacher_id == teacher.id,
-        )
-    )
-    if cls_result.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this lab",
-        )
-
-    lab.is_deleted = True
-    db.add(lab)
-    await db.flush()
+    """Soft-delete a lab (ownership enforced)."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    await lab_service.soft_delete_lab(db, lab)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -646,76 +417,34 @@ async def get_class_analytics(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> ClassAnalyticsResponse:
-    """
-    Fetch granular token usage for students inside a specific class.
+    """Hierarchical token usage: class → lab → student breakdown."""
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
 
-    Aggregates from Message tokens through Session → Lab → Class.
-    """
-    # Verify class ownership
-    cls_result = await db.execute(
-        select(Class).where(
-            Class.id == class_id,
-            Class.teacher_id == teacher.id,
-            Class.is_deleted.is_(False),
-        )
-    )
-    if cls_result.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Class not found or not owned by you",
-        )
-
-    # Get all lab IDs for this class
-    lab_result = await db.execute(
-        select(Lab.id).where(Lab.class_id == class_id)
-    )
-    lab_ids = [row[0] for row in lab_result.all()]
-
-    if not lab_ids:
-        return ClassAnalyticsResponse(
-            class_id=class_id,
-            total_tokens=0,
-            total_requests=0,
-            students=[],
-        )
-
-    # Aggregate tokens from messages in sessions belonging to these labs
-    # Group by user_id
-    stats_result = await db.execute(
-        select(
-            Session.user_id,
-            func.coalesce(func.sum(Message.total_tokens), 0),
-            func.count(Message.id),
-        )
-        .join(Message, Message.session_id == Session.id)
-        .where(Session.lab_id.in_(lab_ids))
-        .group_by(Session.user_id)
-    )
-    user_stats = stats_result.all()
-
-    total_tokens = sum(r[1] for r in user_stats)
-    total_requests = sum(r[2] for r in user_stats)
-
-    # Fetch user details for each student
-    students = []
-    for user_id, tokens, req_count in user_stats:
-        user_result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
-        user = user_result.scalar_one_or_none()
-        if user:
-            students.append(
-                StudentUsageSummary(
-                    user_id=user.id,
-                    username=user.username,
-                    tokens_used=tokens,
-                    request_count=req_count,
-                )
-            )
+    result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
 
     return ClassAnalyticsResponse(
-        class_id=class_id,
-        total_tokens=total_tokens,
-        total_requests=total_requests,
-        students=students,
+        class_id=result.class_id,
+        class_name=result.class_name,
+        total_tokens=result.total_tokens,
+        total_requests=result.total_requests,
+        labs=[
+            LabUsageSummary(
+                lab_id=lab.lab_id,
+                lab_name=lab.lab_name,
+                tokens=lab.tokens,
+                requests=lab.requests,
+                students=[
+                    StudentUsageSummary(
+                        user_id=s.user_id,
+                        username=s.username,
+                        tokens_used=s.tokens_used,
+                        request_count=s.request_count,
+                    )
+                    for s in lab.students
+                ],
+            )
+            for lab in result.labs
+        ],
     )

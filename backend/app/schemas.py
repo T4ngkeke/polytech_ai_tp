@@ -331,7 +331,7 @@ class AdminAnalyticsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Teacher: Class Analytics
+# Analytics — Hierarchical (v6)
 # ---------------------------------------------------------------------------
 
 
@@ -342,20 +342,38 @@ class StudentUsageSummary(BaseModel):
     request_count: int
 
 
-class ClassAnalyticsResponse(BaseModel):
-    class_id: uuid.UUID
-    total_tokens: int
-    total_requests: int
+class LabUsageSummary(BaseModel):
+    """Per-lab analytics with student-level breakdown."""
+    lab_id: uuid.UUID
+    lab_name: str
+    tokens: int
+    requests: int
     students: list[StudentUsageSummary] = []
 
 
+class ClassAnalyticsResponse(BaseModel):
+    """Hierarchical class analytics: class → lab → student."""
+    class_id: uuid.UUID
+    class_name: str
+    total_tokens: int
+    total_requests: int
+    labs: list[LabUsageSummary] = []
+
+
 # ---------------------------------------------------------------------------
-# Student: Session Update
+# Student: Session Update & Usage
 # ---------------------------------------------------------------------------
 
 
 class SessionUpdateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
+
+
+class StudentUsageResponse(BaseModel):
+    """Today's token usage for the student."""
+    used: int
+    limit: int
+    date: date
 
 
 # ---------------------------------------------------------------------------

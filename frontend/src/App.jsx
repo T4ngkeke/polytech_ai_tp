@@ -1,12 +1,13 @@
 /**
- * App.jsx — React Router v6 route definitions for Edu-LLM v3.
+ * App.jsx — React Router v6 route definitions for Edu-LLM v6.
  *
  * Route Structure:
  *   /login           → Login page (public)
+ *   /register        → Register page (public, student self-signup)
  *   /                → MainLayout (requires auth)
- *     /admin/users   → Admin (admin only)
- *     /teacher/*     → Teacher (teacher + admin)
- *     /chat          → Chat (all authenticated)
+ *     /admin         → Admin Dashboard (admin only)
+ *     /teacher       → Teacher Workspace (teacher + admin)
+ *     /chat/:labId?  → Student chat with hierarchical sidebar
  */
 
 import { Routes, Route, Navigate } from 'react-router-dom';
@@ -14,6 +15,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './components/MainLayout';
 import Login from './pages/Login';
+import Register from './pages/Register';
 import Chat from './pages/Chat';
 import Teacher from './pages/Teacher';
 import Admin from './pages/Admin';
@@ -23,23 +25,25 @@ export default function App() {
     <Routes>
       {/* ── Public ── */}
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
       {/* ── Authenticated routes ── */}
       <Route element={<ProtectedRoute />}>
         <Route element={<MainLayout />}>
           {/* Admin only */}
           <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
-            <Route path="/admin/users" element={<Admin />} />
+            <Route path="/admin" element={<Admin />} />
           </Route>
 
           {/* Teacher + Admin */}
           <Route element={<ProtectedRoute allowedRoles={['admin', 'teacher']} />}>
-            <Route path="/teacher/students" element={<Teacher />} />
+            <Route path="/teacher" element={<Teacher />} />
           </Route>
 
-          {/* All authenticated users */}
+          {/* All authenticated users — Chat is the unified student workspace */}
           <Route element={<ProtectedRoute allowedRoles={['admin', 'teacher', 'student']} />}>
             <Route path="/chat" element={<Chat />} />
+            <Route path="/chat/:labId" element={<Chat />} />
           </Route>
         </Route>
       </Route>

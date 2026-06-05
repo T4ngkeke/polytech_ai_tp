@@ -1,26 +1,16 @@
 /**
- * MainLayout.jsx — Global layout shell with sidebar + header + content outlet.
+ * MainLayout.jsx — Minimal layout shell for Edu-LLM v6.
+ *
+ * v6: Each page (Chat, Teacher, Admin) manages its own sidebar internally.
+ * MainLayout only provides the authenticated route outlet — no global sidebar.
  */
 
 import { Outlet } from 'react-router-dom';
-import GlobalSidebar from './GlobalSidebar';
-import UserHeader from './UserHeader';
 
 export default function MainLayout() {
   return (
-    <div className="min-h-screen bg-bg-primary">
-      <GlobalSidebar />
-
-      {/* Main content area — offset by sidebar width */}
-      <div
-        className="min-h-screen flex flex-col"
-        style={{ marginLeft: 'var(--sidebar-width)' }}
-      >
-        <UserHeader />
-        <main className="flex-1 overflow-hidden">
-          <Outlet />
-        </main>
-      </div>
+    <div className="flex flex-col h-screen bg-ink-deep overflow-hidden">
+      <Outlet />
     </div>
   );
 }

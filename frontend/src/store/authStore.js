@@ -1,5 +1,5 @@
 /**
- * authStore.js — Zustand global auth state for Edu-LLM v3.
+ * authStore.js — Zustand global auth state for Edu-LLM v5.
  *
  * Stores: token, userId, username, userRole
  * Persists JWT to localStorage; hydrates on app boot.
@@ -11,8 +11,8 @@ const TOKEN_KEY = 'edu_llm_token';
 
 /** Role → default landing route */
 const DEFAULT_ROUTES = {
-  admin: '/admin/users',
-  teacher: '/teacher/students',
+  admin: '/admin',
+  teacher: '/teacher',
   student: '/chat',
 };
 

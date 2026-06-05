@@ -1,13 +1,13 @@
 /**
- * main.jsx — React entry point for Edu-LLM v3.
+ * main.jsx — React entry point for Edu-LLM v5.
  *
  * Boots up:
  *   1. Auth store hydration (restores JWT from localStorage)
  *   2. BrowserRouter
- *   3. Toast notifications (react-hot-toast)
+ *   3. Toast notifications (react-hot-toast) — Dossier Noir themed
  */
 
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
@@ -26,10 +26,10 @@ function Root() {
 
   if (!isHydrated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-bg-primary">
+      <div className="min-h-screen flex items-center justify-center bg-ink-deep">
         <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <div className="w-10 h-10 rounded-full border-2 border-accent border-t-transparent animate-[spin_0.8s_linear_infinite]" />
-          <span className="text-sm text-text-muted font-medium">Loading…</span>
+          <div className="w-10 h-10 rounded-full border-2 border-cyan border-t-transparent animate-[spin_0.8s_linear_infinite]" />
+          <span className="text-sm text-cream-muted font-medium">Loading…</span>
         </div>
       </div>
     );
@@ -47,18 +47,18 @@ createRoot(document.getElementById('root')).render(
         toastOptions={{
           duration: 3000,
           style: {
-            background: '#1a2332',
-            color: '#f1f5f9',
-            border: '1px solid rgba(148, 163, 184, 0.12)',
-            borderRadius: '12px',
+            background: '#1a1d25',
+            color: '#e8e2d6',
+            border: '1px solid rgba(232, 226, 214, 0.1)',
+            borderRadius: '10px',
             fontSize: '13px',
-            fontFamily: '"DM Sans", system-ui, sans-serif',
+            fontFamily: '"Geist", system-ui, sans-serif',
           },
           success: {
-            iconTheme: { primary: '#10b981', secondary: '#fff' },
+            iconTheme: { primary: '#3ecf71', secondary: '#e8e2d6' },
           },
           error: {
-            iconTheme: { primary: '#ef4444', secondary: '#fff' },
+            iconTheme: { primary: '#ff2d2d', secondary: '#e8e2d6' },
           },
         }}
       />

@@ -1,147 +1,173 @@
 /**
- * Chat.jsx — Student AI Chat page for Edu-LLM v3.
+ * Chat.jsx — Student unified workspace for Edu-LLM v6.
  *
- * Layout: SessionSidebar (left) + ChatWindow (right)
- * Features:
- *   - Session CRUD via /api/student/sessions
- *   - SSE streaming via @microsoft/fetch-event-source
- *   - Quota progress bar
- *   - 429 error toast for exceeded quota
+ * Layout: Left hierarchical sidebar (Class→Lab tree) + Right chat panel.
+ * Students pick a lab from the sidebar; sessions are created automatically.
+ * Students CANNOT delete sessions (audit integrity — v6 rule).
+ *
+ * Join class flow is a modal triggered from the sidebar.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
-import api from '../lib/api';
 import useAuthStore from '../store/authStore';
+import api from '../lib/api';
+import HierarchicalSidebar from '../components/HierarchicalSidebar';
 
 export default function Chat() {
-  const token = useAuthStore((s) => s.token);
-  const userId = useAuthStore((s) => s.userId);
+  const { labId: urlLabId } = useParams();
+  const navigate = useNavigate();
+  const { token, username } = useAuthStore();
 
-  // ── Sessions state ──
+  // ── Hierarchical state ──
+  const [classes, setClasses] = useState([]);
+  const [classesLoading, setClassesLoading] = useState(true);
+
+  // ── Active context ──
+  const [activeLabId, setActiveLabId] = useState(urlLabId || null);
+  const [activeClassId, setActiveClassId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
-
-  // ── Messages state ──
   const [messages, setMessages] = useState([]);
-  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [usage, setUsage] = useState({ used: 0, limit: 50000 });
 
-  // ── Input state ──
+  // ── Chat state ──
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-
-  // ── Quota state ──
-  const [quota, setQuota] = useState({ used: 0, limit: 0 });
-
-  // ── Refs ──
-  const messagesEndRef = useRef(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const abortRef = useRef(null);
-  const textareaRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
 
-  // ── Auto-scroll ──
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+  // ── Join modal state ──
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinCode, setJoinCode] = useState(['', '', '', '', '', '']);
+  const [isJoining, setIsJoining] = useState(false);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+  // ── Rename session state ──
+  const [renamingSessionId, setRenamingSessionId] = useState(null);
+  const [renameTitle, setRenameTitle] = useState('');
 
-  // ── Load sessions on mount ──
-  useEffect(() => {
-    loadSessions();
-  }, []);
-
-  // ── Load quota info ──
-  useEffect(() => {
-    loadQuota();
-  }, []);
-
-  async function loadSessions() {
-    setSessionsLoading(true);
+  // ── Load classes with labs ──
+  const loadClasses = useCallback(async () => {
     try {
-      const data = await api.get('/api/student/sessions');
-      setSessions(data);
-      if (data.length > 0 && !activeSessionId) {
-        setActiveSessionId(data[0].id);
-      }
-    } catch {
-      toast.error('Failed to load sessions');
+      setClassesLoading(true);
+      const classData = await api.get('/api/student/classes');
+      // For each class, fetch its labs
+      const withLabs = await Promise.all(
+        classData.map(async (cls) => {
+          const labs = await api.get(`/api/student/classes/${cls.id}/labs`).catch(() => []);
+          return { ...cls, labs };
+        })
+      );
+      setClasses(withLabs);
+    } catch (err) {
+      toast.error('Failed to load classes');
     } finally {
-      setSessionsLoading(false);
+      setClassesLoading(false);
     }
-  }
+  }, []);
 
-  async function loadQuota() {
+  useEffect(() => { loadClasses(); }, [loadClasses]);
+
+  // ── Load usage stats ──
+  const loadUsage = useCallback(async () => {
     try {
       const data = await api.get('/api/student/usage');
-      setQuota({ used: data.used, limit: data.limit });
-    } catch {
-      // non-critical
-    }
-  }
+      setUsage(data);
+    } catch {}
+  }, []);
 
-  // ── Load messages when active session changes ──
-  useEffect(() => {
-    if (!activeSessionId) {
-      setMessages([]);
-      return;
-    }
-    loadMessages(activeSessionId);
-  }, [activeSessionId]);
+  useEffect(() => { loadUsage(); }, [loadUsage]);
 
-  async function loadMessages(sessionId) {
-    setMessagesLoading(true);
+  // ── When a lab is selected ──
+  const handleSelectLab = useCallback(async (labId, classId) => {
+    setActiveLabId(labId);
+    setActiveClassId(classId);
+    setMessages([]);
+    setActiveSessionId(null);
+    navigate(`/chat/${labId}`, { replace: true });
+
+    // Load or create a session for this lab
     try {
-      const data = await api.get(`/api/student/sessions/${sessionId}`);
-      setMessages(data.messages || []);
-      // Update quota from message token sums (approximation)
+      const existing = await api.get(`/api/student/sessions?lab_id=${labId}`);
+      if (existing.length > 0) {
+        const latest = existing[0];
+        setActiveSessionId(latest.id);
+        setSessions(existing);
+        // Load messages
+        const sessionData = await api.get(`/api/student/sessions/${latest.id}`);
+        setMessages(sessionData.messages || []);
+      } else {
+        setSessions([]);
+      }
     } catch {
-      toast.error('Failed to load messages');
-    } finally {
-      setMessagesLoading(false);
+      setSessions([]);
     }
-  }
+  }, [navigate]);
 
   // ── Create new session ──
-  async function handleNewSession() {
+  const handleNewSession = useCallback(async () => {
+    if (!activeLabId) return;
     try {
-      const newSession = await api.post('/api/student/sessions', {
-        title: `Chat ${new Date().toLocaleString()}`,
+      const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {
+        title: `Session ${new Date().toLocaleDateString()}`,
       });
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
       setMessages([]);
-    } catch {
-      toast.error('Failed to create session');
+    } catch (err) {
+      toast.error(err.message || 'Failed to create session');
     }
-  }
+  }, [activeLabId]);
 
-  // ── Send message via SSE ──
-  async function handleSend() {
+  // ── Load session messages ──
+  const handleSelectSession = useCallback(async (sessionId) => {
+    setActiveSessionId(sessionId);
+    setIsLoadingMessages(true);
+    try {
+      const data = await api.get(`/api/student/sessions/${sessionId}`);
+      setMessages(data.messages || []);
+    } catch {
+      toast.error('Failed to load messages');
+    } finally {
+      setIsLoadingMessages(false);
+    }
+  }, []);
+
+  // ── Scroll to bottom ──
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // ── Send message ──
+  const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || !activeSessionId || isStreaming) return;
 
+    let currentSessionId = activeSessionId;
+    // Auto-create session if none exists
+    if (!currentSessionId) {
+      try {
+        const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, { title: text.slice(0, 40) });
+        setSessions((prev) => [newSession, ...prev]);
+        setActiveSessionId(newSession.id);
+        currentSessionId = newSession.id;
+      } catch (err) {
+        toast.error('Could not start session');
+        return;
+      }
+    }
+
+    const userMsg = { id: Date.now(), sender: 'user', content: text, created_at: new Date().toISOString() };
+    setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setIsStreaming(true);
 
-    // Optimistic user message
-    const userMsg = {
-      id: `temp-${Date.now()}`,
-      sender: 'user',
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    // Placeholder for LLM response
-    const llmMsgId = `llm-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev,
-      { id: llmMsgId, sender: 'llm', content: '', created_at: new Date().toISOString() },
-    ]);
+    const assistantMsgId = Date.now() + 1;
+    setMessages((prev) => [...prev, { id: assistantMsgId, sender: 'llm', content: '', created_at: new Date().toISOString() }]);
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -149,291 +175,329 @@ export default function Chat() {
     try {
       await fetchEventSource('/api/chat/stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          session_id: activeSessionId,
-          message: text,
-        }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session_id: currentSessionId, message: text }),
         signal: ctrl.signal,
-
-        onopen: async (response) => {
-          if (response.status === 429) {
-            toast.error('Daily token quota exceeded (Too Many Requests)', {
-              duration: 5000,
-              icon: '⚠️',
-            });
-            throw new Error('Quota exceeded');
-          }
-          if (!response.ok) {
-            const body = await response.json().catch(() => ({}));
-            throw new Error(body.detail || `Error ${response.status}`);
+        onmessage(ev) {
+          if (ev.event === 'done') { setIsStreaming(false); loadUsage(); return; }
+          if (ev.data) {
+            setMessages((prev) => prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: m.content + ev.data } : m
+            ));
           }
         },
-
-        onmessage: (event) => {
-          const chunk = event.data;
-          if (chunk) {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === llmMsgId
-                  ? { ...msg, content: msg.content + chunk }
-                  : msg
-              )
-            );
-          }
-        },
-
-        onerror: (err) => {
-          // If it's a quota error we already toasted
-          if (err?.message === 'Quota exceeded') {
-            throw err; // stop retrying
-          }
-          toast.error('Connection error. Please try again.');
-          throw err; // stop retrying
-        },
-
-        onclose: () => {
-          // Stream finished
-          // We intentionally do NOT call loadMessages here to avoid a race condition 
-          // with the backend's background task that saves the messages.
-          // The optimistic UI already has the complete message history.
-          setTimeout(() => loadQuota(), 500);
-        },
+        onerror(err) { throw err; },
       });
     } catch (err) {
-      if (err?.name !== 'AbortError' && err?.message !== 'Quota exceeded') {
-        // Remove the empty LLM placeholder on error
-        setMessages((prev) => {
-          const llmMsg = prev.find((m) => m.id === llmMsgId);
-          if (llmMsg && !llmMsg.content) {
-            return prev.filter((m) => m.id !== llmMsgId);
-          }
-          return prev;
-        });
-      }
+      if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
       setIsStreaming(false);
-      abortRef.current = null;
     }
-  }
+  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage]);
 
-  // ── Handle Enter key ──
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
+
+  // ── Join class ──
+  const handleJoinSubmit = async () => {
+    const code = joinCode.join('').trim().toUpperCase();
+    if (code.length !== 6) return;
+    setIsJoining(true);
+    try {
+      const result = await api.post('/api/student/classes/join', { invite_code: code });
+      toast.success(`Joined ${result.class_name}!`);
+      setShowJoinModal(false);
+      setJoinCode(['', '', '', '', '', '']);
+      loadClasses(); // Optimistic refresh
+    } catch (err) {
+      toast.error(err.message || 'Invalid invite code');
+    } finally {
+      setIsJoining(false);
     }
   };
 
-  // ── Compute quota percentage ──
-  const quotaPct = quota.limit > 0 ? Math.min((quota.used / quota.limit) * 100, 100) : 0;
+  const handleJoinCodeChange = (i, val) => {
+    const filtered = val.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 1);
+    const next = [...joinCode];
+    next[i] = filtered;
+    setJoinCode(next);
+    if (filtered && i < 5) document.getElementById(`jc-${i + 1}`)?.focus();
+  };
+
+  // ── Rename session ──
+  const handleRenameSession = async (sessionId) => {
+    if (!renameTitle.trim()) { setRenamingSessionId(null); return; }
+    try {
+      const updated = await api.put(`/api/student/sessions/${sessionId}`, { title: renameTitle });
+      setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, title: updated.title } : s));
+      setRenamingSessionId(null);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  // ── Derived ──
+  const quotaPct = usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   return (
-    <div className="flex h-[calc(100vh-var(--header-height))]">
-      {/* ════════════════════════════════════════════
-          SESSION SIDEBAR (LEFT)
-          ════════════════════════════════════════════ */}
-      <div className="w-72 shrink-0 flex flex-col border-r border-border-subtle bg-bg-secondary">
-        {/* New session button */}
-        <div className="p-3 border-b border-border-subtle">
-          <button
-            id="new-session-button"
-            onClick={handleNewSession}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border-default text-sm font-medium text-text-primary hover:bg-bg-surface-hover hover:border-accent/30 transition-all duration-200 cursor-pointer group"
-          >
-            <PlusIcon className="w-4 h-4 text-accent group-hover:scale-110 transition-transform" />
-            New Session
-          </button>
-        </div>
+    <div className="flex h-screen bg-ink-deep overflow-hidden">
+      {/* ── Left: Hierarchical Sidebar ── */}
+      <div className="w-60 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base">
+        <HierarchicalSidebar
+          role="student"
+          classes={classes}
+          selectedLabId={activeLabId}
+          onSelectLab={handleSelectLab}
+          onJoinClass={() => setShowJoinModal(true)}
+          loading={classesLoading}
+        />
 
-        {/* Session list */}
-        <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-          {sessionsLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="w-5 h-5 rounded-full border-2 border-accent border-t-transparent animate-[spin_0.8s_linear_infinite]" />
-            </div>
-          ) : sessions.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <ChatEmptyIcon className="w-10 h-10 text-text-muted mx-auto mb-3 opacity-50" />
-              <p className="text-sm text-text-muted">No sessions yet</p>
-              <p className="text-xs text-text-muted mt-1">Create a new session to start chatting</p>
-            </div>
-          ) : (
-            sessions.map((session) => (
-              <button
-                key={session.id}
-                onClick={() => setActiveSessionId(session.id)}
-                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all duration-150 cursor-pointer ${
-                  activeSessionId === session.id
-                    ? 'bg-accent-muted text-accent font-medium'
-                    : 'text-text-secondary hover:bg-bg-surface-hover hover:text-text-primary'
-                }`}
-              >
-                <div className="truncate font-medium">
-                  {session.title || 'Untitled Session'}
-                </div>
-                <div className="text-xs text-text-muted mt-0.5">
-                  {new Date(session.created_at).toLocaleDateString()}
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* ════════════════════════════════════════════
-          CHAT WINDOW (RIGHT)
-          ════════════════════════════════════════════ */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Quota bar */}
-        <div className="px-6 py-3 border-b border-border-subtle bg-bg-surface/50">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-text-secondary">
-              Daily Token Usage
-            </span>
-            <span className="text-xs text-text-muted">
-              {quota.used.toLocaleString()} / {quota.limit.toLocaleString()}
-            </span>
+        {/* Token quota at bottom */}
+        <div className="shrink-0 px-4 py-3 border-t border-border-subtle">
+          <div className="flex justify-between text-[10px] text-cream-muted mb-1.5">
+            <span>Token Quota</span>
+            <span className="font-mono">{usage.used.toLocaleString()} / {usage.limit.toLocaleString()}</span>
           </div>
-          <div className="w-full h-2 rounded-full bg-bg-primary overflow-hidden">
+          <div className="h-1 bg-ink-surface rounded-full overflow-hidden">
             <div
-              className="h-full rounded-full transition-all duration-700 ease-out"
-              style={{
-                width: `${quotaPct}%`,
-                background:
-                  quotaPct > 90
-                    ? 'var(--color-danger)'
-                    : quotaPct > 70
-                      ? 'var(--color-accent-warm)'
-                      : 'var(--color-accent)',
-              }}
+              className={`h-full rounded-full transition-all duration-500 ${
+                quotaPct > 85 ? 'bg-danger' : quotaPct > 65 ? 'bg-gold' : 'bg-cyan'
+              }`}
+              style={{ width: `${quotaPct}%` }}
             />
           </div>
         </div>
+      </div>
 
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-          {!activeSessionId ? (
-            <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in">
-              <div className="w-16 h-16 rounded-2xl gradient-accent flex items-center justify-center mb-4 shadow-[var(--shadow-glow)]">
-                <SparkleIcon className="w-8 h-8 text-white" />
-              </div>
-              <h2 className="text-xl font-bold font-[var(--font-display)] text-text-primary mb-2">
-                Start a Conversation
-              </h2>
-              <p className="text-sm text-text-secondary max-w-sm">
-                Select a session from the sidebar or create a new one to begin chatting with your AI assistant.
-              </p>
-            </div>
-          ) : messagesLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="w-6 h-6 rounded-full border-2 border-accent border-t-transparent animate-[spin_0.8s_linear_infinite]" />
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in">
-              <p className="text-sm text-text-muted">
-                This session is empty. Send a message to get started!
-              </p>
-            </div>
-          ) : (
-            messages.map((msg, i) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
-                style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
-              >
-                <div
-                  className={`max-w-[75%] px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                    msg.sender === 'user'
-                      ? 'bg-accent text-white rounded-br-md'
-                      : 'bg-bg-surface border border-border-subtle text-text-primary rounded-bl-md'
-                  }`}
-                >
-                  {msg.content}
-                  {msg.sender === 'llm' && isStreaming && msg.content === '' && (
-                    <span className="inline-flex gap-1 ml-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent animate-[pulse-glow_1s_ease-in-out_infinite]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent animate-[pulse-glow_1s_ease-in-out_0.2s_infinite]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent animate-[pulse-glow_1s_ease-in-out_0.4s_infinite]" />
+      {/* ── Middle: Session list (when lab selected) ── */}
+      {activeLabId && (
+        <div className="w-48 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base">
+          <div className="px-3 pt-4 pb-2 border-b border-border-subtle">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
+            <button
+              id="new-session-btn"
+              onClick={handleNewSession}
+              className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
+            >
+              + New Session
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {sessions.map((s) => (
+              <div key={s.id} className="group relative">
+                {renamingSessionId === s.id ? (
+                  <input
+                    autoFocus
+                    value={renameTitle}
+                    onChange={(e) => setRenameTitle(e.target.value)}
+                    onBlur={() => handleRenameSession(s.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSession(s.id); if (e.key === 'Escape') setRenamingSessionId(null); }}
+                    className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
+                  />
+                ) : (
+                  <button
+                    onClick={() => handleSelectSession(s.id)}
+                    className={`w-full text-left px-3 py-2 text-xs transition-all cursor-pointer ${
+                      activeSessionId === s.id
+                        ? 'bg-cyan-muted text-cyan'
+                        : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
+                    }`}
+                  >
+                    <span className="block truncate">{s.title || 'Untitled Session'}</span>
+                    <span className="block text-[9px] text-cream-muted mt-0.5">
+                      {new Date(s.created_at).toLocaleDateString()}
                     </span>
-                  )}
-                </div>
+                  </button>
+                )}
+                {/* Rename button only — NO delete */}
+                <button
+                  onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-all cursor-pointer"
+                  title="Rename session"
+                >
+                  <PencilIcon className="w-3 h-3" />
+                </button>
               </div>
-            ))
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Right: Chat panel ── */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Chat header */}
+        <div className="shrink-0 h-14 px-6 border-b border-border-subtle flex items-center justify-between bg-ink-base/80 backdrop-blur-sm">
+          <div>
+            {activeSession ? (
+              <h2 className="text-sm font-semibold text-cream">{activeSession.title || 'Untitled Session'}</h2>
+            ) : activeLabId ? (
+              <h2 className="text-sm font-semibold text-cream-secondary">Select or create a session</h2>
+            ) : (
+              <h2 className="text-sm font-semibold text-cream-secondary">Select a lab to begin</h2>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-cream-muted font-mono">{username}</span>
+            {isStreaming && (
+              <div className="flex items-center gap-1.5 text-[10px] text-cyan">
+                <div className="w-1.5 h-1.5 rounded-full bg-cyan animate-pulse" />
+                streaming
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+          {!activeLabId && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center max-w-xs">
+                <div className="w-16 h-16 rounded-2xl gradient-cyan mx-auto mb-4 flex items-center justify-center shadow-glow">
+                  <svg className="w-8 h-8 text-cream" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
+                  </svg>
+                </div>
+                <h3 className="font-display text-xl text-cream mb-2">Select a Lab</h3>
+                <p className="text-sm text-cream-secondary">
+                  Choose a lab from the sidebar to start chatting, or join a class first.
+                </p>
+              </div>
+            </div>
           )}
+
+          {activeLabId && !activeSessionId && sessions.length === 0 && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <p className="text-cream-secondary text-sm mb-3">No sessions yet for this lab.</p>
+                <button onClick={handleNewSession} className="px-4 py-2 rounded-lg gradient-cyan text-cream text-sm font-medium cursor-pointer hover:brightness-110 transition-all">
+                  Start First Session
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isLoadingMessages && (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-5 h-5 rounded-full border-2 border-cyan border-t-transparent animate-[spin_0.8s_linear_infinite]" />
+            </div>
+          )}
+
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input area */}
-        {activeSessionId && (
-          <div className="px-6 py-4 border-t border-border-subtle bg-bg-surface/30">
-            <div className="flex items-end gap-3">
-              <textarea
-                ref={textareaRef}
-                id="chat-input"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your message… (Enter to send, Shift+Enter for new line)"
-                disabled={isStreaming}
-                rows={1}
-                className="flex-1 px-4 py-3 rounded-xl bg-bg-primary border border-border-default text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors disabled:opacity-50 max-h-32 overflow-y-auto"
-                style={{ minHeight: '48px' }}
-              />
+        {/* Input */}
+        <div className="shrink-0 px-6 py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
+          <div className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
+            activeSessionId ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
+          } bg-ink-deep`}>
+            <textarea
+              ref={inputRef}
+              id="chat-input"
+              rows={1}
+              disabled={!activeSessionId || isStreaming}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={activeSessionId ? 'Type your message… (Enter to send)' : 'Select a session first'}
+              className="flex-1 bg-transparent text-cream text-sm resize-none outline-none placeholder:text-cream-muted max-h-32 min-h-[1.5rem] leading-relaxed"
+              style={{ height: 'auto' }}
+            />
+            <button
+              id="send-btn"
+              onClick={isStreaming ? () => abortRef.current?.abort() : handleSend}
+              disabled={!activeSessionId}
+              className={`shrink-0 p-2 rounded-lg transition-all cursor-pointer ${
+                isStreaming
+                  ? 'bg-danger-muted text-danger hover:bg-danger-muted/80'
+                  : 'gradient-cyan text-cream hover:brightness-110 shadow-glow disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Join Class Modal ── */}
+      {showJoinModal && (
+        <div className="fixed inset-0 bg-ink-deep/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-ink-base rounded-2xl border border-border-default shadow-elevated max-w-sm w-full p-8 noise">
+            <h3 className="font-display text-2xl text-cream mb-1">Join a Class</h3>
+            <p className="text-sm text-cream-secondary mb-6">Enter the 6-character invite code from your teacher.</p>
+
+            <div className="flex gap-2 justify-center mb-6">
+              {joinCode.map((ch, i) => (
+                <input
+                  key={i}
+                  id={`jc-${i}`}
+                  type="text"
+                  maxLength={1}
+                  value={ch}
+                  onChange={(e) => handleJoinCodeChange(i, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Backspace' && !ch && i > 0) document.getElementById(`jc-${i - 1}`)?.focus();
+                  }}
+                  className="w-11 h-13 text-center text-lg font-mono font-bold text-cream bg-ink-deep border border-border-default rounded-lg focus:border-cyan focus:ring-1 focus:ring-cyan/30 outline-none transition-colors uppercase"
+                />
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => { setShowJoinModal(false); setJoinCode(['', '', '', '', '', '']); }}
+                className="flex-1 py-2.5 rounded-lg border border-border-default text-cream-secondary text-sm hover:bg-ink-hover transition-all cursor-pointer">
+                Cancel
+              </button>
               <button
-                id="chat-send-button"
-                onClick={handleSend}
-                disabled={!input.trim() || isStreaming}
-                className="shrink-0 w-11 h-11 rounded-xl gradient-accent flex items-center justify-center text-white transition-all duration-200 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-[var(--shadow-glow)]"
-              >
-                {isStreaming ? (
-                  <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-[spin_0.8s_linear_infinite]" />
-                ) : (
-                  <SendIcon className="w-5 h-5" />
-                )}
+                onClick={handleJoinSubmit}
+                disabled={isJoining || joinCode.join('').length !== 6}
+                className="flex-1 py-2.5 rounded-lg gradient-cyan text-cream text-sm font-semibold disabled:opacity-50 cursor-pointer hover:brightness-110 transition-all">
+                {isJoining ? 'Joining…' : 'Join Class'}
               </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Message Bubble ── */
+function MessageBubble({ message }) {
+  const isUser = message.sender === 'user';
+  return (
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
+      {!isUser && (
+        <div className="w-7 h-7 rounded-lg gradient-cyan flex items-center justify-center shrink-0 mt-0.5 shadow-glow">
+          <span className="text-cream text-[10px] font-bold">AI</span>
+        </div>
+      )}
+      <div className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        isUser
+          ? 'bg-cyan-muted text-cream rounded-tr-sm border border-cyan/20'
+          : 'bg-ink-raised text-cream-secondary border border-border-subtle rounded-tl-sm'
+      }`}>
+        {message.content || <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
       </div>
     </div>
   );
 }
 
+function BlinkDot({ delay = '0ms' }) {
+  return <span className="w-1.5 h-1.5 rounded-full bg-cream-muted animate-pulse inline-block" style={{ animationDelay: delay }} />;
+}
+
 /* ── Icons ── */
-
-function PlusIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
 function SendIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m22 2-7 20-4-9-9-4z" /><path d="m22 2-11 11" />
-    </svg>
-  );
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z" /><path d="M22 2 11 13" /></svg>;
 }
-
-function SparkleIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 2L14.09 8.26L20 9.27L15.55 13.97L16.91 20L12 16.9L7.09 20L8.45 13.97L4 9.27L9.91 8.26L12 2Z" />
-    </svg>
-  );
+function StopIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>;
 }
-
-function ChatEmptyIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z" />
-      <path d="M8 12h.01M12 12h.01M16 12h.01" />
-    </svg>
-  );
+function PencilIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
 }

@@ -481,3 +481,60 @@ class TestAdminPrune:
         resp = await student_full_client.post("/api/admin/maintenance/prune",
                                               json={"older_than_days": 30})
         assert resp.status_code == 403
+
+
+class TestAdminDeleteClass:
+    async def test_admin_force_deletes_class(self, admin_full_client, seed_full, db_session):
+        cid = seed_full["class"].id
+        resp = await admin_full_client.delete(f"/api/admin/classes/{cid}")
+        assert resp.status_code == 204
+        r = await db_session.execute(select(Class).where(Class.id == cid))
+        cls = r.scalar_one_or_none()
+        assert cls is not None
+        assert cls.is_deleted is True
+
+    async def test_already_deleted_404(self, admin_full_client, seed_full):
+        cid = seed_full["deleted_class"].id
+        resp = await admin_full_client.delete(f"/api/admin/classes/{cid}")
+        assert resp.status_code == 404
+
+    async def test_student_rejected_403(self, student_full_client, seed_full):
+        resp = await student_full_client.delete(f"/api/admin/classes/{seed_full['class'].id}")
+        assert resp.status_code == 403
+
+
+class TestAdminDeleteLab:
+    async def test_admin_force_deletes_lab(self, admin_full_client, seed_full, db_session):
+        lid = seed_full["lab"].id
+        resp = await admin_full_client.delete(f"/api/admin/labs/{lid}")
+        assert resp.status_code == 204
+        r = await db_session.execute(select(Lab).where(Lab.id == lid))
+        lab = r.scalar_one_or_none()
+        assert lab is not None
+        assert lab.is_deleted is True
+
+    async def test_already_deleted_404(self, admin_full_client, seed_full):
+        lid = seed_full["deleted_lab"].id
+        resp = await admin_full_client.delete(f"/api/admin/labs/{lid}")
+        assert resp.status_code == 404
+
+    async def test_student_rejected_403(self, student_full_client, seed_full):
+        resp = await student_full_client.delete(f"/api/admin/labs/{seed_full['lab'].id}")
+        assert resp.status_code == 403
+
+
+class TestAdminClassAnalytics:
+    async def test_returns_hierarchical_analytics(self, admin_full_client, seed_full):
+        resp = await admin_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["class_id"] == str(seed_full["class"].id)
+        assert "total_tokens" in body
+        assert len(body["labs"]) >= 1
+        assert "students" in body["labs"][0]
+
+    async def test_student_rejected_403(self, student_full_client, seed_full):
+        resp = await student_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}")
+        assert resp.status_code == 403

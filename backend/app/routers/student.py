@@ -1,18 +1,20 @@
 """
 routers/student.py — Student session management, class-joining, and self-service endpoints.
 
+v6 Rule: Students CANNOT delete their own sessions.
+All sessions are permanently retained for teacher/admin audit.
+
 Endpoints
 ---------
 POST   /api/student/classes/join               →  Join a class via 6-char invite code.
 GET    /api/student/classes                    →  List joined classes.
 GET    /api/student/classes/{id}/labs           →  List labs for a joined class.
+DELETE /api/student/classes/{class_id}/leave   →  Voluntarily leave a class.
 POST   /api/student/labs/{lab_id}/sessions     →  Create a session scoped to a lab.
 GET    /api/student/sessions                   →  List own active sessions (optional lab filter).
 GET    /api/student/sessions/{session_id}      →  Fetch message history (IDOR check required).
+PUT    /api/student/sessions/{session_id}      →  Rename session title (cosmetic, no audit impact).
 GET    /api/student/usage                      →  Daily token usage stats.
-DELETE /api/student/classes/{class_id}/leave   →  Voluntarily leave a class.
-PUT    /api/student/sessions/{session_id}      →  Update session title.
-DELETE /api/student/sessions/{session_id}      →  Soft-delete a session.
 """
 
 import uuid
@@ -370,38 +372,3 @@ async def update_session_title(
     await db.refresh(session)
     return SessionResponse.model_validate(session)
 
-
-# ===================================================================
-# DELETE /api/student/sessions/{session_id}
-# ===================================================================
-
-
-@router.delete("/sessions/{session_id}", status_code=204)
-async def soft_delete_session(
-    session_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> Response:
-    """Soft-delete a session: sets ``is_deleted = True`` to hide from history."""
-    result = await db.execute(
-        select(Session).where(
-            Session.id == session_id,
-            Session.is_deleted.is_(False),
-        )
-    )
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-    if session.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this session",
-        )
-
-    session.is_deleted = True
-    db.add(session)
-    await db.flush()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)

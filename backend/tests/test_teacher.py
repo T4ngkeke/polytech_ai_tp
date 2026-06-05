@@ -449,7 +449,8 @@ class TestTeacherClassAnalytics:
         body = resp.json()
         assert body["class_id"] == str(seed_data["class"].id)
         assert body["total_tokens"] >= 25  # 10 + 15 from messages
-        assert len(body["students"]) >= 1
+        assert len(body["labs"]) >= 1
+        assert len(body["labs"][0]["students"]) >= 1
 
     async def test_wrong_class_404(self, teacher_client):
         resp = await teacher_client.get(

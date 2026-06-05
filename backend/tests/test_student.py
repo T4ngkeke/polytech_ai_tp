@@ -311,31 +311,3 @@ class TestUpdateSessionTitle:
         assert resp.status_code == 404
 
 
-class TestSoftDeleteSession:
-    async def test_soft_deletes(self, client_s1, seed_data, db_session):
-        sid = seed_data["session"].id
-        resp = await client_s1.delete(f"/api/student/sessions/{sid}")
-        assert resp.status_code == 204
-        await db_session.refresh(seed_data["session"])
-        assert seed_data["session"].is_deleted is True
-
-    async def test_idor_returns_403(self, client_s2, seed_data):
-        resp = await client_s2.delete(
-            f"/api/student/sessions/{seed_data['session'].id}")
-        assert resp.status_code == 403
-
-    async def test_already_deleted_404(self, client_s1, seed_data, db_session):
-        sess = seed_data["session"]
-        sess.is_deleted = True
-        db_session.add(sess)
-        await db_session.flush()
-        resp = await client_s1.delete(f"/api/student/sessions/{sess.id}")
-        assert resp.status_code == 404
-
-    async def test_hidden_from_session_list(self, client_s1, seed_data):
-        sid = seed_data["session"].id
-        await client_s1.delete(f"/api/student/sessions/{sid}")
-        resp = await client_s1.get("/api/student/sessions")
-        assert resp.status_code == 200
-        ids = [s["id"] for s in resp.json()]
-        assert str(sid) not in ids
