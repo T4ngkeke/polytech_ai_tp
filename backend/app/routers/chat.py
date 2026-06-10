@@ -313,6 +313,12 @@ async def chat_stream(
             model=llm_config["model"],
             messages=messages_payload,
             stream=True,
+            # Disable "thinking/reasoning" mode for reasoning-capable models
+            # (e.g. Qwen3): otherwise the model emits all tokens in a non-standard
+            # `reasoning` field with an empty `content`, so nothing streams to the
+            # client. Ollama's OpenAI-compatible endpoint honors this; plain models
+            # simply ignore it.
+            extra_body={"reasoning_effort": "none"},
         )
     except Exception as e:
         raise HTTPException(

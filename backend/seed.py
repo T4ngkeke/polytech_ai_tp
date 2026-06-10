@@ -39,10 +39,13 @@ async def seed():
     async with AsyncSessionLocal() as db:
         # ── 1. SystemConfig (LLM defaults) ───────────────────────
         print("Inserting SystemConfig rows (Ollama defaults)...")
+        # Use the env-injected base URL (compose sets host.docker.internal so the
+        # backend container can reach the host's Ollama). Falls back to the
+        # config default (localhost) when running natively.
         configs = [
-            SystemConfig(key="LLM_BASE_URL", value="http://localhost:11434/v1"),
-            SystemConfig(key="LLM_API_KEY", value="ollama"),
-            SystemConfig(key="LLM_MODEL", value="qwen3.5:0.8b"),
+            SystemConfig(key="LLM_BASE_URL", value=settings.LLM_BASE_URL),
+            SystemConfig(key="LLM_API_KEY", value=settings.LLM_API_KEY),
+            SystemConfig(key="LLM_MODEL", value=settings.LLM_MODEL),
         ]
         db.add_all(configs)
 
