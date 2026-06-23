@@ -1,5 +1,5 @@
 """
-test_chat.py — Tests for POST /api/chat/stream (v5 Class-Lab Architecture).
+test_chat.py — Tests for POST /api/chat/stream (v7).
 
 Coverage
 --------

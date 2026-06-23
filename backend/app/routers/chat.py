@@ -42,6 +42,7 @@ from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.agent.graph import build_agent
 from backend.app.auth import get_current_user
 from backend.app.config import settings
 from backend.app.database import AsyncSessionLocal, get_db
@@ -84,7 +85,54 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "base_url": configs.get("LLM_BASE_URL", settings.LLM_BASE_URL),
         "api_key": configs.get("LLM_API_KEY", settings.LLM_API_KEY),
         "model": configs.get("LLM_MODEL", settings.LLM_MODEL),
+        "embedding_model": configs.get("EMBEDDING_MODEL", "bge-m3"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Helper: fetch active rule texts per tier (for the agent synthesize node)
+# ---------------------------------------------------------------------------
+
+async def _fetch_rule_texts(
+    db: AsyncSession,
+    class_id,
+    lab_id,
+    user_id,
+) -> dict[str, str | None]:
+    """Return active Class/Lab/Student rule texts (or None) for prompt assembly."""
+    out: dict[str, str | None] = {"class_rules": None, "lab_rules": None, "student_rules": None}
+    targets = [("class_rules", RuleLevel.class_, class_id),
+               ("lab_rules", RuleLevel.lab, lab_id),
+               ("student_rules", RuleLevel.student, user_id)]
+    for key, level, target_id in targets:
+        if target_id is None:
+            continue
+        result = await db.execute(
+            select(Rule).where(
+                Rule.level == level,
+                Rule.target_id == target_id,
+                Rule.is_active.is_(True),
+            )
+        )
+        rule = result.scalar_one_or_none()
+        if rule:
+            out[key] = rule.rules_text
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Helper: query-embedding function for the agent's RAG node
+# ---------------------------------------------------------------------------
+
+def _make_embed_fn(llm_config: dict[str, str]):
+    """Build an async embedder hitting the configured embedding model."""
+    async def embed(texts: list[str]) -> list[list[float]]:
+        client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
+        resp = await client.embeddings.create(
+            model=llm_config["embedding_model"], input=texts
+        )
+        return [item.embedding for item in resp.data]
+    return embed
 
 
 # ---------------------------------------------------------------------------
@@ -272,16 +320,11 @@ async def chat_stream(
         )
 
     # ---------------------------------------------------------
-    # STEP 2: Three-Tier Prompt Controller
+    # STEP 2: Agent (router → retrieve → synthesize) builds the payload
     # ---------------------------------------------------------
-    system_prompt = await _build_system_prompt(
-        db,
-        class_id=str(class_id) if class_id else None,
-        lab_id=str(lab_id) if lab_id else None,
-        user_id=str(current_user.id),
-    )
+    llm_config = await _get_llm_config(db)
 
-    # Fetch last 20 messages for context
+    # Fetch last 20 messages as chronological chat history.
     msg_result = await db.execute(
         select(Message)
         .where(Message.session_id == body.session_id)
@@ -289,20 +332,28 @@ async def chat_stream(
         .limit(20)
     )
     last_messages = msg_result.scalars().all()
-    last_messages.reverse()  # Chronological order
+    last_messages.reverse()
+    history = [
+        {"role": "user" if m.sender == SenderType.user else "assistant", "content": m.content}
+        for m in last_messages
+    ]
 
-    messages_payload = [{"role": "system", "content": system_prompt}]
-    for msg in last_messages:
-        role = "user" if msg.sender == SenderType.user else "assistant"
-        messages_payload.append({"role": role, "content": msg.content})
+    rule_texts = await _fetch_rule_texts(db, class_id, lab_id, current_user.id)
 
-    messages_payload.append({"role": "user", "content": body.message})
+    agent = build_agent(db, embed_fn=_make_embed_fn(llm_config))
+    agent_result = await agent.ainvoke({
+        "message": body.message,
+        "class_id": class_id,
+        "lab_id": lab_id,
+        "user_id": current_user.id,
+        "history": history,
+        **rule_texts,
+    })
+    messages_payload = agent_result["messages_payload"]
 
     # ---------------------------------------------------------
     # STEP 3: Dynamic LLM Proxy (Zero-Downtime)
     # ---------------------------------------------------------
-    llm_config = await _get_llm_config(db)
-
     client = AsyncOpenAI(
         api_key=llm_config["api_key"],
         base_url=llm_config["base_url"],

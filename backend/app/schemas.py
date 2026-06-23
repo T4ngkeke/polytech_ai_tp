@@ -1,5 +1,5 @@
 """
-schemas.py — Pydantic v2 request/response schemas for Edu-LLM v5 Class-Lab Architecture.
+schemas.py — Pydantic v2 request/response schemas for Edu-LLM v7 Agentic Class-Lab Architecture.
 
 Each router domain has its own section.  Models marked *Request* are used for
 incoming payloads; models marked *Response* are returned to the client.
@@ -149,6 +149,16 @@ class LabResponse(BaseModel):
     is_deleted: bool
     is_active: bool
     created_at: datetime
+
+
+class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    class_id: uuid.UUID
+    lab_id: uuid.UUID | None
+    filename: str
+    status: str
 
 
 class LabUpdateRequest(BaseModel):
@@ -331,7 +341,7 @@ class AdminAnalyticsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Analytics — Hierarchical (v6)
+# Analytics — Hierarchical (v7)
 # ---------------------------------------------------------------------------
 
 

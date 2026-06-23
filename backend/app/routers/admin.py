@@ -1,5 +1,5 @@
 """
-routers/admin.py — Admin-only endpoints for Edu-LLM v6.
+routers/admin.py — Admin-only endpoints for Edu-LLM v7.
 
 All DB/business logic is delegated to the services/ layer.
 Admin bypasses ownership checks — no class/lab ownership is verified here.

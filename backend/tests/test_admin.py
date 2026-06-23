@@ -1,5 +1,5 @@
 """
-test_admin.py — Tests for admin endpoints (v5 production-ready).
+test_admin.py — Tests for admin endpoints (v7).
 """
 
 import uuid

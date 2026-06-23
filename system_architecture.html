@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM v5 Class-Lab Architecture</title>
+    <title>Edu-LLM v7 Agentic Class-Lab Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -309,10 +309,13 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v5 — Class-Lab Architecture</div>
-            <h1>Edu-LLM: Hierarchical Rules & Zero-Downtime Architecture</h1>
-            <p class="subtitle">Streamlined design optimized for a 20-student class. Redis layer removed to reduce
-                overhead. Ollama is retained as a compute placeholder for seamless API migration.</p>
+            <div class="pill">Architecture v7 — Agentic Class-Lab Architecture</div>
+            <h1>Edu-LLM: Agentic RAG, Hybrid Retrieval & Off-Peak Ingestion</h1>
+            <p class="subtitle">The v6 foundation (3-tier RBAC, invite codes, hierarchical rule injection) plus a
+                LangGraph agent that routes between structured search and pgvector RAG, and a GPU-aware
+                docker-compose worker that ingests course documents off-peak. Chat and ingestion share one
+                existing inference engine (vLLM/Ollama); the model is config-driven via SystemConfigs, never
+                hardcoded — swap any model that fits the box with zero downtime.</p>
         </header>
 
         <div class="legend">
@@ -350,25 +353,36 @@
                 subgraph BE ["② Backend Layer (FastAPI)"]
                 Auth["JWT Gateway"]
                 R_Admin["Admin Routes\n(CSV Import, LLM Config)"]
-                R_Teacher["Teacher Routes\n(Classes, Labs, Rules)"]
+                R_Teacher["Teacher Routes\n(Classes, Labs, Rules, Documents)"]
                 R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
-                RateLimit["Rate Limiter\n(In-Memory/DB Check)"]
-                PromptCtrl["Prompt Controller\nMerge Class+Lab+Student rules"]
-                Proxy["Streaming Proxy\nSSE forwarding"]
+                RateLimit["Rate Limiter\n(DB Quota Check)"]
+                Router["LangGraph Router\ncheap classify (rules→LLM)"]
+                Retrieval["Retrieval Service\nlab-scoped · solution-isolated"]
+                Synth["Synthesize Node\nskill.md + 3-tier rules + context"]
+                SSE["astream_events → SSE\nadapter"]
                 AsyncDB["Background Task\ntoken-aware write"]
                 end
 
-                subgraph DB ["③ Database Layer (PostgreSQL)"]
-                DB_SysConf["SystemConfigs\nLLM_BASE_URL, Model (0-Downtime)"]
+                subgraph DB ["③ Database Layer (PostgreSQL + pgvector)"]
+                DB_SysConf["SystemConfigs\nLLM_BASE_URL, Model, Embedding (0-Downtime)"]
                 DB_Classes["Classes & Labs\ninvite_code, teacher_id"]
                 DB_Users["Users\nid · role · daily_token_quota"]
-                DB_Rules["Hierarchical Rules\nlevel(class/lab/student) · target_id"]
+                DB_Rules["Hierarchical Rules\nlevel(class/lab/student) + skill.md"]
                 DB_Sessions["Sessions\nid · user_id · lab_id"]
                 DB_Messages["Messages & Usage Stats"]
+                DB_Chunks["DocChunks\nembedding vector(N) · lab_id"]
+                DB_Exercises["Exercises\nnumber · statement · hints · 🔴solution"]
+                DB_Jobs["IngestionJobs\nDB-as-queue · SKIP LOCKED"]
                 end
 
-                subgraph COMPUTE ["④ Compute Layer"]
-                LLM["Model Endpoint\n(MVP: Ollama | Future: API)"]
+                subgraph WK ["④ Ingestion Worker (docker-compose)"]
+                Poll["Poll Loop\nconcurrency=1"]
+                GpuGate["GPU Gate\npynvml off-peak"]
+                Extract["Chunk + Embed +\nguided-JSON extract"]
+                end
+
+                subgraph COMPUTE ["⑤ Compute Layer (one shared engine)"]
+                LLM["Existing Inference Engine (vLLM/Ollama)\nmodel from SystemConfigs — not hardcoded"]
                 end
 
                 UI_S & UI_T & UI_A == "JWT Token" ==> Auth
@@ -381,58 +395,87 @@
                 R_Admin -.->|"CSV Upsert"| DB_Users
                 R_Admin -.->|"write LLM config"| DB_SysConf
                 R_Teacher -.->|"write Class/Lab"| DB_Classes
-                R_Teacher -.->|"write 3-tier rules"| DB_Rules
+                R_Teacher -.->|"write 3-tier rules + skill.md"| DB_Rules
+                R_Teacher -.->|"upload doc → enqueue"| DB_Jobs
 
                 R_Student -.->|"join via invite code"| DB_Classes
                 R_Student ==>|"chat in lab"| RateLimit
                 RateLimit -.->|"read quota"| DB_Users
-                RateLimit ==>|"quota OK"| PromptCtrl
+                RateLimit ==>|"quota OK"| Router
                 RateLimit -->|"429 — over limit"| UI_S
 
-                PromptCtrl -.->|"fetch Class+Lab+Student rules"| DB_Rules
-                PromptCtrl -.->|"fetch session ctx"| DB_Sessions
-                PromptCtrl ==>|"assembled payload"| Proxy
-
-                Proxy -.->|"read dynamic URL/Key"| DB_SysConf
-                Proxy ==>|"POST request"| LLM
-                LLM ==>|"stream tokens"| Proxy
-                Proxy ==>|"SSE to browser"| UI_S
-
-                Proxy -.->|"stream ended — trigger"| AsyncDB
+                Router ==>|"agentic_search | rag"| Retrieval
+                Router ==>|"direct"| Synth
+                Retrieval -.->|"vector RAG (lab-scoped)"| DB_Chunks
+                Retrieval -.->|"structured search (no solution)"| DB_Exercises
+                Retrieval ==>|"context + citations"| Synth
+                Synth -.->|"fetch rules + skill.md"| DB_Rules
+                Synth -.->|"fetch session ctx"| DB_Sessions
+                Synth -.->|"read dynamic URL/Key/Model"| DB_SysConf
+                Synth ==>|"prompt"| LLM
+                LLM ==>|"stream tokens"| SSE
+                SSE ==>|"SSE to browser"| UI_S
+                SSE -.->|"stream ended — trigger"| AsyncDB
                 AsyncDB -.->|"save msg + tokens"| DB_Messages
 
-                class DB_SysConf,DB_Classes,DB_Rules newNode;
+                Poll -.->|"claim job (SKIP LOCKED)"| DB_Jobs
+                GpuGate -.->|"util < threshold?"| Poll
+                Poll ==>|"run"| Extract
+                Extract -.->|"low-priority batch"| LLM
+                Extract -.->|"write chunks"| DB_Chunks
+                Extract -.->|"write exercises"| DB_Exercises
+
+                class DB_SysConf,DB_Classes,DB_Rules,DB_Chunks,DB_Exercises,DB_Jobs newNode;
                 class Auth auth;
-                class PromptCtrl danger;
-                class Proxy,LLM streaming;
+                class Router,Retrieval,Synth danger;
+                class SSE,LLM streaming;
                 class R_Admin,R_Teacher,R_Student route;
                 class DB_Users,DB_Sessions changedNode;
+                class Poll,GpuGate,Extract newNode;
             </div>
         </div>
 
         <div class="grid">
+            <div class="card new">
+                <span class="tag">Agent, not Proxy</span>
+                <h3>LangGraph Agentic RAG</h3>
+                <p>The chat endpoint becomes a graph: <code>Router → [agentic_search | rag | direct] → Synthesize → SSE</code>. The router classifies cheaply (rules first, LLM fallback), avoiding pure ReAct so slow-bandwidth decodes aren't wasted on every step.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">Single DB</span>
+                <h3>Hybrid Retrieval on pgvector</h3>
+                <p>Concept questions hit <b>RAG</b> over <code>doc_chunks.embedding</code>; exact missions hit <b>structured search</b> over <code>exercises</code>. All retrieval is filtered by <code>lab_id</code>/<code>class_id</code>, and <code>solution</code> is an Agent-only hidden reference — never emitted.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">Off-Peak · GPU-Aware</span>
+                <h3>Ingestion Worker (No Airflow / k8s)</h3>
+                <p>A docker-compose <code>worker</code> polls <code>ingestion_jobs</code> (<code>SKIP LOCKED</code>) and runs <b>guided-JSON</b> extraction at low priority on the same engine. A <code>pynvml</code> gate only pulls work when the GPU is idle; chat always preempts.</p>
+            </div>
+
             <div class="card changed">
-                <span class="tag">Zero-Friction</span>
-                <h3>Invite Code Workflow</h3>
-                <p>The tedious manual approval process is replaced with 6-character Invite Codes. Students can instantly join a class and access their assigned labs, ensuring a flawless and fast demo experience.</p>
+                <span class="tag">One Shared Engine</span>
+                <h3>Config-Driven Model, Never Hardcoded</h3>
+                <p>Chat <b>and</b> ingestion call the same existing engine (vLLM/Ollama) and the one model set in <code>SystemConfigs</code> — no second model, nothing hardcoded. Swap to any model that fits the box (e.g. smaller for test, larger for prod) with zero downtime and no code change.</p>
             </div>
 
             <div class="card changed">
                 <span class="tag">Granular Control</span>
-                <h3>Three-Tier Rule Injection</h3>
-                <p>The Prompt Controller dynamically fetches and sequentially merges rules from three levels: <b>Class Rule</b> -> <b>Lab Rule</b> -> <b>Student Rule</b>, injecting highly targeted pedagogy directly into the LLM context.</p>
+                <h3>Three-Tier Rules + skill.md</h3>
+                <p><code>skill.md</code> (instructor persona) reuses the Rules table as a <code>level=class</code> rule placed <b>first</b> (sets tone); restrictive <b>Class → Lab → Student</b> rules come <b>after</b> so constraints win, resisting prompt-injection bypass.</p>
+            </div>
+
+            <div class="card changed">
+                <span class="tag">Zero-Friction · Context Safe</span>
+                <h3>Invite Codes &amp; Lab-Scoped Sessions</h3>
+                <p>Retained from v6: 6-character invite codes for instant class joining, and isolated chat sessions scoped to a single Lab — clearing history safely and preventing context-window overflow on smaller local models.</p>
             </div>
 
             <div class="card new">
-                <span class="tag">Zero-Downtime</span>
-                <h3>Dynamic LLM Configuration</h3>
-                <p>Crucial LLM connection details (Base URL, API Key, Model) are now fetched from the <code>SystemConfigs</code> database table rather than a static <code>.env</code> file. Admins can hot-swap AI models on the fly.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">Context Safe</span>
-                <h3>Lab-Scoped Sessions</h3>
-                <p>Chats are no longer infinite global threads. Students create isolated <code>Chat Sessions</code> inside a specific Lab. This clears history safely, preventing catastrophic Context Window overflow for smaller local models.</p>
+                <span class="tag">Teach Prompt Literacy</span>
+                <h3>Effort Coaching, not Mastery Grading</h3>
+                <p>Two cheap rules-first signals (no LLM): a <b>windowed effort/clarity</b> score gently coaches <i>how to ask</i> (never gates a "stupid" question), and a per-message <b>lazy / answer-seeking</b> detector forces a Socratic reply — it answers, but <b>never hands over the answer</b>. Structured scores only, teacher-overridable.</p>
             </div>
         </div>
 
@@ -477,6 +520,36 @@
                         <td><span class="badge kept">Unchanged</span></td>
                         <td><code>id, role, daily_token_quota</code></td>
                         <td>Supports bulk creation via Admin CSV dry-run import.</td>
+                    </tr>
+                    <tr>
+                        <td><code>documents</code></td>
+                        <td><span class="badge new">New v7</span></td>
+                        <td><code>class_id, lab_id, storage_path, content_hash, status</code></td>
+                        <td>Course-material registry with a state machine (<code>pending→processing→indexed→failed</code>). Files persist in the <code>documents_data</code> Docker volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
+                    </tr>
+                    <tr>
+                        <td><code>doc_chunks</code></td>
+                        <td><span class="badge new">New v7</span></td>
+                        <td><code>document_id, lab_id, content, embedding vector(N), page_no</code></td>
+                        <td>RAG store. HNSW + <code>vector_cosine_ops</code> index; denormalized <code>lab_id</code> for filter-without-JOIN tenant scoping. <code>page_no</code> powers citations.</td>
+                    </tr>
+                    <tr>
+                        <td><code>exercises</code></td>
+                        <td><span class="badge new">New v7</span></td>
+                        <td><code>number, statement, hints, 🔴solution, concept</code></td>
+                        <td>LLM-extracted via guided decoding. Target of agentic structured search. <code>solution</code> is never SELECTed by default; <code>concept</code> is reserved for future Adaptive Tutoring.</td>
+                    </tr>
+                    <tr>
+                        <td><code>ingestion_jobs</code></td>
+                        <td><span class="badge new">New v7</span></td>
+                        <td><code>document_id, status, priority, attempts, locked_at</code></td>
+                        <td>DB-as-queue for the worker. Atomic pickup via <code>FOR UPDATE SKIP LOCKED</code>; stale <code>processing</code> jobs are reclaimed for crash recovery.</td>
+                    </tr>
+                    <tr>
+                        <td><code>learner_profiles</code></td>
+                        <td><span class="badge new">New v7</span></td>
+                        <td><code>user_id, lab_id, effort_ema, coaching_level, teacher_override</code></td>
+                        <td>Prompt-literacy coaching: smoothed sliding-window effort score per (student, lab). Structured values only — no free-text judgments; teacher-overridable.</td>
                     </tr>
                 </tbody>
             </table>

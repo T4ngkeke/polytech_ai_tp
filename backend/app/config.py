@@ -25,5 +25,8 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = "ollama"                       # Placeholder
     LLM_MODEL: str = "qwen3.5:0.8b"                        # Default model
 
+    # [v7] Where uploaded course documents are stored (mounted Docker volume)
+    DOCUMENTS_STORAGE_ROOT: str = "/data/documents"
+
 
 settings = Settings()

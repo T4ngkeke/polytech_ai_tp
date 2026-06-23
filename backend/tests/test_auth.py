@@ -1,5 +1,5 @@
 """
-test_auth.py — Tests for auth endpoints and dependencies (v5).
+test_auth.py — Tests for auth endpoints and dependencies (v7).
 
 Coverage
 --------

@@ -1,5 +1,5 @@
 """
-services/__init__.py — Service layer package for Edu-LLM v6.
+services/__init__.py — Service layer package for Edu-LLM v7.
 
 All business/DB logic lives here. Routers are thin controllers that:
   1. Validate authentication & authorization (ownership checks)

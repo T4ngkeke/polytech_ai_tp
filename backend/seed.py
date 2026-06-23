@@ -1,5 +1,5 @@
 """
-seed.py — Standalone script to seed the DB with initial data for Edu-LLM v5.
+seed.py — Standalone script to seed the DB with initial data for Edu-LLM v7.
 
 Seeds:
   1. SystemConfig rows (LLM defaults for Ollama)
@@ -31,9 +31,33 @@ engine = create_async_engine(settings.DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
 
 
+# Default SystemConfig rows (key/value). All model wiring reads these at runtime —
+# generation, embeddings, reranking, and the bounded-loop / router knobs are config,
+# not code. Kept as plain dicts so it is unit-testable without a DB.
+DEFAULT_SYSTEM_CONFIGS = [
+    {"key": "LLM_BASE_URL", "value": settings.LLM_BASE_URL},
+    {"key": "LLM_API_KEY", "value": settings.LLM_API_KEY},
+    {"key": "LLM_MODEL", "value": settings.LLM_MODEL},
+    # [v7] embedding model for RAG + router kNN. bge-m3 = 1024-dim (matches EMBEDDING_DIM).
+    {"key": "EMBEDDING_MODEL", "value": "bge-m3"},
+    # [v7.1] reranker behind an OpenAI-compatible rerank endpoint (TEI / Infinity / vLLM).
+    # Empty URL → retrieval degrades gracefully to fusion-only ordering.
+    {"key": "RERANK_URL", "value": ""},
+    {"key": "RERANK_MODEL", "value": "bge-reranker-v2-m3"},
+    # [v7.1] bounded self-eval loop: max re-retrieval rounds (admin-configurable, default 1).
+    {"key": "RAG_MAX_RETRIES", "value": "1"},
+    # [v7.1] router kNN confidence threshold: below this, fall back to RAG + log.
+    {"key": "ROUTER_KNN_THRESHOLD", "value": "0.35"},
+]
+
+
 async def seed():
     print("Connecting to DB and creating tables if needed...")
     async with engine.begin() as conn:
+        # [v7] pgvector must exist before create_all builds vector() columns.
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy import text
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
 
     async with AsyncSessionLocal() as db:
@@ -42,12 +66,7 @@ async def seed():
         # Use the env-injected base URL (compose sets host.docker.internal so the
         # backend container can reach the host's Ollama). Falls back to the
         # config default (localhost) when running natively.
-        configs = [
-            SystemConfig(key="LLM_BASE_URL", value=settings.LLM_BASE_URL),
-            SystemConfig(key="LLM_API_KEY", value=settings.LLM_API_KEY),
-            SystemConfig(key="LLM_MODEL", value=settings.LLM_MODEL),
-        ]
-        db.add_all(configs)
+        db.add_all(SystemConfig(**c) for c in DEFAULT_SYSTEM_CONFIGS)
 
         # ── 2. Users ─────────────────────────────────────────────
         print("Inserting 4 users (admin, teacher, student1, student2)...")

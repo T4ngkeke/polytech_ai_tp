@@ -1,6 +1,7 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # [v7] pgvector image — provides the `vector` type for DocChunk embeddings.
+    image: pgvector/pgvector:pg16
     container_name: edullm-db
     environment:
       POSTGRES_USER: postgres
@@ -22,6 +23,29 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/edudb
       - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - DOCUMENTS_STORAGE_ROOT=/data/documents
+    volumes:
+      - documents_data:/data/documents
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # [v7] Off-peak ingestion worker — same image/code as backend, different
+  # entrypoint (a polling loop instead of uvicorn). Shares the documents volume.
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: edullm-worker
+    command: ["python", "-m", "backend.worker.main"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/edudb
+      - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - DOCUMENTS_STORAGE_ROOT=/data/documents
+    volumes:
+      - documents_data:/data/documents
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -38,5 +62,7 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
 volumes:
   postgres_data:
+  documents_data:

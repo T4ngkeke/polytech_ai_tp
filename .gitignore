@@ -1,6 +1,10 @@
 .venv
 .agent
+.agents
+.vscode
+skills-lock.json
 __pycache__
 *.pyc
 .pytest_cache
 backend/.env
+.DS_Store

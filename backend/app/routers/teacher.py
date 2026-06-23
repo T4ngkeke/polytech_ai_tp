@@ -1,5 +1,5 @@
 """
-routers/teacher.py — Teacher endpoints for Edu-LLM v6.
+routers/teacher.py — Teacher endpoints for Edu-LLM v7.
 
 All DB/business logic is delegated to the services/ layer.
 This router only: (1) authenticates, (2) verifies ownership, (3) calls service, (4) returns response.
@@ -26,12 +26,13 @@ GET    /api/teacher/analytics/classes/{class_id}
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.auth import require_teacher
+from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import Class, ClassStudent, Lab, Session, UsageStat, User, UserRole
 from backend.app.schemas import (
@@ -44,15 +45,27 @@ from backend.app.schemas import (
     LabResponse,
     LabUpdateRequest,
     LabUsageSummary,
+    DocumentResponse,
     RuleResponse,
     RuleUpsertRequest,
     SessionWithMessagesResponse,
     StudentSummaryResponse,
     StudentUsageSummary,
 )
-from backend.app.services import class_service, lab_service, rule_service, analytics_service
+from backend.app.services import (
+    class_service,
+    document_service,
+    lab_service,
+    rule_service,
+    analytics_service,
+)
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
+
+
+def get_storage_root() -> str:
+    """Storage root for uploaded documents (overridable in tests)."""
+    return settings.DOCUMENTS_STORAGE_ROOT
 
 
 # ===================================================================
@@ -124,6 +137,35 @@ async def list_labs(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
     labs = await lab_service.list_labs_for_class(db, class_id=class_id)
     return [LabResponse.model_validate(l) for l in labs]
+
+
+# ===================================================================
+# POST /api/teacher/labs/{lab_id}/documents
+# ===================================================================
+
+
+@router.post("/labs/{lab_id}/documents", response_model=DocumentResponse, status_code=201)
+async def upload_document(
+    lab_id: uuid.UUID,
+    file: UploadFile = File(...),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+    storage_root: str = Depends(get_storage_root),
+) -> DocumentResponse:
+    """Upload a course document to a lab the teacher owns; enqueues ingestion."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    content = await file.read()
+    doc = await document_service.create_document(
+        db,
+        class_id=lab.class_id,
+        lab_id=lab.id,
+        filename=file.filename,
+        content=content,
+        uploaded_by=teacher.id,
+        storage_root=storage_root,
+    )
+    return DocumentResponse.model_validate(doc)
 
 
 # ===================================================================

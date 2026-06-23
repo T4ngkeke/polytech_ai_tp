@@ -1,7 +1,7 @@
 """
 routers/student.py — Student session management, class-joining, and self-service endpoints.
 
-v6 Rule: Students CANNOT delete their own sessions.
+Audit rule: Students CANNOT delete their own sessions.
 All sessions are permanently retained for teacher/admin audit.
 
 Endpoints

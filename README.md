@@ -1,19 +1,70 @@
-# Edu-LLM: v6 Class-Lab Architecture
+# Edu-LLM: v7.1 Agentic Class-Lab Architecture
 ---
 
 ## 1. Project Overview
 
-**Edu-LLM (v6 Class-Lab Architecture)** is a streamlined, full-stack educational platform
-designed for a controlled classroom environment. It features a strict 3-tier
-RBAC system, an Invite-Code based zero-friction joining workflow, real-time DB-based rate limiting,
-and a powerful **Three-Tier Rule Injection** mechanism (Class -> Lab -> Student) — all running on a minimal stack of FastAPI, PostgreSQL,
-and React with no external message queue required.
+**Edu-LLM (v7.1 Agentic Class-Lab Architecture)** is a full-stack educational platform
+designed for a controlled classroom environment. It keeps the entire v6 foundation —
+strict 3-tier RBAC, Invite-Code zero-friction joining, real-time DB-based rate limiting,
+and **Three-Tier Rule Injection** (Class → Lab → Student) — and the v7 shift from a
+**transparent LLM proxy** to a **LangGraph Agent**. v7.1 upgrades the retrieval core from
+"naive chunk-and-dump + keyword routing" into **PDF-only structured ingestion + multilingual
+routing + high-quality hybrid retrieval + an LLM-self-eval bounded agent loop**, all on a
+local model and an **off-peak document-ingestion pipeline** (a docker-compose `worker`) that
+never preempts live student inference.
 
-**v6 Architecture Principles:**
-- **Service Layer**: All business/DB logic lives in `backend/app/services/`. Routers are thin controllers only.
-- **No Cross-Router Calls**: Admin and Teacher routers call the same service functions independently — no router imports another router.
-- **Audit Integrity**: Students cannot delete their own sessions. All chat history is immutable and auditable by teachers.
-- **Hierarchical UI**: All role dashboards use a Class → Lab tree navigation instead of flat tab lists.
+The stack stays minimal: **FastAPI + PostgreSQL (with `pgvector`) + React**, orchestrated
+by Docker Compose, with **no external message queue** (PostgreSQL itself is the job queue).
+
+**v7 Core Shift (still in force):**
+- **Agent, not proxy**: `/api/chat/stream` is a LangGraph graph
+  (`Router → [agentic_search | rag | direct] → Synthesize → SSE`).
+- **Hybrid retrieval on a single DB**: structured tables + `pgvector` + Postgres full-text
+  (`tsvector`) live together, so exercise lookups and concept RAG JOIN naturally. No
+  third-party vector DB.
+- **Deferred, GPU-aware ingestion**: a `worker` service polls an `IngestionJobs` table and
+  runs ingestion at low priority — chat always preempts.
+- **Reuse the same engine, nothing hardcoded**: chat *and* ingestion call the same
+  OpenAI-compatible endpoints read from `SystemConfigs` at runtime — generation, embeddings
+  (`bge-m3`), and reranking (`bge-reranker-v2-m3`). No second model is spun up; no model is
+  hardcoded; **no torch in the image**.
+
+**v7.1 Retrieval Upgrade (this release):**
+- **PDF-only structured ingestion**: pymupdf text extraction + a cheap character-yield gate
+  (bad PDFs are flagged `needs_review`, never silently ingested); deterministic **type +
+  audience routing** by upload metadata (`CM/TD/TP`, `student/teacher`); **structure-aware
+  chunking** that never cuts an exercise or code block and drops the table-of-contents.
+- **Contextual Retrieval**: the worker LLM-generates each chunk's in-document context and
+  prepends it before embedding; the original text is still stored for citation. This is what
+  makes context-poor CM slides retrievable.
+- **Multilingual embedding-kNN router**: a deterministic exercise-number regex stays as a
+  fast-path; everything else is routed by `bge-m3` kNN against in-code multilingual anchor
+  exemplars (zh/fr/en route alike), with a confidence threshold + safe RAG fallback.
+- **Hybrid + rerank + bounded self-eval**: vector + BM25 recall → RRF fusion → reranker →
+  cheap gate → guided LLM self-eval (`good/partial/bad`) → bounded re-retrieval (admin-
+  configurable rounds, default 1) → disclaimer-tagged answer if material is still thin.
+
+**v6 Principles (still in force):**
+- **Service Layer**: All business/DB logic lives in `backend/app/services/`. Routers are thin.
+- **No Cross-Router Calls**: routers call services independently — no router imports another.
+- **Audit Integrity**: Students cannot delete their own sessions. History is immutable and teacher-auditable.
+- **Hierarchical UI**: Class → Lab tree navigation across all roles.
+
+**v7.1 Red Lines (security/governance):**
+- **Tenant isolation in SQL, never in the prompt**: every retrieval is filtered by
+  `lab_id` / `class_id` (and `audience` for students) in the **SQL WHERE clause** — re-checked
+  after fusion/rerank. Prompt-injection cannot break a query filter. No cross-class / cross-lab
+  access.
+- **No corrigé ingestion — nothing to leak**: solutions are **not stored anywhere**. The
+  `Exercise.solution` column is **dropped**; only student-safe exercise **statements** are
+  ingested. A 120B model can derive this exercise level itself, so the entire solution-leak
+  surface is deleted rather than guarded. Any non-derivable instructor convention goes in the
+  **class-level prompt** (3-tier injection), not a per-exercise field or an ingested answer key.
+- **Security in the database, pedagogy in the prompt**: the Socratic guardrail is a *behavioral*
+  guardrail; if a student jailbreaks it the harm is low (no stored answer key). Security
+  boundaries must never degrade into a prompt guardrail.
+- **Structured-only governance**: store controlled-vocabulary scores only — never free-text
+  judgments about students.
 
 ---
 
@@ -25,39 +76,60 @@ polytech_ai_tp/
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                  # FastAPI app entry point
-│   │   ├── database.py              # SQLAlchemy engine & session
-│   │   ├── models.py                # ORM models (Users, Classes, Labs, Rules, etc.)
+│   │   ├── database.py              # SQLAlchemy engine & session (pgvector enabled)
+│   │   ├── models.py                # ORM models (…, Documents, DocChunks, Exercises, IngestionJobs, RouterQueryLog)
 │   │   ├── schemas.py               # Pydantic request/response schemas
 │   │   ├── auth.py                  # JWT creation & get_current_user deps
-│   │   ├── services/                # [NEW v6] Business logic layer
+│   │   ├── services/                # Business logic layer
 │   │   │   ├── __init__.py
 │   │   │   ├── class_service.py     # Class CRUD + invite code generation
 │   │   │   ├── lab_service.py       # Lab CRUD + active toggle
-│   │   │   ├── rule_service.py      # Rule upsert + queries
+│   │   │   ├── rule_service.py      # Rule upsert + queries (skill.md = level=class rule)
 │   │   │   ├── analytics_service.py # Hierarchical token aggregation
-│   │   │   └── session_service.py   # Session CRUD (no student delete)
+│   │   │   ├── session_service.py   # Session CRUD (no student delete)
+│   │   │   ├── document_service.py  # [v7] Upload (+doc_type/audience) + enqueue ingestion jobs; chunk/exercise reads (Phase 6)
+│   │   │   ├── learner_service.py   # [v7] prompt-literacy effort/lazy profiles
+│   │   │   ├── llm_service.py       # [v7.1] OpenAI-compatible clients from SystemConfigs: generate / embed / rerank
+│   │   │   └── retrieval_service.py # [v7.1] hybrid (vector+BM25) + rerank, tenant/audience-filtered in SQL
+│   │   ├── agent/                   # [v7] LangGraph agent
+│   │   │   ├── __init__.py
+│   │   │   ├── graph.py             # Router → [agentic_search | rag | direct] → self-eval loop → Synthesize → SSE
+│   │   │   ├── router.py            # [v7.1] exercise-number regex fast-path + bge-m3 kNN intent router
+│   │   │   ├── selfeval.py          # [v7.1] cheap gate + guided good/partial/bad verdict + bounded re-retrieval
+│   │   │   ├── prompt.py            # Prompt Controller (skill.md → 3-tier rules → context → history → question)
+│   │   │   ├── effort.py            # effort/clarity heuristic (windowed coaching)
+│   │   │   └── lazy.py              # lazy/answer-seeking guardrail (Socratic)
 │   │   └── routers/
 │   │       ├── __init__.py
 │   │       ├── auth.py              # POST /api/auth/signup, /api/auth/login
 │   │       ├── admin.py             # /api/admin/* — calls services, no ownership checks
-│   │       ├── teacher.py           # /api/teacher/* — calls services, ownership-checked
+│   │       ├── teacher.py           # /api/teacher/* — ownership-checked (+ documents: upload, list, chunks, exercises)
 │   │       ├── student.py           # /api/student/* — join, sessions (no delete)
-│   │       └── chat.py              # POST /api/chat/stream (SSE + DB Rate Check)
-│   ├── .env                         # DATABASE_URL, JWT_SECRET (LLM configs moved to DB)
+│   │       └── chat.py              # POST /api/chat/stream (LangGraph agent + SSE)
+│   ├── worker/                      # [v7] Off-peak ingestion worker
+│   │   ├── __init__.py
+│   │   ├── main.py                  # Polling loop entrypoint (not uvicorn)
+│   │   ├── queue.py                 # FOR UPDATE SKIP LOCKED claim + stale-lock reclaim
+│   │   ├── ingest.py                # [v7.1] pymupdf parse + char-yield gate + structure-aware chunk + Contextual Retrieval + statement-only extract + tsvector
+│   │   ├── parsing.py               # [v7.1] PDF text extraction (pymupdf) + character-yield gate
+│   │   ├── chunking.py              # [v7.1] structure-aware chunking (keep exercises/code intact, drop TOC)
+│   │   └── gpu_gate.py              # pynvml GPU-utilization gate (off-peak scheduling)
+│   ├── .env                         # DATABASE_URL, JWT_SECRET (LLM configs live in DB)
 │   ├── requirements.txt
-│   └── Dockerfile                   # Python 3.12-slim FastAPI build
+│   └── Dockerfile                   # Python 3.12-slim — shared by backend & worker (entrypoint differs)
 ├── frontend/
 │   ├── public/
 │   ├── src/
 │   │   ├── App.jsx                  # React Router setup
 │   │   ├── pages/
 │   │   │   ├── Login.jsx            # Login + link to Register
-│   │   │   ├── Register.jsx         # [NEW v6] Student self-registration
-│   │   │   ├── Chat.jsx             # Student chat (hierarchical sidebar + no delete)
-│   │   │   ├── Teacher.jsx          # Teacher workspace (tree + right panel)
-│   │   │   └── Admin.jsx            # Admin god-mode (5 tabs)
+│   │   │   ├── Register.jsx         # Student self-registration
+│   │   │   ├── Chat.jsx             # Student chat (agent answers + citations)
+│   │   │   ├── Teacher.jsx          # Teacher workspace (tree + rules + document manager)
+│   │   │   └── Admin.jsx            # Admin god-mode
 │   │   ├── components/
-│   │   │   ├── HierarchicalSidebar.jsx  # [NEW v6] Role-aware Class→Lab tree
+│   │   │   ├── HierarchicalSidebar.jsx  # Role-aware Class→Lab tree
+│   │   │   ├── DocumentManager.jsx      # [v7.1] Upload (doc_type/audience) + status list + chunk inspector + exercises
 │   │   │   ├── MainLayout.jsx
 │   │   │   ├── ProtectedRoute.jsx
 │   │   │   └── UserHeader.jsx
@@ -68,22 +140,36 @@ polytech_ai_tp/
 │   ├── tailwind.config.js           # Tailwind v3 config
 │   ├── nginx.conf                   # Nginx reverse proxy config for prod
 │   └── Dockerfile                   # Node builder + Nginx multi-stage build
-└── docker-compose.yml               # Postgres + Backend + Frontend Orchestration
+└── docker-compose.yml               # Postgres(pgvector) + Backend + Worker + Frontend + named volumes
 ```
 
 ---
 
-## 3. Database Schema (SQLAlchemy - PostgreSQL)
+## 3. Database Schema (SQLAlchemy - PostgreSQL + pgvector)
 
-The system relies on core tables optimized for the decoupled rule injection, hierarchical class-lab structure, and token tracking.
+The system relies on core tables optimized for decoupled rule injection, the hierarchical
+class-lab structure, token tracking, and (v7.1) hybrid retrieval over course documents.
+
+> **v7 prerequisite:** `CREATE EXTENSION IF NOT EXISTS vector;` must run before the new
+> tables are created (handled in DB init / migration).
+>
+> **v7.1 schema note:** there is no Alembic; schema is applied by `Base.metadata.create_all`
+> (see `seed.py`). The v7.1 changes (drop `Exercise.solution`; add `needs_review`; add
+> `doc_type`/`audience`; add `DocChunk.context`/`section`/`tsv`; add `RouterQueryLog`) are
+> applied by **recreating** the dev database — there is no production data to migrate.
 
 ### 1. SystemConfigs
 | Column | Type | Constraints / Notes |
 | --- | --- | --- |
 | id | UUID / Int | Primary Key |
-| key | String | Unique. e.g., `LLM_BASE_URL`, `LLM_MODEL` |
+| key | String | Unique. v7: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`. **v7.1 adds** `RERANK_URL`, `RERANK_MODEL`, `RAG_MAX_RETRIES` (default `1`), `ROUTER_KNN_THRESHOLD` |
 | value | String | The configuration value |
 | updated_at | Timestamp | For tracking when admin changed configs |
+
+> **v7.1 — all model calls are config-driven HTTP.** Generation, embeddings (`bge-m3`), and
+> reranking (`bge-reranker-v2-m3`) all hit OpenAI-compatible endpoints read from this table at
+> runtime. Nothing is hardcoded; **no torch in the image**. In tests these calls are replaced
+> by injected fakes.
 
 ### 2. Users
 | Column | Type | Constraints / Notes |
@@ -132,6 +218,11 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 | rules_text | Text | The restrictive prompts/instructions designed by the teacher |
 | is_active | Boolean | Default: True. Toggle for applying these rules |
 
+> **v7 note — `skill.md`:** the instructor "persona/style" prompt reuses this table as a
+> `level=class` rule. The Prompt Controller places it **first** (sets tone); restrictive
+> rules go **after** (constraints win, resisting prompt-injection bypass). Keep it short and
+> resident (a few hundred tokens). Long instructor material goes through RAG instead.
+
 ### 7. Sessions
 | Column | Type | Constraints / Notes |
 | --- | --- | --- |
@@ -143,7 +234,117 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 | created_at | Timestamp | Timezone-aware (UTC) |
 
 ### 8. Messages & Usage Stats
-(Unchanged from previous versions. Tracks tokens used per user and per message).
+(Unchanged from previous versions. Tracks tokens used per user and per message.)
+
+---
+
+### [v7.1] Retrieval & Ingestion Tables
+
+### 9. Documents (state machine)
+| Column | Type | Constraints / Notes |
+| --- | --- | --- |
+| id | UUID | Primary Key |
+| class_id | FK | → Classes.id. **Security boundary.** Not Null |
+| lab_id | FK | → Labs.id. Nullable (NULL = class-wide shared material) |
+| filename | String | Original display name |
+| storage_path | String | Path inside the `documents_data` Docker volume |
+| content_hash | String | Hash of file content — dedup + change detection (triggers re-index) |
+| doc_type | Enum | **[v7.1]** `CM` / `TD` / `TP`. Set at upload — the deterministic routing signal (chunk-path vs exercise-path) |
+| audience | Enum | **[v7.1]** `student` / `teacher`. Set at upload. Students never retrieve `teacher`-audience docs (SQL filter) |
+| status | Enum | `pending` → `processing` → `indexed` → `failed`. **[v7.1]** plus `needs_review` (char-yield gate rejected the PDF back to the teacher) |
+| error_message | Text | Populated on `failed`; also carries the `needs_review` reason |
+| page_count | Integer | **[v7.1]** parsed page count (Phase 6 summary). Nullable until processed |
+| uploaded_by | FK | → Users.id |
+| created_at | Timestamp | Timezone-aware (UTC) |
+| indexed_at | Timestamp | Set when indexing completes |
+
+> **`needs_review` is not an error.** A PDF whose extracted character yield is below threshold
+> (or is mostly garbage / non-word) is flagged `needs_review` with a reason — **never silently
+> ingested**. The teacher sees it in DocumentManager and re-exports a clean PDF. No OCR.
+
+### 10. DocChunks (RAG vectors + BM25)
+| Column | Type | Constraints / Notes |
+| --- | --- | --- |
+| id | UUID | Primary Key |
+| document_id | FK | → Documents.id `ON DELETE CASCADE` |
+| class_id | UUID | **Denormalized** for filter-without-JOIN (security + speed) |
+| lab_id | UUID | **Denormalized**, nullable |
+| doc_type | Enum | **[v7.1]** denormalized from Document (query-time routing/filter) |
+| audience | Enum | **[v7.1]** denormalized — the `audience='student'` retrieval filter lives here |
+| chunk_index | Integer | Position in source document (ordering / locating) |
+| content | Text | The **original** chunk text — this is what citations and the teacher chunk-inspector show |
+| context | Text | **[v7.1]** LLM-generated Contextual-Retrieval context (nullable). Load-bearing for context-poor CM slides |
+| section | String | **[v7.1]** heading/section path the chunk came from (nullable) |
+| embedding | `vector(N)` | Embedded over the **augmented** text (`context + content`). N = embedding dim (`bge-m3` = 1024) |
+| tsv | `tsvector` | **[v7.1]** BM25 full-text index, built over the **augmented** text (multilingual config) |
+| page_no | Integer | Citation support — source page |
+| created_at | Timestamp | Timezone-aware (UTC) |
+
+*Indexes:* `USING hnsw (embedding vector_cosine_ops)` for ANN; `USING gin (tsv)` for BM25;
+B-tree on `lab_id` for the mandatory tenant filter.
+
+### 11. Exercises (LLM-extracted, statements only)
+| Column | Type | Constraints / Notes |
+| --- | --- | --- |
+| id | UUID | Primary Key |
+| document_id | FK | → Documents.id `ON DELETE CASCADE` |
+| class_id | UUID | Denormalized tenant filter. Not Null |
+| lab_id | UUID | Denormalized, nullable |
+| number | String | e.g. "Exercise 2", "3.1" |
+| statement | Text | Exercise body. **Student-safe** — this is all that is stored |
+| hints | Text | Hints (safe to surface to students) |
+| concept | String | **[reserved]** knowledge-point tag for future Adaptive Tutoring (nullable now) |
+| created_at | Timestamp | Timezone-aware (UTC) |
+
+> **🔴 v7.1 red line — no `solution` column.** The corrigé is **not ingested**: there is no
+> `solution` field on this table. Only student-visible **statements** are stored, so there is
+> nothing to leak (the old "never SELECT solution" query rule is replaced by *not storing it
+> at all*). Non-derivable instructor conventions live in the class-level prompt, not here.
+
+### 12. IngestionJobs (DB-as-queue)
+| Column | Type | Constraints / Notes |
+| --- | --- | --- |
+| id | UUID | Primary Key |
+| document_id | FK | → Documents.id `ON DELETE CASCADE` |
+| status | Enum | `queued` → `processing` → `done` → `failed` |
+| priority | Integer | Lower = higher priority (reserved for future tiers) |
+| attempts | Integer | Retry counter |
+| locked_at | Timestamp | Set when a worker claims the job — used for stale-lock reclaim |
+| error_message | Text | Populated on `failed` |
+| created_at | Timestamp | Timezone-aware (UTC) |
+| updated_at | Timestamp | Touched on each transition |
+
+*Worker pickup is atomic via `FOR UPDATE SKIP LOCKED`, and re-claims any job stuck in
+`processing` past a timeout (crash recovery). Ingestion is idempotent: a re-run first deletes
+the document's old chunks/exercises, then rebuilds (consistent after a strategy change).*
+
+### 13. LearnerProfiles (prompt-literacy coaching — §8)
+| Column | Type | Constraints / Notes |
+| --- | --- | --- |
+| id | UUID | Primary Key |
+| user_id | FK | → Users.id |
+| lab_id | FK | → Labs.id. Profile is per *(student, lab)* |
+| effort_ema | Float | Smoothed sliding-window effort/clarity score (0–1) |
+| samples | Integer | Number of scored questions so far (cold-start = neutral) |
+| coaching_level | Enum | `neutral` / `low` / `high` — derived from `effort_ema` (hysteresis) |
+| last_tip_msg_index | Integer | Throttle marker for the explicit "how to ask" tip |
+| teacher_override | Boolean | Default False. Teacher can pin/override the profile |
+| updated_at | Timestamp | Timezone-aware (UTC) |
+*Stores structured scores + controlled-vocabulary strategy only — never free-text judgments.*
+
+### 14. RouterQueryLog (low-confidence routing telemetry — §6)
+| Column | Type | Constraints / Notes |
+| --- | --- | --- |
+| id | UUID | Primary Key |
+| message | Text | The raw student query that routed below the kNN confidence threshold |
+| chosen_route | String | The fallback route taken (`rag`) |
+| top_similarity | Float | Best cosine similarity to any anchor exemplar |
+| lab_id | FK | → Labs.id. Nullable — context for later analysis |
+| created_at | Timestamp | Timezone-aware (UTC) |
+
+> **[v7.1]** Accumulates real multilingual queries the embedding-kNN router was unsure about,
+> so a future BERT/XLM-R router has a labeled data source. Write-only telemetry; nothing in the
+> live path reads it.
 
 ---
 
@@ -163,7 +364,7 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 
 ## 5. API Routing Contract
 
-> **v6 Rule:** Every router calls its own service layer. No router ever calls another router's functions.
+> **Rule:** Every router calls its own service layer. No router ever calls another router's functions.
 > Admin routes bypass ownership checks; Teacher routes enforce ownership.
 
 ### A. Auth & Admin Operations
@@ -178,8 +379,8 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 | PUT | `/api/admin/users/{id}/quota` | require_admin | Update user's daily token quota. |
 | DELETE | `/api/admin/users/{id}` | require_admin | Soft-delete a user. |
 | POST | `/api/admin/users/import` | require_admin | CSV Bulk Import. Dry-run by default. `?force=true` executes. |
-| GET | `/api/admin/llm/config` | require_admin | Read current LLM config (base_url, model, api_key). |
-| PUT | `/api/admin/llm/config` | require_admin | Zero-downtime update of SystemConfigs (Base URL, API Key, Model). |
+| GET | `/api/admin/llm/config` | require_admin | Read current LLM config (base_url, model, api_key, embedding_model; **v7.1**: rerank_url, rerank_model, rag_max_retries, router_knn_threshold). |
+| PUT | `/api/admin/llm/config` | require_admin | Zero-downtime update of SystemConfigs (Base URL, API Key, Model, Embedding Model; **v7.1** Rerank URL/Model, RAG max retries, router threshold). |
 | GET | `/api/admin/classes` | require_admin | God Mode: List all classes across the system (no ownership filter). |
 | GET | `/api/admin/classes/{class_id}/labs` | require_admin | God Mode: List all labs in a class. |
 | GET | `/api/admin/classes/{class_id}/students` | require_admin | God Mode: View all students in a specific class. |
@@ -191,6 +392,7 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 | GET | `/api/admin/analytics/classes/{class_id}` | require_admin | Per-class hierarchical analytics (class→lab→student). |
 | DELETE | `/api/admin/sessions/{session_id}` | require_admin | Hard-delete a specific session to purge inappropriate content. |
 | POST | `/api/admin/maintenance/prune` | require_admin | Bulk hard-delete sessions/messages older than X days. |
+| GET | `/api/admin/ingestion/jobs` | require_admin | [NEW v7] Inspect ingestion queue (status, attempts, errors). |
 
 ### B. Teacher Audit & Control
 
@@ -207,9 +409,14 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 | PUT | `/api/teacher/labs/{lab_id}` | require_teacher | Rename lab or toggle `is_active` (Open/Close). |
 | DELETE | `/api/teacher/labs/{lab_id}` | require_teacher | Soft-delete a Lab (ownership enforced). |
 | GET | `/api/teacher/rules` | require_teacher | Get existing rules. Filters: `?level=X&target_id=Y` |
-| PUT | `/api/teacher/rules` | require_teacher | Create/Update Rules (Class level, Lab level, or Student level). |
+| PUT | `/api/teacher/rules` | require_teacher | Create/Update Rules (Class / Lab / Student level; `skill.md` = class level). |
 | GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W` |
 | GET | `/api/teacher/analytics/classes/{class_id}` | require_teacher | Hierarchical token usage: class → lab → student breakdown. |
+| POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] Upload a **PDF** course document. Multipart form **requires `doc_type` (CM/TD/TP) + `audience` (student/teacher)** → stored in volume + enqueued for ingestion. |
+| GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] List documents + status (`pending/processing/indexed/failed/needs_review`) + summary (pages / chunks / exercises) + warnings. |
+| GET | `/api/teacher/documents/{document_id}/chunks` | require_teacher | [v7.1] Paginated chunk text + `page_no` (+ generated `context`) — the core "is it well processed?" inspector surface. |
+| GET | `/api/teacher/documents/{document_id}/exercises` | require_teacher | [v7.1] Extracted exercises (`number / statement / hints`). No solution exists. |
+| DELETE | `/api/teacher/documents/{document_id}` | require_teacher | [v7] Delete a document (cascades chunks/exercises; triggers re-index cleanup). |
 
 ### C. Student Flow (Session & Chat)
 
@@ -227,11 +434,11 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 | GET | `/api/student/sessions/{session_id}` | get_current_user | Fetch message history. **IDOR check required.** |
 | PUT | `/api/student/sessions/{session_id}` | get_current_user | Rename a chat session title (cosmetic only). |
 | GET | `/api/student/usage` | get_current_user | Today's token usage vs. daily quota. |
-| POST | `/api/chat/stream` | get_current_user | Core chat endpoint. Scoped by `session_id`. SSE streaming. |
+| POST | `/api/chat/stream` | get_current_user | Core chat endpoint. Scoped by `session_id`. LangGraph agent, SSE streaming. |
 
 ---
 
-## 6. POST `/api/chat/stream` — Full Logic Spec (v6)
+## 6. POST `/api/chat/stream` — Agent Logic Spec (v7.1)
 
 **Payload:**
 
@@ -242,33 +449,136 @@ The system relies on core tables optimized for the decoupled rule injection, hie
 }
 ```
 
-**Step-by-step Logic:**
+**Step-by-step Logic (LangGraph agent):**
 
-1. **Security & Context Resolution**
+1. **Security & Context Resolution** (unchanged from v6)
    * Fetch Session to find `lab_id`. Verify `session.user_id == current_user.id`.
-   * Verify the user has successfully joined the Class that owns this Lab.
-   * Verify the Lab `is_active == True` (reject if lab is locked).
+   * Verify the user has joined the Class that owns this Lab.
+   * Verify the Lab `is_active == True` (reject if locked).
+   * Resolve `class_id` — passed as the tenant filter into every retrieval call.
 
-2. **Three-Tier Prompt Controller**
-   * Query `rules` table for active rules matching:
-     - `level=class, target_id=class_id`
-     - `level=lab, target_id=lab_id`
-     - `level=student, target_id=current_user.id`
-   * Concatenate these rules sequentially (Class → Lab → Student) to build a robust, granular System Prompt.
+2. **Rate Limit** (unchanged from v6)
+   * DB-based daily quota check; `429` if over limit.
 
-3. **Dynamic LLM Proxy (Zero-Downtime)**
-   * Fetch active `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` from `SystemConfigs` table.
-   * Proxy payload directly to the LLM engine using standard `AsyncOpenAI` client.
+3. **LangGraph Graph Execution (v7.1)**
+   ```
+   Router (exercise-number regex fast-path → bge-m3 kNN over multilingual exemplars)
+     ├─ "how to do exercise 2?" (regex hit)     → agentic_search (structured Exercises, lab-scoped)
+     ├─ concept question (kNN ≥ threshold)       → rag (hybrid vector+BM25 → RRF → rerank, lab+audience-scoped)
+     ├─ kNN < threshold                          → rag (safe fallback) + log to RouterQueryLog
+     └─ chit-chat / other                        → direct
+                       ↓
+   Self-eval loop (cheap gate → guided good/partial/bad verdict)
+     ├─ bad   → rewrite query, re-retrieve  (≤ RAG_MAX_RETRIES rounds, admin-config, default 1)
+     └─ ok    → proceed; still bad after budget → answer with a "not enough material" disclaimer
+                       ↓
+   Synthesize (skill.md FIRST → Class → Lab → Student rules → retrieved context + citations → history → question)
+   ```
+   * **Router-first, multilingual**: a deterministic exercise-number regex catches exact
+     missions; everything else is classified by `bge-m3` cosine-kNN against in-code multilingual
+     anchor exemplars (zh/fr/en route alike). Below the confidence threshold → fall back to the
+     safest branch (`rag`) and log the query for the future BERT router.
+   * **Tenant + audience filter is mandatory and in SQL**: every `agentic_search` / `rag` query
+     filters `lab_id` / `class_id` (and `audience='student'` for students) **in the WHERE
+     clause** — re-checked after fusion/rerank. Prompt-injection cannot break a query filter.
+   * **Hybrid + rerank**: `rag` recalls via vector ANN *and* BM25 (`tsvector`), fuses with RRF,
+     reranks with `bge-reranker-v2-m3`, takes top-k.
+   * **Self-eval is bounded and cheap**: a deterministic gate (cosine threshold / empty recall)
+     blocks the obviously-bad before any LLM; the grade is a guided 1-token verdict; only
+     re-generation is expensive, so the loop is capped at `RAG_MAX_RETRIES` (default 1).
+   * **No solution anywhere**: there is no stored solution; nothing solution-shaped can enter any
+     node.
 
-4. **SSE Streaming & Safe Async Write**
-   * Stream tokens via SSE (`text/event-stream`).
-   * Use `BackgroundTasks` to insert User message, LLM message (with tokens), and Upsert `usage_stats`.
+4. **Dynamic LLM Config (Zero-Downtime)**
+   * Fetch active `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, and (v7.1)
+     `RERANK_URL` / `RERANK_MODEL` / `RAG_MAX_RETRIES` / `ROUTER_KNN_THRESHOLD` from
+     `SystemConfigs`. Nothing is hardcoded — generation, embeddings, and reranking are all
+     config-driven HTTP. Swapping a model or threshold is a config change, not a code change.
+
+5. **SSE Streaming & Safe Async Write**
+   * Stream tokens via SSE from the graph's `astream_events` (an adapter filters node events
+     down to the v6-compatible token stream + a final citations event; an optional throttled
+     `tip` event for prompt-literacy coaching).
+   * Use `BackgroundTasks` to insert User message, LLM message (with tokens), and Upsert
+     `usage_stats`. **Token accounting sums the Synthesize node's usage** plus any extra LLM
+     calls made during Contextual routing / self-eval.
 
 ---
 
-## 7. Analytics Schema — Hierarchical Response (v6)
+## 7. Ingestion Pipeline (v7.1)
 
-The `ClassAnalyticsResponse` now includes a full Lab→Student breakdown:
+A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live students.
+**No Airflow, no k8s, no OCR, no LibreOffice.**
+
+- **`worker` service** (in docker-compose): shares the backend image/code/DB; the only
+  difference is the entrypoint — a polling loop instead of uvicorn. It reuses the same
+  DB-as-queue pattern already used for rate limiting.
+- **Input = PDF only.** Instructors export slides (`.ppt/.pptx`) to PDF themselves before
+  upload (1 slide = 1 page). This collapses ingestion to a single pymupdf path.
+- **Per-job pipeline (concurrency = 1, `FOR UPDATE SKIP LOCKED`):**
+  1. **Parse + input gate** (`parsing.py`): pymupdf text extraction; a cheap **character-yield
+     gate** (chars/page below threshold, or high garbage / non-word ratio) marks the document
+     `needs_review` and rejects it back to the teacher — **never silently ingest garbage**.
+  2. **Type + audience routing**: deterministic, from the upload metadata (`doc_type`,
+     `audience`) — decides chunk-path vs exercise-path and whether Contextual Retrieval applies.
+     No structure guessing.
+  3. **Structure-aware chunking** (`chunking.py`): split on heading / paragraph / exercise
+     boundaries; **never cut an exercise or a code block in half**; **detect and drop the TOC**
+     (table des matières) so it doesn't match every query.
+  4. **Contextual Retrieval**: per chunk, the worker LLM generates the chunk's in-document
+     context and prepends it; the **augmented** text (`context + content`) is embedded and
+     BM25-indexed, while the original `content` is stored for citation. Load-bearing for
+     context-poor CM slides.
+  5. **Exercise extraction — statements only**: extract `number / statement / hints` via
+     **guided/structured decoding**. **No `solution` is extracted or stored** (the column does
+     not exist).
+  6. **Build the BM25 column** (`tsvector`, multilingual config) and enrich metadata
+     (`doc_type` / `audience` / `section` / `page_no` / reserved `concept`).
+- **Reuse the same engine as chat, config-driven:** embeddings and Contextual-Retrieval
+  generation hit the **same `SystemConfigs` endpoints chat uses** — no second model, nothing
+  hardcoded, no torch. Per-chunk Contextual-Retrieval calls run entirely on the **off-peak
+  worker** and never preempt students.
+- **"When to run" lives in the worker's Python** (`gpu_gate.py`): at night / no-class windows
+  pull freely; during the day pull only when `pynvml` reports GPU utilization below a
+  threshold (sliding window + hysteresis to avoid flapping), else sleep. No external cron.
+- **Crash recovery & idempotency:** stale `processing` jobs past a timeout are re-claimed; a
+  re-run deletes the document's old chunks/exercises before rebuilding (consistent after a
+  strategy change).
+
+---
+
+## 8. Adaptive Tutoring — Prompt-Literacy Coaching (v7.1)
+
+> **Teaching goal:** teach students **how to ask GenAI** — a learnable skill. We judge the
+> *most observable signal — how the student asks* — not their mastery, using **cheap,
+> rules-first heuristics** (no LLM), mirroring the `router` and `GpuGate` patterns. The heavy
+> Learner-Model / BKT-DKT / LLM-judge / per-concept stack is intentionally dropped.
+
+Two layers:
+
+- **(a) Effort / clarity — windowed, formative.** A per-message heuristic score (code-dump vs.
+  explanation; "what I tried"; a concrete error; an exercise reference) feeds a **smoothed
+  sliding window** (EMA) per *(student, lab)*. The trend sets a *coaching level* that adjusts
+  the tutor's scaffolding. **Never gates, always answers.** When the window stays low, a
+  **throttled** tip nudges better questioning. A low-skill ("stupid") question is **never
+  limited** — only encouraged toward more thinking, less copy-paste.
+
+- **(b) Lazy / answer-seeking — per-message guardrail.** Detects offloading ("just give me the
+  answer to Q2"). Forces a **strict Socratic response** (guiding questions/hints only, never
+  the final answer). It **still responds** — "limit" means *don't hand over the answer*.
+  Distinguished from a thinking question ("I think the answer is X because Y, right?"), which
+  is answered normally. Keys on **absence of the student's own attempt**, not on mentioning an
+  answer/exercise.
+
+- **Governance:** store **structured score + controlled-vocabulary strategy** only — never
+  insulting free text. Profiles are **teacher-visible, teacher-overridable, transparent to the
+  student.** Complements the data-layer red line (no solution is stored anywhere).
+
+---
+
+## 9. Analytics Schema — Hierarchical Response
+
+The `ClassAnalyticsResponse` includes a full Lab→Student breakdown:
 
 ```json
 {
@@ -300,26 +610,57 @@ The `ClassAnalyticsResponse` now includes a full Lab→Student breakdown:
 
 ---
 
-## 8. Deployment & Run Instructions
+## 10. Deployment & Run Instructions
 
 The application is fully containerized using Docker, allowing for a single-command deployment.
 
 ### Prerequisites
 - Docker and Docker Compose installed.
-- (Local LLM) Ollama installed on the host machine running on `http://127.0.0.1:11434`.
+- A running OpenAI-compatible inference engine (your existing chat engine — vLLM/Ollama;
+  vLLM/SGLang preferred where guided decoding + priority batching are needed):
+  - The **chat path and the ingestion worker share this one engine and the one model
+    configured in `SystemConfigs`** — the model is **not hardcoded** anywhere.
+  - The active endpoint/model is hot-swappable at runtime (e.g. a smaller model for local
+    test, a larger one for production) with zero downtime and no code change.
+  - Reached via `host.docker.internal`.
+- **Models on that engine** (test setup = one Ollama instance):
+  - **Chat:** a generation model — e.g. `qwen3` (35B local / 120B prod) → `LLM_MODEL`. Also
+    used for Contextual-Retrieval generation and the guided self-eval verdict.
+  - **Embeddings (RAG + router kNN):** `bge-m3` (1024-dim, matches `EMBEDDING_DIM`) →
+    `EMBEDDING_MODEL`. Pull it once: `ollama pull bge-m3`. Indexing, querying, and router
+    exemplars must all use this same model.
+  - **Reranker (v7.1):** `bge-reranker-v2-m3`, served behind an OpenAI-compatible rerank
+    endpoint (e.g. TEI / Infinity / vLLM) → `RERANK_URL` + `RERANK_MODEL`. Ollama does not
+    expose a rerank API, so point these at whatever rerank server you run. If unset, retrieval
+    degrades gracefully to fusion-only ordering.
+- `pgvector`-enabled PostgreSQL image (e.g. `pgvector/pgvector:pg16`). v7.1 also uses Postgres
+  full-text (`tsvector` / GIN) for BM25 — no extra extension needed.
+
+> **v7.1 testing note:** hybrid retrieval (pgvector ANN + `tsvector` BM25 + rerank) cannot run
+> on SQLite. The retrieval test suite runs against a live pgvector Postgres via the `pg_session`
+> fixture (`TEST_PG_URL`, default `localhost:5433/edudb_test`); start it with
+> `docker compose up -d postgres`. All model calls (embed / rerank / generate) are replaced by
+> injected fakes in tests, so no inference engine is required to run the suite.
+
+### Persistent Storage (Docker volumes)
+Named volumes persist data across container rebuilds:
+- `pg_data` → PostgreSQL data directory.
+- `documents_data` → uploaded course documents (`Documents.storage_path` points inside this
+  volume). Mounted into **both** `backend` (for upload) and `worker` (for ingestion).
 
 ### 🚀 Running with Docker (Production/Demo Mode)
-To spin up the Postgres database, FastAPI backend, and Nginx/React frontend simultaneously:
+Spin up Postgres(pgvector) + FastAPI backend + ingestion worker + Nginx/React frontend:
 
 ```bash
 docker compose up -d --build
 ```
-- **Frontend**: Access via `http://localhost` (Port 80).
-- **Backend API**: Proxied through Nginx via `/api/` or available directly at `http://localhost:8000`.
+- **Frontend**: `http://localhost` (Port 80).
+- **Backend API**: Proxied through Nginx via `/api/`, or directly at `http://localhost:8000`.
+- **Worker**: no exposed port; `restart: always` polling loop.
 - **Database**: Port mapped on `5432`.
 
 #### 🔐 Initialize Database (First Time Only)
-After starting the containers for the first time, you MUST seed the database with initial accounts:
+After starting the containers for the first time, enable pgvector + seed initial accounts:
 ```bash
 docker compose exec backend python -m backend.seed
 ```
@@ -329,23 +670,29 @@ docker compose exec backend python -m backend.seed
 - `student1` / `student123`
 - `student2` / `student123`
 
-*(Note: The backend container uses `host.docker.internal` to reach the local host's Ollama model natively without complex networking.)*
+*(Note: The backend & worker containers use `host.docker.internal` to reach the host's local
+inference engine without complex networking. Both share the one engine/model set in
+`SystemConfigs` — pick whatever model fits the box; nothing is hardcoded.)*
 
 ### 🛠️ Running Natively (Development Mode)
 If you prefer running services outside of Docker for development:
 
-1. **Database**: Start a Postgres server (you can use `docker-compose up -d postgres`).
-2. **Backend (Run from project root)**:
+1. **Database**: Start a `pgvector` Postgres server (`docker compose up -d postgres`).
+2. **Backend (from project root)**:
    ```bash
    pip install -r backend/requirements.txt
 
    # Initialize the database (first time only)
    python -m backend.seed
 
-   # Start the server
+   # Start the API
    uvicorn backend.app.main:app --reload --port 8000
    ```
-3. **Frontend**:
+3. **Worker (separate process, from project root)**:
+   ```bash
+   python -m backend.worker.main
+   ```
+4. **Frontend**:
    ```bash
    cd frontend
    npm install

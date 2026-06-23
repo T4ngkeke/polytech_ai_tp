@@ -1,7 +1,7 @@
 """
 services/session_service.py — Session management business logic.
 
-Key v6 rule: Students CANNOT delete sessions (audit integrity).
+Key audit rule: Students CANNOT delete sessions (audit integrity).
 Session soft-delete is only available to admin/teacher via their routers.
 """
 

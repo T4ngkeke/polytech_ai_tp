@@ -1,5 +1,5 @@
 """
-test_teacher.py — Tests for teacher endpoints (v5 production-ready).
+test_teacher.py — Tests for teacher endpoints (v7).
 """
 
 import uuid

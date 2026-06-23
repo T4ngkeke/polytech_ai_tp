@@ -1,5 +1,5 @@
 """
-models.py — SQLAlchemy ORM models for Edu-LLM v5 Class-Lab Architecture.
+models.py — SQLAlchemy ORM models for Edu-LLM v7 Agentic Class-Lab Architecture.
 
 Tables
 ------
@@ -15,6 +15,7 @@ Tables
 """
 
 import enum
+import json
 import uuid
 from datetime import date, datetime, timezone
 
@@ -30,11 +31,97 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.types import CHAR, Float, TypeDecorator
+from pgvector.sqlalchemy import Vector
 
 from backend.app.database import Base
+
+# Embedding dimension for DocChunk vectors. Placeholder — set to match the
+# configured embedding model (see SystemConfigs.EMBEDDING_MODEL) before prod.
+EMBEDDING_DIM = 1024
+
+
+# ---------------------------------------------------------------------------
+# Dialect-aware column types
+# ---------------------------------------------------------------------------
+# These render native PostgreSQL types in production and SQLite-compatible
+# types under the test suite — automatically, per dialect — so no metadata
+# patching is needed and ORM queries bind the correct type on either backend.
+
+
+class GUID(TypeDecorator):
+    """UUID column: native `uuid` on PostgreSQL, CHAR(36) on SQLite."""
+    impl = CHAR
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PGUUID(as_uuid=True))
+        return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if not isinstance(value, uuid.UUID):
+            value = uuid.UUID(str(value))
+        return value if dialect.name == "postgresql" else str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+class EmbeddingVector(TypeDecorator):
+    """Embedding column: native pgvector `Vector` on PostgreSQL, JSON text on SQLite."""
+    impl = Text
+    cache_ok = True
+
+    def __init__(self, dim: int):
+        self.dim = dim
+        super().__init__()
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Vector(self.dim))
+        return dialect.type_descriptor(Text())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return list(value) if dialect.name == "postgresql" else json.dumps(list(value))
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        return value if dialect.name == "postgresql" else json.loads(value)
+
+    class comparator_factory(TypeDecorator.Comparator):
+        """Expose pgvector distance operators through the decorator."""
+        def cosine_distance(self, other):
+            return self.op("<=>", return_type=Float)(other)
+
+        def l2_distance(self, other):
+            return self.op("<->", return_type=Float)(other)
+
+
+class TSVector(TypeDecorator):
+    """[v7.1] BM25 full-text column: native `tsvector` on PostgreSQL, Text on SQLite.
+
+    Populated at ingest time via a Postgres `to_tsvector(...)` expression; on SQLite
+    it degrades to plain text so the model/table still builds under the unit suite.
+    """
+    impl = Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import TSVECTOR
+            return dialect.type_descriptor(TSVECTOR())
+        return dialect.type_descriptor(Text())
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -59,6 +146,45 @@ class RuleLevel(str, enum.Enum):
     student = "student"
 
 
+class DocumentStatus(str, enum.Enum):
+    """Ingestion state machine for an uploaded course document."""
+    pending = "pending"
+    processing = "processing"
+    indexed = "indexed"
+    failed = "failed"
+    # [v7.1] PDF rejected by the character-yield gate — returned to the teacher,
+    # never silently ingested. Not an error; a request to re-export a clean PDF.
+    needs_review = "needs_review"
+
+
+class DocType(str, enum.Enum):
+    """[v7.1] Course-document type — the deterministic routing signal, set at upload."""
+    CM = "CM"   # cours magistral (lecture: slides or book) → chunk path
+    TD = "TD"   # travaux dirigés (problem set) → exercise path
+    TP = "TP"   # travaux pratiques (lab: exercises + code) → exercise path
+
+
+class Audience(str, enum.Enum):
+    """[v7.1] Who a document is for. Students never retrieve `teacher`-audience docs."""
+    student = "student"
+    teacher = "teacher"
+
+
+class JobStatus(str, enum.Enum):
+    """Lifecycle of an ingestion job in the DB-as-queue."""
+    queued = "queued"
+    processing = "processing"
+    done = "done"
+    failed = "failed"
+
+
+class CoachingLevel(str, enum.Enum):
+    """How much scaffolding the tutor applies, from the effort window."""
+    neutral = "neutral"
+    low = "low"
+    high = "high"
+
+
 # ---------------------------------------------------------------------------
 # Helper: server-side UTC timestamp default
 # ---------------------------------------------------------------------------
@@ -77,7 +203,7 @@ class SystemConfig(Base):
     __tablename__ = "system_configs"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
@@ -98,7 +224,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     username: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -137,11 +263,11 @@ class Class(Base):
     __tablename__ = "classes"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     teacher_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     invite_code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -171,10 +297,10 @@ class ClassStudent(Base):
     __tablename__ = "class_students"
 
     class_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True
+        GUID(), ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True
     )
     student_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -197,10 +323,10 @@ class Lab(Base):
     __tablename__ = "labs"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     class_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -228,7 +354,7 @@ class Rule(Base):
     __tablename__ = "rules"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     level: Mapped[RuleLevel] = mapped_column(
         Enum(RuleLevel, name="rulelevel"), nullable=False
@@ -236,7 +362,7 @@ class Rule(Base):
     # Polymorphic target — points to a Class ID, Lab ID, or User ID
     # No FK constraint because it references different tables based on `level`
     target_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        GUID(), nullable=False, index=True
     )
     rules_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -258,10 +384,10 @@ class UsageStat(Base):
     __tablename__ = "usage_stats"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     tokens_used: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -290,13 +416,13 @@ class Session(Base):
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     lab_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("labs.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
@@ -327,10 +453,10 @@ class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     session_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("sessions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -353,4 +479,229 @@ class Message(Base):
         return (
             f"<Message id={self.id} session={self.session_id} "
             f"sender={self.sender} tokens={self.total_tokens}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 10. Document — [v7] uploaded course material with ingestion state machine
+# ---------------------------------------------------------------------------
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), primary_key=True, default=uuid.uuid4
+    )
+    class_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("labs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # [v7.1] Deterministic routing metadata, set at upload (the API enforces presence;
+    # the column is nullable so historical rows / fixtures remain valid).
+    doc_type: Mapped[DocType | None] = mapped_column(
+        Enum(DocType, name="doctype"), nullable=True
+    )
+    audience: Mapped[Audience | None] = mapped_column(
+        Enum(Audience, name="audience"), nullable=True
+    )
+    status: Mapped[DocumentStatus] = mapped_column(
+        Enum(DocumentStatus, name="documentstatus"),
+        nullable=False,
+        default=DocumentStatus.pending,
+    )
+    # [v7.1] Populated on `failed` and carries the `needs_review` rejection reason.
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [v7.1] Parsed page count — Phase 6 summary. Nullable until processed.
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Document id={self.id} status={self.status} file={self.filename!r}>"
+
+
+# ---------------------------------------------------------------------------
+# 11. IngestionJob — [v7] DB-as-queue row polled by the ingestion worker
+# ---------------------------------------------------------------------------
+
+
+class IngestionJob(Base):
+    __tablename__ = "ingestion_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), primary_key=True, default=uuid.uuid4
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[JobStatus] = mapped_column(
+        Enum(JobStatus, name="jobstatus"), nullable=False, default=JobStatus.queued
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<IngestionJob id={self.id} doc={self.document_id} status={self.status}>"
+
+
+# ---------------------------------------------------------------------------
+# 12. DocChunk — [v7] embedded text chunk for RAG retrieval (pgvector)
+# ---------------------------------------------------------------------------
+
+
+class DocChunk(Base):
+    __tablename__ = "doc_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), primary_key=True, default=uuid.uuid4
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Denormalized tenant scope — filter-without-JOIN security boundary.
+    class_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False, index=True)
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    # [v7.1] Denormalized from Document for query-time routing + the audience filter.
+    doc_type: Mapped[DocType | None] = mapped_column(
+        Enum(DocType, name="doctype"), nullable=True
+    )
+    audience: Mapped[Audience | None] = mapped_column(
+        Enum(Audience, name="audience"), nullable=True, index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The ORIGINAL chunk text — what citations and the teacher chunk-inspector show.
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # [v7.1] LLM-generated Contextual-Retrieval context, prepended before embedding.
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [v7.1] Heading/section path the chunk came from.
+    section: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Embedded over the augmented text (context + content). bge-m3 = 1024 dim.
+    embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(EMBEDDING_DIM), nullable=False)
+    # [v7.1] BM25 full-text index, built over the augmented text at ingest time.
+    tsv: Mapped[str | None] = mapped_column(TSVector(), nullable=True)
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<DocChunk id={self.id} doc={self.document_id} idx={self.chunk_index}>"
+
+
+# ---------------------------------------------------------------------------
+# 13. Exercise — [v7] LLM-extracted structured exercise (agentic search target)
+# ---------------------------------------------------------------------------
+
+
+class Exercise(Base):
+    __tablename__ = "exercises"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), primary_key=True, default=uuid.uuid4
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    class_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False, index=True)
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    number: Mapped[str] = mapped_column(String(64), nullable=False)
+    statement: Mapped[str] = mapped_column(Text, nullable=False)
+    hints: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 🔴 v7.1 red line: there is NO solution column. The corrigé is not ingested or
+    # stored anywhere — only student-safe statements are kept, so nothing can leak.
+    # Reserved for future Adaptive Tutoring (per-concept scoring). Nullable for now.
+    concept: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Exercise id={self.id} number={self.number!r} doc={self.document_id}>"
+
+
+# ---------------------------------------------------------------------------
+# 14. LearnerProfile — [v7] prompt-literacy coaching (per student + lab)
+# ---------------------------------------------------------------------------
+
+
+class LearnerProfile(Base):
+    __tablename__ = "learner_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    lab_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("labs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Smoothed sliding-window effort/clarity score (0..1).
+    effort_ema: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    coaching_level: Mapped[CoachingLevel] = mapped_column(
+        Enum(CoachingLevel, name="coachinglevel"), nullable=False, default=CoachingLevel.neutral
+    )
+    # Throttle marker for the explicit "how to ask" tip.
+    last_tip_msg_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    teacher_override: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "lab_id", name="uq_learner_profile_user_lab"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<LearnerProfile user={self.user_id} lab={self.lab_id} "
+            f"ema={self.effort_ema:.2f} level={self.coaching_level}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 15. RouterQueryLog — [v7.1] low-confidence routing telemetry
+# ---------------------------------------------------------------------------
+
+
+class RouterQueryLog(Base):
+    """Write-only log of queries the embedding-kNN router was unsure about.
+
+    Accumulates real multilingual data so a future BERT/XLM-R router has a labeled
+    source. Nothing in the live path reads it.
+    """
+    __tablename__ = "router_query_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    chosen_route: Mapped[str] = mapped_column(String(32), nullable=False)
+    top_similarity: Mapped[float] = mapped_column(Float, nullable=False)
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<RouterQueryLog route={self.chosen_route} "
+            f"sim={self.top_similarity:.3f}>"
         )
