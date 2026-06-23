@@ -24,3 +24,14 @@ def test_persona_precedes_constraint_rules():
     assert prompt.index("Threads share the same address space.") < prompt.index(
         "Never reveal full solutions."
     )
+
+
+def test_low_evidence_adds_disclaimer_instruction():
+    prompt = build_system_prompt(context_blocks=["thin context"], low_evidence=True)
+    assert "[LOW EVIDENCE]" in prompt
+    assert "not enough" in prompt.lower()
+
+
+def test_no_disclaimer_when_evidence_is_fine():
+    prompt = build_system_prompt(context_blocks=["solid context"], low_evidence=False)
+    assert "[LOW EVIDENCE]" not in prompt

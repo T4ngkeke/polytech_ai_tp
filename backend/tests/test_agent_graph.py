@@ -130,3 +130,31 @@ async def test_low_confidence_query_is_logged(db_session):
     assert len(rows) == 1
     assert rows[0].message == "??? message totally ambiguous"
     assert rows[0].chosen_route == "rag"
+
+
+@pytest.mark.asyncio
+async def test_self_eval_bad_verdict_adds_low_evidence_disclaimer(pg_session):
+    """A persistently-bad self-eval verdict raises the low-evidence disclaimer."""
+    cls, lab, student = await _seed_lab_with_chunk(pg_session, "barely relevant note", at=1)
+
+    async def fake_embed(texts):
+        return [_unit(1) for _ in texts]
+
+    async def bad_grade(query, docs):
+        return "bad"
+
+    async def rewrite(query):
+        return query + " rewritten"
+
+    agent = build_agent(
+        pg_session, embed_fn=fake_embed,
+        grade_fn=bad_grade, rewrite_fn=rewrite, max_retries=1,
+    )
+    result = await agent.ainvoke({
+        "message": "What is a thread?",
+        "class_id": cls.id, "lab_id": lab.id, "user_id": student.id, "history": [],
+    })
+
+    assert result["route"] == "rag"
+    assert result["low_evidence"] is True
+    assert "[LOW EVIDENCE]" in result["messages_payload"][0]["content"]

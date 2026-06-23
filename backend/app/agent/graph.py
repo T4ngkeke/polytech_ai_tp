@@ -23,6 +23,7 @@ from backend.app.agent.effort import assess_effort
 from backend.app.agent.lazy import detect_answer_seeking
 from backend.app.agent.prompt import build_system_prompt
 from backend.app.agent.router import build_embedding_router
+from backend.app.agent.selfeval import GradeFn, RewriteFn, run_self_eval_loop
 from backend.app.models import Audience, CoachingLevel
 from backend.app.services import learner_service, router_service
 from backend.app.services.retrieval_service import RerankFn, hybrid_search, search_exercises
@@ -31,6 +32,11 @@ EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 
 # Default router kNN confidence threshold (overridden by ROUTER_KNN_THRESHOLD config).
 DEFAULT_ROUTER_THRESHOLD = 0.35
+
+
+async def _identity_rewrite(query: str) -> str:
+    """Fallback rewrite when none is configured: re-retrieve the same query."""
+    return query
 
 # Neutral, controlled-vocabulary strategies per coaching level (never insulting).
 _COACHING_STRATEGY = {
@@ -60,6 +66,7 @@ class AgentState(TypedDict, total=False):
     query_embedding: list[float]
     context_blocks: list[str]
     citations: list[dict]
+    low_evidence: bool
     answer_seeking: bool
     coaching_strategy: str | None
     messages_payload: list[dict]
@@ -72,6 +79,9 @@ def build_agent(
     router_threshold: float = DEFAULT_ROUTER_THRESHOLD,
     embedding_model: str | None = None,
     rerank_fn: RerankFn | None = None,
+    grade_fn: GradeFn | None = None,
+    rewrite_fn: RewriteFn | None = None,
+    max_retries: int = 1,
 ):
     """Compile the chat agent graph bound to a DB session + query embedder."""
 
@@ -121,23 +131,46 @@ def build_agent(
         lab_id = state.get("lab_id")
         if not lab_id:
             return {"context_blocks": []}
-        # Reuse the embedding computed in the router; fall back if missing.
-        embedding = state.get("query_embedding") or (await embed_fn([state["message"]]))[0]
-        # Hybrid recall (vector + BM25) → RRF → rerank, student-audience scoped in SQL.
-        hits = await hybrid_search(
-            db,
-            query_text=state["message"],
-            query_embedding=embedding,
-            lab_id=lab_id,
-            audience=Audience.student,
-            rerank_fn=rerank_fn,
-            top_k=4,
-        )
+        message = state["message"]
+        base_embedding = state.get("query_embedding")
+
+        async def retrieve_fn(query: str) -> list:
+            # Reuse the router's embedding for the original query; embed rewrites.
+            if query == message and base_embedding:
+                embedding = base_embedding
+            else:
+                embedding = (await embed_fn([query]))[0]
+            # Hybrid recall (vector + BM25) → RRF → rerank, student-audience scoped in SQL.
+            return await hybrid_search(
+                db,
+                query_text=query,
+                query_embedding=embedding,
+                lab_id=lab_id,
+                audience=Audience.student,
+                rerank_fn=rerank_fn,
+                top_k=4,
+            )
+
+        low_evidence = False
+        if grade_fn is None:
+            hits = await retrieve_fn(message)
+        else:
+            outcome = await run_self_eval_loop(
+                message,
+                retrieve_fn=retrieve_fn,
+                grade_fn=grade_fn,
+                rewrite_fn=rewrite_fn or _identity_rewrite,
+                max_retries=max_retries,
+            )
+            hits = outcome.hits
+            low_evidence = outcome.disclaimer
+
         return {
             "context_blocks": [h.content for h in hits],
             "citations": [
                 {"document_id": str(h.document_id), "page_no": h.page_no} for h in hits
             ],
+            "low_evidence": low_evidence,
         }
 
     async def direct_node(state: AgentState) -> dict:
@@ -152,6 +185,7 @@ def build_agent(
             context_blocks=state.get("context_blocks"),
             coaching_strategy=state.get("coaching_strategy"),
             answer_seeking=state.get("answer_seeking", False),
+            low_evidence=state.get("low_evidence", False),
         )
         payload = (
             [{"role": "system", "content": system}]

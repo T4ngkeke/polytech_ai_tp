@@ -79,7 +79,7 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
             SystemConfig.key.in_([
                 "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
                 "EMBEDDING_MODEL", "ROUTER_KNN_THRESHOLD",
-                "RERANK_URL", "RERANK_MODEL",
+                "RERANK_URL", "RERANK_MODEL", "RAG_MAX_RETRIES",
             ])
         )
     )
@@ -93,6 +93,7 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "router_knn_threshold": configs.get("ROUTER_KNN_THRESHOLD", "0.35"),
         "rerank_url": configs.get("RERANK_URL", ""),
         "rerank_model": configs.get("RERANK_MODEL", "bge-reranker-v2-m3"),
+        "rag_max_retries": configs.get("RAG_MAX_RETRIES", "1"),
     }
 
 
@@ -169,6 +170,46 @@ def _make_rerank_fn(llm_config: dict[str, str]):
             scores[item["index"]] = item["relevance_score"]
         return scores
     return rerank
+
+
+def _make_grade_fn(llm_config: dict[str, str]):
+    """Guided 3-tier retrieval self-eval: returns 'good' | 'partial' | 'bad'."""
+    async def grade(query: str, documents: list[str]) -> str:  # pragma: no cover
+        client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
+        joined = "\n\n".join(f"[{i}] {d}" for i, d in enumerate(documents))
+        resp = await client.chat.completions.create(
+            model=llm_config["model"],
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Rate how well the retrieved material answers the question. "
+                    "Reply with exactly one word: good, partial, or bad.\n\n"
+                    f"Question: {query}\n\nMaterial:\n{joined}"
+                ),
+            }],
+            max_tokens=4,
+        )
+        return (resp.choices[0].message.content or "").strip().lower()
+    return grade
+
+
+def _make_rewrite_fn(llm_config: dict[str, str]):
+    """Rewrite the query for a better retrieval pass."""
+    async def rewrite(query: str) -> str:  # pragma: no cover
+        client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
+        resp = await client.chat.completions.create(
+            model=llm_config["model"],
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Rewrite this question to retrieve better course material "
+                    "(add synonyms / key terms). Reply with the rewritten query only.\n\n"
+                    f"{query}"
+                ),
+            }],
+        )
+        return (resp.choices[0].message.content or query).strip()
+    return rewrite
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +423,9 @@ async def chat_stream(
         router_threshold=float(llm_config["router_knn_threshold"]),
         embedding_model=llm_config["embedding_model"],
         rerank_fn=_make_rerank_fn(llm_config),
+        grade_fn=_make_grade_fn(llm_config),
+        rewrite_fn=_make_rewrite_fn(llm_config),
+        max_retries=int(llm_config["rag_max_retries"]),
     )
     agent_result = await agent.ainvoke({
         "message": body.message,
