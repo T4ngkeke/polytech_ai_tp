@@ -23,9 +23,9 @@ from backend.app.agent.effort import assess_effort
 from backend.app.agent.lazy import detect_answer_seeking
 from backend.app.agent.prompt import build_system_prompt
 from backend.app.agent.router import build_embedding_router
-from backend.app.models import CoachingLevel
+from backend.app.models import Audience, CoachingLevel
 from backend.app.services import learner_service, router_service
-from backend.app.services.retrieval_service import rag_search, search_exercises
+from backend.app.services.retrieval_service import RerankFn, hybrid_search, search_exercises
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 
@@ -71,6 +71,7 @@ def build_agent(
     *,
     router_threshold: float = DEFAULT_ROUTER_THRESHOLD,
     embedding_model: str | None = None,
+    rerank_fn: RerankFn | None = None,
 ):
     """Compile the chat agent graph bound to a DB session + query embedder."""
 
@@ -122,7 +123,16 @@ def build_agent(
             return {"context_blocks": []}
         # Reuse the embedding computed in the router; fall back if missing.
         embedding = state.get("query_embedding") or (await embed_fn([state["message"]]))[0]
-        hits = await rag_search(db, embedding, lab_id, k=4)
+        # Hybrid recall (vector + BM25) → RRF → rerank, student-audience scoped in SQL.
+        hits = await hybrid_search(
+            db,
+            query_text=state["message"],
+            query_embedding=embedding,
+            lab_id=lab_id,
+            audience=Audience.student,
+            rerank_fn=rerank_fn,
+            top_k=4,
+        )
         return {
             "context_blocks": [h.content for h in hits],
             "citations": [

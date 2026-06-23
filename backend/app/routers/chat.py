@@ -79,6 +79,7 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
             SystemConfig.key.in_([
                 "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
                 "EMBEDDING_MODEL", "ROUTER_KNN_THRESHOLD",
+                "RERANK_URL", "RERANK_MODEL",
             ])
         )
     )
@@ -90,6 +91,8 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "model": configs.get("LLM_MODEL", settings.LLM_MODEL),
         "embedding_model": configs.get("EMBEDDING_MODEL", "bge-m3"),
         "router_knn_threshold": configs.get("ROUTER_KNN_THRESHOLD", "0.35"),
+        "rerank_url": configs.get("RERANK_URL", ""),
+        "rerank_model": configs.get("RERANK_MODEL", "bge-reranker-v2-m3"),
     }
 
 
@@ -137,6 +140,35 @@ def _make_embed_fn(llm_config: dict[str, str]):
         )
         return [item.embedding for item in resp.data]
     return embed
+
+
+def _make_rerank_fn(llm_config: dict[str, str]):
+    """Build a reranker hitting the configured rerank endpoint, or None if unset.
+
+    Expects an OpenAI-compatible rerank endpoint (TEI / Infinity / vLLM) returning
+    `{"results": [{"index": i, "relevance_score": s}, ...]}`. When `RERANK_URL` is
+    empty, hybrid retrieval degrades gracefully to fusion-only ordering.
+    """
+    url = llm_config.get("rerank_url") or ""
+    if not url:
+        return None
+
+    import httpx
+
+    async def rerank(query: str, documents: list[str]) -> list[float]:  # pragma: no cover
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json={
+                "model": llm_config["rerank_model"],
+                "query": query,
+                "documents": documents,
+            })
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+        scores = [0.0] * len(documents)
+        for item in results:
+            scores[item["index"]] = item["relevance_score"]
+        return scores
+    return rerank
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +381,7 @@ async def chat_stream(
         embed_fn=_make_embed_fn(llm_config),
         router_threshold=float(llm_config["router_knn_threshold"]),
         embedding_model=llm_config["embedding_model"],
+        rerank_fn=_make_rerank_fn(llm_config),
     )
     agent_result = await agent.ainvoke({
         "message": body.message,
