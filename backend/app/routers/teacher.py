@@ -49,7 +49,10 @@ from backend.app.schemas import (
     LabResponse,
     LabUpdateRequest,
     LabUsageSummary,
+    ChunkResponse,
+    DocExerciseResponse,
     DocumentResponse,
+    DocumentSummaryResponse,
     RuleResponse,
     RuleUpsertRequest,
     SessionWithMessagesResponse,
@@ -186,6 +189,72 @@ async def upload_document(
         audience=audience,
     )
     return DocumentResponse.model_validate(doc)
+
+
+# ===================================================================
+# [v7.1] Phase 6 — teacher ingestion visibility
+# ===================================================================
+
+
+@router.get("/labs/{lab_id}/documents", response_model=list[DocumentSummaryResponse])
+async def list_lab_documents(
+    lab_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[DocumentSummaryResponse]:
+    """List a lab's documents with status + processing summary (ownership enforced)."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    rows = await document_service.list_lab_documents(db, lab_id)
+    return [
+        DocumentSummaryResponse(
+            id=r["doc"].id,
+            filename=r["doc"].filename,
+            doc_type=r["doc"].doc_type.value if r["doc"].doc_type else None,
+            audience=r["doc"].audience.value if r["doc"].audience else None,
+            status=r["doc"].status.value,
+            page_count=r["doc"].page_count,
+            error_message=r["doc"].error_message,
+            chunk_count=r["chunk_count"],
+            exercise_count=r["exercise_count"],
+        )
+        for r in rows
+    ]
+
+
+async def _owned_document_or_404(db, document_id, teacher):
+    doc = await document_service.get_owned_document(db, document_id, teacher.id)
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return doc
+
+
+@router.get("/documents/{document_id}/chunks", response_model=list[ChunkResponse])
+async def get_document_chunks(
+    document_id: uuid.UUID,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[ChunkResponse]:
+    """Paginated chunk inspector for a document the teacher owns."""
+    await _owned_document_or_404(db, document_id, teacher)
+    chunks = await document_service.get_document_chunks(
+        db, document_id, offset=offset, limit=limit
+    )
+    return [ChunkResponse.model_validate(c) for c in chunks]
+
+
+@router.get("/documents/{document_id}/exercises", response_model=list[DocExerciseResponse])
+async def get_document_exercises(
+    document_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[DocExerciseResponse]:
+    """Extracted exercises (statements only) for a document the teacher owns."""
+    await _owned_document_or_404(db, document_id, teacher)
+    exercises = await document_service.get_document_exercises(db, document_id)
+    return [DocExerciseResponse.model_validate(e) for e in exercises]
 
 
 # ===================================================================

@@ -8,9 +8,11 @@ import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
+import DocumentManager from '../components/DocumentManager';
 
 const TABS_CLASS = ['Rules', 'Analytics'];
-const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students'];
+// 'Documents' appended last so existing tab indices (0–4) stay stable.
+const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents'];
 
 export default function Teacher() {
   // ── Tree state ──
@@ -314,6 +316,7 @@ export default function Teacher() {
               {level === 'lab' && activeTab === 2 && <AnalyticsPanel analytics={analytics} filterLabId={selectedLab.id} />}
               {level === 'lab' && activeTab === 3 && <AuditPanel sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
+              {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
             </div>
           </>
         )}

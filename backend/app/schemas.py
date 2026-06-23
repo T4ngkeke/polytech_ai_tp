@@ -161,6 +161,39 @@ class DocumentResponse(BaseModel):
     status: str
 
 
+class DocumentSummaryResponse(BaseModel):
+    """[v7.1] A document with its processing status + summary for the teacher list."""
+    id: uuid.UUID
+    filename: str
+    doc_type: str | None
+    audience: str | None
+    status: str
+    page_count: int | None
+    error_message: str | None
+    chunk_count: int
+    exercise_count: int
+
+
+class ChunkResponse(BaseModel):
+    """[v7.1] One indexed chunk — the 'is it well processed?' inspector surface."""
+    model_config = ConfigDict(from_attributes=True)
+
+    chunk_index: int
+    page_no: int | None
+    section: str | None
+    content: str
+    context: str | None
+
+
+class DocExerciseResponse(BaseModel):
+    """[v7.1] An extracted exercise. Deliberately has no `solution`."""
+    model_config = ConfigDict(from_attributes=True)
+
+    number: str
+    statement: str
+    hints: str | None
+
+
 class LabUpdateRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     is_active: bool | None = None

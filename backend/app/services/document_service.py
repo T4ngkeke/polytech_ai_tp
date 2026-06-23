@@ -9,10 +9,12 @@ import hashlib
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Audience, Document, DocType, IngestionJob
+from backend.app.models import (
+    Audience, Class, DocChunk, Document, DocType, Exercise, IngestionJob,
+)
 
 
 async def create_document(
@@ -67,3 +69,67 @@ async def create_document(
     await db.commit()
     await db.refresh(doc)
     return doc
+
+
+# ---------------------------------------------------------------------------
+# [v7.1] Phase 6 — teacher ingestion visibility (read side)
+# ---------------------------------------------------------------------------
+
+
+async def _count(db: AsyncSession, model, document_id: uuid.UUID) -> int:
+    stmt = select(func.count()).select_from(model).where(model.document_id == document_id)
+    return (await db.execute(stmt)).scalar_one()
+
+
+async def list_lab_documents(db: AsyncSession, lab_id: uuid.UUID) -> list[dict]:
+    """Documents in a lab with their status + processing summary (pages/chunks/exercises)."""
+    docs = (await db.execute(
+        select(Document).where(Document.lab_id == lab_id).order_by(Document.id)
+    )).scalars().all()
+
+    summaries: list[dict] = []
+    for doc in docs:
+        summaries.append({
+            "doc": doc,
+            "chunk_count": await _count(db, DocChunk, doc.id),
+            "exercise_count": await _count(db, Exercise, doc.id),
+        })
+    return summaries
+
+
+async def get_owned_document(
+    db: AsyncSession, document_id: uuid.UUID, teacher_id: uuid.UUID
+) -> Document | None:
+    """Return the document only if it belongs to a class the teacher owns."""
+    stmt = (
+        select(Document)
+        .join(Class, Class.id == Document.class_id)
+        .where(Document.id == document_id, Class.teacher_id == teacher_id)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def get_document_chunks(
+    db: AsyncSession, document_id: uuid.UUID, *, offset: int = 0, limit: int = 50
+) -> list[DocChunk]:
+    """Paginated chunks for a document, in source order — the inspector surface."""
+    stmt = (
+        select(DocChunk)
+        .where(DocChunk.document_id == document_id)
+        .order_by(DocChunk.chunk_index)
+        .offset(offset)
+        .limit(limit)
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def get_document_exercises(
+    db: AsyncSession, document_id: uuid.UUID
+) -> list[Exercise]:
+    """Extracted exercises (statements only — no solution exists)."""
+    stmt = (
+        select(Exercise)
+        .where(Exercise.document_id == document_id)
+        .order_by(Exercise.number)
+    )
+    return list((await db.execute(stmt)).scalars().all())
