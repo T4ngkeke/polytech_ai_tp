@@ -12,7 +12,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Document, IngestionJob
+from backend.app.models import Audience, Document, DocType, IngestionJob
 
 
 async def create_document(
@@ -24,6 +24,8 @@ async def create_document(
     content: bytes,
     uploaded_by: uuid.UUID,
     storage_root: str | Path,
+    doc_type: DocType | None = None,
+    audience: Audience | None = None,
 ) -> Document:
     """Persist an uploaded document and enqueue it for ingestion."""
     content_hash = hashlib.sha256(content).hexdigest()
@@ -54,6 +56,8 @@ async def create_document(
         filename=filename,
         storage_path=str(path),
         content_hash=content_hash,
+        doc_type=doc_type,
+        audience=audience,
         uploaded_by=uploaded_by,
     )
     db.add(doc)

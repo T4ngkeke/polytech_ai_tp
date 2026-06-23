@@ -18,7 +18,7 @@ from typing import Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import IngestionJob, JobStatus
-from backend.worker.ingest import EmbedFn, ExtractFn, ingest_document
+from backend.worker.ingest import ContextFn, EmbedFn, ExtractFn, ingest_document
 from backend.worker.queue import claim_next_job
 
 # How long to sleep when the queue is empty vs. when the GPU gate is closed.
@@ -31,6 +31,7 @@ async def process_one(
     *,
     embed_fn: EmbedFn,
     extract_fn: ExtractFn,
+    context_fn: ContextFn | None = None,
 ) -> bool:
     """
     Claim and process one ingestion job.
@@ -46,7 +47,10 @@ async def process_one(
     document_id = job.document_id
 
     try:
-        await ingest_document(db, document_id, embed_fn=embed_fn, extract_fn=extract_fn)
+        await ingest_document(
+            db, document_id,
+            embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+        )
         job = await db.get(IngestionJob, job_id)
         job.status = JobStatus.done
         job.error_message = None
@@ -66,6 +70,7 @@ async def run_tick(
     *,
     embed_fn: EmbedFn,
     extract_fn: ExtractFn,
+    context_fn: ContextFn | None = None,
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
     idle_seconds: float = IDLE_SLEEP_SECONDS,
     gate_seconds: float = GATE_SLEEP_SECONDS,
@@ -81,7 +86,9 @@ async def run_tick(
         await sleep_fn(gate_seconds)
         return False
 
-    processed = await process_one(db, embed_fn=embed_fn, extract_fn=extract_fn)
+    processed = await process_one(
+        db, embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+    )
     if not processed:
         await sleep_fn(idle_seconds)
     return processed
@@ -93,10 +100,13 @@ async def run_forever(
     *,
     embed_fn: EmbedFn,
     extract_fn: ExtractFn,
+    context_fn: ContextFn | None = None,
 ) -> None:  # pragma: no cover - thin infinite-loop glue
     """Run the ingestion worker loop forever."""
     while True:
-        await run_tick(db, gate, embed_fn=embed_fn, extract_fn=extract_fn)
+        await run_tick(
+            db, gate, embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +159,27 @@ def _make_real_extract_fn(client, model: str) -> ExtractFn:  # pragma: no cover
     return extract
 
 
+def _make_real_context_fn(client, model: str) -> ContextFn:  # pragma: no cover
+    """Contextual Retrieval: situate a chunk within its document (one short sentence)."""
+    _PROMPT = (
+        "Here is a course document:\n<document>\n{doc}\n</document>\n\n"
+        "Here is a chunk from it:\n<chunk>\n{chunk}\n</chunk>\n\n"
+        "Give a short, standalone sentence situating this chunk within the document "
+        "(section/topic) to improve retrieval. Answer with the sentence only."
+    )
+
+    async def context(full_text: str, chunk_text: str) -> str:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[{
+                "role": "user",
+                "content": _PROMPT.format(doc=full_text[:8000], chunk=chunk_text),
+            }],
+        )
+        return (resp.choices[0].message.content or "").strip()
+    return context
+
+
 def _pynvml_util() -> float:  # pragma: no cover
     """Current GPU utilization %, or 0.0 (assume idle) if pynvml is unavailable."""
     try:
@@ -189,8 +220,11 @@ async def main() -> None:  # pragma: no cover - entrypoint
         client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
         embed_fn = _make_real_embed_fn(client, cfg["embedding_model"])
         extract_fn = _make_real_extract_fn(client, cfg["model"])
+        context_fn = _make_real_context_fn(client, cfg["model"])
         gate = GpuGate(util_fn=_pynvml_util)
-        await run_forever(db, gate, embed_fn=embed_fn, extract_fn=extract_fn)
+        await run_forever(
+            db, gate, embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

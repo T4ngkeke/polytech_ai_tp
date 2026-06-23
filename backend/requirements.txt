@@ -5,6 +5,7 @@ asyncpg>=0.29.0
 pgvector>=0.3.0         # [v7] pgvector SQLAlchemy Vector type for DocChunk embeddings
 langgraph>=0.2.0        # [v7] chat agent StateGraph (router → retrieve → synthesize)
 nvidia-ml-py>=12.0      # [v7] pynvml — worker GPU-utilization gate (off-peak ingestion)
+pymupdf>=1.27.0         # [v7.1] PDF-only text extraction in the ingestion worker (no OCR)
 pydantic>=2.7.0
 pydantic-settings>=2.2.0
 python-jose[cryptography]>=3.3.0

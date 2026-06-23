@@ -26,7 +26,9 @@ GET    /api/teacher/analytics/classes/{class_id}
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -34,7 +36,9 @@ from sqlalchemy.orm import selectinload
 from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
-from backend.app.models import Class, ClassStudent, Lab, Session, UsageStat, User, UserRole
+from backend.app.models import (
+    Audience, Class, ClassStudent, DocType, Lab, Session, UsageStat, User, UserRole,
+)
 from backend.app.schemas import (
     ClassAnalyticsResponse,
     ClassCreate,
@@ -148,13 +152,27 @@ async def list_labs(
 async def upload_document(
     lab_id: uuid.UUID,
     file: UploadFile = File(...),
+    doc_type: DocType = Form(...),
+    audience: Audience = Form(...),
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
     storage_root: str = Depends(get_storage_root),
 ) -> DocumentResponse:
-    """Upload a course document to a lab the teacher owns; enqueues ingestion."""
+    """Upload a PDF course document to a lab the teacher owns; enqueues ingestion.
+
+    `doc_type` (CM/TD/TP) and `audience` (student/teacher) are required — they are the
+    deterministic ingestion routing signal and the student-retrieval audience filter.
+    """
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+
+    # Input is PDF only — instructors export slides to PDF before upload.
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF uploads are supported. Export slides to PDF first.",
+        )
+
     content = await file.read()
     doc = await document_service.create_document(
         db,
@@ -164,6 +182,8 @@ async def upload_document(
         content=content,
         uploaded_by=teacher.id,
         storage_root=storage_root,
+        doc_type=doc_type,
+        audience=audience,
     )
     return DocumentResponse.model_validate(doc)
 
