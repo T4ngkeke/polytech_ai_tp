@@ -10,7 +10,9 @@ import uuid
 import pytest
 
 from backend.app.models import (
+    Audience,
     Class,
+    DocType,
     Document,
     DocumentStatus,
     EMBEDDING_DIM,
@@ -50,7 +52,8 @@ async def _seed_job(session, tmp_path):
     await session.flush()
     doc = await create_document(
         session, class_id=cls.id, lab_id=lab.id, filename="doc.txt",
-        content=b"para one\n\npara two", uploaded_by=teacher.id, storage_root=tmp_path,
+        content=b"Exercice 1\npara one\n\npara two", uploaded_by=teacher.id,
+        storage_root=tmp_path, doc_type=DocType.TD, audience=Audience.student,
     )
     return doc
 

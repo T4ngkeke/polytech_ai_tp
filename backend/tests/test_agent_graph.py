@@ -12,6 +12,7 @@ import pytest
 
 from backend.app.agent.graph import build_agent
 from backend.app.models import (
+    Audience,
     Class,
     DocChunk,
     Document,
@@ -46,8 +47,8 @@ async def _seed_lab_with_chunk(session, body: str, at: int):
     session.add(doc)
     await session.flush()
     session.add(DocChunk(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id,
-                         lab_id=lab.id, chunk_index=0, content=body,
-                         embedding=_unit(at), page_no=1))
+                         lab_id=lab.id, audience=Audience.student, chunk_index=0,
+                         content=body, embedding=_unit(at), page_no=1))
     await session.commit()
     return cls, lab, student
 
