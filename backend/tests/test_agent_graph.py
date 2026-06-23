@@ -102,3 +102,30 @@ async def test_agent_agentic_search_surfaces_statement_only(pg_session):
     system = result["messages_payload"][0]["content"]
     # Only the student-safe statement is surfaced; no solution exists to leak.
     assert "Sum two numbers." in system
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_query_is_logged(db_session):
+    """A below-threshold route falls back to rag and is logged (Phase 2.3)."""
+    from sqlalchemy import select
+
+    from backend.app.agent.router import INTENT_EXEMPLARS
+    from backend.app.models import RouterQueryLog
+
+    anchors = set(INTENT_EXEMPLARS["rag"]) | set(INTENT_EXEMPLARS["direct"])
+
+    async def fake_embed(texts):
+        # Anchor exemplars on one axis; the actual query orthogonal (cosine 0).
+        return [[1.0, 0.0] if t in anchors else [0.0, 1.0] for t in texts]
+
+    agent = build_agent(db_session, embed_fn=fake_embed, router_threshold=0.5)
+    result = await agent.ainvoke({
+        "message": "??? message totally ambiguous",
+        "class_id": None, "lab_id": None, "user_id": uuid.uuid4(), "history": [],
+    })
+
+    assert result["route"] == "rag"  # safe fallback
+    rows = (await db_session.execute(select(RouterQueryLog))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].message == "??? message totally ambiguous"
+    assert rows[0].chosen_route == "rag"

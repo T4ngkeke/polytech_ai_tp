@@ -170,8 +170,31 @@ async def mock_openai():
 
             return mock_generator()
 
+        # The kNN router embeds every message. Return 2-D vectors that send the
+        # rag anchor exemplars to one axis and everything else (incl. these test
+        # queries) to the other, so the test messages deterministically route to
+        # `direct` — the SQLite-safe path (no pgvector ops).
+        from backend.app.agent.router import INTENT_EXEMPLARS
+        _rag_exemplars = set(INTENT_EXEMPLARS["rag"])
+
+        async def mock_embed_create(*args, model=None, input=None, **kwargs):
+            class _Item:
+                def __init__(self, embedding):
+                    self.embedding = embedding
+
+            class _Resp:
+                def __init__(self, items):
+                    self.data = items
+
+            vectors = [
+                _Item([1.0, 0.0] if text in _rag_exemplars else [0.0, 1.0])
+                for text in input
+            ]
+            return _Resp(vectors)
+
         instance = mock.return_value
         instance.chat.completions.create = mock_create
+        instance.embeddings.create = mock_embed_create
         yield mock
 
 
@@ -295,8 +318,10 @@ class TestDynamicLLMConfig:
                 async for _ in resp.aiter_text():
                     pass
 
-        # Verify AsyncOpenAI was called with DB config values
-        mock_openai.assert_called_once_with(
+        # Verify AsyncOpenAI was instantiated with DB config values. The kNN router
+        # also embeds (its own client), so it is created more than once — assert the
+        # config was used rather than the exact call count.
+        mock_openai.assert_any_call(
             api_key="test-key",
             base_url="http://test:11434/v1",
         )

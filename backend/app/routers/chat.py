@@ -76,7 +76,10 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
     """
     result = await db.execute(
         select(SystemConfig).where(
-            SystemConfig.key.in_(["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"])
+            SystemConfig.key.in_([
+                "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
+                "EMBEDDING_MODEL", "ROUTER_KNN_THRESHOLD",
+            ])
         )
     )
     configs = {row.key: row.value for row in result.scalars().all()}
@@ -86,6 +89,7 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "api_key": configs.get("LLM_API_KEY", settings.LLM_API_KEY),
         "model": configs.get("LLM_MODEL", settings.LLM_MODEL),
         "embedding_model": configs.get("EMBEDDING_MODEL", "bge-m3"),
+        "router_knn_threshold": configs.get("ROUTER_KNN_THRESHOLD", "0.35"),
     }
 
 
@@ -340,7 +344,12 @@ async def chat_stream(
 
     rule_texts = await _fetch_rule_texts(db, class_id, lab_id, current_user.id)
 
-    agent = build_agent(db, embed_fn=_make_embed_fn(llm_config))
+    agent = build_agent(
+        db,
+        embed_fn=_make_embed_fn(llm_config),
+        router_threshold=float(llm_config["router_knn_threshold"]),
+        embedding_model=llm_config["embedding_model"],
+    )
     agent_result = await agent.ainvoke({
         "message": body.message,
         "class_id": class_id,

@@ -22,12 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.agent.effort import assess_effort
 from backend.app.agent.lazy import detect_answer_seeking
 from backend.app.agent.prompt import build_system_prompt
-from backend.app.agent.router import classify_intent
+from backend.app.agent.router import build_embedding_router
 from backend.app.models import CoachingLevel
-from backend.app.services import learner_service
+from backend.app.services import learner_service, router_service
 from backend.app.services.retrieval_service import rag_search, search_exercises
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
+
+# Default router kNN confidence threshold (overridden by ROUTER_KNN_THRESHOLD config).
+DEFAULT_ROUTER_THRESHOLD = 0.35
 
 # Neutral, controlled-vocabulary strategies per coaching level (never insulting).
 _COACHING_STRATEGY = {
@@ -54,6 +57,7 @@ class AgentState(TypedDict, total=False):
     lab_rules: str | None
     student_rules: str | None
     route: str
+    query_embedding: list[float]
     context_blocks: list[str]
     citations: list[dict]
     answer_seeking: bool
@@ -61,7 +65,13 @@ class AgentState(TypedDict, total=False):
     messages_payload: list[dict]
 
 
-def build_agent(db: AsyncSession, embed_fn: EmbedFn):
+def build_agent(
+    db: AsyncSession,
+    embed_fn: EmbedFn,
+    *,
+    router_threshold: float = DEFAULT_ROUTER_THRESHOLD,
+    embedding_model: str | None = None,
+):
     """Compile the chat agent graph bound to a DB session + query embedder."""
 
     async def tutor_node(state: AgentState) -> dict:
@@ -78,7 +88,22 @@ def build_agent(db: AsyncSession, embed_fn: EmbedFn):
         return {"answer_seeking": answer_seeking, "coaching_strategy": coaching_strategy}
 
     async def router_node(state: AgentState) -> dict:
-        return {"route": classify_intent(state["message"])}
+        # Embed the query once here and reuse it downstream (rag), to avoid a
+        # second decode on a slow-bandwidth box.
+        query_embedding = (await embed_fn([state["message"]]))[0]
+        router = await build_embedding_router(
+            embed_fn, router_threshold, embedding_model=embedding_model,
+        )
+        decision = router.route(state["message"], query_embedding)
+        if decision.low_confidence:
+            await router_service.log_low_confidence_query(
+                db,
+                message=state["message"],
+                route=decision.route,
+                top_similarity=decision.top_similarity,
+                lab_id=state.get("lab_id"),
+            )
+        return {"route": decision.route, "query_embedding": query_embedding}
 
     async def agentic_search_node(state: AgentState) -> dict:
         lab_id = state.get("lab_id")
@@ -95,7 +120,8 @@ def build_agent(db: AsyncSession, embed_fn: EmbedFn):
         lab_id = state.get("lab_id")
         if not lab_id:
             return {"context_blocks": []}
-        embedding = (await embed_fn([state["message"]]))[0]
+        # Reuse the embedding computed in the router; fall back if missing.
+        embedding = state.get("query_embedding") or (await embed_fn([state["message"]]))[0]
         hits = await rag_search(db, embedding, lab_id, k=4)
         return {
             "context_blocks": [h.content for h in hits],

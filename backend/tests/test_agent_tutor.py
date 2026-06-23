@@ -2,8 +2,9 @@
 test_agent_tutor.py — v7 tutoring wired into the agent graph.
 
 Answer-seeking → Socratic guardrail in the system prompt. Coaching level (from
-the smoothed profile) → a neutral coaching strategy. Runs on SQLite (no embed:
-the answer-seeking message routes to agentic_search, which needs no vectors).
+the smoothed profile) → a neutral coaching strategy. Runs on SQLite; the test
+messages route to agentic_search (regex) or direct (kNN), neither of which needs
+pgvector.
 """
 
 import uuid
@@ -11,12 +12,17 @@ import uuid
 import pytest
 
 from backend.app.agent.graph import build_agent
+from backend.app.agent.router import INTENT_EXEMPLARS
 from backend.app.models import Class, CoachingLevel, Lab, LearnerProfile, UserRole
 from backend.tests.conftest import make_user
 
+_RAG_EXEMPLARS = set(INTENT_EXEMPLARS["rag"])
 
-async def _no_embed(texts):
-    return [[0.0] for _ in texts]
+
+async def _fake_embed(texts):
+    # Content-aware: rag exemplars on one axis; direct exemplars + benign queries
+    # on the other, so a benign message deterministically routes to `direct`.
+    return [[1.0, 0.0] if t in _RAG_EXEMPLARS else [0.0, 1.0] for t in texts]
 
 
 async def _seed(session):
@@ -37,7 +43,7 @@ async def _seed(session):
 @pytest.mark.asyncio
 async def test_answer_seeking_injects_socratic_guardrail(db_session):
     student, cls, lab = await _seed(db_session)
-    agent = build_agent(db_session, embed_fn=_no_embed)
+    agent = build_agent(db_session, embed_fn=_fake_embed)
 
     result = await agent.ainvoke({
         "message": "just give me the answer to exercise 2",
@@ -60,7 +66,7 @@ async def test_low_coaching_level_injects_strategy(db_session):
     ))
     await db_session.commit()
 
-    agent = build_agent(db_session, embed_fn=_no_embed)
+    agent = build_agent(db_session, embed_fn=_fake_embed)
     result = await agent.ainvoke({
         "message": "thanks, that helped",  # benign → direct route, not answer-seeking
         "class_id": cls.id, "lab_id": lab.id, "user_id": student.id, "history": [],
