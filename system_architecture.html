@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM v7 Agentic Class-Lab Architecture</title>
+    <title>Edu-LLM v7.1 Agentic Class-Lab Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -309,13 +309,14 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v7 — Agentic Class-Lab Architecture</div>
+            <div class="pill">Architecture v7.1 — Agentic Class-Lab Architecture</div>
             <h1>Edu-LLM: Agentic RAG, Hybrid Retrieval & Off-Peak Ingestion</h1>
             <p class="subtitle">The v6 foundation (3-tier RBAC, invite codes, hierarchical rule injection) plus a
-                LangGraph agent that routes between structured search and pgvector RAG, and a GPU-aware
-                docker-compose worker that ingests course documents off-peak. Chat and ingestion share one
-                existing inference engine (vLLM/Ollama); the model is config-driven via SystemConfigs, never
-                hardcoded — swap any model that fits the box with zero downtime.</p>
+                LangGraph agent. v7.1 upgrades the retrieval core: PDF-only structured ingestion with
+                Contextual Retrieval, a multilingual embedding-kNN router, hybrid (vector + BM25) retrieval
+                with reranking, and a bounded LLM self-eval loop — all on a GPU-aware off-peak worker. Chat and
+                ingestion share one existing inference engine (vLLM/Ollama); the model is config-driven via
+                SystemConfigs, never hardcoded — swap any model that fits the box with zero downtime.</p>
         </header>
 
         <div class="legend">
@@ -356,8 +357,9 @@
                 R_Teacher["Teacher Routes\n(Classes, Labs, Rules, Documents)"]
                 R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
                 RateLimit["Rate Limiter\n(DB Quota Check)"]
-                Router["LangGraph Router\ncheap classify (rules→LLM)"]
-                Retrieval["Retrieval Service\nlab-scoped · solution-isolated"]
+                Router["LangGraph Router\nexercise regex + bge-m3 kNN"]
+                Retrieval["Retrieval Service\nhybrid vector+BM25 → RRF → rerank"]
+                SelfEval["Self-Eval Loop\ngate → good/partial/bad → bounded retry"]
                 Synth["Synthesize Node\nskill.md + 3-tier rules + context"]
                 SSE["astream_events → SSE\nadapter"]
                 AsyncDB["Background Task\ntoken-aware write"]
@@ -368,17 +370,18 @@
                 DB_Classes["Classes & Labs\ninvite_code, teacher_id"]
                 DB_Users["Users\nid · role · daily_token_quota"]
                 DB_Rules["Hierarchical Rules\nlevel(class/lab/student) + skill.md"]
-                DB_Sessions["Sessions\nid · user_id · lab_id"]
+                DB_Sessions["Sessions\nid · user_id · lab_id · is_deleted (soft-delete)"]
                 DB_Messages["Messages & Usage Stats"]
-                DB_Chunks["DocChunks\nembedding vector(N) · lab_id"]
-                DB_Exercises["Exercises\nnumber · statement · hints · 🔴solution"]
+                DB_Chunks["DocChunks\nembedding vector(N) · tsv (BM25) · context · lab_id · audience"]
+                DB_Exercises["Exercises\nnumber · statement · hints (no solution)"]
                 DB_Jobs["IngestionJobs\nDB-as-queue · SKIP LOCKED"]
+                DB_RouterLog["RouterQueryLog\nlow-confidence routing telemetry"]
                 end
 
                 subgraph WK ["④ Ingestion Worker (docker-compose)"]
                 Poll["Poll Loop\nconcurrency=1"]
                 GpuGate["GPU Gate\npynvml off-peak"]
-                Extract["Chunk + Embed +\nguided-JSON extract"]
+                Extract["Parse + chunk + Contextual Retrieval +\nembed + tsv + guided-JSON extract"]
                 end
 
                 subgraph COMPUTE ["⑤ Compute Layer (one shared engine)"]
@@ -406,9 +409,12 @@
 
                 Router ==>|"agentic_search | rag"| Retrieval
                 Router ==>|"direct"| Synth
-                Retrieval -.->|"vector RAG (lab-scoped)"| DB_Chunks
-                Retrieval -.->|"structured search (no solution)"| DB_Exercises
-                Retrieval ==>|"context + citations"| Synth
+                Router -.->|"low-confidence → log"| DB_RouterLog
+                Retrieval -.->|"vector + BM25 (lab + audience)"| DB_Chunks
+                Retrieval -.->|"structured search (statements only)"| DB_Exercises
+                Retrieval ==>|"hybrid + rerank"| SelfEval
+                SelfEval -.->|"bad → rewrite & re-retrieve (≤ max)"| Retrieval
+                SelfEval ==>|"context + citations"| Synth
                 Synth -.->|"fetch rules + skill.md"| DB_Rules
                 Synth -.->|"fetch session ctx"| DB_Sessions
                 Synth -.->|"read dynamic URL/Key/Model"| DB_SysConf
@@ -425,9 +431,9 @@
                 Extract -.->|"write chunks"| DB_Chunks
                 Extract -.->|"write exercises"| DB_Exercises
 
-                class DB_SysConf,DB_Classes,DB_Rules,DB_Chunks,DB_Exercises,DB_Jobs newNode;
+                class DB_SysConf,DB_Classes,DB_Rules,DB_Chunks,DB_Exercises,DB_Jobs,DB_RouterLog newNode;
                 class Auth auth;
-                class Router,Retrieval,Synth danger;
+                class Router,Retrieval,SelfEval,Synth danger;
                 class SSE,LLM streaming;
                 class R_Admin,R_Teacher,R_Student route;
                 class DB_Users,DB_Sessions changedNode;
@@ -439,13 +445,13 @@
             <div class="card new">
                 <span class="tag">Agent, not Proxy</span>
                 <h3>LangGraph Agentic RAG</h3>
-                <p>The chat endpoint becomes a graph: <code>Router → [agentic_search | rag | direct] → Synthesize → SSE</code>. The router classifies cheaply (rules first, LLM fallback), avoiding pure ReAct so slow-bandwidth decodes aren't wasted on every step.</p>
+                <p>The chat endpoint is a graph: <code>Router → [agentic_search | rag | direct] → self-eval loop → Synthesize → SSE</code>. The router is cheap and multilingual — a deterministic exercise-number regex fast-path, then <code>bge-m3</code> cosine-kNN over in-code anchor exemplars — avoiding pure ReAct so slow-bandwidth decodes aren't wasted on every step.</p>
             </div>
 
             <div class="card new">
                 <span class="tag">Single DB</span>
                 <h3>Hybrid Retrieval on pgvector</h3>
-                <p>Concept questions hit <b>RAG</b> over <code>doc_chunks.embedding</code>; exact missions hit <b>structured search</b> over <code>exercises</code>. All retrieval is filtered by <code>lab_id</code>/<code>class_id</code>, and <code>solution</code> is an Agent-only hidden reference — never emitted.</p>
+                <p>Concept questions hit <b>hybrid RAG</b> — vector ANN <i>and</i> BM25 (<code>tsvector</code>) recall → RRF fusion → <code>bge-reranker-v2-m3</code>; exact missions hit <b>structured search</b> over <code>exercises</code>. All retrieval is filtered by <code>lab_id</code>/<code>class_id</code> (and <code>audience</code> for students) <b>in SQL</b>. No <code>solution</code> is stored anywhere — nothing to leak.</p>
             </div>
 
             <div class="card new">
@@ -476,6 +482,18 @@
                 <span class="tag">Teach Prompt Literacy</span>
                 <h3>Effort Coaching, not Mastery Grading</h3>
                 <p>Two cheap rules-first signals (no LLM): a <b>windowed effort/clarity</b> score gently coaches <i>how to ask</i> (never gates a "stupid" question), and a per-message <b>lazy / answer-seeking</b> detector forces a Socratic reply — it answers, but <b>never hands over the answer</b>. Structured scores only, teacher-overridable.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.1 · Context-Poor Slides</span>
+                <h3>Contextual Retrieval at Ingest</h3>
+                <p>The off-peak worker LLM-generates each chunk's in-document context and prepends it; the <b>augmented</b> text (<code>context + content</code>) is embedded and BM25-indexed, while the original <code>content</code> is kept for citation. This is what makes context-poor CM slides retrievable. Same engine as chat, config-driven, no torch.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.1 · Bounded &amp; Cheap</span>
+                <h3>LLM Self-Eval Loop</h3>
+                <p>A deterministic gate (cosine / empty recall) blocks the obviously-bad before any LLM; a guided 1-token verdict grades <code>good / partial / bad</code>; a <code>bad</code> verdict rewrites the query and re-retrieves, capped at <code>RAG_MAX_RETRIES</code> (admin-config, default 1). Still thin after the budget → answer with a "not enough material" disclaimer.</p>
             </div>
         </div>
 
@@ -512,8 +530,8 @@
                     <tr>
                         <td><code>sessions</code></td>
                         <td><span class="badge changed">Modified</span></td>
-                        <td><code>id, user_id, lab_id</code></td>
-                        <td>Tightly scoped to a <code>lab_id</code>. Allows clearing history to avoid LLM context overflow.</td>
+                        <td><code>id, user_id, lab_id, is_deleted</code></td>
+                        <td>Tightly scoped to a <code>lab_id</code>. A student "delete" is a <b>soft delete</b> (<code>is_deleted=True</code>): hidden from the student but retained and visible to teacher/admin audit. Only admin hard-deletes.</td>
                     </tr>
                     <tr>
                         <td><code>users</code></td>
@@ -523,21 +541,21 @@
                     </tr>
                     <tr>
                         <td><code>documents</code></td>
-                        <td><span class="badge new">New v7</span></td>
-                        <td><code>class_id, lab_id, storage_path, content_hash, status</code></td>
-                        <td>Course-material registry with a state machine (<code>pending→processing→indexed→failed</code>). Files persist in the <code>documents_data</code> Docker volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
+                        <td><span class="badge new">New v7 · v7.1</span></td>
+                        <td><code>class_id, lab_id, storage_path, content_hash, doc_type, audience, status</code></td>
+                        <td>PDF-only registry with a state machine (<code>pending→processing→indexed→failed</code>, <b>v7.1</b> adds <code>needs_review</code> for the char-yield gate). <b>v7.1</b> <code>doc_type</code> (CM/TD/TP) + <code>audience</code> (student/teacher) are the deterministic routing + filter signals. Files persist in the <code>documents_data</code> volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
                     </tr>
                     <tr>
                         <td><code>doc_chunks</code></td>
-                        <td><span class="badge new">New v7</span></td>
-                        <td><code>document_id, lab_id, content, embedding vector(N), page_no</code></td>
-                        <td>RAG store. HNSW + <code>vector_cosine_ops</code> index; denormalized <code>lab_id</code> for filter-without-JOIN tenant scoping. <code>page_no</code> powers citations.</td>
+                        <td><span class="badge new">New v7 · v7.1</span></td>
+                        <td><code>document_id, lab_id, audience, content, context, embedding vector(N), tsv, page_no</code></td>
+                        <td>Hybrid RAG store. HNSW + <code>vector_cosine_ops</code> for ANN <i>and</i> (<b>v7.1</b>) a GIN <code>tsv</code> for BM25, both built over the <b>augmented</b> text (<code>context + content</code>). Denormalized <code>lab_id</code>/<code>audience</code> for filter-without-JOIN tenant scoping; <code>page_no</code> powers citations.</td>
                     </tr>
                     <tr>
                         <td><code>exercises</code></td>
-                        <td><span class="badge new">New v7</span></td>
-                        <td><code>number, statement, hints, 🔴solution, concept</code></td>
-                        <td>LLM-extracted via guided decoding. Target of agentic structured search. <code>solution</code> is never SELECTed by default; <code>concept</code> is reserved for future Adaptive Tutoring.</td>
+                        <td><span class="badge new">New v7 · v7.1</span></td>
+                        <td><code>number, statement, hints, concept</code></td>
+                        <td>LLM-extracted via guided decoding — target of agentic structured search. <b>🔴 v7.1 red line:</b> the <code>solution</code> column is <b>dropped</b> — only student-safe statements are stored, so there is nothing to leak. <code>concept</code> is reserved for future Adaptive Tutoring.</td>
                     </tr>
                     <tr>
                         <td><code>ingestion_jobs</code></td>
@@ -550,6 +568,12 @@
                         <td><span class="badge new">New v7</span></td>
                         <td><code>user_id, lab_id, effort_ema, coaching_level, teacher_override</code></td>
                         <td>Prompt-literacy coaching: smoothed sliding-window effort score per (student, lab). Structured values only — no free-text judgments; teacher-overridable.</td>
+                    </tr>
+                    <tr>
+                        <td><code>router_query_log</code></td>
+                        <td><span class="badge new">New v7.1</span></td>
+                        <td><code>message, chosen_route, top_similarity, lab_id</code></td>
+                        <td>Write-only telemetry: real multilingual queries the embedding-kNN router was unsure about (below threshold → safe <code>rag</code> fallback), so a future BERT/XLM-R router has a labeled data source. Nothing in the live path reads it.</td>
                     </tr>
                 </tbody>
             </table>

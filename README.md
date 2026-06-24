@@ -47,7 +47,7 @@ by Docker Compose, with **no external message queue** (PostgreSQL itself is the 
 **v6 Principles (still in force):**
 - **Service Layer**: All business/DB logic lives in `backend/app/services/`. Routers are thin.
 - **No Cross-Router Calls**: routers call services independently — no router imports another.
-- **Audit Integrity**: Students cannot delete their own sessions. History is immutable and teacher-auditable.
+- **Audit Integrity**: A student "delete" is a **soft delete** (`is_deleted=True`) — the session is hidden from the student but permanently retained and fully visible to teacher/admin audit (flagged as deleted). Only admin can hard-delete. History is immutable and teacher-auditable.
 - **Hierarchical UI**: Class → Lab tree navigation across all roles.
 
 **v7.1 Red Lines (security/governance):**
@@ -86,7 +86,7 @@ polytech_ai_tp/
 │   │   │   ├── lab_service.py       # Lab CRUD + active toggle
 │   │   │   ├── rule_service.py      # Rule upsert + queries (skill.md = level=class rule)
 │   │   │   ├── analytics_service.py # Hierarchical token aggregation
-│   │   │   ├── session_service.py   # Session CRUD (no student delete)
+│   │   │   ├── session_service.py   # Session CRUD + student soft-delete (hide; retained for audit)
 │   │   │   ├── document_service.py  # [v7] Upload (+doc_type/audience) + enqueue ingestion jobs; chunk/exercise reads (Phase 6)
 │   │   │   ├── learner_service.py   # [v7] prompt-literacy effort/lazy profiles
 │   │   │   ├── llm_service.py       # [v7.1] OpenAI-compatible clients from SystemConfigs: generate / embed / rerank
@@ -104,7 +104,7 @@ polytech_ai_tp/
 │   │       ├── auth.py              # POST /api/auth/signup, /api/auth/login
 │   │       ├── admin.py             # /api/admin/* — calls services, no ownership checks
 │   │       ├── teacher.py           # /api/teacher/* — ownership-checked (+ documents: upload, list, chunks, exercises)
-│   │       ├── student.py           # /api/student/* — join, sessions (no delete)
+│   │       ├── student.py           # /api/student/* — join, sessions (soft-delete = hide, retained for audit)
 │   │       └── chat.py              # POST /api/chat/stream (LangGraph agent + SSE)
 │   ├── worker/                      # [v7] Off-peak ingestion worker
 │   │   ├── __init__.py
@@ -230,7 +230,7 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 | user_id | FK | → Users.id |
 | lab_id | FK | → Labs.id. Sessions are tightly scoped to a specific lab |
 | title | String | Optional display name, renameable by student |
-| is_deleted | Boolean | Default: False. **Only admin/teacher can set True.** |
+| is_deleted | Boolean | Default: False. A **student soft-delete** sets this True (the session is hidden from the student but retained and visible to teacher/admin audit). Teacher/admin can also set it; only admin hard-deletes. |
 | created_at | Timestamp | Timezone-aware (UTC) |
 
 ### 8. Messages & Usage Stats
@@ -410,7 +410,7 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | DELETE | `/api/teacher/labs/{lab_id}` | require_teacher | Soft-delete a Lab (ownership enforced). |
 | GET | `/api/teacher/rules` | require_teacher | Get existing rules. Filters: `?level=X&target_id=Y` |
 | PUT | `/api/teacher/rules` | require_teacher | Create/Update Rules (Class / Lab / Student level; `skill.md` = class level). |
-| GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W` |
+| GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W`. **Includes student soft-deleted sessions** (each row carries `is_deleted` so the UI can flag the hidden ones). |
 | GET | `/api/teacher/analytics/classes/{class_id}` | require_teacher | Hierarchical token usage: class → lab → student breakdown. |
 | POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] Upload a **PDF** course document. Multipart form **requires `doc_type` (CM/TD/TP) + `audience` (student/teacher)** → stored in volume + enqueued for ingestion. |
 | GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] List documents + status (`pending/processing/indexed/failed/needs_review`) + summary (pages / chunks / exercises) + warnings. |
@@ -420,8 +420,10 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 
 ### C. Student Flow (Session & Chat)
 
-> **Audit Integrity Rule:** Students CANNOT delete their own sessions.
-> All sessions are permanently retained for teacher audit. Only admin can purge sessions.
+> **Audit Integrity Rule:** A student "delete" is a **soft delete** — it sets `is_deleted=True`,
+> hiding the session from the student's own views, but the session is permanently retained and
+> stays fully visible to teacher/admin audit (flagged as deleted). Students can never purge data;
+> only admin can hard-delete a session.
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
@@ -433,6 +435,7 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | GET | `/api/student/sessions` | get_current_user | List own sessions (optional `?lab_id=` filter). |
 | GET | `/api/student/sessions/{session_id}` | get_current_user | Fetch message history. **IDOR check required.** |
 | PUT | `/api/student/sessions/{session_id}` | get_current_user | Rename a chat session title (cosmetic only). |
+| DELETE | `/api/student/sessions/{session_id}` | get_current_user | **Soft-delete (hide)** own session: sets `is_deleted=True`. Hidden from the student; retained and teacher/admin-visible. **IDOR check required.** |
 | GET | `/api/student/usage` | get_current_user | Today's token usage vs. daily quota. |
 | POST | `/api/chat/stream` | get_current_user | Core chat endpoint. Scoped by `session_id`. LangGraph agent, SSE streaming. |
 
