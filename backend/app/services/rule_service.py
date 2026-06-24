@@ -58,32 +58,35 @@ async def list_rules(
     return list(result.scalars().all())
 
 
-async def get_active_rules_for_session(
+async def get_active_rule_texts(
     db: AsyncSession,
-    class_id: uuid.UUID,
-    lab_id: uuid.UUID,
-    student_id: uuid.UUID,
-) -> list[Rule]:
+    class_id: uuid.UUID | None,
+    lab_id: uuid.UUID | None,
+    user_id: uuid.UUID,
+) -> dict[str, str | None]:
+    """Return the active Class/Lab/Student rule texts (or None) for prompt assembly.
+
+    Used by the chat agent's synthesize node, which injects the three tiers in
+    Class → Lab → Student order. A tier whose target id is None (e.g. a session
+    with no lab) is skipped.
     """
-    Fetch all active rules for a chat session in order:
-    Class-level → Lab-level → Student-level.
-    Used by chat.py to build the system prompt.
-    """
-    result = await db.execute(
-        select(Rule).where(
-            Rule.is_active.is_(True),
-            Rule.target_id.in_([class_id, lab_id, student_id]),
+    out: dict[str, str | None] = {"class_rules": None, "lab_rules": None, "student_rules": None}
+    targets = [
+        ("class_rules", RuleLevel.class_, class_id),
+        ("lab_rules", RuleLevel.lab, lab_id),
+        ("student_rules", RuleLevel.student, user_id),
+    ]
+    for key, level, target_id in targets:
+        if target_id is None:
+            continue
+        result = await db.execute(
+            select(Rule).where(
+                Rule.level == level,
+                Rule.target_id == target_id,
+                Rule.is_active.is_(True),
+            )
         )
-    )
-    all_rules = result.scalars().all()
-
-    # Enforce correct injection order
-    level_order = {RuleLevel.class_: 0, RuleLevel.lab: 1, RuleLevel.student: 2}
-    target_map = {class_id: RuleLevel.class_, lab_id: RuleLevel.lab, student_id: RuleLevel.student}
-
-    def rule_sort_key(r: Rule) -> int:
-        # Match rule to its level by target_id
-        matched_level = target_map.get(r.target_id, RuleLevel.student)
-        return level_order.get(matched_level, 99)
-
-    return sorted(all_rules, key=rule_sort_key)
+        rule = result.scalar_one_or_none()
+        if rule:
+            out[key] = rule.rules_text
+    return out

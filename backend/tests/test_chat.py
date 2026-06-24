@@ -285,13 +285,17 @@ class TestRuleInjection:
         db_session.add(seed_chat["rule_lab"])
         await db_session.commit()
 
-        from backend.app.routers.chat import _build_system_prompt
-        prompt = await _build_system_prompt(
+        from backend.app.agent.prompt import build_system_prompt
+        from backend.app.services.rule_service import get_active_rule_texts
+
+        rule_texts = await get_active_rule_texts(
             db_session,
-            class_id=str(seed_chat["class"].id),
-            lab_id=str(seed_chat["lab"].id),
-            user_id=str(seed_chat["student1"].id),
+            class_id=seed_chat["class"].id,
+            lab_id=seed_chat["lab"].id,
+            user_id=seed_chat["student1"].id,
         )
+        assert rule_texts["lab_rules"] is None  # inactive rule excluded by the query
+        prompt = build_system_prompt(**rule_texts)
         assert "Lab: Focus on physics." not in prompt
         assert "Class: Be educational." in prompt
         assert "Student: Speak French." in prompt

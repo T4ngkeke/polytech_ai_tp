@@ -1,8 +1,9 @@
 """
 routers/student.py — Student session management, class-joining, and self-service endpoints.
 
-Audit rule: Students CANNOT delete their own sessions.
-All sessions are permanently retained for teacher/admin audit.
+Audit rule: a student "delete" is a SOFT delete (is_deleted=True). The session is
+hidden from the student (their list/reads exclude it), but it is permanently retained
+and fully visible to teacher/admin audit, flagged as deleted. Only admin can hard-delete.
 
 Endpoints
 ---------
@@ -14,6 +15,7 @@ POST   /api/student/labs/{lab_id}/sessions     →  Create a session scoped to a
 GET    /api/student/sessions                   →  List own active sessions (optional lab filter).
 GET    /api/student/sessions/{session_id}      →  Fetch message history (IDOR check required).
 PUT    /api/student/sessions/{session_id}      →  Rename session title (cosmetic, no audit impact).
+DELETE /api/student/sessions/{session_id}      →  Soft-delete (hide) own session; retained for audit.
 GET    /api/student/usage                      →  Daily token usage stats.
 """
 
@@ -23,11 +25,10 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from backend.app.auth import get_current_user
 from backend.app.database import get_db
-from backend.app.models import Class, ClassStudent, Lab, Session, User, UsageStat
+from backend.app.models import Class, ClassStudent, Lab, User, UsageStat
 from backend.app.schemas import (
     ClassResponse,
     JoinClassRequest,
@@ -38,6 +39,7 @@ from backend.app.schemas import (
     SessionUpdateRequest,
     SessionWithMessagesResponse,
 )
+from backend.app.services import session_service
 
 router = APIRouter(prefix="/api/student", tags=["student"])
 
@@ -200,14 +202,9 @@ async def create_session_in_lab(
             detail="You are not a member of the class that owns this lab",
         )
 
-    session = Session(
-        user_id=current_user.id,
-        lab_id=lab_id,
-        title=body.title,
+    session = await session_service.create_session(
+        db, user_id=current_user.id, lab_id=lab_id, title=body.title
     )
-    db.add(session)
-    await db.flush()
-    await db.refresh(session)
     return SessionResponse.model_validate(session)
 
 
@@ -223,20 +220,9 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionResponse]:
     """Return all non-deleted sessions belonging to the authenticated user."""
-    query = (
-        select(Session)
-        .where(
-            Session.user_id == current_user.id,
-            Session.is_deleted.is_(False),
-        )
+    sessions = await session_service.list_sessions_for_student(
+        db, user_id=current_user.id, lab_id=lab_id
     )
-
-    if lab_id is not None:
-        query = query.where(Session.lab_id == lab_id)
-
-    query = query.order_by(Session.created_at.desc())
-    result = await db.execute(query)
-    sessions = result.scalars().all()
     return [SessionResponse.model_validate(s) for s in sessions]
 
 
@@ -260,23 +246,20 @@ async def get_session(
     IDOR check: verify that session.user_id == current_user.id before
     returning any data. Returns 403 if the session belongs to another user.
     """
-    result = await db.execute(
-        select(Session)
-        .where(Session.id == session_id)
-        .options(selectinload(Session.messages))
-    )
-    session = result.scalar_one_or_none()
-
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
+    session = await session_service.get_session_with_messages(db, session_id)
 
     if session.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this session",
+        )
+
+    # A session the student soft-deleted is hidden from them (the "deleted" illusion);
+    # it remains retained and visible to teacher/admin audit.
+    if session.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
         )
 
     return SessionWithMessagesResponse.model_validate(session)
@@ -351,24 +334,45 @@ async def update_session_title(
     db: AsyncSession = Depends(get_db),
 ) -> SessionResponse:
     """Update the title of a session owned by the authenticated user."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
+    session = await session_service.get_session_by_id(db, session_id)
     if session.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to modify this session",
         )
+    if session.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
 
-    session.title = body.title
-    db.add(session)
-    await db.flush()
-    await db.refresh(session)
+    session = await session_service.rename_session(db, session, body.title)
     return SessionResponse.model_validate(session)
+
+
+# ===================================================================
+# DELETE /api/student/sessions/{session_id}
+# ===================================================================
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def soft_delete_own_session(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Soft-delete (hide) the student's own session.
+
+    Sets is_deleted=True: the session disappears from the student's own views, but is
+    permanently retained and remains fully visible to teacher/admin audit (flagged as
+    deleted). Only admin can hard-delete. Idempotent on an already-hidden session.
+    """
+    session = await session_service.get_session_by_id(db, session_id)
+    if session.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this session",
+        )
+    await session_service.soft_delete_session(db, session)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 

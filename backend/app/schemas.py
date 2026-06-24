@@ -384,6 +384,16 @@ class StudentUsageSummary(BaseModel):
     tokens_used: int
     request_count: int
 
+    @classmethod
+    def from_analytics(cls, s) -> "StudentUsageSummary":
+        """Build from an analytics_service.StudentUsage dataclass."""
+        return cls(
+            user_id=s.user_id,
+            username=s.username,
+            tokens_used=s.tokens_used,
+            request_count=s.request_count,
+        )
+
 
 class LabUsageSummary(BaseModel):
     """Per-lab analytics with student-level breakdown."""
@@ -393,6 +403,17 @@ class LabUsageSummary(BaseModel):
     requests: int
     students: list[StudentUsageSummary] = []
 
+    @classmethod
+    def from_analytics(cls, lab) -> "LabUsageSummary":
+        """Build from an analytics_service.LabUsage dataclass."""
+        return cls(
+            lab_id=lab.lab_id,
+            lab_name=lab.lab_name,
+            tokens=lab.tokens,
+            requests=lab.requests,
+            students=[StudentUsageSummary.from_analytics(s) for s in lab.students],
+        )
+
 
 class ClassAnalyticsResponse(BaseModel):
     """Hierarchical class analytics: class → lab → student."""
@@ -401,6 +422,17 @@ class ClassAnalyticsResponse(BaseModel):
     total_tokens: int
     total_requests: int
     labs: list[LabUsageSummary] = []
+
+    @classmethod
+    def from_analytics(cls, result) -> "ClassAnalyticsResponse":
+        """Build from an analytics_service.ClassAnalytics dataclass."""
+        return cls(
+            class_id=result.class_id,
+            class_name=result.class_name,
+            total_tokens=result.total_tokens,
+            total_requests=result.total_requests,
+            labs=[LabUsageSummary.from_analytics(lab) for lab in result.labs],
+        )
 
 
 # ---------------------------------------------------------------------------

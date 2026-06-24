@@ -311,3 +311,54 @@ class TestUpdateSessionTitle:
         assert resp.status_code == 404
 
 
+class TestSoftDeleteOwnSession:
+    """A student 'delete' is a soft-delete: hidden from the student, retained for audit."""
+
+    async def test_delete_returns_204_and_sets_flag(
+            self, client_s1, seed_data, db_session):
+        sid = seed_data["session"].id
+        resp = await client_s1.delete(f"/api/student/sessions/{sid}")
+        assert resp.status_code == 204
+        await db_session.refresh(seed_data["session"])
+        assert seed_data["session"].is_deleted is True  # retained, not purged
+
+    async def test_hidden_from_student_list_after_delete(self, client_s1, seed_data):
+        sid = seed_data["session"].id
+        await client_s1.delete(f"/api/student/sessions/{sid}")
+        resp = await client_s1.get("/api/student/sessions")
+        assert resp.status_code == 200
+        assert all(s["id"] != str(sid) for s in resp.json())
+
+    async def test_get_own_deleted_session_404(self, client_s1, seed_data):
+        sid = seed_data["session"].id
+        await client_s1.delete(f"/api/student/sessions/{sid}")
+        resp = await client_s1.get(f"/api/student/sessions/{sid}")
+        assert resp.status_code == 404
+
+    async def test_idor_cannot_delete_others_session_403(self, client_s2, seed_data):
+        resp = await client_s2.delete(
+            f"/api/student/sessions/{seed_data['session'].id}")
+        assert resp.status_code == 403
+
+    async def test_nonexistent_404(self, client_s1):
+        resp = await client_s1.delete(f"/api/student/sessions/{uuid.uuid4()}")
+        assert resp.status_code == 404
+
+    async def test_teacher_audit_still_sees_deleted_session_flagged(
+            self, client_s1, seed_data, db_session):
+        """After the student hides it, teacher audit still sees it, flagged is_deleted."""
+        sid = seed_data["session"].id
+        await client_s1.delete(f"/api/student/sessions/{sid}")
+
+        token = create_access_token(seed_data["teacher"].id)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test",
+                               headers={"Authorization": f"Bearer {token}"}) as tc:
+            resp = await tc.get(f"/api/teacher/chat-history?session_id={sid}")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 1
+        assert rows[0]["id"] == str(sid)
+        assert rows[0]["is_deleted"] is True
+
+

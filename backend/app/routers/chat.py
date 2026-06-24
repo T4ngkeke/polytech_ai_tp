@@ -50,8 +50,6 @@ from backend.app.models import (
     ClassStudent,
     Lab,
     Message,
-    Rule,
-    RuleLevel,
     SenderType,
     Session,
     SystemConfig,
@@ -59,6 +57,7 @@ from backend.app.models import (
     User,
 )
 from backend.app.schemas import ChatStreamRequest
+from backend.app.services import rule_service
 
 logger = logging.getLogger(__name__)
 
@@ -95,37 +94,6 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "rerank_model": configs.get("RERANK_MODEL", "bge-reranker-v2-m3"),
         "rag_max_retries": configs.get("RAG_MAX_RETRIES", "1"),
     }
-
-
-# ---------------------------------------------------------------------------
-# Helper: fetch active rule texts per tier (for the agent synthesize node)
-# ---------------------------------------------------------------------------
-
-async def _fetch_rule_texts(
-    db: AsyncSession,
-    class_id,
-    lab_id,
-    user_id,
-) -> dict[str, str | None]:
-    """Return active Class/Lab/Student rule texts (or None) for prompt assembly."""
-    out: dict[str, str | None] = {"class_rules": None, "lab_rules": None, "student_rules": None}
-    targets = [("class_rules", RuleLevel.class_, class_id),
-               ("lab_rules", RuleLevel.lab, lab_id),
-               ("student_rules", RuleLevel.student, user_id)]
-    for key, level, target_id in targets:
-        if target_id is None:
-            continue
-        result = await db.execute(
-            select(Rule).where(
-                Rule.level == level,
-                Rule.target_id == target_id,
-                Rule.is_active.is_(True),
-            )
-        )
-        rule = result.scalar_one_or_none()
-        if rule:
-            out[key] = rule.rules_text
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -210,49 +178,6 @@ def _make_rewrite_fn(llm_config: dict[str, str]):
         )
         return (resp.choices[0].message.content or query).strip()
     return rewrite
-
-
-# ---------------------------------------------------------------------------
-# Helper: Build 3-tier system prompt
-# ---------------------------------------------------------------------------
-
-async def _build_system_prompt(
-    db: AsyncSession,
-    class_id: str | None,
-    lab_id: str | None,
-    user_id: str,
-) -> str:
-    """
-    Assemble the Master System Prompt from three rule tiers:
-    Class → Lab → Student (concatenated sequentially).
-    """
-    base_prompt = "You are a helpful AI assistant for an educational platform."
-    rule_parts: list[str] = []
-
-    # Collect target IDs and their levels
-    targets = []
-    if class_id:
-        targets.append((RuleLevel.class_, class_id))
-    if lab_id:
-        targets.append((RuleLevel.lab, lab_id))
-    targets.append((RuleLevel.student, user_id))
-
-    for level, target_id in targets:
-        result = await db.execute(
-            select(Rule).where(
-                Rule.level == level,
-                Rule.target_id == target_id,
-                Rule.is_active.is_(True),
-            )
-        )
-        rule = result.scalar_one_or_none()
-        if rule:
-            label = level.value.upper()
-            rule_parts.append(f"[{label} RULES]\n{rule.rules_text}")
-
-    if rule_parts:
-        return base_prompt + "\n\n" + "\n\n".join(rule_parts)
-    return base_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +340,7 @@ async def chat_stream(
         for m in last_messages
     ]
 
-    rule_texts = await _fetch_rule_texts(db, class_id, lab_id, current_user.id)
+    rule_texts = await rule_service.get_active_rule_texts(db, class_id, lab_id, current_user.id)
 
     agent = build_agent(
         db,

@@ -48,7 +48,6 @@ from backend.app.schemas import (
     LabCreate,
     LabResponse,
     LabUpdateRequest,
-    LabUsageSummary,
     ChunkResponse,
     DocExerciseResponse,
     DocumentResponse,
@@ -57,7 +56,6 @@ from backend.app.schemas import (
     RuleUpsertRequest,
     SessionWithMessagesResponse,
     StudentSummaryResponse,
-    StudentUsageSummary,
 )
 from backend.app.services import (
     class_service,
@@ -73,6 +71,37 @@ router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 def get_storage_root() -> str:
     """Storage root for uploaded documents (overridable in tests)."""
     return settings.DOCUMENTS_STORAGE_ROOT
+
+
+async def _verify_class_ownership(db: AsyncSession, class_id: uuid.UUID, teacher: User) -> Class:
+    """Fetch a class (404 if missing) and assert the teacher owns it (403 otherwise)."""
+    cls = await class_service.get_class_by_id(db, class_id)
+    if cls.teacher_id != teacher.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    return cls
+
+
+async def _build_student_summaries(
+    db: AsyncSession, students: list[User]
+) -> list[StudentSummaryResponse]:
+    """Attach today's token usage to each student (per-student lookup)."""
+    today = date.today()
+    summaries: list[StudentSummaryResponse] = []
+    for student in students:
+        usage_result = await db.execute(
+            select(UsageStat).where(UsageStat.user_id == student.id, UsageStat.date == today)
+        )
+        usage = usage_result.scalar_one_or_none()
+        summaries.append(
+            StudentSummaryResponse(
+                id=student.id,
+                username=student.username,
+                daily_token_quota=student.daily_token_quota,
+                tokens_used_today=usage.tokens_used if usage else 0,
+                request_count_today=usage.request_count if usage else 0,
+            )
+        )
+    return summaries
 
 
 # ===================================================================
@@ -119,10 +148,7 @@ async def create_lab(
     db: AsyncSession = Depends(get_db),
 ) -> LabResponse:
     """Create a new lab within a class the teacher owns."""
-    # Ownership check
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    await _verify_class_ownership(db, class_id, teacher)
     lab = await lab_service.create_lab(db, class_id=class_id, name=body.name)
     return LabResponse.model_validate(lab)
 
@@ -139,9 +165,7 @@ async def list_labs(
     db: AsyncSession = Depends(get_db),
 ) -> list[LabResponse]:
     """List all labs for a class owned by the teacher."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    await _verify_class_ownership(db, class_id, teacher)
     labs = await lab_service.list_labs_for_class(db, class_id=class_id)
     return [LabResponse.model_validate(l) for l in labs]
 
@@ -310,10 +334,14 @@ async def get_chat_history(
     _teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionWithMessagesResponse]:
-    """Fetch chat sessions and messages with flexible filters for audit."""
+    """Fetch chat sessions and messages with flexible filters for audit.
+
+    Includes student soft-deleted sessions (is_deleted=True): audit sees everything,
+    and the `is_deleted` flag on each row lets the UI mark the hidden ones. Only an
+    admin hard-delete actually removes a session.
+    """
     query = (
         select(Session)
-        .where(Session.is_deleted.is_(False))
         .options(selectinload(Session.messages))
     )
 
@@ -351,28 +379,11 @@ async def list_students(
     db: AsyncSession = Depends(get_db),
 ) -> list[StudentSummaryResponse]:
     """List active students with their current daily token consumption."""
-    today = date.today()
     result = await db.execute(
         select(User).where(User.role == UserRole.student, User.is_deleted.is_(False))
     )
     students = result.scalars().all()
-
-    summaries = []
-    for student in students:
-        usage_result = await db.execute(
-            select(UsageStat).where(UsageStat.user_id == student.id, UsageStat.date == today)
-        )
-        usage = usage_result.scalar_one_or_none()
-        summaries.append(
-            StudentSummaryResponse(
-                id=student.id,
-                username=student.username,
-                daily_token_quota=student.daily_token_quota,
-                tokens_used_today=usage.tokens_used if usage else 0,
-                request_count_today=usage.request_count if usage else 0,
-            )
-        )
-    return summaries
+    return await _build_student_summaries(db, students)
 
 
 # ===================================================================
@@ -387,12 +398,7 @@ async def list_class_students(
     db: AsyncSession = Depends(get_db),
 ) -> list[StudentSummaryResponse]:
     """List active students enrolled in a specific class."""
-    # Ownership check
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-
-    today = date.today()
+    await _verify_class_ownership(db, class_id, teacher)
     result = await db.execute(
         select(User)
         .join(ClassStudent, ClassStudent.student_id == User.id)
@@ -403,23 +409,7 @@ async def list_class_students(
         )
     )
     students = result.scalars().all()
-
-    summaries = []
-    for student in students:
-        usage_result = await db.execute(
-            select(UsageStat).where(UsageStat.user_id == student.id, UsageStat.date == today)
-        )
-        usage = usage_result.scalar_one_or_none()
-        summaries.append(
-            StudentSummaryResponse(
-                id=student.id,
-                username=student.username,
-                daily_token_quota=student.daily_token_quota,
-                tokens_used_today=usage.tokens_used if usage else 0,
-                request_count_today=usage.request_count if usage else 0,
-            )
-        )
-    return summaries
+    return await _build_student_summaries(db, students)
 
 
 # ===================================================================
@@ -435,9 +425,7 @@ async def unenroll_student(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Remove a student from a class (ownership enforced)."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    await _verify_class_ownership(db, class_id, teacher)
     await class_service.kick_student(db, class_id=class_id, student_id=student_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -454,9 +442,7 @@ async def reset_invite_code(
     db: AsyncSession = Depends(get_db),
 ) -> InviteCodeResponse:
     """Generate and save a new 6-character invite code for a class."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    cls = await _verify_class_ownership(db, class_id, teacher)
     code = await class_service.reset_invite_code(db, cls)
     return InviteCodeResponse(invite_code=code)
 
@@ -474,9 +460,7 @@ async def update_class(
     db: AsyncSession = Depends(get_db),
 ) -> ClassResponse:
     """Rename a class (ownership enforced)."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    cls = await _verify_class_ownership(db, class_id, teacher)
     cls = await class_service.rename_class(db, cls, name=body.name)
     return ClassResponse.model_validate(cls)
 
@@ -493,9 +477,7 @@ async def soft_delete_class(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Soft-delete a class (ownership enforced)."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    cls = await _verify_class_ownership(db, class_id, teacher)
     await class_service.soft_delete_class(db, cls)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -549,33 +531,6 @@ async def get_class_analytics(
     db: AsyncSession = Depends(get_db),
 ) -> ClassAnalyticsResponse:
     """Hierarchical token usage: class → lab → student breakdown."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    if cls.teacher_id != teacher.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-
+    cls = await _verify_class_ownership(db, class_id, teacher)
     result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
-
-    return ClassAnalyticsResponse(
-        class_id=result.class_id,
-        class_name=result.class_name,
-        total_tokens=result.total_tokens,
-        total_requests=result.total_requests,
-        labs=[
-            LabUsageSummary(
-                lab_id=lab.lab_id,
-                lab_name=lab.lab_name,
-                tokens=lab.tokens,
-                requests=lab.requests,
-                students=[
-                    StudentUsageSummary(
-                        user_id=s.user_id,
-                        username=s.username,
-                        tokens_used=s.tokens_used,
-                        request_count=s.request_count,
-                    )
-                    for s in lab.students
-                ],
-            )
-            for lab in result.labs
-        ],
-    )
+    return ClassAnalyticsResponse.from_analytics(result)

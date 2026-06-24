@@ -45,12 +45,10 @@ from backend.app.schemas import (
     CSVImportPreviewResponse,
     DailyUsage,
     LabResponse,
-    LabUsageSummary,
     LLMConfigRequest,
     LLMConfigResponse,
     PruneRequest,
     PruneResponse,
-    StudentUsageSummary,
     TransferClassRequest,
     UpdateQuotaRequest,
     UpdateRoleRequest,
@@ -60,6 +58,19 @@ from backend.app.schemas import (
 from backend.app.services import class_service, lab_service, analytics_service
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+async def _get_active_user_or_404(
+    db: AsyncSession, user_id: uuid.UUID, detail: str = "User not found"
+) -> User:
+    """Fetch a non-deleted user by id or raise 404."""
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.is_deleted.is_(False))
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return user
 
 
 # ===================================================================
@@ -121,10 +132,7 @@ async def update_quota(
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Update the daily token quota for a user."""
-    result = await db.execute(select(User).where(User.id == user_id, User.is_deleted.is_(False)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = await _get_active_user_or_404(db, user_id)
     user.daily_token_quota = body.daily_token_quota
     db.add(user)
     await db.flush()
@@ -145,10 +153,7 @@ async def update_role(
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Change a user's role."""
-    result = await db.execute(select(User).where(User.id == user_id, User.is_deleted.is_(False)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = await _get_active_user_or_404(db, user_id)
     user.role = body.role
     db.add(user)
     await db.flush()
@@ -168,10 +173,7 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Soft-delete a user."""
-    result = await db.execute(select(User).where(User.id == user_id, User.is_deleted.is_(False)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or already deleted")
+    user = await _get_active_user_or_404(db, user_id, detail="User not found or already deleted")
     user.is_deleted = True
     db.add(user)
     await db.flush()
@@ -464,31 +466,7 @@ async def get_class_analytics(
     """Per-class hierarchical analytics (class→lab→student). No ownership check."""
     cls = await class_service.get_class_by_id(db, class_id)
     result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
-
-    return ClassAnalyticsResponse(
-        class_id=result.class_id,
-        class_name=result.class_name,
-        total_tokens=result.total_tokens,
-        total_requests=result.total_requests,
-        labs=[
-            LabUsageSummary(
-                lab_id=lab.lab_id,
-                lab_name=lab.lab_name,
-                tokens=lab.tokens,
-                requests=lab.requests,
-                students=[
-                    StudentUsageSummary(
-                        user_id=s.user_id,
-                        username=s.username,
-                        tokens_used=s.tokens_used,
-                        request_count=s.request_count,
-                    )
-                    for s in lab.students
-                ],
-            )
-            for lab in result.labs
-        ],
-    )
+    return ClassAnalyticsResponse.from_analytics(result)
 
 
 # ===================================================================

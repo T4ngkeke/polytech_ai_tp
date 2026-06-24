@@ -8,3 +8,5 @@ __pycache__
 .pytest_cache
 backend/.env
 .DS_Store
+.claude
+docs/
