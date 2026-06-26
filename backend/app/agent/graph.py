@@ -22,13 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.agent.effort import assess_effort
 from backend.app.agent.lazy import detect_answer_seeking
 from backend.app.agent.prompt import build_system_prompt
-from backend.app.agent.router import build_embedding_router
+from backend.app.agent.router import build_embedding_router, looks_like_exercise
 from backend.app.agent.selfeval import GradeFn, RewriteFn, run_self_eval_loop
 from backend.app.models import Audience, CoachingLevel
 from backend.app.services import learner_service, router_service
 from backend.app.services.retrieval_service import RerankFn, hybrid_search, search_exercises
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
+# [v7.2] Resolves an exercise-shaped query to its number via a cheap ROUTER_MODEL.
+ExerciseExtractFn = Callable[[str], Awaitable[int | None]]
 
 # Default router kNN confidence threshold (overridden by ROUTER_KNN_THRESHOLD config).
 DEFAULT_ROUTER_THRESHOLD = 0.35
@@ -81,6 +83,7 @@ def build_agent(
     rerank_fn: RerankFn | None = None,
     grade_fn: GradeFn | None = None,
     rewrite_fn: RewriteFn | None = None,
+    exercise_extract_fn: ExerciseExtractFn | None = None,
     max_retries: int = 1,
 ):
     """Compile the chat agent graph bound to a DB session + query embedder."""
@@ -106,6 +109,20 @@ def build_agent(
             embed_fn, router_threshold, embedding_model=embedding_model,
         )
         decision = router.route(state["message"], query_embedding)
+
+        # [v7.2] LLM exercise-number fallback: the deterministic regex runs first
+        # (zero latency when it hits). Only when it missed *and* the query is
+        # exercise-shaped (Roman / Chinese / implicit) do we ask the cheap
+        # ROUTER_MODEL to resolve the number; a hit reroutes to agentic_search.
+        if (
+            decision.route != "agentic_search"
+            and exercise_extract_fn is not None
+            and looks_like_exercise(state["message"])
+        ):
+            number = await exercise_extract_fn(state["message"])
+            if number is not None:
+                return {"route": "agentic_search", "query_embedding": query_embedding}
+
         if decision.low_confidence:
             await router_service.log_low_confidence_query(
                 db,

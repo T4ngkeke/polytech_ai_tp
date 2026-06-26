@@ -14,7 +14,29 @@ from backend.app.agent.router import (
     INTENT_EXEMPLARS,
     EmbeddingRouter,
     build_embedding_router,
+    looks_like_exercise,
 )
+
+
+# [v7.2] looks_like_exercise gates the LLM fallback: it is exercise-shaped but the
+# strict keyword+digit fast-path missed (Roman / Chinese / implicit phrasing).
+@pytest.mark.parametrize("message", [
+    "How do I start exercise II?",   # roman, no arabic digit
+    "je bloque sur l'exercice III",  # FR + roman
+    "练习三怎么做",                    # zh keyword + zh numeral
+    "can you help with the exercise?",  # keyword, number implied
+])
+def test_looks_like_exercise_true_for_keyworded_without_digit(message):
+    assert looks_like_exercise(message) is True
+
+
+@pytest.mark.parametrize("message", [
+    "what is recursion?",
+    "hello there",
+    "explain how pointers work",
+])
+def test_looks_like_exercise_false_for_concept_or_chitchat(message):
+    assert looks_like_exercise(message) is False
 
 
 def _router(threshold: float = 0.5) -> EmbeddingRouter:

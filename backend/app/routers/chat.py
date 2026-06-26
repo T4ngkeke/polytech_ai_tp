@@ -245,6 +245,33 @@ def _make_rewrite_fn(llm_config: dict[str, str]):
     return rewrite
 
 
+def _make_exercise_extract_fn(llm_config: dict[str, str]):
+    """[v7.2] Resolve an exercise-shaped query to its number via the cheap
+    ROUTER_MODEL, then normalize deterministically. Returns None when the model
+    can't identify an exercise (so the graph keeps its kNN decision)."""
+    async def extract(message: str) -> int | None:  # pragma: no cover
+        client = AsyncOpenAI(
+            api_key=llm_config["router_api_key"],
+            base_url=llm_config["router_base_url"],
+        )
+        resp = await client.chat.completions.create(
+            model=llm_config["router_model"],
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Which exercise number is this message about? Reply with just the "
+                    "number/label (e.g. '2', 'II', '3.1'), or 'none' if it isn't about "
+                    "a specific exercise.\n\n"
+                    f"{message}"
+                ),
+            }],
+            max_tokens=8,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        return normalize_exercise_number(raw)
+    return extract
+
+
 # ---------------------------------------------------------------------------
 # Background task: save messages & usage stats
 # ---------------------------------------------------------------------------
@@ -424,6 +451,7 @@ async def chat_stream(
         rerank_fn=_make_rerank_fn(llm_config),
         grade_fn=_make_grade_fn(llm_config),
         rewrite_fn=_make_rewrite_fn(llm_config),
+        exercise_extract_fn=_make_exercise_extract_fn(llm_config),
         max_retries=int(llm_config["rag_max_retries"]),
     )
     agent_result = await agent.ainvoke({

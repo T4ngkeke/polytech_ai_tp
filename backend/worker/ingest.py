@@ -17,6 +17,7 @@ from typing import Awaitable, Callable
 from sqlalchemy import delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.agent.exercise_number import normalize_exercise_number
 from backend.app.models import DocChunk, Document, DocumentStatus, DocType, Exercise
 from backend.worker.chunking import chunk_pages
 from backend.worker.parsing import GateResult, character_yield_gate, extract_pdf_text
@@ -135,6 +136,7 @@ async def ingest_document(
                     class_id=doc.class_id,
                     lab_id=doc.lab_id,
                     number=ex["number"],
+                    number_normalized=normalize_exercise_number(ex["number"]),
                     statement=ex["statement"],
                     hints=ex.get("hints"),
                     concept=ex.get("concept"),

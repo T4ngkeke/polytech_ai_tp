@@ -109,6 +109,24 @@ async def test_td_ingest_extracts_statements_only(db_session, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_ingest_populates_normalized_exercise_number(db_session, tmp_path):
+    """[v7.2] The raw label is stored verbatim, but number_normalized carries the
+    canonical int so query-side matching is decoupled from the printed format."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD, body="x")
+
+    async def roman_extract(text):
+        return [{"number": "Exercice III", "statement": "Do the thing.", "hints": None}]
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=roman_extract)
+
+    ex = (await db_session.execute(
+        select(Exercise).where(Exercise.document_id == doc.id)
+    )).scalars().one()
+    assert ex.number == "Exercice III"   # raw label preserved
+    assert ex.number_normalized == 3      # canonical int
+
+
+@pytest.mark.asyncio
 async def test_contextual_retrieval_embeds_augmented_stores_original(db_session, tmp_path):
     doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM, body="lone slide fragment")
 

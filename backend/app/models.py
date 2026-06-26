@@ -625,6 +625,9 @@ class Exercise(Base):
     class_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False, index=True)
     lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
     number: Mapped[str] = mapped_column(String(64), nullable=False)
+    # [v7.2] Canonical integer derived from `number` (Roman/Arabic/3.1 → one int)
+    # via normalize_exercise_number. Decouples matching from the unstable label.
+    number_normalized: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     statement: Mapped[str] = mapped_column(Text, nullable=False)
     hints: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 🔴 v7.1 red line: there is NO solution column. The corrigé is not ingested or

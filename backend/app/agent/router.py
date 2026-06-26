@@ -23,6 +23,23 @@ _EXERCISE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# [v7.2] Exercise-shaped but without an arabic digit (Roman / Chinese numeral /
+# implicit phrasing). When the fast-path misses but this matches, the graph asks
+# a cheap ROUTER_MODEL to extract the intended exercise number.
+_EXERCISE_KEYWORD_RE = re.compile(
+    r"(exercise|exercice|exo\b|probl[eè]me|problem|练习|习题|题)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_exercise(message: str) -> bool:
+    """True if the message references an exercise but the strict digit fast-path
+    missed it — the trigger for the LLM exercise-number fallback."""
+    if _EXERCISE_RE.search(message):
+        return False  # already handled deterministically; no LLM needed
+    return bool(_EXERCISE_KEYWORD_RE.search(message))
+
+
 # Multilingual anchor exemplars per intent (zh/fr/en). Concept questions → rag;
 # chit-chat / meta / acknowledgements → direct. Kept short and resident.
 INTENT_EXEMPLARS: dict[str, list[str]] = {

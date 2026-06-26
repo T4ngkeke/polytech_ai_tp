@@ -133,6 +133,57 @@ async def test_low_confidence_query_is_logged(db_session):
 
 
 @pytest.mark.asyncio
+async def test_llm_fallback_routes_roman_exercise_to_agentic_search(db_session):
+    """[v7.2] Regex misses 'exercise II' (no digit), but it is exercise-shaped, so
+    the ROUTER_MODEL fallback extracts the number → route to agentic_search."""
+    async def fake_embed(texts):
+        return [[0.0, 1.0] for _ in texts]
+
+    calls: list[str] = []
+
+    async def fake_exercise_extract(message):
+        calls.append(message)
+        return 2  # the model resolves "exercise II" → 2
+
+    agent = build_agent(
+        db_session, embed_fn=fake_embed, router_threshold=0.5,
+        exercise_extract_fn=fake_exercise_extract,
+    )
+    result = await agent.ainvoke({
+        "message": "how do I start exercise II?",
+        "class_id": None, "lab_id": None, "user_id": uuid.uuid4(), "history": [],
+    })
+
+    assert result["route"] == "agentic_search"
+    assert calls == ["how do I start exercise II?"]
+
+
+@pytest.mark.asyncio
+async def test_llm_fallback_not_called_when_regex_hits(db_session):
+    """The deterministic fast-path keeps zero latency — no LLM call when it hits."""
+    async def fake_embed(texts):
+        return [[0.0, 1.0] for _ in texts]
+
+    calls: list[str] = []
+
+    async def fake_exercise_extract(message):
+        calls.append(message)
+        return 2
+
+    agent = build_agent(
+        db_session, embed_fn=fake_embed, router_threshold=0.5,
+        exercise_extract_fn=fake_exercise_extract,
+    )
+    result = await agent.ainvoke({
+        "message": "how do I do exercise 2?",
+        "class_id": None, "lab_id": None, "user_id": uuid.uuid4(), "history": [],
+    })
+
+    assert result["route"] == "agentic_search"
+    assert calls == []  # regex hit → no LLM fallback
+
+
+@pytest.mark.asyncio
 async def test_self_eval_bad_verdict_adds_low_evidence_disclaimer(pg_session):
     """A persistently-bad self-eval verdict raises the low-evidence disclaimer."""
     cls, lab, student = await _seed_lab_with_chunk(pg_session, "barely relevant note", at=1)
