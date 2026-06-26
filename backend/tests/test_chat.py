@@ -380,7 +380,9 @@ class TestStreamingAndBackgroundTask:
             select(UsageStat).where(UsageStat.user_id == seed_chat["student1"].id)
         )
         usage = usage_result.scalar_one()
-        assert usage.tokens_used == 15
+        # [v7.2] quota is charged on weighted billed tokens, not the raw sum:
+        # billed = prompt*0.2 + completion*1.0 = 10*0.2 + 5*1.0 = 7.
+        assert usage.tokens_used == 7
         assert usage.request_count == 1
 
     async def test_stream_emits_citations_and_done_events(

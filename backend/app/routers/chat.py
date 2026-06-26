@@ -60,6 +60,7 @@ from backend.app.models import (
 )
 from backend.app.schemas import ChatStreamRequest
 from backend.app.services import rule_service
+from backend.app.services.billing import compute_billed_tokens
 from backend.app.services.model_routing import resolve_model_routing
 
 logger = logging.getLogger(__name__)
@@ -255,12 +256,21 @@ async def save_chat_background_task(
     llm_message_content: str,
     prompt_tokens: int,
     completion_tokens: int,
+    token_alpha: float = 1.0,
+    token_beta: float = 1.0,
 ):
     """
     Background task to save messages and upsert usage stats.
     Uses its own DB session since the request session is already closed.
+
+    [v7.2] The per-message record keeps the *raw* prompt/completion/total counts,
+    but the quota (UsageStat.tokens_used) accumulates *billed* tokens — the
+    weighted sum that discounts cheaper prefill tokens.
     """
     total_tokens = prompt_tokens + completion_tokens
+    billed_tokens = compute_billed_tokens(
+        prompt_tokens, completion_tokens, alpha=token_alpha, beta=token_beta
+    )
 
     async with AsyncSessionLocal() as db:
         try:
@@ -294,13 +304,13 @@ async def save_chat_background_task(
             stmt = insert(UsageStat).values(
                 user_id=user_id,
                 date=today,
-                tokens_used=total_tokens,
+                tokens_used=billed_tokens,
                 request_count=1,
             )
             stmt = stmt.on_conflict_do_update(
                 index_elements=["user_id", "date"],
                 set_={
-                    "tokens_used": UsageStat.tokens_used + total_tokens,
+                    "tokens_used": UsageStat.tokens_used + billed_tokens,
                     "request_count": UsageStat.request_count + 1,
                 },
             )
@@ -504,6 +514,8 @@ async def chat_stream(
                 llm_message_content=stream_results["content"],
                 prompt_tokens=pt,
                 completion_tokens=ct,
+                token_alpha=float(llm_config["token_alpha"]),
+                token_beta=float(llm_config["token_beta"]),
             )
 
     return StreamingResponse(
