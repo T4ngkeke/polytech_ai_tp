@@ -286,6 +286,30 @@ class RuleResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# [v7.2] Skill presets (instructor-style library)
+# ---------------------------------------------------------------------------
+
+
+class SkillPresetUpsertRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1)
+
+
+class SkillPresetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    content: str
+
+
+class ApplySkillRequest(BaseModel):
+    """Apply a preset (by id) or ad-hoc raw content to a class's skill rule."""
+    preset_id: uuid.UUID | None = None
+    content: str | None = None
+
+
+# ---------------------------------------------------------------------------
 # UsageStat
 # ---------------------------------------------------------------------------
 

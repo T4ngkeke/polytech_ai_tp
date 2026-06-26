@@ -37,7 +37,7 @@ from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    Audience, Class, ClassStudent, DocType, Lab, Session, UsageStat, User, UserRole,
+    Audience, Class, ClassStudent, DocType, Lab, RuleLevel, Session, UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
     ClassAnalyticsResponse,
@@ -52,9 +52,12 @@ from backend.app.schemas import (
     DocExerciseResponse,
     DocumentResponse,
     DocumentSummaryResponse,
+    ApplySkillRequest,
     RuleResponse,
     RuleUpsertRequest,
     SessionWithMessagesResponse,
+    SkillPresetResponse,
+    SkillPresetUpsertRequest,
     StudentSummaryResponse,
 )
 from backend.app.services import (
@@ -62,6 +65,7 @@ from backend.app.services import (
     document_service,
     lab_service,
     rule_service,
+    skill_preset_service,
     analytics_service,
 )
 
@@ -318,6 +322,93 @@ async def list_rules(
     """List rules with optional level and target_id filters."""
     rules = await rule_service.list_rules(db, level=level, target_id=target_id)
     return [RuleResponse.model_validate(r) for r in rules]
+
+
+# ===================================================================
+# [v7.2] Skill presets — instructor-style library + apply-to-class
+# ===================================================================
+
+
+@router.get("/skill-presets", response_model=list[SkillPresetResponse])
+async def list_skill_presets(
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[SkillPresetResponse]:
+    presets = await skill_preset_service.list_presets(db, owner_teacher_id=teacher.id)
+    return [SkillPresetResponse.model_validate(p) for p in presets]
+
+
+@router.post("/skill-presets", response_model=SkillPresetResponse, status_code=201)
+async def create_skill_preset(
+    body: SkillPresetUpsertRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> SkillPresetResponse:
+    preset = await skill_preset_service.create_preset(
+        db, owner_teacher_id=teacher.id, name=body.name, content=body.content)
+    return SkillPresetResponse.model_validate(preset)
+
+
+@router.put("/skill-presets/{preset_id}", response_model=SkillPresetResponse)
+async def update_skill_preset(
+    preset_id: uuid.UUID,
+    body: SkillPresetUpsertRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> SkillPresetResponse:
+    try:
+        preset = await skill_preset_service.update_preset(
+            db, owner_teacher_id=teacher.id, preset_id=preset_id,
+            name=body.name, content=body.content)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preset not found")
+    except PermissionError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner")
+    return SkillPresetResponse.model_validate(preset)
+
+
+@router.delete("/skill-presets/{preset_id}", status_code=204)
+async def delete_skill_preset(
+    preset_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    try:
+        await skill_preset_service.delete_preset(
+            db, owner_teacher_id=teacher.id, preset_id=preset_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preset not found")
+    except PermissionError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/classes/{class_id}/skill", response_model=RuleResponse)
+async def apply_class_skill(
+    class_id: uuid.UUID,
+    body: ApplySkillRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> RuleResponse:
+    """Apply a preset (snapshot-copy) or ad-hoc content to a class's skill rule."""
+    await _verify_class_ownership(db, class_id, teacher)
+
+    if body.preset_id is not None:
+        try:
+            rule = await skill_preset_service.apply_preset_to_class(
+                db, owner_teacher_id=teacher.id, class_id=class_id, preset_id=body.preset_id)
+        except LookupError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preset not found")
+        except PermissionError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner")
+    elif body.content is not None:
+        rule = await rule_service.upsert_rule(
+            db, level=RuleLevel.class_, target_id=class_id, rules_text=body.content)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Provide preset_id or content")
+
+    return RuleResponse.model_validate(rule)
 
 
 # ===================================================================

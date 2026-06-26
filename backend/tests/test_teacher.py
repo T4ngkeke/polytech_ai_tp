@@ -461,3 +461,71 @@ class TestTeacherClassAnalytics:
         resp = await student_client.get(
             f"/api/teacher/analytics/classes/{seed_data['class'].id}")
         assert resp.status_code == 403
+
+
+# ===================================================================
+# [v7.2] Skill presets (library + apply-to-class)
+# ===================================================================
+
+class TestSkillPresets:
+    async def test_create_list_update_delete_preset(self, teacher_client):
+        created = await teacher_client.post("/api/teacher/skill-presets",
+                                            json={"name": "Socratic", "content": "Guide."})
+        assert created.status_code == 201
+        pid = created.json()["id"]
+
+        listed = await teacher_client.get("/api/teacher/skill-presets")
+        assert [p["name"] for p in listed.json()] == ["Socratic"]
+
+        updated = await teacher_client.put(f"/api/teacher/skill-presets/{pid}",
+                                           json={"name": "Socratic v2", "content": "Hint only."})
+        assert updated.status_code == 200
+        assert updated.json()["name"] == "Socratic v2"
+
+        deleted = await teacher_client.delete(f"/api/teacher/skill-presets/{pid}")
+        assert deleted.status_code == 204
+        assert (await teacher_client.get("/api/teacher/skill-presets")).json() == []
+
+    async def test_apply_preset_to_class_snapshots_rule(self, teacher_client, seed_data):
+        created = await teacher_client.post("/api/teacher/skill-presets",
+                                            json={"name": "P", "content": "BE SOCRATIC"})
+        pid = created.json()["id"]
+        class_id = seed_data["class"].id
+
+        resp = await teacher_client.post(f"/api/teacher/classes/{class_id}/skill",
+                                         json={"preset_id": pid})
+        assert resp.status_code == 200
+
+        rules = await teacher_client.get(
+            f"/api/teacher/rules?level=class&target_id={class_id}")
+        assert any(r["rules_text"] == "BE SOCRATIC" for r in rules.json())
+
+    async def test_apply_raw_content_to_class(self, teacher_client, seed_data):
+        class_id = seed_data["class"].id
+        resp = await teacher_client.post(f"/api/teacher/classes/{class_id}/skill",
+                                         json={"content": "AD HOC STYLE"})
+        assert resp.status_code == 200
+        rules = await teacher_client.get(
+            f"/api/teacher/rules?level=class&target_id={class_id}")
+        assert any(r["rules_text"] == "AD HOC STYLE" for r in rules.json())
+
+    async def test_student_cannot_create_preset_403(self, student_client):
+        resp = await student_client.post("/api/teacher/skill-presets",
+                                         json={"name": "x", "content": "y"})
+        assert resp.status_code == 403
+
+    async def test_apply_to_unowned_class_403(self, teacher_client, db_session):
+        # A class owned by a different teacher.
+        other = make_user(role=UserRole.teacher, username="other_t")
+        db_session.add(other)
+        await db_session.flush()
+        foreign = Class(name="Foreign", teacher_id=other.id, invite_code="ZZZ999")
+        db_session.add(foreign)
+        await db_session.commit()
+
+        created = await teacher_client.post("/api/teacher/skill-presets",
+                                            json={"name": "P", "content": "X"})
+        resp = await teacher_client.post(
+            f"/api/teacher/classes/{foreign.id}/skill",
+            json={"preset_id": created.json()["id"]})
+        assert resp.status_code == 403

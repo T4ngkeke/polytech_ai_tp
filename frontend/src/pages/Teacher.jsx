@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
+import SkillPresetManager from '../components/SkillPresetManager';
 
 const TABS_CLASS = ['Rules', 'Analytics'];
 // 'Documents' appended last so existing tab indices (0–4) stay stable.
@@ -308,7 +309,7 @@ export default function Teacher() {
 
             {/* Panel content */}
             <div className="flex-1 p-8 overflow-y-auto">
-              {level === 'class' && activeTab === 0 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule="" />}
+              {level === 'class' && activeTab === 0 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule="" showPresets />}
               {level === 'class' && activeTab === 1 && <AnalyticsPanel analytics={analytics} />}
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
@@ -413,13 +414,17 @@ function StudentsPanel({ students, onKick, onSetRule }) {
   );
 }
 
-function RulesPanel({ ruleText, setRuleText, ruleActive, setRuleActive, onSave, context, inheritedRule }) {
+function RulesPanel({ ruleText, setRuleText, ruleActive, setRuleActive, onSave, context, inheritedRule, showPresets }) {
   return (
     <div className="max-w-2xl space-y-4">
       <div>
         <h3 className="text-sm font-semibold text-cream mb-1">Prompt Rules</h3>
         <p className="text-xs text-cream-muted mb-4">Target: <span className="text-cyan font-mono">{context}</span></p>
       </div>
+
+      {showPresets && (
+        <SkillPresetManager currentText={ruleText} onUse={(content) => setRuleText(content)} />
+      )}
 
       {inheritedRule && (
         <div className="mb-4">

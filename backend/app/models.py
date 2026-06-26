@@ -375,6 +375,32 @@ class Rule(Base):
         return f"<Rule id={self.id} level={self.level} target={self.target_id} active={self.is_active}>"
 
 
+class SkillPreset(Base):
+    """[v7.2] A teacher's private, reusable instructor-style (`skill.md`) preset.
+
+    Applying one to a class snapshot-copies its `content` into that class's
+    `level=class` rule — the prompt-injection path is unchanged (it still reads
+    `rules`); this table is just a template library.
+    """
+    __tablename__ = "skill_presets"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    owner_teacher_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<SkillPreset id={self.id} name={self.name!r} owner={self.owner_teacher_id}>"
+
+
 # ---------------------------------------------------------------------------
 # 7. UsageStat
 # ---------------------------------------------------------------------------
