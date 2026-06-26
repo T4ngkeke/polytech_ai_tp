@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM v7.1 Agentic Class-Lab Architecture</title>
+    <title>Edu-LLM v7.2 Agentic Class-Lab Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -309,14 +309,16 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v7.1 — Agentic Class-Lab Architecture</div>
+            <div class="pill">Architecture v7.2 — Agentic Class-Lab Architecture</div>
             <h1>Edu-LLM: Agentic RAG, Hybrid Retrieval & Off-Peak Ingestion</h1>
             <p class="subtitle">The v6 foundation (3-tier RBAC, invite codes, hierarchical rule injection) plus a
-                LangGraph agent. v7.1 upgrades the retrieval core: PDF-only structured ingestion with
-                Contextual Retrieval, a multilingual embedding-kNN router, hybrid (vector + BM25) retrieval
-                with reranking, and a bounded LLM self-eval loop — all on a GPU-aware off-peak worker. Chat and
-                ingestion share one existing inference engine (vLLM/Ollama); the model is config-driven via
-                SystemConfigs, never hardcoded — swap any model that fits the box with zero downtime.</p>
+                LangGraph agent and the v7.1 retrieval core (PDF-only structured ingestion with Contextual
+                Retrieval, a multilingual embedding-kNN router, hybrid vector + BM25 retrieval with reranking,
+                a bounded LLM self-eval loop). <b>v7.2</b> adds a full config-driven model-routing table
+                (split a cheap off-peak ingestion / live router model from the expensive chat model),
+                cost-aware weighted-token quota, an LLM-assisted exercise-number fallback with canonical
+                normalization, per-teacher skill presets, section-scoped (length-safe) Contextual Retrieval,
+                and a markdown / code-highlight / KaTeX student chat UI — plus self-service password change.</p>
         </header>
 
         <div class="legend">
@@ -357,16 +359,16 @@
                 R_Teacher["Teacher Routes\n(Classes, Labs, Rules, Documents)"]
                 R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
                 RateLimit["Rate Limiter\n(DB Quota Check)"]
-                Router["LangGraph Router\nexercise regex + bge-m3 kNN"]
+                Router["LangGraph Router\nexercise regex → bge-m3 kNN\n+ ROUTER_MODEL fallback (v7.2)"]
                 Retrieval["Retrieval Service\nhybrid vector+BM25 → RRF → rerank"]
                 SelfEval["Self-Eval Loop\ngate → good/partial/bad → bounded retry"]
                 Synth["Synthesize Node\nskill.md + 3-tier rules + context"]
                 SSE["astream_events → SSE\nadapter"]
-                AsyncDB["Background Task\ntoken-aware write"]
+                AsyncDB["Background Task\nweighted billed-token write (α·prompt+β·completion)"]
                 end
 
                 subgraph DB ["③ Database Layer (PostgreSQL + pgvector)"]
-                DB_SysConf["SystemConfigs\nLLM_BASE_URL, Model, Embedding (0-Downtime)"]
+                DB_SysConf["SystemConfigs\nmodel-routing table: LLM / Embedding / Rerank / Ingest / Router\n+ TOKEN_ALPHA/BETA (0-Downtime)"]
                 DB_Classes["Classes & Labs\ninvite_code, teacher_id"]
                 DB_Users["Users\nid · role · daily_token_quota"]
                 DB_Rules["Hierarchical Rules\nlevel(class/lab/student) + skill.md"]
@@ -381,7 +383,7 @@
                 subgraph WK ["④ Ingestion Worker (docker-compose)"]
                 Poll["Poll Loop\nconcurrency=1"]
                 GpuGate["GPU Gate\npynvml off-peak"]
-                Extract["Parse + chunk + Contextual Retrieval +\nembed + tsv + guided-JSON extract"]
+                Extract["Parse + chunk + section-scoped Contextual Retrieval +\nembed + tsv + guided-JSON extract\n(INGEST_MODEL, v7.2)"]
                 end
 
                 subgraph COMPUTE ["⑤ Compute Layer (one shared engine)"]
@@ -495,6 +497,42 @@
                 <h3>LLM Self-Eval Loop</h3>
                 <p>A deterministic gate (cosine / empty recall) blocks the obviously-bad before any LLM; a guided 1-token verdict grades <code>good / partial / bad</code>; a <code>bad</code> verdict rewrites the query and re-retrieves, capped at <code>RAG_MAX_RETRIES</code> (admin-config, default 1). Still thin after the budget → answer with a "not enough material" disclaimer.</p>
             </div>
+
+            <div class="card new">
+                <span class="tag">v7.2 · Split the Engine</span>
+                <h3>Full Model-Routing Table</h3>
+                <p>Generation, <b>embedding</b>, <b>rerank</b>, <b>ingestion</b>, and <b>router</b> each get an optional endpoint/key/model in <code>SystemConfigs</code>. Ingest/router default <b>empty → fall back to the main LLM</b>, so the cheap-model split is opt-in: a 120B serves chat while a 30B does off-peak Contextual Retrieval and live router intent — without sharing one RPM pool.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.2 · Cost-Aware</span>
+                <h3>Weighted-Token Quota</h3>
+                <p>Prefill is cheaper than decode, so quota is now charged on <code>billed = prompt·α + completion·β</code> (admin-set <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>, default <code>0.2</code>/<code>1.0</code>). Raw prompt/completion counts are still stored per message; the <code>429</code> check and <code>/usage</code> compare billed tokens to the daily quota.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.2 · Stable Matching</span>
+                <h3>LLM-Assisted Exercise Routing</h3>
+                <p>The deterministic exercise-number regex stays the zero-latency fast-path; only when it misses but the query looks exercise-shaped does a cheap <code>ROUTER_MODEL</code> disambiguate. A canonical <code>number_normalized</code> integer (Roman / Arabic / <code>3.1</code> all map to one number) lets ingest extraction and query matching share one normalization function.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.2 · Instructor Style</span>
+                <h3>Per-Teacher Skill Presets</h3>
+                <p>Teachers keep a private library of reusable <code>skill</code> presets and <b>snapshot-copy</b> one into a class's <code>level=class</code> rule. The prompt-injection path is unchanged (still reads <code>Rules</code>); editing a preset never retro-changes classes that already selected it.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.2 · Context-Poor, Length-Safe</span>
+                <h3>Section-Scoped Contextual Retrieval</h3>
+                <p>Per-chunk context is generated from the chunk's <b>own section</b> instead of <code>full_text[:8000]</code>, so a long document never gets a context hallucinated from its opening pages — and the call fits any small model. No hard length gate; long docs simply degrade to per-section context, all on the off-peak <code>INGEST_MODEL</code>.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.2 · Student UX</span>
+                <h3>Markdown + Code + KaTeX Chat</h3>
+                <p>The student chat renders markdown, syntax-highlighted code blocks (with copy), and KaTeX math, using stream-safe incremental rendering so a half-streamed fenced block never collapses into plain text. Plus self-service password change for every role.</p>
+            </div>
         </div>
 
         <div class="schema-section">
@@ -511,9 +549,9 @@
                 <tbody>
                     <tr>
                         <td><code>system_configs</code></td>
-                        <td><span class="badge new">New</span></td>
+                        <td><span class="badge changed">v7.2</span></td>
                         <td><code>id, key, value</code></td>
-                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping.</td>
+                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping. <b>v7.2</b> adds the full model-routing table (<code>EMBEDDING_URL/KEY</code>, <code>RERANK_API_KEY</code>, <code>INGEST_MODEL/URL/KEY</code>, <code>ROUTER_MODEL/URL/KEY</code> — empty falls back to the main LLM) plus cost weights <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>.</td>
                     </tr>
                     <tr>
                         <td><code>classes & labs</code></td>
@@ -553,9 +591,9 @@
                     </tr>
                     <tr>
                         <td><code>exercises</code></td>
-                        <td><span class="badge new">New v7 · v7.1</span></td>
-                        <td><code>number, statement, hints, concept</code></td>
-                        <td>LLM-extracted via guided decoding — target of agentic structured search. <b>🔴 v7.1 red line:</b> the <code>solution</code> column is <b>dropped</b> — only student-safe statements are stored, so there is nothing to leak. <code>concept</code> is reserved for future Adaptive Tutoring.</td>
+                        <td><span class="badge new">New v7 · v7.1 · v7.2</span></td>
+                        <td><code>number, number_normalized, statement, hints, concept</code></td>
+                        <td>LLM-extracted via guided decoding — target of agentic structured search. <b>🔴 v7.1 red line:</b> the <code>solution</code> column is <b>dropped</b> — only student-safe statements are stored, so there is nothing to leak. <b>v7.2</b> adds <code>number_normalized</code> (canonical int) so matching is decoupled from the unstable printed label. <code>concept</code> is reserved for future Adaptive Tutoring.</td>
                     </tr>
                     <tr>
                         <td><code>ingestion_jobs</code></td>
@@ -574,6 +612,12 @@
                         <td><span class="badge new">New v7.1</span></td>
                         <td><code>message, chosen_route, top_similarity, lab_id</code></td>
                         <td>Write-only telemetry: real multilingual queries the embedding-kNN router was unsure about (below threshold → safe <code>rag</code> fallback), so a future BERT/XLM-R router has a labeled data source. Nothing in the live path reads it.</td>
+                    </tr>
+                    <tr>
+                        <td><code>skill_presets</code></td>
+                        <td><span class="badge new">New v7.2</span></td>
+                        <td><code>owner_teacher_id, name, content</code></td>
+                        <td>Per-teacher private library of reusable instructor-style (<code>skill.md</code>) presets. Applying one to a class <b>snapshot-copies</b> its <code>content</code> into the class's <code>level=class</code> rule — the prompt-injection path is unchanged and still reads <code>rules</code>. Editing a preset does not retro-change classes that already selected it.</td>
                     </tr>
                 </tbody>
             </table>

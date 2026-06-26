@@ -1,4 +1,4 @@
-# Edu-LLM: v7.1 Agentic Class-Lab Architecture
+# Edu-LLM: v7.2 Agentic Class-Lab Architecture
 ---
 
 ## 1. Project Overview
@@ -45,6 +45,34 @@ by Docker Compose, with **no external message queue** (PostgreSQL itself is the 
   cheap gate → guided LLM self-eval (`good/partial/bad`) → bounded re-retrieval (admin-
   configurable rounds, default 1) → disclaimer-tagged answer if material is still thin.
 
+**v7.2 Upgrade (this release):**
+- **Self-service account management**: any logged-in user can change their own password
+  (old-password check); admins can reset any user's password (no old password). No email/OTP
+  recovery — out of scope for the controlled classroom.
+- **Full model-routing table in `SystemConfigs`**: generation, **embedding**, **rerank**,
+  **ingestion**, and **router** each get their own optional endpoint/key/model. Ingestion and
+  router default to **empty → fall back to the main LLM**, so the cheap-model split is opt-in
+  and existing behaviour is unchanged. Lets the expensive 120B serve chat while a cheap 30B
+  does off-peak Contextual-Retrieval and live router intent — without sharing one RPM pool.
+- **Cost-aware token accounting**: quota is charged on **weighted** tokens
+  `billed = prompt·α + completion·β` (admin-set `TOKEN_ALPHA`/`TOKEN_BETA`; default `0.2`/`1.0`)
+  — prefill is cheaper than decode, so it no longer counts the same. Raw prompt/completion
+  counts are still stored per message.
+- **LLM-assisted exercise routing**: the deterministic exercise-number regex stays the
+  fast-path; when it misses but the query looks exercise-shaped, a cheap `ROUTER_MODEL`
+  disambiguates. Exercises gain a `number_normalized` integer (Roman/Arabic/`3.1` all map to
+  one canonical number) so ingest-side extraction and query-side matching share one
+  normalization function.
+- **Per-class instructor style — preset library**: teachers maintain a private library of
+  reusable `skill` presets and snapshot-copy one into a class's `level=class` rule. The prompt
+  injection path is unchanged (it still reads Rules); presets are just templates.
+- **Cheaper, length-safe Contextual Retrieval**: per-chunk context is generated from the
+  chunk's **own section** (not `full_text[:8000]`), so long documents no longer get a context
+  hallucinated from the document's opening, and the call fits any small model. Runs on the
+  config-driven `INGEST_MODEL`.
+- **Student-facing markdown rendering**: the chat UI renders markdown, syntax-highlighted code
+  blocks (with copy), and KaTeX math, with stream-safe incremental rendering.
+
 **v6 Principles (still in force):**
 - **Service Layer**: All business/DB logic lives in `backend/app/services/`. Routers are thin.
 - **No Cross-Router Calls**: routers call services independently — no router imports another.
@@ -90,12 +118,15 @@ polytech_ai_tp/
 │   │   │   ├── session_service.py   # Session CRUD + student soft-delete (hide; retained for audit)
 │   │   │   ├── document_service.py  # [v7] Upload (+doc_type/audience) + enqueue ingestion jobs; chunk/exercise reads (Phase 6)
 │   │   │   ├── learner_service.py   # [v7] prompt-literacy effort/lazy profiles
-│   │   │   ├── llm_service.py       # [v7.1] OpenAI-compatible clients from SystemConfigs: generate / embed / rerank
-│   │   │   └── retrieval_service.py # [v7.1] hybrid (vector+BM25) + rerank, tenant/audience-filtered in SQL
+│   │   │   ├── llm_service.py       # [v7.1] OpenAI-compatible clients from SystemConfigs: generate / embed / rerank ([v7.2] + ingest/router clients, fallback to main LLM)
+│   │   │   ├── retrieval_service.py # [v7.1] hybrid (vector+BM25) + rerank, tenant/audience-filtered in SQL
+│   │   │   ├── skill_preset_service.py # [v7.2] teacher skill-preset library CRUD + snapshot-copy into class rule
+│   │   │   └── billing.py           # [v7.2] weighted billed-token helper (prompt·α + completion·β)
 │   │   ├── agent/                   # [v7] LangGraph agent
 │   │   │   ├── __init__.py
 │   │   │   ├── graph.py             # Router → [agentic_search | rag | direct] → self-eval loop → Synthesize → SSE
-│   │   │   ├── router.py            # [v7.1] exercise-number regex fast-path + bge-m3 kNN intent router
+│   │   │   ├── router.py            # [v7.1] exercise-number regex fast-path + bge-m3 kNN intent router ([v7.2] + ROUTER_MODEL LLM fallback)
+│   │   │   ├── exercise_number.py   # [v7.2] shared normalize_exercise_number() (Roman/Arabic/3.1 → canonical int)
 │   │   │   ├── selfeval.py          # [v7.1] cheap gate + guided good/partial/bad verdict + bounded re-retrieval
 │   │   │   ├── prompt.py            # Prompt Controller (skill.md → 3-tier rules → context → history → question)
 │   │   │   ├── effort.py            # effort/clarity heuristic (windowed coaching)
@@ -125,12 +156,15 @@ polytech_ai_tp/
 │   │   ├── pages/
 │   │   │   ├── Login.jsx            # Login + link to Register
 │   │   │   ├── Register.jsx         # Student self-registration
-│   │   │   ├── Chat.jsx             # Student chat (agent answers + citations)
+│   │   │   ├── Account.jsx          # [v7.2] User center — self-service change password (all roles)
+│   │   │   ├── Chat.jsx             # Student chat (agent answers + citations) ([v7.2] markdown + code highlight + KaTeX)
 │   │   │   ├── Teacher.jsx          # Teacher workspace (tree + rules + document manager)
 │   │   │   └── Admin.jsx            # Admin god-mode
 │   │   ├── components/
 │   │   │   ├── HierarchicalSidebar.jsx  # Role-aware Class→Lab tree
 │   │   │   ├── DocumentManager.jsx      # [v7.1] Upload (doc_type/audience) + status list + chunk inspector + exercises
+│   │   │   ├── SkillPresetManager.jsx   # [v7.2] Teacher skill-preset library CRUD + apply-to-class
+│   │   │   ├── MessageContent.jsx       # [v7.2] markdown + syntax-highlighted code (copy) + KaTeX, stream-safe
 │   │   │   ├── MainLayout.jsx
 │   │   │   ├── ProtectedRoute.jsx
 │   │   │   └── UserHeader.jsx
@@ -158,14 +192,39 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 > (see `seed.py`). The v7.1 changes (drop `Exercise.solution`; add `needs_review`; add
 > `doc_type`/`audience`; add `DocChunk.context`/`section`/`tsv`; add `RouterQueryLog`) are
 > applied by **recreating** the dev database — there is no production data to migrate.
+>
+> **v7.2 schema note:** same approach — the v7.2 changes (add `Exercise.number_normalized`; add
+> the `SkillPresets` table; add the v7.2 `SystemConfigs` keys with defaults in `seed.py`) are
+> applied by **recreating** the dev database.
 
 ### 1. SystemConfigs
 | Column | Type | Constraints / Notes |
 | --- | --- | --- |
 | id | UUID / Int | Primary Key |
-| key | String | Unique. v7: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`. **v7.1 adds** `RERANK_URL`, `RERANK_MODEL`, `RAG_MAX_RETRIES` (default `1`), `ROUTER_KNN_THRESHOLD` |
+| key | String | Unique. v7: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`. **v7.1 adds** `RERANK_URL`, `RERANK_MODEL`, `RAG_MAX_RETRIES` (default `1`), `ROUTER_KNN_THRESHOLD`. **v7.2 adds** the rest of the model-routing table + cost weights (below) |
 | value | String | The configuration value |
 | updated_at | Timestamp | For tracking when admin changed configs |
+
+> **v7.2 — model-routing table.** Generation keeps `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`.
+> Each other role now has its own optional endpoint, **defaulting empty → fall back to the
+> main LLM** so existing behaviour is unchanged unless an admin opts in:
+>
+> | Key | Default | Meaning |
+> | --- | --- | --- |
+> | `EMBEDDING_URL` | empty → `LLM_BASE_URL` | Embedding endpoint (was previously hard-shared with `LLM_BASE_URL`) |
+> | `EMBEDDING_API_KEY` | empty → `LLM_API_KEY` | Embedding key |
+> | `RERANK_API_KEY` | empty | Key for the existing `RERANK_URL` |
+> | `INGEST_MODEL` | empty → `LLM_MODEL` | Cheap model the **off-peak worker** uses for Contextual Retrieval + exercise extraction |
+> | `INGEST_BASE_URL` | empty → `LLM_BASE_URL` | Ingestion endpoint (e.g. local 30B) |
+> | `INGEST_API_KEY` | empty → `LLM_API_KEY` | Ingestion key |
+> | `ROUTER_MODEL` | empty → `LLM_MODEL` | Cheap model for **live** exercise-number disambiguation when the regex misses |
+> | `ROUTER_BASE_URL` | empty → `LLM_BASE_URL` | Router endpoint |
+> | `ROUTER_API_KEY` | empty → `LLM_API_KEY` | Router key |
+> | `TOKEN_ALPHA` | `0.2` | Prefill (prompt) weight for billed-token quota |
+> | `TOKEN_BETA` | `1.0` | Decode (completion) weight for billed-token quota |
+>
+> Ingestion (off-peak) and router (live) have different latency/cost needs, so they are
+> configured independently; point them at the same endpoint to reuse one engine.
 
 > **v7.1 — all model calls are config-driven HTTP.** Generation, embeddings (`bge-m3`), and
 > reranking (`bge-reranker-v2-m3`) all hit OpenAI-compatible endpoints read from this table at
@@ -291,7 +350,8 @@ B-tree on `lab_id` for the mandatory tenant filter.
 | document_id | FK | → Documents.id `ON DELETE CASCADE` |
 | class_id | UUID | Denormalized tenant filter. Not Null |
 | lab_id | UUID | Denormalized, nullable |
-| number | String | e.g. "Exercise 2", "3.1" |
+| number | String | Raw label as printed — e.g. "Exercise 2", "3.1", "II". Used for display/citation |
+| number_normalized | Integer | **[v7.2]** canonical integer derived from `number` (Roman→int, `3.1`→main `3`, etc.), nullable. Both ingest-side extraction and query-side matching run the **same** `normalize_exercise_number()` over it — decouples matching from the unstable printed format |
 | statement | Text | Exercise body. **Student-safe** — this is all that is stored |
 | hints | Text | Hints (safe to surface to students) |
 | concept | String | **[reserved]** knowledge-point tag for future Adaptive Tutoring (nullable now) |
@@ -347,6 +407,22 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 > so a future BERT/XLM-R router has a labeled data source. Write-only telemetry; nothing in the
 > live path reads it.
 
+### 15. SkillPresets (per-teacher instructor-style library — §5/v7.2)
+| Column | Type | Constraints / Notes |
+| --- | --- | --- |
+| id | UUID | Primary Key |
+| owner_teacher_id | FK | → Users.id (the teacher who owns this preset). Private to that teacher |
+| name | String | Display name of the preset (e.g. "Strict Socratic", "Friendly TA") |
+| content | Text | The `skill.md` body (instructor persona/style), a few hundred tokens |
+| created_at | Timestamp | Timezone-aware (UTC) |
+| updated_at | Timestamp | Timezone-aware (UTC) |
+
+> **[v7.2]** A reusable library only. Selecting a preset for a class **snapshot-copies** its
+> `content` into that class's `level=class` skill rule (the `Rules` row) — the prompt-injection
+> path is unchanged and still reads `Rules`. Editing a preset later does **not** retro-change
+> classes that already selected it (safe, explicit re-selection required). Teachers may still
+> hand-edit the class rule text directly without using a preset.
+
 ---
 
 ## 4. RBAC Authorization (JWT + FastAPI Depends)
@@ -374,14 +450,16 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | --- | --- | --- | --- |
 | POST | `/api/auth/signup` | — | Student self-registration (Default role: student). Fails if username exists. |
 | POST | `/api/auth/login` | — | Validate credentials. Return JWT containing ONLY `user_id`. |
+| POST | `/api/auth/change-password` | get_current_user | **[v7.2]** Self-service password change. Requires `old_password` (verified) + `new_password`; re-hashes (bcrypt). Any role. |
 | GET | `/api/admin/users` | require_admin | List all non-deleted users. |
+| PUT | `/api/admin/users/{id}/password` | require_admin | **[v7.2]** Admin reset of any user's password (no old password required). |
 | POST | `/api/admin/users` | require_admin | Create a single new user. |
 | PUT | `/api/admin/users/{id}/role` | require_admin | Change user role (e.g., student ↔ teacher). |
 | PUT | `/api/admin/users/{id}/quota` | require_admin | Update user's daily token quota. |
 | DELETE | `/api/admin/users/{id}` | require_admin | Soft-delete a user. |
 | POST | `/api/admin/users/import` | require_admin | CSV Bulk Import. Dry-run by default. `?force=true` executes. |
-| GET | `/api/admin/llm/config` | require_admin | Read current LLM config (base_url, model, api_key, embedding_model; **v7.1**: rerank_url, rerank_model, rag_max_retries, router_knn_threshold). |
-| PUT | `/api/admin/llm/config` | require_admin | Zero-downtime update of SystemConfigs (Base URL, API Key, Model, Embedding Model; **v7.1** Rerank URL/Model, RAG max retries, router threshold). |
+| GET | `/api/admin/llm/config` | require_admin | Read current LLM config (base_url, model, api_key, embedding_model; **v7.1**: rerank_url, rerank_model, rag_max_retries, router_knn_threshold; **v7.2**: embedding_url/key, rerank_key, ingest_model/url/key, router_model/url/key, token_alpha, token_beta). |
+| PUT | `/api/admin/llm/config` | require_admin | Zero-downtime update of SystemConfigs (all keys above; **v7.2** the full model-routing table + `TOKEN_ALPHA`/`TOKEN_BETA` cost weights). Empty ingest/router/embedding endpoint fields fall back to the main LLM. |
 | GET | `/api/admin/classes` | require_admin | God Mode: List all classes across the system (no ownership filter). |
 | GET | `/api/admin/classes/{class_id}/labs` | require_admin | God Mode: List all labs in a class. |
 | GET | `/api/admin/classes/{class_id}/students` | require_admin | God Mode: View all students in a specific class. |
@@ -411,6 +489,11 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | DELETE | `/api/teacher/labs/{lab_id}` | require_teacher | Soft-delete a Lab (ownership enforced). |
 | GET | `/api/teacher/rules` | require_teacher | Get existing rules. Filters: `?level=X&target_id=Y` |
 | PUT | `/api/teacher/rules` | require_teacher | Create/Update Rules (Class / Lab / Student level; `skill.md` = class level). |
+| GET | `/api/teacher/skill-presets` | require_teacher | **[v7.2]** List the teacher's own skill presets (`id / name / content`). |
+| POST | `/api/teacher/skill-presets` | require_teacher | **[v7.2]** Create a skill preset (`name`, `content`). |
+| PUT | `/api/teacher/skill-presets/{preset_id}` | require_teacher | **[v7.2]** Update an owned preset (ownership enforced). |
+| DELETE | `/api/teacher/skill-presets/{preset_id}` | require_teacher | **[v7.2]** Delete an owned preset (does not affect classes that already snapshot-copied it). |
+| POST | `/api/teacher/classes/{class_id}/skill` | require_teacher | **[v7.2]** Apply a preset to a class — **snapshot-copies** `preset.content` into the class's `level=class` skill rule. Body: `{preset_id}` or raw `{content}` for an ad-hoc edit. |
 | GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W`. **Includes student soft-deleted sessions** (each row carries `is_deleted` so the UI can flag the hidden ones). |
 | GET | `/api/teacher/analytics/classes/{class_id}` | require_teacher | Hierarchical token usage: class → lab → student breakdown. |
 | POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] Upload a **PDF** course document. Multipart form **requires `doc_type` (CM/TD/TP) + `audience` (student/teacher)** → stored in volume + enqueued for ingestion. |
@@ -482,6 +565,12 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
      missions; everything else is classified by `bge-m3` cosine-kNN against in-code multilingual
      anchor exemplars (zh/fr/en route alike). Below the confidence threshold → fall back to the
      safest branch (`rag`) and log the query for the future BERT router.
+   * **[v7.2] LLM exercise-number fallback**: the regex fast-path runs first and, **when it
+     hits, the query proceeds with zero added latency**. Only when the regex misses *but the
+     query looks exercise-shaped* is a cheap `ROUTER_MODEL` (defaults to `LLM_MODEL`) asked to
+     extract the intended exercise number, which is then matched against
+     `Exercises.number_normalized` via the shared `normalize_exercise_number()`. Plain chit-chat
+     never pays for this call.
    * **Tenant + audience filter is mandatory and in SQL**: every `agentic_search` / `rag` query
      filters `lab_id` / `class_id` (and `audience='student'` for students) **in the WHERE
      clause** — re-checked after fusion/rerank. Prompt-injection cannot break a query filter.
@@ -507,6 +596,12 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
    * Use `BackgroundTasks` to insert User message, LLM message (with tokens), and Upsert
      `usage_stats`. **Token accounting sums the Synthesize node's usage** plus any extra LLM
      calls made during Contextual routing / self-eval.
+   * **[v7.2] Cost-aware quota.** Raw `prompt_tokens` / `completion_tokens` are still recorded
+     per message, but the quota is charged on **billed tokens** =
+     `prompt·TOKEN_ALPHA + completion·TOKEN_BETA` (admin-set, default `0.2`/`1.0`). The daily
+     quota check (`429`) compares accumulated **billed** tokens against `daily_token_quota`, and
+     `GET /api/student/usage` reports billed-vs-quota. Prefill being cheaper is now reflected in
+     the limit instead of counting decode and prefill equally.
 
 ---
 
@@ -533,16 +628,22 @@ A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live
   4. **Contextual Retrieval**: per chunk, the worker LLM generates the chunk's in-document
      context and prepends it; the **augmented** text (`context + content`) is embedded and
      BM25-indexed, while the original `content` is stored for citation. Load-bearing for
-     context-poor CM slides.
+     context-poor CM slides. **[v7.2]** the context is generated from the chunk's **own
+     `section`** (not `full_text[:8000]`), so a long document never gets a context hallucinated
+     from its opening pages, and the call fits any small model. No hard length gate — long docs
+     just degrade to per-section context. Generation uses `INGEST_MODEL` (defaults to
+     `LLM_MODEL`), so a cheap off-peak model can do this without touching the chat model.
   5. **Exercise extraction — statements only**: extract `number / statement / hints` via
      **guided/structured decoding**. **No `solution` is extracted or stored** (the column does
      not exist).
   6. **Build the BM25 column** (`tsvector`, multilingual config) and enrich metadata
      (`doc_type` / `audience` / `section` / `page_no` / reserved `concept`).
-- **Reuse the same engine as chat, config-driven:** embeddings and Contextual-Retrieval
-  generation hit the **same `SystemConfigs` endpoints chat uses** — no second model, nothing
-  hardcoded, no torch. Per-chunk Contextual-Retrieval calls run entirely on the **off-peak
-  worker** and never preempt students.
+- **Config-driven engine, optionally split:** embeddings and Contextual-Retrieval generation
+  are read from `SystemConfigs` — nothing hardcoded, no torch. **[v7.2]** by default they still
+  fall back to the one chat engine, but an admin can point `INGEST_MODEL` / `INGEST_BASE_URL`
+  at a separate cheap model (e.g. local 30B) so ingestion doesn't share the chat model's RPM
+  pool. Per-chunk Contextual-Retrieval calls run entirely on the **off-peak worker** and never
+  preempt students.
 - **"When to run" lives in the worker's Python** (`gpu_gate.py`): the **primary signal is
   live chat load** — the worker counts recent `Messages` in the DB and pauses ingestion while
   students are actively chatting (sliding window + hysteresis to avoid flapping). **GPU
@@ -634,7 +735,13 @@ The application is fully containerized using Docker, allowing for a single-comma
   - Reached via `host.docker.internal`.
 - **Models on that engine** (test setup = one Ollama instance):
   - **Chat:** a generation model — e.g. `qwen3` (35B local / 120B prod) → `LLM_MODEL`. Also
-    used for Contextual-Retrieval generation and the guided self-eval verdict.
+    used for the guided self-eval verdict, and (unless split) Contextual-Retrieval generation
+    and the router exercise-number fallback.
+  - **[v7.2] Optional cheap models:** set `INGEST_MODEL` (off-peak Contextual Retrieval +
+    exercise extraction) and/or `ROUTER_MODEL` (live exercise-number disambiguation) to a
+    smaller model — e.g. `qwen3:30b` / `mistral-small` — to keep the expensive chat model's RPM
+    pool for students. Leave empty to reuse `LLM_MODEL`. Embedding/rerank likewise get optional
+    independent endpoints (`EMBEDDING_URL`, `RERANK_API_KEY`, …).
   - **Embeddings (RAG + router kNN):** `bge-m3` (1024-dim, matches `EMBEDDING_DIM`) →
     `EMBEDDING_MODEL`. Pull it once: `ollama pull bge-m3`. Indexing, querying, and router
     exemplars must all use this same model.
