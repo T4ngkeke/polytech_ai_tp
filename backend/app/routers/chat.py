@@ -547,6 +547,12 @@ async def chat_stream(
             if not disconnected:
                 yield f"event: citations\ndata: {json.dumps(citations_payload)}\n\n"
                 yield "event: done\ndata: {}\n\n"
+        except Exception as e:
+            # A mid-stream failure must surface as an explicit `error` event so the
+            # client can stop the spinner and show a message — otherwise the
+            # connection just drops with no `done` and the UI hangs.
+            logger.error("Chat stream failed mid-flight: %s", repr(e), exc_info=True)
+            yield f"event: error\ndata: {json.dumps({'detail': 'Generation failed'})}\n\n"
         finally:
             # Enqueue the background task with fallback token estimates
             pt = stream_results["prompt_tokens"] or 10

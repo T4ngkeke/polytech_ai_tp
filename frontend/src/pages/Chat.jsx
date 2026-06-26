@@ -133,6 +133,10 @@ export default function Chat() {
 
   // ── Load session messages ──
   const handleSelectSession = useCallback(async (sessionId) => {
+    // Abort any in-flight stream so its tokens never land on the new session.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
     setActiveSessionId(sessionId);
     setIsLoadingMessages(true);
     try {
@@ -149,6 +153,9 @@ export default function Chat() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // ── Abort the SSE stream on unmount (no leaked EventSource / setState) ──
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // ── Send message ──
   const handleSend = useCallback(async () => {
@@ -169,12 +176,15 @@ export default function Chat() {
       }
     }
 
-    const userMsg = { id: Date.now(), sender: 'user', content: text, created_at: new Date().toISOString() };
+    // Unique client ids (UUIDs) — Date.now() collides with itself and with
+    // server message ids, which would route streamed tokens to the wrong bubble.
+    const userMsgId = crypto.randomUUID();
+    const assistantMsgId = crypto.randomUUID();
+    const userMsg = { id: userMsgId, sender: 'user', content: text, created_at: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setIsStreaming(true);
 
-    const assistantMsgId = Date.now() + 1;
     setMessages((prev) => [...prev, { id: assistantMsgId, sender: 'llm', content: '', created_at: new Date().toISOString() }]);
 
     const ctrl = new AbortController();
@@ -188,6 +198,15 @@ export default function Chat() {
         signal: ctrl.signal,
         onmessage(ev) {
           if (ev.event === 'done') { setIsStreaming(false); loadUsage(); return; }
+          if (ev.event === 'error') {
+            // Server-side mid-stream failure: stop the spinner and surface it,
+            // never append the error payload as if it were model output.
+            setIsStreaming(false);
+            let detail = 'Generation failed';
+            try { detail = JSON.parse(ev.data).detail || detail; } catch { /* keep default */ }
+            toast.error(detail);
+            return;
+          }
           if (ev.event === 'citations') {
             let cites = [];
             try { cites = JSON.parse(ev.data); } catch { /* ignore malformed */ }

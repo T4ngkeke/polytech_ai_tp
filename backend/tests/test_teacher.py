@@ -483,6 +483,15 @@ class TestTeacherClassAnalytics:
         assert len(body["labs"]) >= 1
         assert len(body["labs"][0]["students"]) >= 1
 
+    async def test_request_count_is_per_exchange_not_per_message(self, teacher_client, seed_data):
+        # [v7.2 fix] seed_data has 1 user + 1 llm message = ONE exchange. Counting
+        # all Message rows would report 2; an exchange is one llm reply.
+        resp = await teacher_client.get(
+            f"/api/teacher/analytics/classes/{seed_data['class'].id}")
+        body = resp.json()
+        assert body["total_requests"] == 1
+        assert body["labs"][0]["students"][0]["request_count"] == 1
+
     async def test_wrong_class_404(self, teacher_client):
         resp = await teacher_client.get(
             f"/api/teacher/analytics/classes/{uuid.uuid4()}")

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Lab, Message, Session, UsageStat, User
+from backend.app.models import Lab, Message, SenderType, Session, UsageStat, User
 
 
 @dataclass
@@ -64,12 +64,15 @@ async def get_class_analytics(db: AsyncSession, class_id: uuid.UUID, class_name:
     lab_usages: list[LabUsage] = []
 
     for lab in labs:
-        # Aggregate per-student usage for this lab
+        # Aggregate per-student usage for this lab. A "request" is one exchange =
+        # one llm reply, so count only llm messages (counting all Message rows
+        # would double it by including the paired user message), consistent with
+        # UsageStat.request_count used by the global dashboard.
         stats_result = await db.execute(
             select(
                 Session.user_id,
                 func.coalesce(func.sum(Message.total_tokens), 0),
-                func.count(Message.id),
+                func.count(Message.id).filter(Message.sender == SenderType.llm),
             )
             .join(Message, Message.session_id == Session.id)
             .where(Session.lab_id == lab.id)
