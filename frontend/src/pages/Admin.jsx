@@ -361,7 +361,7 @@ function AnalyticsTab() {
 
 /* ═══════════════════════════ LLM CONFIG TAB ══════════════════════════════ */
 function LLMConfigTab() {
-  const [config, setConfig] = useState({ base_url: '', api_key: '', model: '' });
+  const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showKey, setShowKey] = useState(false);
@@ -370,48 +370,115 @@ function LLMConfigTab() {
     api.get('/api/admin/llm/config').then(setConfig).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
+  const set = (k) => (v) => setConfig((p) => ({ ...p, [k]: v }));
+
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updated = await api.put('/api/admin/llm/config', config);
+      // token weights are numeric in the API contract.
+      const payload = {
+        ...config,
+        token_alpha: Number(config.token_alpha),
+        token_beta: Number(config.token_beta),
+      };
+      const updated = await api.put('/api/admin/llm/config', payload);
       setConfig(updated);
       toast.success('LLM config saved');
     } catch (err) { toast.error(err.message); } finally { setSaving(false); }
   };
 
-  if (loading) return <Spinner />;
+  if (loading || !config) return <Spinner />;
 
   return (
     <div className="p-8 overflow-y-auto h-full">
-      <div className="max-w-lg space-y-5">
-        <h2 className="text-lg font-semibold text-cream mb-2">LLM Configuration</h2>
-        <p className="text-xs text-cream-muted">Changes take effect immediately — no server restart required.</p>
-
-        <Field label="Base URL" value={config.base_url}
-          onChange={(v) => setConfig((p) => ({ ...p, base_url: v }))}
-          placeholder="http://localhost:11434/v1" />
-        <Field label="Model Name" value={config.model}
-          onChange={(v) => setConfig((p) => ({ ...p, model: v }))}
-          placeholder="llama3.2" />
-        <div className="space-y-1.5">
-          <label className="mono-label">API Key</label>
-          <div className="relative">
-            <input type={showKey ? 'text' : 'password'} value={config.api_key}
-              onChange={(e) => setConfig((p) => ({ ...p, api_key: e.target.value }))}
-              placeholder="sk-… or 'ollama'"
-              className="w-full px-4 py-3 pr-10 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 font-mono transition-colors" />
-            <button onClick={() => setShowKey(!showKey)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-cream-muted hover:text-cream cursor-pointer text-xs">
-              {showKey ? '🙈' : '👁️'}
-            </button>
-          </div>
+      <div className="max-w-lg space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold text-cream mb-2">LLM Configuration</h2>
+          <p className="text-xs text-cream-muted">Changes take effect immediately — no server restart required.
+            Empty endpoint/model fields in the split sections <span className="text-cyan">inherit the main LLM</span>.</p>
         </div>
+
+        {/* Main generation engine */}
+        <ConfigSection title="Main LLM (generation)">
+          <Field label="Base URL" value={config.base_url} onChange={set('base_url')}
+            placeholder="http://localhost:11434/v1" />
+          <Field label="Model Name" value={config.model} onChange={set('model')} placeholder="qwen3" />
+          <div className="space-y-1.5">
+            <label className="mono-label">API Key</label>
+            <div className="relative">
+              <input type={showKey ? 'text' : 'password'} value={config.api_key}
+                onChange={(e) => set('api_key')(e.target.value)} placeholder="sk-… or 'ollama'"
+                className="w-full px-4 py-3 pr-10 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 font-mono transition-colors" />
+              <button onClick={() => setShowKey(!showKey)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-cream-muted hover:text-cream cursor-pointer text-xs">
+                {showKey ? '🙈' : '👁️'}
+              </button>
+            </div>
+          </div>
+        </ConfigSection>
+
+        {/* Embedding */}
+        <ConfigSection title="Embedding (RAG + router kNN)">
+          <Field label="Model Name" value={config.embedding_model} onChange={set('embedding_model')}
+            placeholder="BAAI/bge-m3" />
+          <Field label="Base URL" value={config.embedding_url} onChange={set('embedding_url')}
+            placeholder="inherits main LLM" />
+          <Field label="API Key" value={config.embedding_api_key} onChange={set('embedding_api_key')}
+            placeholder="inherits main LLM" />
+        </ConfigSection>
+
+        {/* Rerank */}
+        <ConfigSection title="Reranker (empty URL = disabled)">
+          <Field label="URL" value={config.rerank_url} onChange={set('rerank_url')}
+            placeholder="http://rerank:8080/rerank" />
+          <Field label="Model Name" value={config.rerank_model} onChange={set('rerank_model')}
+            placeholder="BAAI/bge-reranker-v2-m3" />
+          <Field label="API Key" value={config.rerank_api_key} onChange={set('rerank_api_key')}
+            placeholder="inherits main LLM" />
+        </ConfigSection>
+
+        {/* Ingestion (off-peak worker) */}
+        <ConfigSection title="Ingestion model (off-peak worker)">
+          <Field label="Model Name" value={config.ingest_model} onChange={set('ingest_model')}
+            placeholder="inherits main LLM — e.g. qwen3:30b" />
+          <Field label="Base URL" value={config.ingest_base_url} onChange={set('ingest_base_url')}
+            placeholder="inherits main LLM" />
+          <Field label="API Key" value={config.ingest_api_key} onChange={set('ingest_api_key')}
+            placeholder="inherits main LLM" />
+        </ConfigSection>
+
+        {/* Router (live exercise-number fallback) */}
+        <ConfigSection title="Router model (live exercise fallback)">
+          <Field label="Model Name" value={config.router_model} onChange={set('router_model')}
+            placeholder="inherits main LLM — e.g. qwen3:30b" />
+          <Field label="Base URL" value={config.router_base_url} onChange={set('router_base_url')}
+            placeholder="inherits main LLM" />
+          <Field label="API Key" value={config.router_api_key} onChange={set('router_api_key')}
+            placeholder="inherits main LLM" />
+        </ConfigSection>
+
+        {/* Token cost weights */}
+        <ConfigSection title="Token quota weights (billed = prompt·α + completion·β)">
+          <Field label="α — prefill weight" value={config.token_alpha} onChange={set('token_alpha')}
+            placeholder="0.2" />
+          <Field label="β — decode weight" value={config.token_beta} onChange={set('token_beta')}
+            placeholder="1.0" />
+        </ConfigSection>
 
         <button onClick={handleSave} disabled={saving}
           className="w-full py-3 rounded-lg gradient-cyan text-cream text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40">
           {saving ? 'Saving…' : 'Save Configuration'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function ConfigSection({ title, children }) {
+  return (
+    <div className="space-y-4 border border-border-default rounded-xl p-4 bg-ink-deep/30">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-cyan/80">{title}</h3>
+      {children}
     </div>
   );
 }

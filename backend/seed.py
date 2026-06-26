@@ -49,6 +49,21 @@ DEFAULT_SYSTEM_CONFIGS = [
     {"key": "RAG_MAX_RETRIES", "value": "1"},
     # [v7.1] router kNN confidence threshold: below this, fall back to RAG + log.
     {"key": "ROUTER_KNN_THRESHOLD", "value": "0.35"},
+    # [v7.2] model-routing table. Empty endpoint/key/model values inherit the main
+    # LLM (see model_routing.resolve_model_routing), so a fresh install runs as a
+    # single engine and the cheap-model split is purely opt-in by the admin.
+    {"key": "EMBEDDING_URL", "value": ""},        # empty → LLM_BASE_URL
+    {"key": "EMBEDDING_API_KEY", "value": ""},    # empty → LLM_API_KEY
+    {"key": "RERANK_API_KEY", "value": ""},       # empty → LLM_API_KEY
+    {"key": "INGEST_MODEL", "value": ""},         # empty → LLM_MODEL (off-peak worker)
+    {"key": "INGEST_BASE_URL", "value": ""},      # empty → LLM_BASE_URL
+    {"key": "INGEST_API_KEY", "value": ""},       # empty → LLM_API_KEY
+    {"key": "ROUTER_MODEL", "value": ""},         # empty → LLM_MODEL (live exercise fallback)
+    {"key": "ROUTER_BASE_URL", "value": ""},      # empty → LLM_BASE_URL
+    {"key": "ROUTER_API_KEY", "value": ""},       # empty → LLM_API_KEY
+    # [v7.2] weighted-token quota: billed = prompt*alpha + completion*beta.
+    {"key": "TOKEN_ALPHA", "value": "0.2"},       # prefill is cheaper than decode
+    {"key": "TOKEN_BETA", "value": "1.0"},
 ]
 
 

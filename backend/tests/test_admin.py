@@ -299,6 +299,48 @@ class TestLLMConfig:
         })
         assert resp.status_code == 403
 
+    # --- [v7.2] full model-routing table ---------------------------------
+
+    async def test_admin_sets_and_reads_routing_fields(self, admin_client):
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big",
+            "embedding_url": "http://embed/v1", "embedding_api_key": "ek",
+            "embedding_model": "bge-m3",
+            "rerank_url": "http://rerank", "rerank_api_key": "rk",
+            "ingest_base_url": "http://local/v1", "ingest_model": "small-30b",
+            "router_model": "small-30b",
+            "token_alpha": 0.3, "token_beta": 0.8,
+        })
+        assert resp.status_code == 200
+        data = (await admin_client.get("/api/admin/llm/config")).json()
+        assert data["embedding_url"] == "http://embed/v1"
+        assert data["ingest_model"] == "small-30b"
+        assert data["router_model"] == "small-30b"
+        assert data["rerank_api_key"] == "rk"
+        assert data["token_alpha"] == 0.3
+        assert data["token_beta"] == 0.8
+
+    async def test_legacy_three_field_put_preserves_routing_fields(self, admin_client):
+        # Set a routing field, then a legacy 3-field PUT must not wipe it.
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big",
+            "ingest_model": "small-30b",
+        })
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big2",
+        })
+        data = (await admin_client.get("/api/admin/llm/config")).json()
+        assert data["model"] == "big2"
+        assert data["ingest_model"] == "small-30b"  # preserved
+
+    async def test_routing_fields_default_empty(self, admin_client):
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big",
+        })
+        data = (await admin_client.get("/api/admin/llm/config")).json()
+        assert data["ingest_model"] == ""        # empty = inherits main LLM
+        assert data["embedding_url"] == ""
+
 
 class TestCSVImport:
     def _csv(self, rows):

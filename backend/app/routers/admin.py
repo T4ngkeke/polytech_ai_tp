@@ -196,6 +196,36 @@ async def _upsert_config(db: AsyncSession, key: str, value: str) -> None:
         db.add(config)
 
 
+# [v7.2] Map LLMConfig request/response field names → SystemConfig keys.
+# String fields (endpoints/models/knobs); token weights are handled separately.
+_LLM_CONFIG_STR_FIELDS: dict[str, str] = {
+    "base_url": "LLM_BASE_URL",
+    "api_key": "LLM_API_KEY",
+    "model": "LLM_MODEL",
+    "embedding_url": "EMBEDDING_URL",
+    "embedding_api_key": "EMBEDDING_API_KEY",
+    "embedding_model": "EMBEDDING_MODEL",
+    "rerank_url": "RERANK_URL",
+    "rerank_api_key": "RERANK_API_KEY",
+    "rerank_model": "RERANK_MODEL",
+    "ingest_base_url": "INGEST_BASE_URL",
+    "ingest_api_key": "INGEST_API_KEY",
+    "ingest_model": "INGEST_MODEL",
+    "router_base_url": "ROUTER_BASE_URL",
+    "router_api_key": "ROUTER_API_KEY",
+    "router_model": "ROUTER_MODEL",
+    "rag_max_retries": "RAG_MAX_RETRIES",
+    "router_knn_threshold": "ROUTER_KNN_THRESHOLD",
+}
+
+
+def _float_config(configs: dict[str, str], key: str, default: float) -> float:
+    try:
+        return float(configs[key])
+    except (KeyError, TypeError, ValueError):
+        return default
+
+
 # ===================================================================
 # GET /api/admin/llm/config
 # ===================================================================
@@ -206,14 +236,19 @@ async def get_llm_config(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> LLMConfigResponse:
-    """Read the current LLM configuration from the SystemConfig table."""
+    """Read the full LLM/model-routing config from the SystemConfig table.
+
+    Raw stored values are returned — an empty string means the role inherits the
+    main LLM (see ``model_routing.resolve_model_routing``).
+    """
     result = await db.execute(select(SystemConfig))
     configs = {row.key: row.value for row in result.scalars().all()}
-    return LLMConfigResponse(
-        base_url=configs.get("LLM_BASE_URL", ""),
-        api_key=configs.get("LLM_API_KEY", ""),
-        model=configs.get("LLM_MODEL", ""),
-    )
+    payload = {
+        field: configs.get(key, "") for field, key in _LLM_CONFIG_STR_FIELDS.items()
+    }
+    payload["token_alpha"] = _float_config(configs, "TOKEN_ALPHA", 0.2)
+    payload["token_beta"] = _float_config(configs, "TOKEN_BETA", 1.0)
+    return LLMConfigResponse(**payload)
 
 
 # ===================================================================
@@ -227,12 +262,21 @@ async def update_llm_config(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> LLMConfigResponse:
-    """Upsert LLM connection parameters. Enables zero-downtime model switching."""
-    await _upsert_config(db, "LLM_BASE_URL", body.base_url)
-    await _upsert_config(db, "LLM_API_KEY", body.api_key)
-    await _upsert_config(db, "LLM_MODEL", body.model)
+    """Zero-downtime upsert of the model-routing table.
+
+    Only fields explicitly provided (non-None) are written, so a legacy 3-field
+    PUT (base_url/api_key/model) never wipes the routing config.
+    """
+    for field, key in _LLM_CONFIG_STR_FIELDS.items():
+        value = getattr(body, field)
+        if value is not None:
+            await _upsert_config(db, key, value)
+    if body.token_alpha is not None:
+        await _upsert_config(db, "TOKEN_ALPHA", str(body.token_alpha))
+    if body.token_beta is not None:
+        await _upsert_config(db, "TOKEN_BETA", str(body.token_beta))
     await db.flush()
-    return LLMConfigResponse(base_url=body.base_url, api_key=body.api_key, model=body.model)
+    return await get_llm_config(_admin=_admin, db=db)
 
 
 # ===================================================================

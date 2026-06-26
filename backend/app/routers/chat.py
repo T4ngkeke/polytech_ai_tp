@@ -60,6 +60,7 @@ from backend.app.models import (
 )
 from backend.app.schemas import ChatStreamRequest
 from backend.app.services import rule_service
+from backend.app.services.model_routing import resolve_model_routing
 
 logger = logging.getLogger(__name__)
 
@@ -73,28 +74,35 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
     """
     Read LLM connection parameters from the SystemConfig table.
-    Falls back to environment-based settings if DB rows are missing.
+
+    [v7.2] The model-routing table (embedding / rerank / ingest / router split,
+    token weights) is resolved via ``resolve_model_routing``, which applies the
+    opt-in fallback to the main LLM. The flat keys (``base_url`` etc.) are kept
+    for backward compatibility with existing call sites.
     """
-    result = await db.execute(
-        select(SystemConfig).where(
-            SystemConfig.key.in_([
-                "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
-                "EMBEDDING_MODEL", "ROUTER_KNN_THRESHOLD",
-                "RERANK_URL", "RERANK_MODEL", "RAG_MAX_RETRIES",
-            ])
-        )
-    )
+    result = await db.execute(select(SystemConfig))
     configs = {row.key: row.value for row in result.scalars().all()}
+    routing = resolve_model_routing(configs)
 
     return {
-        "base_url": configs.get("LLM_BASE_URL", settings.LLM_BASE_URL),
-        "api_key": configs.get("LLM_API_KEY", settings.LLM_API_KEY),
-        "model": configs.get("LLM_MODEL", settings.LLM_MODEL),
-        "embedding_model": configs.get("EMBEDDING_MODEL", "BAAI/bge-m3"),
+        "base_url": routing.llm.base_url,
+        "api_key": routing.llm.api_key,
+        "model": routing.llm.model,
+        # [v7.2] embedding endpoint is now independently configurable.
+        "embedding_base_url": routing.embedding.base_url,
+        "embedding_api_key": routing.embedding.api_key,
+        "embedding_model": routing.embedding.model,
         "router_knn_threshold": configs.get("ROUTER_KNN_THRESHOLD", "0.35"),
-        "rerank_url": configs.get("RERANK_URL", ""),
-        "rerank_model": configs.get("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+        "rerank_url": routing.rerank.base_url,
+        "rerank_api_key": routing.rerank.api_key,
+        "rerank_model": routing.rerank.model,
+        # [v7.2] router model for the live exercise-number LLM fallback.
+        "router_base_url": routing.router.base_url,
+        "router_api_key": routing.router.api_key,
+        "router_model": routing.router.model,
         "rag_max_retries": configs.get("RAG_MAX_RETRIES", "1"),
+        "token_alpha": str(routing.token_alpha),
+        "token_beta": str(routing.token_beta),
     }
 
 
@@ -153,7 +161,10 @@ async def _build_citations_payload(db: AsyncSession, citations: list[dict]) -> l
 def _make_embed_fn(llm_config: dict[str, str]):
     """Build an async embedder hitting the configured embedding model."""
     async def embed(texts: list[str]) -> list[list[float]]:
-        client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
+        client = AsyncOpenAI(
+            api_key=llm_config["embedding_api_key"],
+            base_url=llm_config["embedding_base_url"],
+        )
         # encoding_format="float" is mandatory: the OpenAI SDK otherwise defaults
         # to "base64", which some OpenAI-compatible servers (e.g. Albert) reject
         # with a 500. Float is universally supported.

@@ -96,15 +96,53 @@ class UpdateRoleRequest(BaseModel):
 
 
 class LLMConfigRequest(BaseModel):
+    # Main generation engine (required — always present).
     base_url: str = Field(..., min_length=1)
     api_key: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
+
+    # [v7.2] model-routing table. All optional: only provided (non-None) fields
+    # are upserted, so a legacy 3-field PUT never wipes the routing config.
+    # Empty string = "inherit the main LLM" (see model_routing.resolve).
+    embedding_url: str | None = None
+    embedding_api_key: str | None = None
+    embedding_model: str | None = None
+    rerank_url: str | None = None
+    rerank_api_key: str | None = None
+    rerank_model: str | None = None
+    ingest_base_url: str | None = None
+    ingest_api_key: str | None = None
+    ingest_model: str | None = None
+    router_base_url: str | None = None
+    router_api_key: str | None = None
+    router_model: str | None = None
+    rag_max_retries: str | None = None
+    router_knn_threshold: str | None = None
+    token_alpha: float | None = None
+    token_beta: float | None = None
 
 
 class LLMConfigResponse(BaseModel):
     base_url: str
     api_key: str
     model: str
+    # [v7.2] raw stored values — empty means "inherits the main LLM".
+    embedding_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = ""
+    rerank_url: str = ""
+    rerank_api_key: str = ""
+    rerank_model: str = ""
+    ingest_base_url: str = ""
+    ingest_api_key: str = ""
+    ingest_model: str = ""
+    router_base_url: str = ""
+    router_api_key: str = ""
+    router_model: str = ""
+    rag_max_retries: str = ""
+    router_knn_threshold: str = ""
+    token_alpha: float = 0.2
+    token_beta: float = 1.0
 
 
 # ---------------------------------------------------------------------------
