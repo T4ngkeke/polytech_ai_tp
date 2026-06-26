@@ -85,6 +85,33 @@ async def _verify_class_ownership(db: AsyncSession, class_id: uuid.UUID, teacher
     return cls
 
 
+async def _verify_rule_target_ownership(
+    db: AsyncSession, level: RuleLevel, target_id: uuid.UUID, teacher: User
+) -> None:
+    """[v7.2] A teacher may only read/write rules for a target inside one of their
+    own classes — these rules are injected into the chat prompt, so cross-tenant
+    writes would let one teacher hijack another's tutor behavior."""
+    if level == RuleLevel.class_:
+        owned = (await db.execute(
+            select(Class.id).where(Class.id == target_id, Class.teacher_id == teacher.id)
+        )).scalar_one_or_none()
+    elif level == RuleLevel.lab:
+        owned = (await db.execute(
+            select(Lab.id).join(Class, Lab.class_id == Class.id)
+            .where(Lab.id == target_id, Class.teacher_id == teacher.id)
+        )).scalar_one_or_none()
+    else:  # student — must be enrolled in a class the teacher owns
+        owned = (await db.execute(
+            select(ClassStudent.student_id).join(Class, ClassStudent.class_id == Class.id)
+            .where(ClassStudent.student_id == target_id, Class.teacher_id == teacher.id)
+        )).first()
+    if owned is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized for this rule target",
+        )
+
+
 async def _build_student_summaries(
     db: AsyncSession, students: list[User]
 ) -> list[StudentSummaryResponse]:
@@ -293,10 +320,11 @@ async def get_document_exercises(
 @router.put("/rules", response_model=RuleResponse)
 async def upsert_rule(
     body: RuleUpsertRequest,
-    _teacher: User = Depends(require_teacher),
+    teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> RuleResponse:
     """Create or update a 3-tier rule based on (level, target_id)."""
+    await _verify_rule_target_ownership(db, body.level, body.target_id, teacher)
     r = await rule_service.upsert_rule(
         db,
         level=body.level,
@@ -316,10 +344,13 @@ async def upsert_rule(
 async def list_rules(
     level: str | None = Query(None, description="Filter by level: class, lab, student"),
     target_id: uuid.UUID | None = Query(None, description="Filter by target ID"),
-    _teacher: User = Depends(require_teacher),
+    teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> list[RuleResponse]:
     """List rules with optional level and target_id filters."""
+    # [v7.2] When asking for a specific target's rule, verify the teacher owns it.
+    if target_id is not None and level is not None:
+        await _verify_rule_target_ownership(db, RuleLevel(level), target_id, teacher)
     rules = await rule_service.list_rules(db, level=level, target_id=target_id)
     return [RuleResponse.model_validate(r) for r in rules]
 
@@ -422,7 +453,7 @@ async def get_chat_history(
     lab_id: uuid.UUID | None = Query(None),
     student_id: uuid.UUID | None = Query(None),
     session_id: uuid.UUID | None = Query(None),
-    _teacher: User = Depends(require_teacher),
+    teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionWithMessagesResponse]:
     """Fetch chat sessions and messages with flexible filters for audit.
@@ -431,9 +462,20 @@ async def get_chat_history(
     and the `is_deleted` flag on each row lets the UI mark the hidden ones. Only an
     admin hard-delete actually removes a session.
     """
+    # [v7.2] Ownership scope (applied unconditionally so a supplied session_id /
+    # student_id can't escape it): a teacher only audits sessions in labs of the
+    # classes they own.
+    owned_lab_ids = (await db.execute(
+        select(Lab.id).join(Class, Lab.class_id == Class.id)
+        .where(Class.teacher_id == teacher.id)
+    )).scalars().all()
+    if not owned_lab_ids:
+        return []
+
     query = (
         select(Session)
         .options(selectinload(Session.messages))
+        .where(Session.lab_id.in_(owned_lab_ids))
     )
 
     if session_id is not None:

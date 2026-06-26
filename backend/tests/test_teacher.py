@@ -220,6 +220,37 @@ class TestUpsertRule:
         resp = await teacher_client.put("/api/teacher/rules", json={})
         assert resp.status_code == 422
 
+    async def test_cannot_upsert_rule_on_foreign_class_403(self, teacher_client, db_session):
+        # [v7.2 fix] A teacher must not write rules (injected into the prompt) on
+        # another teacher's class.
+        other = make_user(role=UserRole.teacher, username="other_t3")
+        db_session.add(other)
+        await db_session.flush()
+        foreign = Class(name="Foreign", teacher_id=other.id, invite_code="FRGN02")
+        db_session.add(foreign)
+        await db_session.commit()
+
+        resp = await teacher_client.put("/api/teacher/rules", json={
+            "level": "class", "target_id": str(foreign.id), "rules_text": "hijack",
+        })
+        assert resp.status_code == 403
+
+    async def test_cannot_upsert_rule_on_foreign_lab_403(self, teacher_client, db_session):
+        other = make_user(role=UserRole.teacher, username="other_t4")
+        db_session.add(other)
+        await db_session.flush()
+        fcls = Class(name="Foreign", teacher_id=other.id, invite_code="FRGN03")
+        db_session.add(fcls)
+        await db_session.flush()
+        flab = Lab(class_id=fcls.id, name="Foreign Lab")
+        db_session.add(flab)
+        await db_session.commit()
+
+        resp = await teacher_client.put("/api/teacher/rules", json={
+            "level": "lab", "target_id": str(flab.id), "rules_text": "hijack",
+        })
+        assert resp.status_code == 403
+
 
 class TestListRules:
     async def test_list_all(self, teacher_client, seed_data):
@@ -523,6 +554,36 @@ class TestSkillPresets:
         rules = await teacher_client.get(
             f"/api/teacher/rules?level=class&target_id={class_id}")
         assert any(r["rules_text"] == "Be formal." for r in rules.json())
+
+    async def test_chat_history_scoped_to_own_classes(self, teacher_client, seed_data, db_session):
+        # [v7.2 fix] A foreign teacher's class/lab/session must be invisible even
+        # when its session_id is supplied directly (IDOR).
+        other = make_user(role=UserRole.teacher, username="other_t2")
+        stu = make_user(role=UserRole.student, username="foreign_stu")
+        db_session.add_all([other, stu])
+        await db_session.flush()
+        fcls = Class(name="Foreign", teacher_id=other.id, invite_code="FRGN01")
+        db_session.add(fcls)
+        await db_session.flush()
+        flab = Lab(class_id=fcls.id, name="Foreign Lab")
+        db_session.add(flab)
+        await db_session.flush()
+        fsess = Session(user_id=stu.id, lab_id=flab.id, title="secret")
+        db_session.add(fsess)
+        await db_session.flush()
+        db_session.add(Message(session_id=fsess.id, sender=SenderType.user, content="secret"))
+        await db_session.commit()
+
+        resp = await teacher_client.get(f"/api/teacher/chat-history?session_id={fsess.id}")
+        assert resp.status_code == 200
+        assert resp.json() == []  # leak blocked — not in teacher1's owned labs
+
+    async def test_chat_history_still_shows_own_sessions(self, teacher_client, seed_data):
+        # teacher1 owns seed_data["class"]/lab → their student's session is visible.
+        sess_id = seed_data["session"].id
+        resp = await teacher_client.get(f"/api/teacher/chat-history?session_id={sess_id}")
+        assert resp.status_code == 200
+        assert [s["id"] for s in resp.json()] == [str(sess_id)]
 
     async def test_apply_to_unowned_class_403(self, teacher_client, db_session):
         # A class owned by a different teacher.

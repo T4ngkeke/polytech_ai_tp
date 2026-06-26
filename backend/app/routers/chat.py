@@ -390,23 +390,35 @@ async def chat_stream(
     lab_id = session.lab_id
 
     if lab_id:
-        lab_result = await db.execute(select(Lab).where(Lab.id == lab_id))
-        lab = lab_result.scalar_one_or_none()
-        if lab:
-            class_id = lab.class_id
-
-            # Verify student membership in the class
-            membership = await db.execute(
-                select(ClassStudent).where(
-                    ClassStudent.class_id == class_id,
-                    ClassStudent.student_id == current_user.id,
-                )
+        # [v7.2] The lab must exist, be active, and not be soft-deleted — a locked
+        # or deleted lab is read-only and must reject chat (README §6 step 1).
+        lab_result = await db.execute(
+            select(Lab).where(
+                Lab.id == lab_id,
+                Lab.is_active.is_(True),
+                Lab.is_deleted.is_(False),
             )
-            if membership.scalar_one_or_none() is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You are not a member of the class that owns this lab",
-                )
+        )
+        lab = lab_result.scalar_one_or_none()
+        if lab is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This lab is locked or no longer available",
+            )
+        class_id = lab.class_id
+
+        # Verify student membership in the class
+        membership = await db.execute(
+            select(ClassStudent).where(
+                ClassStudent.class_id == class_id,
+                ClassStudent.student_id == current_user.id,
+            )
+        )
+        if membership.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of the class that owns this lab",
+            )
 
     # Check quota
     today = date.today()
@@ -484,6 +496,11 @@ async def chat_stream(
             model=llm_config["model"],
             messages=messages_payload,
             stream=True,
+            # [v7.2] Opt into streamed token usage. Without this most OpenAI-
+            # compatible servers (vLLM/Ollama) omit `usage` on streamed chunks,
+            # so billing would fall back to a flat 10/10 charge and quota would be
+            # meaningless. A final usage-only chunk arrives after the content.
+            stream_options={"include_usage": True},
             # Disable "thinking/reasoning" mode for reasoning-capable models
             # (e.g. Qwen3): otherwise the model emits all tokens in a non-standard
             # `reasoning` field with an empty `content`, so nothing streams to the

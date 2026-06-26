@@ -142,7 +142,9 @@ def build_agent(
         lab_id = state.get("lab_id")
         if not lab_id:
             return {"context_blocks": []}
-        hits = await search_exercises(db, lab_id, number=state.get("exercise_number"))
+        hits = await search_exercises(
+            db, lab_id, number=state.get("exercise_number"), audience=Audience.student,
+        )
         blocks = [
             f"{h.number}: {h.statement}" + (f"\nHint: {h.hints}" if h.hints else "")
             for h in hits

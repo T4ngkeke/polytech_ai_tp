@@ -193,9 +193,9 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 > `doc_type`/`audience`; add `DocChunk.context`/`section`/`tsv`; add `RouterQueryLog`) are
 > applied by **recreating** the dev database — there is no production data to migrate.
 >
-> **v7.2 schema note:** same approach — the v7.2 changes (add `Exercise.number_normalized`; add
-> the `SkillPresets` table; add the v7.2 `SystemConfigs` keys with defaults in `seed.py`) are
-> applied by **recreating** the dev database.
+> **v7.2 schema note:** same approach — the v7.2 changes (add `Exercise.number_normalized` +
+> `Exercise.audience`; add the `SkillPresets` table; add the v7.2 `SystemConfigs` keys with
+> defaults in `seed.py`) are applied by **recreating** the dev database.
 
 ### 1. SystemConfigs
 | Column | Type | Constraints / Notes |
@@ -350,6 +350,7 @@ B-tree on `lab_id` for the mandatory tenant filter.
 | document_id | FK | → Documents.id `ON DELETE CASCADE` |
 | class_id | UUID | Denormalized tenant filter. Not Null |
 | lab_id | UUID | Denormalized, nullable |
+| audience | Enum | **[v7.2]** `student` / `teacher`, denormalized from the Document. The `audience='student'` filter for exercise search lives here — students never retrieve teacher-audience exercises (SQL WHERE) |
 | number | String | Raw label as printed — e.g. "Exercise 2", "3.1", "II". Used for display/citation |
 | number_normalized | Integer | **[v7.2]** canonical integer derived from `number` (Roman→int, `3.1`→main `3`, etc.), nullable. Both ingest-side extraction and query-side matching run the **same** `normalize_exercise_number()` over it — decouples matching from the unstable printed format |
 | statement | Text | Exercise body. **Student-safe** — this is all that is stored |

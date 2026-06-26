@@ -127,6 +127,19 @@ async def test_ingest_populates_normalized_exercise_number(db_session, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_ingest_denormalizes_audience_onto_exercise(db_session, tmp_path):
+    """[v7.2 fix] Exercise.audience is copied from the source Document so the
+    student-audience filter can be enforced in the exercise search WHERE clause."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="x", audience=Audience.teacher)
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=fake_extract)
+    ex = (await db_session.execute(
+        select(Exercise).where(Exercise.document_id == doc.id)
+    )).scalars().one()
+    assert ex.audience == Audience.teacher
+
+
+@pytest.mark.asyncio
 async def test_contextual_retrieval_embeds_augmented_stores_original(db_session, tmp_path):
     doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM, body="lone slide fragment")
 

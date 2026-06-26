@@ -149,7 +149,12 @@ async def client2(db_session: AsyncSession, seed_chat) -> AsyncClient:
 async def mock_openai():
     """Mock AsyncOpenAI to return a predictable streaming response."""
     with patch("backend.app.routers.chat.AsyncOpenAI") as mock:
+        captured_create_kwargs: dict = {}
+
         async def mock_create(*args, **kwargs):
+            captured_create_kwargs.clear()
+            captured_create_kwargs.update(kwargs)
+
             async def mock_generator():
                 class Delta:
                     def __init__(self, content):
@@ -195,6 +200,7 @@ async def mock_openai():
         instance = mock.return_value
         instance.chat.completions.create = mock_create
         instance.embeddings.create = mock_embed_create
+        instance._captured_create_kwargs = captured_create_kwargs
         yield mock
 
 
@@ -246,6 +252,29 @@ class TestGateChecks:
             "session_id": str(seed_chat["sess1"].id), "message": "hi",
         })
         assert resp.status_code == 429
+
+    async def test_locked_lab_rejected_403(self, client1, seed_chat, db_session):
+        # [v7.2 fix] README §6: a locked (is_active=False) lab must reject chat.
+        lab = seed_chat["lab"]
+        lab.is_active = False
+        db_session.add(lab)
+        await db_session.commit()
+
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess1"].id), "message": "hi",
+        })
+        assert resp.status_code == 403
+
+    async def test_deleted_lab_rejected_403(self, client1, seed_chat, db_session):
+        lab = seed_chat["lab"]
+        lab.is_deleted = True
+        db_session.add(lab)
+        await db_session.commit()
+
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess1"].id), "message": "hi",
+        })
+        assert resp.status_code == 403
 
 
 # ===================================================================
@@ -384,6 +413,25 @@ class TestStreamingAndBackgroundTask:
         # billed = prompt*0.2 + completion*1.0 = 10*0.2 + 5*1.0 = 7.
         assert usage.tokens_used == 7
         assert usage.request_count == 1
+
+    async def test_stream_requests_usage_so_billing_is_real(
+        self, client1, seed_chat, db_session, mock_openai
+    ):
+        """[v7.2 fix] Without stream_options include_usage, OpenAI-compatible
+        servers omit usage on streamed chunks, so quota silently falls back to a
+        flat 10/10 charge. The create() call must opt into streamed usage."""
+        sess = seed_chat["sess1"]
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+            async with client1.stream("POST", "/api/chat/stream", json={
+                "session_id": str(sess.id), "message": "stream test",
+            }) as resp:
+                async for _ in resp.aiter_text():
+                    pass
+
+        kwargs = mock_openai.return_value._captured_create_kwargs
+        assert kwargs.get("stream") is True
+        assert kwargs.get("stream_options") == {"include_usage": True}
 
     async def test_stream_emits_citations_and_done_events(
         self, client1, seed_chat, db_session, mock_openai

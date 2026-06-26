@@ -135,6 +135,7 @@ async def ingest_document(
                     document_id=doc.id,
                     class_id=doc.class_id,
                     lab_id=doc.lab_id,
+                    audience=doc.audience,
                     number=ex["number"],
                     number_normalized=normalize_exercise_number(ex["number"]),
                     statement=ex["statement"],

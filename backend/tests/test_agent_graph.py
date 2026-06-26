@@ -234,6 +234,54 @@ async def test_llm_fallback_number_filters_exercises(db_session):
 
 
 @pytest.mark.asyncio
+async def test_agentic_search_excludes_teacher_audience_exercises(db_session):
+    """[v7.2 fix] Students never retrieve teacher-audience exercise statements."""
+    from backend.app.models import Audience, Document
+
+    teacher = make_user(role=UserRole.teacher)
+    db_session.add(teacher)
+    await db_session.flush()
+    cls = Class(id=uuid.uuid4(), name="Algo", teacher_id=teacher.id,
+                invite_code=uuid.uuid4().hex[:6])
+    db_session.add(cls)
+    await db_session.flush()
+    lab = Lab(id=uuid.uuid4(), class_id=cls.id, name="Lab 1")
+    db_session.add(lab)
+    await db_session.flush()
+    doc = Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="d.pdf",
+                   storage_path="/x", content_hash=uuid.uuid4().hex, uploaded_by=teacher.id)
+    db_session.add(doc)
+    await db_session.flush()
+    db_session.add_all([
+        Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 audience=Audience.student, number="E1", number_normalized=1,
+                 statement="STUDENT-SAFE exercise"),
+        Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 audience=Audience.teacher, number="E2", number_normalized=2,
+                 statement="TEACHER-ONLY exercise"),
+    ])
+    await db_session.commit()
+
+    async def fake_embed(texts):
+        return [[0.0, 1.0] for _ in texts]
+
+    async def fake_exercise_extract(_message):
+        return 2  # the student asks for exercise 2 (which is teacher-audience)
+
+    agent = build_agent(
+        db_session, embed_fn=fake_embed, router_threshold=0.5,
+        exercise_extract_fn=fake_exercise_extract,
+    )
+    result = await agent.ainvoke({
+        "message": "exercice 2 svp",
+        "class_id": cls.id, "lab_id": lab.id, "user_id": teacher.id, "history": [],
+    })
+
+    blocks = "\n".join(result["context_blocks"])
+    assert "TEACHER-ONLY exercise" not in blocks  # teacher-audience never surfaces
+
+
+@pytest.mark.asyncio
 async def test_self_eval_bad_verdict_adds_low_evidence_disclaimer(pg_session):
     """A persistently-bad self-eval verdict raises the low-evidence disclaimer."""
     cls, lab, student = await _seed_lab_with_chunk(pg_session, "barely relevant note", at=1)
