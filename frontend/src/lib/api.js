@@ -1,13 +1,12 @@
 /**
- * api.js — Lightweight fetch wrapper with JWT auth for Edu-LLM v6.
+ * api.js — Lightweight fetch wrapper with JWT auth for Edu-LLM.
  *
  * Automatically attaches Authorization header from the auth store.
  * Redirects to /login on 401 responses.
  *
- * v6 changes:
- *   - Student DELETE /sessions removed (audit integrity)
- *   - Admin: DELETE /classes/{id}, DELETE /labs/{id}, GET/PUT /llm/config,
- *            GET /analytics/classes/{id}, GET /classes/{id}/labs
+ * Generic verbs (get/post/put/delete/upload/raw); endpoints live at call sites.
+ * Note: student DELETE /api/student/sessions/{id} is a soft delete (the session
+ * is hidden from the student but retained for teacher/admin audit).
  */
 
 import useAuthStore from '../store/authStore';

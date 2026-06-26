@@ -383,6 +383,28 @@ class TestStreamingAndBackgroundTask:
         assert usage.tokens_used == 15
         assert usage.request_count == 1
 
+    async def test_stream_emits_citations_and_done_events(
+        self, client1, seed_chat, db_session, mock_openai
+    ):
+        """After the token stream, a `citations` event then a terminal `done` event."""
+        sess = seed_chat["sess1"]
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+
+        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+            async with client1.stream("POST", "/api/chat/stream", json={
+                "session_id": str(sess.id), "message": "stream test",
+            }) as resp:
+                assert resp.status_code == 200
+                full_text = "".join([c async for c in resp.aiter_text()])
+
+        # Terminal contract the frontend relies on.
+        assert "event: done\n" in full_text
+        # Citations event is always emitted (empty list on the `direct` route here).
+        assert "event: citations\n" in full_text
+        assert "data: []\n\n" in full_text
+        # done comes after citations.
+        assert full_text.index("event: citations") < full_text.index("event: done")
+
     async def test_legacy_session_without_lab_works(
         self, client1, seed_chat, db_session, mock_openai
     ):

@@ -34,6 +34,7 @@ Execution Flow
 
 import json
 import logging
+import uuid
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -48,6 +49,7 @@ from backend.app.config import settings
 from backend.app.database import AsyncSessionLocal, get_db
 from backend.app.models import (
     ClassStudent,
+    Document,
     Lab,
     Message,
     SenderType,
@@ -88,12 +90,60 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "base_url": configs.get("LLM_BASE_URL", settings.LLM_BASE_URL),
         "api_key": configs.get("LLM_API_KEY", settings.LLM_API_KEY),
         "model": configs.get("LLM_MODEL", settings.LLM_MODEL),
-        "embedding_model": configs.get("EMBEDDING_MODEL", "bge-m3"),
+        "embedding_model": configs.get("EMBEDDING_MODEL", "BAAI/bge-m3"),
         "router_knn_threshold": configs.get("ROUTER_KNN_THRESHOLD", "0.35"),
         "rerank_url": configs.get("RERANK_URL", ""),
-        "rerank_model": configs.get("RERANK_MODEL", "bge-reranker-v2-m3"),
+        "rerank_model": configs.get("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
         "rag_max_retries": configs.get("RAG_MAX_RETRIES", "1"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Helper: build the SSE citations payload (enrich agent citations with filename)
+# ---------------------------------------------------------------------------
+
+async def _build_citations_payload(db: AsyncSession, citations: list[dict]) -> list[dict]:
+    """Dedup the agent's citations and enrich each with its document filename.
+
+    The agent emits ``{document_id, page_no}``; students can't resolve a raw
+    document_id, so we resolve filenames here (one query) while the request DB
+    session is still open. Returns ``[{document_id, filename, page_no}, ...]``.
+    """
+    if not citations:
+        return []
+
+    # Dedup by (document_id, page_no), preserving first-seen order.
+    seen: set[tuple] = set()
+    deduped: list[dict] = []
+    for c in citations:
+        key = (c.get("document_id"), c.get("page_no"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(c)
+
+    # Resolve filenames in a single query.
+    uuid_ids = []
+    for doc_id in {c.get("document_id") for c in deduped if c.get("document_id")}:
+        try:
+            uuid_ids.append(uuid.UUID(str(doc_id)))
+        except (ValueError, TypeError):
+            continue
+    filenames: dict[str, str] = {}
+    if uuid_ids:
+        rows = await db.execute(
+            select(Document.id, Document.filename).where(Document.id.in_(uuid_ids))
+        )
+        filenames = {str(r.id): r.filename for r in rows.all()}
+
+    return [
+        {
+            "document_id": c.get("document_id"),
+            "filename": filenames.get(c.get("document_id")),
+            "page_no": c.get("page_no"),
+        }
+        for c in deduped
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -104,8 +154,11 @@ def _make_embed_fn(llm_config: dict[str, str]):
     """Build an async embedder hitting the configured embedding model."""
     async def embed(texts: list[str]) -> list[list[float]]:
         client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
+        # encoding_format="float" is mandatory: the OpenAI SDK otherwise defaults
+        # to "base64", which some OpenAI-compatible servers (e.g. Albert) reject
+        # with a 500. Float is universally supported.
         resp = await client.embeddings.create(
-            model=llm_config["embedding_model"], input=texts
+            model=llm_config["embedding_model"], input=texts, encoding_format="float"
         )
         return [item.embedding for item in resp.data]
     return embed
@@ -362,6 +415,12 @@ async def chat_stream(
     })
     messages_payload = agent_result["messages_payload"]
 
+    # Resolve citations now, while the request DB session is still open (the
+    # streaming generator runs after the request returns and cannot use `db`).
+    citations_payload = await _build_citations_payload(
+        db, agent_result.get("citations", [])
+    )
+
     # ---------------------------------------------------------
     # STEP 3: Dynamic LLM Proxy (Zero-Downtime)
     # ---------------------------------------------------------
@@ -380,7 +439,7 @@ async def chat_stream(
             # `reasoning` field with an empty `content`, so nothing streams to the
             # client. Ollama's OpenAI-compatible endpoint honors this; plain models
             # simply ignore it.
-            extra_body={"reasoning_effort": "none"},
+            extra_body={"reasoning_effort": "low"},
         )
     except Exception as e:
         raise HTTPException(
@@ -398,9 +457,11 @@ async def chat_stream(
     }
 
     async def event_generator():
+        disconnected = False
         try:
             async for chunk in stream:
                 if await request.is_disconnected():
+                    disconnected = True
                     break
 
                 # Check for token usage
@@ -413,6 +474,12 @@ async def chat_stream(
                     if delta.content:
                         stream_results["content"] += delta.content
                         yield f"data: {delta.content}\n\n"
+
+            # After the token stream: emit citations, then a terminal `done`
+            # event (the client stops streaming and refreshes quota on `done`).
+            if not disconnected:
+                yield f"event: citations\ndata: {json.dumps(citations_payload)}\n\n"
+                yield "event: done\ndata: {}\n\n"
         finally:
             # Enqueue the background task with fallback token estimates
             pt = stream_results["prompt_tokens"] or 10

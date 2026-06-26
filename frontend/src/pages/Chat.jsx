@@ -1,9 +1,11 @@
 /**
- * Chat.jsx — Student unified workspace for Edu-LLM v6.
+ * Chat.jsx — Student unified workspace for Edu-LLM.
  *
  * Layout: Left hierarchical sidebar (Class→Lab tree) + Right chat panel.
  * Students pick a lab from the sidebar; sessions are created automatically.
- * Students CANNOT delete sessions (audit integrity — v6 rule).
+ * Deleting a session is a SOFT delete (DELETE /api/student/sessions/{id}): it
+ * disappears from the student's list but is retained and stays visible to
+ * teacher/admin audit. Only admin can hard-delete.
  *
  * Join class flow is a modal triggered from the sidebar.
  */
@@ -49,6 +51,9 @@ export default function Chat() {
   // ── Rename session state ──
   const [renamingSessionId, setRenamingSessionId] = useState(null);
   const [renameTitle, setRenameTitle] = useState('');
+
+  // ── Soft-delete confirm state (inline, mirrors the rename pattern) ──
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
 
   // ── Load classes with labs ──
   const loadClasses = useCallback(async () => {
@@ -180,6 +185,14 @@ export default function Chat() {
         signal: ctrl.signal,
         onmessage(ev) {
           if (ev.event === 'done') { setIsStreaming(false); loadUsage(); return; }
+          if (ev.event === 'citations') {
+            let cites = [];
+            try { cites = JSON.parse(ev.data); } catch { /* ignore malformed */ }
+            setMessages((prev) => prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, citations: cites } : m
+            ));
+            return;
+          }
           if (ev.data) {
             setMessages((prev) => prev.map((m) =>
               m.id === assistantMsgId ? { ...m, content: m.content + ev.data } : m
@@ -236,6 +249,24 @@ export default function Chat() {
       toast.error(err.message);
     }
   };
+
+  // ── Soft-delete session (hidden from student; retained for teacher/admin audit) ──
+  const handleDeleteSession = useCallback(async (sessionId) => {
+    try {
+      await api.delete(`/api/student/sessions/${sessionId}`);
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete session');
+      return;
+    } finally {
+      setConfirmingDeleteId(null);
+    }
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(null);
+      setMessages([]);
+    }
+    toast.success('Chat deleted');
+  }, [activeSessionId]);
 
   // ── Derived ──
   const quotaPct = usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
@@ -296,29 +327,58 @@ export default function Chat() {
                     onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSession(s.id); if (e.key === 'Escape') setRenamingSessionId(null); }}
                     className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
                   />
+                ) : confirmingDeleteId === s.id ? (
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs bg-rose-500/10">
+                    <span className="flex-1 truncate text-rose-300">Delete this chat?</span>
+                    <button
+                      onClick={() => handleDeleteSession(s.id)}
+                      className="w-5 h-5 flex items-center justify-center text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
+                      title="Confirm delete"
+                    >
+                      <CheckIcon className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setConfirmingDeleteId(null)}
+                      className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
+                      title="Cancel"
+                    >
+                      <XIcon className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 ) : (
-                  <button
-                    onClick={() => handleSelectSession(s.id)}
-                    className={`w-full text-left px-3 py-2 text-xs transition-all cursor-pointer ${
-                      activeSessionId === s.id
-                        ? 'bg-cyan-muted text-cyan'
-                        : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
-                    }`}
-                  >
-                    <span className="block truncate">{s.title || 'Untitled Session'}</span>
-                    <span className="block text-[9px] text-cream-muted mt-0.5">
-                      {new Date(s.created_at).toLocaleDateString()}
-                    </span>
-                  </button>
+                  <>
+                    <button
+                      onClick={() => handleSelectSession(s.id)}
+                      className={`w-full text-left px-3 py-2 pr-14 text-xs transition-all cursor-pointer ${
+                        activeSessionId === s.id
+                          ? 'bg-cyan-muted text-cyan'
+                          : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
+                      }`}
+                    >
+                      <span className="block truncate">{s.title || 'Untitled Session'}</span>
+                      <span className="block text-[9px] text-cream-muted mt-0.5">
+                        {new Date(s.created_at).toLocaleDateString()}
+                      </span>
+                    </button>
+                    {/* Hover actions: rename + soft-delete */}
+                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
+                        className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
+                        title="Rename session"
+                      >
+                        <PencilIcon className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => setConfirmingDeleteId(s.id)}
+                        className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-rose-400 transition-colors cursor-pointer"
+                        title="Delete session"
+                      >
+                        <TrashIcon className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </>
                 )}
-                {/* Rename button only — NO delete */}
-                <button
-                  onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-all cursor-pointer"
-                  title="Rename session"
-                >
-                  <PencilIcon className="w-3 h-3" />
-                </button>
               </div>
             ))}
           </div>
@@ -482,6 +542,21 @@ function MessageBubble({ message }) {
           : 'bg-ink-raised text-cream-secondary border border-border-subtle rounded-tl-sm'
       }`}>
         {message.content || <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
+        {!isUser && message.citations?.length > 0 && (
+          <div className="mt-2.5 pt-2.5 border-t border-border-subtle flex flex-wrap gap-1.5">
+            {message.citations.map((c, i) => (
+              <span
+                key={`${c.document_id}-${c.page_no}-${i}`}
+                className="inline-flex items-center gap-1 rounded-md bg-cyan-muted/60 border border-cyan/20 px-1.5 py-0.5 text-[10px] text-cream-secondary"
+                title={c.filename || c.document_id}
+              >
+                <DocIcon className="w-2.5 h-2.5 text-cyan" />
+                <span className="max-w-[180px] truncate">{c.filename || 'Source'}</span>
+                {c.page_no != null && <span className="text-cream-muted">· p.{c.page_no}</span>}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -498,6 +573,18 @@ function SendIcon({ className }) {
 function StopIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>;
 }
+function DocIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>;
+}
 function PencilIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
+}
+function TrashIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>;
+}
+function CheckIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
+}
+function XIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>;
 }

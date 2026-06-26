@@ -21,6 +21,7 @@ from backend.app.models import (
 )
 from backend.app.services.document_service import create_document
 from backend.tests.conftest import make_user
+from backend.worker.gpu_gate import ChatLoadGate
 from backend.worker.main import run_tick
 
 
@@ -98,3 +99,54 @@ async def test_run_tick_processes_when_gate_open(pg_session, tmp_path):
     await pg_session.refresh(doc)
     assert doc.status == DocumentStatus.indexed
     assert sleeps == []  # did work, no idle sleep
+
+
+@pytest.mark.asyncio
+async def test_run_tick_skips_when_chat_busy_even_if_gpu_idle(pg_session, tmp_path):
+    """Primary gate: a busy chat pauses ingestion even when the GPU gate is open."""
+    doc = await _seed_job(pg_session, tmp_path)
+    gate = FakeGate(is_open=True)  # GPU idle
+    chat_gate = ChatLoadGate(window=1)
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    async def busy_chat_load(_db):
+        return 50.0  # lots of recent chat activity
+
+    processed = await run_tick(
+        pg_session, gate, embed_fn=fake_embed, extract_fn=fake_extract, sleep_fn=fake_sleep,
+        chat_gate=chat_gate, chat_load_fn=busy_chat_load,
+    )
+
+    assert processed is False
+    assert sleeps  # backed off
+    job = (await pg_session.execute(
+        IngestionJob.__table__.select().where(IngestionJob.document_id == doc.id)
+    )).first()
+    assert job.status == JobStatus.queued  # untouched
+
+
+@pytest.mark.asyncio
+async def test_run_tick_processes_when_chat_quiet_and_gpu_idle(pg_session, tmp_path):
+    """Both gates open (chat quiet + GPU idle) → ingestion runs."""
+    doc = await _seed_job(pg_session, tmp_path)
+    gate = FakeGate(is_open=True)
+    chat_gate = ChatLoadGate(window=1)
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    async def quiet_chat_load(_db):
+        return 0.0  # no recent chat
+
+    processed = await run_tick(
+        pg_session, gate, embed_fn=fake_embed, extract_fn=fake_extract, sleep_fn=fake_sleep,
+        chat_gate=chat_gate, chat_load_fn=quiet_chat_load,
+    )
+
+    assert processed is True
+    await pg_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed

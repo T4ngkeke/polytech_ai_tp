@@ -39,11 +39,12 @@ DEFAULT_SYSTEM_CONFIGS = [
     {"key": "LLM_API_KEY", "value": settings.LLM_API_KEY},
     {"key": "LLM_MODEL", "value": settings.LLM_MODEL},
     # [v7] embedding model for RAG + router kNN. bge-m3 = 1024-dim (matches EMBEDDING_DIM).
-    {"key": "EMBEDDING_MODEL", "value": "bge-m3"},
+    # Model id is the provider's full name (Albert/HF style: "BAAI/bge-m3").
+    {"key": "EMBEDDING_MODEL", "value": "BAAI/bge-m3"},
     # [v7.1] reranker behind an OpenAI-compatible rerank endpoint (TEI / Infinity / vLLM).
     # Empty URL → retrieval degrades gracefully to fusion-only ordering.
     {"key": "RERANK_URL", "value": ""},
-    {"key": "RERANK_MODEL", "value": "bge-reranker-v2-m3"},
+    {"key": "RERANK_MODEL", "value": "BAAI/bge-reranker-v2-m3"},
     # [v7.1] bounded self-eval loop: max re-retrieval rounds (admin-configurable, default 1).
     {"key": "RAG_MAX_RETRIES", "value": "1"},
     # [v7.1] router kNN confidence threshold: below this, fall back to RAG + log.

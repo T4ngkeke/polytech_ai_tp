@@ -553,7 +553,14 @@ function AuditPanel({ sessions, students, expandedStudentId, setExpandedStudentI
                         className="w-full flex items-center justify-between px-4 py-2 text-left cursor-pointer hover:bg-ink-hover transition-colors bg-ink-deep"
                       >
                         <div>
-                          <p className="text-xs font-medium text-cream">{s.title || 'Untitled Session'}</p>
+                          <p className="text-xs font-medium text-cream">
+                            <span className={s.is_deleted ? 'line-through opacity-70' : ''}>{s.title || 'Untitled Session'}</span>
+                            {s.is_deleted && (
+                              <span className="ml-2 align-middle rounded bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-300">
+                                deleted by student
+                              </span>
+                            )}
+                          </p>
                           <p className="text-[10px] text-cream-muted font-mono">{new Date(s.created_at).toLocaleString()}</p>
                         </div>
                         <div className="flex items-center gap-3">

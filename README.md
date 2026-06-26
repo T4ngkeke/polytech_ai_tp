@@ -22,8 +22,9 @@ by Docker Compose, with **no external message queue** (PostgreSQL itself is the 
 - **Hybrid retrieval on a single DB**: structured tables + `pgvector` + Postgres full-text
   (`tsvector`) live together, so exercise lookups and concept RAG JOIN naturally. No
   third-party vector DB.
-- **Deferred, GPU-aware ingestion**: a `worker` service polls an `IngestionJobs` table and
-  runs ingestion at low priority — chat always preempts.
+- **Deferred, load-aware ingestion**: a `worker` service polls an `IngestionJobs` table and
+  runs ingestion at low priority, pausing while students are actively chatting (live chat-load
+  gate; GPU utilization is an optional extra signal on local engines) — chat always preempts.
 - **Reuse the same engine, nothing hardcoded**: chat *and* ingestion call the same
   OpenAI-compatible endpoints read from `SystemConfigs` at runtime — generation, embeddings
   (`bge-m3`), and reranking (`bge-reranker-v2-m3`). No second model is spun up; no model is
@@ -113,7 +114,7 @@ polytech_ai_tp/
 │   │   ├── ingest.py                # [v7.1] pymupdf parse + char-yield gate + structure-aware chunk + Contextual Retrieval + statement-only extract + tsvector
 │   │   ├── parsing.py               # [v7.1] PDF text extraction (pymupdf) + character-yield gate
 │   │   ├── chunking.py              # [v7.1] structure-aware chunking (keep exercises/code intact, drop TOC)
-│   │   └── gpu_gate.py              # pynvml GPU-utilization gate (off-peak scheduling)
+│   │   └── gpu_gate.py              # chat-load gate (+ optional pynvml GPU signal); off-peak scheduling
 │   ├── .env                         # DATABASE_URL, JWT_SECRET (LLM configs live in DB)
 │   ├── requirements.txt
 │   └── Dockerfile                   # Python 3.12-slim — shared by backend & worker (entrypoint differs)
@@ -499,9 +500,10 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
      config-driven HTTP. Swapping a model or threshold is a config change, not a code change.
 
 5. **SSE Streaming & Safe Async Write**
-   * Stream tokens via SSE from the graph's `astream_events` (an adapter filters node events
-     down to the v6-compatible token stream + a final citations event; an optional throttled
-     `tip` event for prompt-literacy coaching).
+   * Stream tokens via SSE from the synthesize payload. After the token stream, emit a final
+     **`citations`** event (`document_id` / `filename` / `page_no`, deduped) and a **`done`**
+     event (the client uses `done` to stop streaming and refresh quota). *(An optional throttled
+     `tip` event for prompt-literacy coaching is deferred to v7.2.)*
    * Use `BackgroundTasks` to insert User message, LLM message (with tokens), and Upsert
      `usage_stats`. **Token accounting sums the Synthesize node's usage** plus any extra LLM
      calls made during Contextual routing / self-eval.
@@ -541,9 +543,13 @@ A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live
   generation hit the **same `SystemConfigs` endpoints chat uses** — no second model, nothing
   hardcoded, no torch. Per-chunk Contextual-Retrieval calls run entirely on the **off-peak
   worker** and never preempt students.
-- **"When to run" lives in the worker's Python** (`gpu_gate.py`): at night / no-class windows
-  pull freely; during the day pull only when `pynvml` reports GPU utilization below a
-  threshold (sliding window + hysteresis to avoid flapping), else sleep. No external cron.
+- **"When to run" lives in the worker's Python** (`gpu_gate.py`): the **primary signal is
+  live chat load** — the worker counts recent `Messages` in the DB and pauses ingestion while
+  students are actively chatting (sliding window + hysteresis to avoid flapping). **GPU
+  utilization is an optional additional condition**: on a local engine the worker also requires
+  the GPU idle via `pynvml`; with a remote API there is no local GPU, so `pynvml` reads idle and
+  that condition no-ops. The same gate therefore works for both local-GPU and remote-API
+  engines. At night / no-class windows it may pull freely. No external cron.
 - **Crash recovery & idempotency:** stale `processing` jobs past a timeout are re-claimed; a
   re-run deletes the document's old chunks/exercises before rebuilding (consistent after a
   strategy change).
