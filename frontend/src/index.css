@@ -95,6 +95,21 @@
 
 /* ── Utility Classes ── */
 @layer utilities {
+  /* [v7.2] Markdown rendering for chat assistant messages. Tailwind's base reset
+     strips list/heading styles, so restore the few we need inside .prose-chat. */
+  .prose-chat p { margin: 0.25rem 0; }
+  .prose-chat ul { list-style: disc; padding-left: 1.25rem; margin: 0.25rem 0; }
+  .prose-chat ol { list-style: decimal; padding-left: 1.25rem; margin: 0.25rem 0; }
+  .prose-chat li { margin: 0.15rem 0; }
+  .prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.5rem 0 0.25rem; }
+  .prose-chat h1 { font-size: 1.1rem; }
+  .prose-chat h2 { font-size: 1.05rem; }
+  .prose-chat h3 { font-size: 1rem; }
+  .prose-chat blockquote { border-left: 3px solid var(--border, #2a2f3a); padding-left: 0.75rem; opacity: 0.85; margin: 0.4rem 0; }
+  .prose-chat table { border-collapse: collapse; margin: 0.4rem 0; }
+  .prose-chat th, .prose-chat td { border: 1px solid rgba(255,255,255,0.12); padding: 0.3rem 0.6rem; }
+  .prose-chat a { word-break: break-word; }
+
   /* Glass panels */
   .glass {
     background: rgba(26, 29, 37, 0.8);

@@ -10,13 +10,16 @@
  * Join class flow is a modal triggered from the sidebar.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
+// Lazy: the markdown/highlight/KaTeX stack is heavy and only needed once the
+// student opens a chat — code-split it out of the initial bundle.
+const MessageContent = lazy(() => import('../components/MessageContent'));
 
 export default function Chat() {
   const { labId: urlLabId } = useParams();
@@ -527,7 +530,7 @@ export default function Chat() {
 }
 
 /* ── Message Bubble ── */
-function MessageBubble({ message }) {
+const MessageBubble = memo(function MessageBubble({ message }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -541,7 +544,15 @@ function MessageBubble({ message }) {
           ? 'bg-cyan-muted text-cream rounded-tr-sm border border-cyan/20'
           : 'bg-ink-raised text-cream-secondary border border-border-subtle rounded-tl-sm'
       }`}>
-        {message.content || <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
+        {message.content
+          ? (isUser
+              ? <span className="whitespace-pre-wrap">{message.content}</span>
+              : (
+                <Suspense fallback={<span className="whitespace-pre-wrap">{message.content}</span>}>
+                  <MessageContent content={message.content} />
+                </Suspense>
+              ))
+          : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
         {!isUser && message.citations?.length > 0 && (
           <div className="mt-2.5 pt-2.5 border-t border-border-subtle flex flex-wrap gap-1.5">
             {message.citations.map((c, i) => (
@@ -560,7 +571,7 @@ function MessageBubble({ message }) {
       </div>
     </div>
   );
-}
+});
 
 function BlinkDot({ delay = '0ms' }) {
   return <span className="w-1.5 h-1.5 rounded-full bg-cream-muted animate-pulse inline-block" style={{ animationDelay: delay }} />;
