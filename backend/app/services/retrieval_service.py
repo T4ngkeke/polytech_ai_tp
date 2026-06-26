@@ -76,14 +76,20 @@ async def search_exercises(
     db: AsyncSession,
     lab_id: uuid.UUID,
     limit: int = 10,
+    number: int | None = None,
 ) -> list[ExerciseHit]:
-    """Return exercises for a lab as solution-free hits."""
-    stmt = (
-        select(Exercise.number, Exercise.statement, Exercise.hints)
-        .where(Exercise.lab_id == lab_id)
-        .order_by(Exercise.number)
-        .limit(limit)
+    """Return exercises for a lab as solution-free hits.
+
+    [v7.2] When ``number`` is given (the canonical exercise number resolved by the
+    router), results are filtered to ``number_normalized == number`` so a "how do
+    I do exercise II?" query surfaces only that exercise, not the whole lab.
+    """
+    stmt = select(Exercise.number, Exercise.statement, Exercise.hints).where(
+        Exercise.lab_id == lab_id
     )
+    if number is not None:
+        stmt = stmt.where(Exercise.number_normalized == number)
+    stmt = stmt.order_by(Exercise.number).limit(limit)
     rows = (await db.execute(stmt)).all()
     return [ExerciseHit(number=r.number, statement=r.statement, hints=r.hints) for r in rows]
 

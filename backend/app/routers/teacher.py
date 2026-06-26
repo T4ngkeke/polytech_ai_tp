@@ -401,12 +401,12 @@ async def apply_class_skill(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preset not found")
         except PermissionError:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner")
-    elif body.content is not None:
+    elif body.content and body.content.strip():
         rule = await rule_service.upsert_rule(
             db, level=RuleLevel.class_, target_id=class_id, rules_text=body.content)
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Provide preset_id or content")
+                            detail="Provide preset_id or non-empty content")
 
     return RuleResponse.model_validate(rule)
 

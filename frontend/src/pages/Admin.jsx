@@ -408,11 +408,17 @@ function LLMConfigTab() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // token weights are numeric in the API contract.
+      // token weights are numeric in the API contract. An empty/invalid field
+      // sends null (not 0) so a blank input never silently zeroes a cost weight —
+      // the backend's partial update keeps the existing value instead.
+      const numOrNull = (v) => {
+        const n = Number(v);
+        return v === '' || v === null || Number.isNaN(n) ? null : n;
+      };
       const payload = {
         ...config,
-        token_alpha: Number(config.token_alpha),
-        token_beta: Number(config.token_beta),
+        token_alpha: numOrNull(config.token_alpha),
+        token_beta: numOrNull(config.token_beta),
       };
       const updated = await api.put('/api/admin/llm/config', payload);
       setConfig(updated);

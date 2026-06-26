@@ -26,8 +26,12 @@ _EXERCISE_RE = re.compile(
 # [v7.2] Exercise-shaped but without an arabic digit (Roman / Chinese numeral /
 # implicit phrasing). When the fast-path misses but this matches, the graph asks
 # a cheap ROUTER_MODEL to extract the intended exercise number.
+# Latin keywords are anchored with word boundaries so 'problem' doesn't match
+# 'problematic'; Chinese uses the unambiguous compounds 练习/习题 or the 第…题
+# form, so the bare char 题 never matches inside 问题 / 主题 / 题目.
 _EXERCISE_KEYWORD_RE = re.compile(
-    r"(exercise|exercice|exo\b|probl[eè]me|problem|练习|习题|题)",
+    r"(\bexercises?\b|\bexercices?\b|\bexo\b|\bprobl[eè]mes?\b|\bproblems?\b"
+    r"|练习|习题|第\s*[\d一二三四五六七八九十]+\s*题)",
     re.IGNORECASE,
 )
 

@@ -514,6 +514,16 @@ class TestSkillPresets:
                                          json={"name": "x", "content": "y"})
         assert resp.status_code == 403
 
+    async def test_blank_content_does_not_wipe_class_rule_400(self, teacher_client, seed_data):
+        class_id = seed_data["class"].id
+        # seed_data has a class rule "Be formal." — a blank apply must not erase it.
+        resp = await teacher_client.post(f"/api/teacher/classes/{class_id}/skill",
+                                         json={"content": "   "})
+        assert resp.status_code == 400
+        rules = await teacher_client.get(
+            f"/api/teacher/rules?level=class&target_id={class_id}")
+        assert any(r["rules_text"] == "Be formal." for r in rules.json())
+
     async def test_apply_to_unowned_class_403(self, teacher_client, db_session):
         # A class owned by a different teacher.
         other = make_user(role=UserRole.teacher, username="other_t")

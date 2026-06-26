@@ -57,6 +57,13 @@ def test_normalizes_to_canonical_int(raw, expected):
     "intro",
     "summary",
     "no number here",
+    # [v7.2 fix] do NOT mis-read lettered labels / ordinary words as Roman numerals.
+    "c",            # was → 100
+    "Problème C",   # was → 100 (lettered sub-part, not exercise 100)
+    "Partie M",     # was → 1000
+    "m",            # was → 1000
+    "mix",          # was → 1009
+    "civil",        # contains c/i/v/l
 ])
 def test_returns_none_when_no_number(raw):
     assert normalize_exercise_number(raw) is None

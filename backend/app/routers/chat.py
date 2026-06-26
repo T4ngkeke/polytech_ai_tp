@@ -43,6 +43,7 @@ from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.agent.exercise_number import normalize_exercise_number
 from backend.app.agent.graph import build_agent
 from backend.app.auth import get_current_user
 from backend.app.config import settings

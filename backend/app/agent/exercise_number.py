@@ -15,10 +15,11 @@ from __future__ import annotations
 import re
 
 _ARABIC_RE = re.compile(r"\d+")
-_ROMAN_TOKEN_RE = re.compile(r"(?i)\b([ivxlcdm]+)\b")
-_ROMAN_VALID_RE = re.compile(
-    r"(?i)^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$"
-)
+# Restrict to I/V/X only: exercise numbering never exceeds ~XXXIX, and excluding
+# L/C/D/M avoids mis-reading lettered sub-parts ("Problème C") and ordinary words
+# ("mix", "civil") as Roman numerals.
+_ROMAN_TOKEN_RE = re.compile(r"(?i)\b([ivx]+)\b")
+_ROMAN_VALID_RE = re.compile(r"(?i)^(X{0,3})(IX|IV|V?I{0,3})$")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
 
 _CJK_DIGITS = {

@@ -34,6 +34,10 @@ def test_looks_like_exercise_true_for_keyworded_without_digit(message):
     "what is recursion?",
     "hello there",
     "explain how pointers work",
+    # [v7.2 fix] '题' must not match as a substring of ordinary words.
+    "我有一个问题，什么是梯度下降",   # 问题 = "question", not an exercise
+    "这个主题很有意思",              # 主题 = "topic"
+    "this is problematic",          # 'problem' substring of 'problematic'
 ])
 def test_looks_like_exercise_false_for_concept_or_chitchat(message):
     assert looks_like_exercise(message) is False

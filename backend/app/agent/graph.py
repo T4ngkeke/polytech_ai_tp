@@ -66,6 +66,7 @@ class AgentState(TypedDict, total=False):
     student_rules: str | None
     route: str
     query_embedding: list[float]
+    exercise_number: int | None
     context_blocks: list[str]
     citations: list[dict]
     low_evidence: bool
@@ -121,7 +122,11 @@ def build_agent(
         ):
             number = await exercise_extract_fn(state["message"])
             if number is not None:
-                return {"route": "agentic_search", "query_embedding": query_embedding}
+                return {
+                    "route": "agentic_search",
+                    "query_embedding": query_embedding,
+                    "exercise_number": number,
+                }
 
         if decision.low_confidence:
             await router_service.log_low_confidence_query(
@@ -137,7 +142,7 @@ def build_agent(
         lab_id = state.get("lab_id")
         if not lab_id:
             return {"context_blocks": []}
-        hits = await search_exercises(db, lab_id)
+        hits = await search_exercises(db, lab_id, number=state.get("exercise_number"))
         blocks = [
             f"{h.number}: {h.statement}" + (f"\nHint: {h.hints}" if h.hints else "")
             for h in hits
