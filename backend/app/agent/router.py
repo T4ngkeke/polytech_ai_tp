@@ -145,12 +145,18 @@ async def build_embedding_router(
     threshold: float,
     *,
     embedding_model: str | None = None,
+    embedding_base_url: str | None = None,
 ) -> EmbeddingRouter:
-    """Build a router, embedding the anchor exemplars once (cached per model)."""
-    if embedding_model and embedding_model in _EXEMPLAR_CACHE:
-        grouped = _EXEMPLAR_CACHE[embedding_model]
+    """Build a router, embedding the anchor exemplars once (cached per *embedding
+    space*). The cache key is endpoint+model, not model name alone: repointing the
+    embedding endpoint while keeping the model name must re-embed, otherwise stale
+    vectors from a different space would be compared against live query vectors.
+    """
+    cache_key = f"{embedding_base_url or ''}|{embedding_model}" if embedding_model else None
+    if cache_key and cache_key in _EXEMPLAR_CACHE:
+        grouped = _EXEMPLAR_CACHE[cache_key]
     else:
         grouped = await _embed_exemplars(embed_fn)
-        if embedding_model:
-            _EXEMPLAR_CACHE[embedding_model] = grouped
+        if cache_key:
+            _EXEMPLAR_CACHE[cache_key] = grouped
     return EmbeddingRouter(grouped, threshold)

@@ -59,9 +59,11 @@ async def run_self_eval_loop(
         if verdict in ("good", "partial"):
             return RetrievalOutcome(hits=hits, verdict=verdict, rounds=attempt, disclaimer=False)
 
-        # bad → rewrite and retry while budget remains.
+        # bad → rewrite and retry while budget remains. Refine the *current*
+        # query so each round builds on the last rather than re-issuing an
+        # identical rewrite of the original.
         if attempt < max_retries:
-            current_query = await rewrite_fn(query)
+            current_query = await rewrite_fn(current_query)
 
     # Budget exhausted, still bad: surface what we have but flag a disclaimer.
     return RetrievalOutcome(hits=hits, verdict="bad", rounds=max_retries, disclaimer=True)

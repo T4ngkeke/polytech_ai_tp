@@ -461,6 +461,7 @@ async def chat_stream(
         embed_fn=_make_embed_fn(llm_config),
         router_threshold=float(llm_config["router_knn_threshold"]),
         embedding_model=llm_config["embedding_model"],
+        embedding_base_url=llm_config["embedding_base_url"],
         rerank_fn=_make_rerank_fn(llm_config),
         grade_fn=_make_grade_fn(llm_config),
         rewrite_fn=_make_rewrite_fn(llm_config),

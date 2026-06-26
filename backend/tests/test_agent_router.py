@@ -97,3 +97,25 @@ async def test_build_embedding_router_embeds_all_exemplars_in_one_call():
     assert len(calls[0]) == total
     # Both intents are represented and routable.
     assert isinstance(router, EmbeddingRouter)
+
+
+@pytest.mark.asyncio
+async def test_exemplar_cache_keyed_by_endpoint_not_just_model():
+    # [v7.2 fix] Same model name on a DIFFERENT endpoint must re-embed, not serve
+    # stale vectors from another embedding space.
+    a_calls, b_calls = [], []
+
+    async def embed_a(texts):
+        a_calls.append(1)
+        return [[1.0, 0.0] for _ in texts]
+
+    async def embed_b(texts):
+        b_calls.append(1)
+        return [[0.0, 1.0] for _ in texts]
+
+    await build_embedding_router(embed_a, 0.5, embedding_model="dup-model",
+                                 embedding_base_url="http://endpoint-a")
+    await build_embedding_router(embed_b, 0.5, embedding_model="dup-model",
+                                 embedding_base_url="http://endpoint-b")
+
+    assert a_calls and b_calls  # endpoint B re-embedded (cache not shared by name)

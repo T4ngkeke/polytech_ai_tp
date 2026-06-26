@@ -368,6 +368,24 @@ class TestCSVImport:
                                        files={"file": ("e.csv", b"username,password,role\n", "text/csv")})
         assert resp.status_code == 400
 
+    async def test_short_row_is_conflict_not_500(self, admin_client):
+        # [v7.2 fix] A row with fewer columns gives DictReader None values; the old
+        # code did None.strip() → 500. It must be reported as a per-row conflict.
+        csv = self._csv(["username,password,role", "onlyname"])
+        resp = await admin_client.post("/api/admin/users/import?force=false",
+                                       files={"file": ("u.csv", csv, "text/csv")})
+        assert resp.status_code == 200
+        assert resp.json()["conflicts"]  # the short row is flagged, not a crash
+
+    async def test_in_file_duplicate_username_force_no_500(self, admin_client):
+        # [v7.2 fix] The same new username twice in one file must not double-INSERT
+        # and IntegrityError → 500.
+        csv = self._csv(["username,password,role",
+                         "dupuser,pass1234,student", "dupuser,pass1234,student"])
+        resp = await admin_client.post("/api/admin/users/import?force=true",
+                                       files={"file": ("u.csv", csv, "text/csv")})
+        assert resp.status_code == 200
+
     async def test_missing_columns_400(self, admin_client):
         resp = await admin_client.post("/api/admin/users/import",
                                        files={"file": ("b.csv", b"name,pass\nfoo,bar\n", "text/csv")})

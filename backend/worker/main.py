@@ -26,6 +26,19 @@ IDLE_SLEEP_SECONDS = 5.0
 GATE_SLEEP_SECONDS = 10.0
 
 
+async def _mark_job(
+    db: AsyncSession, job_id, status: JobStatus, error_message: str | None = None
+) -> None:
+    """None-safe terminal status write. The job row may have been reclaimed by a
+    stale-lock sweep or cascade-deleted with its document while a long ingest ran;
+    if it's gone, skip the update rather than crash the worker loop."""
+    job = await db.get(IngestionJob, job_id)
+    if job is None:
+        return
+    job.status = status
+    job.error_message = error_message
+
+
 async def process_one(
     db: AsyncSession,
     *,
@@ -51,14 +64,10 @@ async def process_one(
             db, document_id,
             embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
         )
-        job = await db.get(IngestionJob, job_id)
-        job.status = JobStatus.done
-        job.error_message = None
+        await _mark_job(db, job_id, JobStatus.done)
     except Exception as exc:  # ingest already marked the document failed
         await db.rollback()
-        job = await db.get(IngestionJob, job_id)
-        job.status = JobStatus.failed
-        job.error_message = str(exc)
+        await _mark_job(db, job_id, JobStatus.failed, str(exc))
 
     await db.commit()
     return True

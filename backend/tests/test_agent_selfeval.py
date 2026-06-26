@@ -123,6 +123,31 @@ async def test_partial_verdict_is_used_not_rewritten():
 
 
 @pytest.mark.asyncio
+async def test_multi_retry_refines_query_iteratively():
+    # [v7.2 fix] Each rewrite must build on the previous one, not re-rewrite the
+    # original — otherwise extra retries re-issue an identical query.
+    rewrites = []
+
+    async def retrieve_fn(q):
+        return [_Hit("x")]
+
+    async def grade_fn(q, docs):
+        return "bad"  # force the loop to exhaust the budget
+
+    async def rewrite_fn(q):
+        rewrites.append(q)
+        return q + "+"
+
+    await run_self_eval_loop(
+        "q", retrieve_fn=retrieve_fn, grade_fn=grade_fn, rewrite_fn=rewrite_fn,
+        max_retries=2,
+    )
+
+    # round 1 rewrites "q"→"q+", round 2 must rewrite "q+"→"q++" (not "q" again).
+    assert rewrites == ["q", "q+"]
+
+
+@pytest.mark.asyncio
 async def test_exhausted_budget_sets_disclaimer():
     async def retrieve_fn(q):
         return [_Hit("x")]

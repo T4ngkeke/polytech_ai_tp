@@ -335,15 +335,21 @@ async def import_users_csv(
     to_create = []
     to_update = []
     conflicts = []
+    seen_in_file: set[str] = set()
 
     for i, row in enumerate(rows, start=2):
-        username = row.get("username", "").strip()
-        password = row.get("password", "").strip()
-        role_str = row.get("role", "student").strip().lower()
+        # DictReader yields None for missing cells on short rows — coerce before strip.
+        username = (row.get("username") or "").strip()
+        password = (row.get("password") or "").strip()
+        role_str = (row.get("role") or "student").strip().lower()
 
         if not username or not password:
             conflicts.append({"row": i, "username": username, "reason": "Missing username or password"})
             continue
+        if username in seen_in_file:
+            conflicts.append({"row": i, "username": username, "reason": "Duplicate username in file"})
+            continue
+        seen_in_file.add(username)
         if role_str not in ("student", "teacher", "admin"):
             role_str = "student"
 

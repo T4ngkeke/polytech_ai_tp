@@ -150,3 +150,13 @@ async def test_run_tick_processes_when_chat_quiet_and_gpu_idle(pg_session, tmp_p
     assert processed is True
     await pg_session.refresh(doc)
     assert doc.status == DocumentStatus.indexed
+
+
+@pytest.mark.asyncio
+async def test_mark_job_is_none_safe(db_session):
+    """[v7.2 fix] A job reclaimed/cascade-deleted during a long ingest must not
+    crash the worker loop when its terminal status is written."""
+    from backend.worker.main import _mark_job
+
+    # No such job row — must be a no-op, not an AttributeError.
+    await _mark_job(db_session, uuid.uuid4(), JobStatus.done)

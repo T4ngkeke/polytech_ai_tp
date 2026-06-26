@@ -81,6 +81,7 @@ def build_agent(
     *,
     router_threshold: float = DEFAULT_ROUTER_THRESHOLD,
     embedding_model: str | None = None,
+    embedding_base_url: str | None = None,
     rerank_fn: RerankFn | None = None,
     grade_fn: GradeFn | None = None,
     rewrite_fn: RewriteFn | None = None,
@@ -108,6 +109,7 @@ def build_agent(
         query_embedding = (await embed_fn([state["message"]]))[0]
         router = await build_embedding_router(
             embed_fn, router_threshold, embedding_model=embedding_model,
+            embedding_base_url=embedding_base_url,
         )
         decision = router.route(state["message"], query_embedding)
 
