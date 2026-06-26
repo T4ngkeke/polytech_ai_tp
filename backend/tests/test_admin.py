@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.auth import create_access_token, hash_password
+from backend.app.auth import create_access_token, hash_password, verify_password
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import (
@@ -579,4 +579,41 @@ class TestAdminClassAnalytics:
     async def test_student_rejected_403(self, student_full_client, seed_full):
         resp = await student_full_client.get(
             f"/api/admin/analytics/classes/{seed_full['class'].id}")
+        assert resp.status_code == 403
+
+
+# ===================================================================
+# PUT /api/admin/users/{id}/password  ([v7.2] admin reset)
+# ===================================================================
+
+class TestAdminResetPassword:
+    async def test_admin_resets_user_password(self, admin_client, seed_users, db_session):
+        target = seed_users["student_a"]
+        resp = await admin_client.put(
+            f"/api/admin/users/{target.id}/password",
+            json={"new_password": "resetpw123"},
+        )
+        assert resp.status_code == 200
+        await db_session.refresh(target)
+        assert verify_password("resetpw123", target.hashed_password)
+
+    async def test_nonexistent_user_404(self, admin_client):
+        resp = await admin_client.put(
+            f"/api/admin/users/{uuid.uuid4()}/password",
+            json={"new_password": "resetpw123"},
+        )
+        assert resp.status_code == 404
+
+    async def test_short_password_422(self, admin_client, seed_users):
+        resp = await admin_client.put(
+            f"/api/admin/users/{seed_users['student_a'].id}/password",
+            json={"new_password": "123"},
+        )
+        assert resp.status_code == 422
+
+    async def test_student_cannot_reset_403(self, student_client, seed_users):
+        resp = await student_client.put(
+            f"/api/admin/users/{seed_users['student_b'].id}/password",
+            json={"new_password": "resetpw123"},
+        )
         assert resp.status_code == 403

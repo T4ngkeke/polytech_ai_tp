@@ -57,6 +57,17 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class ChangePasswordRequest(BaseModel):
+    """[v7.2] Self-service password change — old password is verified."""
+    old_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6)
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """[v7.2] Admin reset of any user's password — no old password required."""
+    new_password: str = Field(..., min_length=6)
+
+
 # ---------------------------------------------------------------------------
 # User
 # ---------------------------------------------------------------------------

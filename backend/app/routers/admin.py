@@ -40,6 +40,7 @@ from backend.app.database import get_db
 from backend.app.models import Class, Message, Session, SystemConfig, User, UserRole
 from backend.app.schemas import (
     AdminAnalyticsResponse,
+    AdminResetPasswordRequest,
     ClassAnalyticsResponse,
     ClassResponse,
     CSVImportPreviewResponse,
@@ -155,6 +156,27 @@ async def update_role(
     """Change a user's role."""
     user = await _get_active_user_or_404(db, user_id)
     user.role = body.role
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return UserResponse.model_validate(user)
+
+
+# ===================================================================
+# PUT /api/admin/users/{user_id}/password  ([v7.2] admin reset)
+# ===================================================================
+
+
+@router.put("/users/{user_id}/password", response_model=UserResponse)
+async def reset_user_password(
+    user_id: uuid.UUID,
+    body: AdminResetPasswordRequest,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Admin reset of a user's password — no old password required."""
+    user = await _get_active_user_or_404(db, user_id)
+    user.hashed_password = hash_password(body.new_password)
     db.add(user)
     await db.flush()
     await db.refresh(user)

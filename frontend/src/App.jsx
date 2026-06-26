@@ -19,6 +19,7 @@ import Register from './pages/Register';
 import Chat from './pages/Chat';
 import Teacher from './pages/Teacher';
 import Admin from './pages/Admin';
+import Account from './pages/Account';
 
 export default function App() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
           <Route element={<ProtectedRoute allowedRoles={['admin', 'teacher', 'student']} />}>
             <Route path="/chat" element={<Chat />} />
             <Route path="/chat/:labId" element={<Chat />} />
+            <Route path="/account" element={<Account />} />
           </Route>
         </Route>
       </Route>

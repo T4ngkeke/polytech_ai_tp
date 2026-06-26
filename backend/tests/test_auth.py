@@ -283,3 +283,68 @@ class TestMe:
         assert body["username"] == "meuser"
         assert body["role"] == "student"
         assert body["id"] == str(user.id)
+
+
+# ===================================================================
+# 7. POST /api/auth/change-password  ([v7.2] self-service)
+# ===================================================================
+
+
+class TestChangePassword:
+    @pytest_asyncio.fixture
+    async def authed_client(self, db_session: AsyncSession):
+        # make_user sets password "password1".
+        user = make_user(username="pwuser", role=UserRole.student)
+        db_session.add(user)
+        await db_session.commit()
+        await db_session.refresh(user)
+
+        async def override_get_db():
+            yield db_session
+        app.dependency_overrides[get_db] = override_get_db
+        token = create_access_token(user.id)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport, base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as c:
+            yield c, user
+        app.dependency_overrides.clear()
+
+    async def test_change_password_success(self, authed_client, db_session):
+        client, user = authed_client
+        resp = await client.post("/api/auth/change-password", json={
+            "old_password": "password1", "new_password": "brandnew99",
+        })
+        assert resp.status_code == 200
+        await db_session.refresh(user)
+        assert verify_password("brandnew99", user.hashed_password)
+        assert not verify_password("password1", user.hashed_password)
+
+    async def test_wrong_old_password_returns_400(self, authed_client, db_session):
+        client, user = authed_client
+        resp = await client.post("/api/auth/change-password", json={
+            "old_password": "not-it", "new_password": "brandnew99",
+        })
+        assert resp.status_code == 400
+        await db_session.refresh(user)
+        assert verify_password("password1", user.hashed_password)  # unchanged
+
+    async def test_short_new_password_returns_422(self, authed_client):
+        client, _ = authed_client
+        resp = await client.post("/api/auth/change-password", json={
+            "old_password": "password1", "new_password": "123",
+        })
+        assert resp.status_code == 422
+
+    async def test_unauthenticated_returns_401(self, db_session):
+        async def override_get_db():
+            yield db_session
+        app.dependency_overrides[get_db] = override_get_db
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.post("/api/auth/change-password", json={
+                "old_password": "password1", "new_password": "brandnew99",
+            })
+        app.dependency_overrides.clear()
+        assert resp.status_code == 401

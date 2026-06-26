@@ -21,6 +21,7 @@ from backend.app.auth import (
 from backend.app.database import get_db
 from backend.app.models import User, UserRole
 from backend.app.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     SignupRequest,
     TokenResponse,
@@ -128,3 +129,32 @@ async def get_me(
     contains only ``sub``).
     """
     return UserResponse.model_validate(current_user)
+
+
+# ===================================================================
+# POST /api/auth/change-password  ([v7.2] self-service)
+# ===================================================================
+
+
+@router.post("/change-password", status_code=200)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """
+    Self-service password change for any authenticated user.
+
+    The current (old) password is verified before the new one is stored,
+    so a stolen/active session alone cannot silently re-key the account.
+    Returns HTTP 400 if the old password is incorrect.
+    """
+    if not verify_password(body.old_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Old password is incorrect",
+        )
+    current_user.hashed_password = hash_password(body.new_password)
+    db.add(current_user)
+    await db.flush()
+    return {"detail": "Password changed"}

@@ -66,6 +66,9 @@ function UsersTab() {
   const [csvFile, setCsvFile] = useState(null);
   const [csvPreview, setCsvPreview] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [resetUser, setResetUser] = useState(null);   // user being password-reset
+  const [resetPw, setResetPw] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   const load = useCallback(async () => {
     try { setLoading(true); setUsers(await api.get('/api/admin/users')); }
@@ -79,6 +82,17 @@ function UsersTab() {
       const u = await api.put(`/api/admin/users/${userId}/role`, { role });
       setUsers((p) => p.map((x) => x.id === userId ? { ...x, role: u.role } : x));
     } catch (err) { toast.error(err.message); }
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetUser || resetPw.length < 6) return;
+    setResetting(true);
+    try {
+      await api.put(`/api/admin/users/${resetUser.id}/password`, { new_password: resetPw });
+      toast.success(`Password reset for ${resetUser.username}`);
+      setResetUser(null);
+      setResetPw('');
+    } catch (err) { toast.error(err.message); } finally { setResetting(false); }
   };
 
   const handleQuotaChange = async (userId, quota) => {
@@ -150,11 +164,30 @@ function UsersTab() {
                 className="w-24 bg-ink-surface border border-border-default text-cream-secondary text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-cyan/40" />
               <span className="text-[10px] text-cream-muted">tok/day</span>
             </div>
+            <button onClick={() => { setResetUser(u); setResetPw(''); }}
+              title="Reset password"
+              className="text-xs text-cream-secondary hover:text-cyan hover:bg-cyan-muted px-3 py-1 rounded-lg transition-colors cursor-pointer">🔑</button>
             <button onClick={() => handleDelete(u.id, u.username)}
               className="text-xs text-danger hover:bg-danger-muted px-3 py-1 rounded-lg transition-colors cursor-pointer">🗑️</button>
           </div>
         ))}
       </div>
+
+      {/* Reset password modal */}
+      {resetUser && (
+        <Modal title={`Reset password — ${resetUser.username}`} onClose={() => setResetUser(null)}>
+          <div className="space-y-4">
+            <p className="text-xs text-cream-muted">Set a new password for this user. They are not notified — share it securely.</p>
+            <input type="text" value={resetPw} autoFocus
+              onChange={(e) => setResetPw(e.target.value)} placeholder="New password (min 6 chars)"
+              className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm font-mono placeholder:text-cream-muted focus:outline-none focus:border-cyan/40" />
+            <button onClick={handleResetPassword} disabled={resetPw.length < 6 || resetting}
+              className="w-full py-3 rounded-lg gradient-cyan text-cream text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+              {resetting ? 'Resetting…' : 'Reset password'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {/* CSV Modal */}
       {showCsvModal && (
