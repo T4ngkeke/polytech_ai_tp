@@ -138,6 +138,34 @@ async def test_contextual_retrieval_embeds_augmented_stores_original(db_session,
 
 
 @pytest.mark.asyncio
+async def test_contextual_retrieval_is_page_scoped_not_whole_document(db_session, tmp_path):
+    """[v7.2] A chunk's context is generated from its own page/slide, never the
+    whole document — so long docs don't get a context hallucinated from page 1."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM)
+
+    def two_page_parse(storage_path):
+        return ["alpha slide content", "beta slide content"], GateResult(ok=True)
+
+    calls: list[tuple[str, str]] = []
+
+    async def capturing_context(scope, chunk_text):
+        calls.append((scope, chunk_text))
+        return "ctx"
+
+    await ingest_document(
+        db_session, doc.id,
+        embed_fn=fake_embed, extract_fn=fake_extract,
+        context_fn=capturing_context, parse_fn=two_page_parse,
+    )
+
+    # The scope handed to context_fn for the "alpha" chunk must contain alpha but
+    # NOT the other page's "beta" — i.e. it is page-scoped, not the full document.
+    alpha_scope = next(scope for scope, chunk in calls if "alpha" in chunk)
+    assert "alpha" in alpha_scope
+    assert "beta" not in alpha_scope
+
+
+@pytest.mark.asyncio
 async def test_bad_pdf_is_flagged_needs_review_not_ingested(db_session, tmp_path):
     doc = await _seed_document(db_session, tmp_path)
 

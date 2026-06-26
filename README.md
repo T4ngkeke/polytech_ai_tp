@@ -628,11 +628,13 @@ A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live
   4. **Contextual Retrieval**: per chunk, the worker LLM generates the chunk's in-document
      context and prepends it; the **augmented** text (`context + content`) is embedded and
      BM25-indexed, while the original `content` is stored for citation. Load-bearing for
-     context-poor CM slides. **[v7.2]** the context is generated from the chunk's **own
-     `section`** (not `full_text[:8000]`), so a long document never gets a context hallucinated
-     from its opening pages, and the call fits any small model. No hard length gate — long docs
-     just degrade to per-section context. Generation uses `INGEST_MODEL` (defaults to
-     `LLM_MODEL`), so a cheap off-peak model can do this without touching the chat model.
+     context-poor CM slides. **[v7.2]** the context is generated from the chunk's **own local
+     scope** — its `section` when the chunker found one (TD/TP), otherwise its **page/slide**
+     (CM = 1 page per slide) — not `full_text[:8000]`, so a long document never gets a context
+     hallucinated from its opening pages, and the call fits any small model. No hard length gate
+     — long docs just degrade to per-section/per-slide context. Generation uses `INGEST_MODEL`
+     (defaults to `LLM_MODEL`), so a cheap off-peak model can do this without touching the chat
+     model.
   5. **Exercise extraction — statements only**: extract `number / statement / hints` via
      **guided/structured decoding**. **No `solution` is extracted or stored** (the column does
      not exist).

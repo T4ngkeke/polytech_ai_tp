@@ -46,6 +46,22 @@ def _augmented(context: str | None, content: str) -> str:
     return f"{context}\n{content}" if context else content
 
 
+def _scope_key(chunk) -> str:
+    """[v7.2] The local scope a chunk is contextualized within: its section if the
+    chunker found one (TD/TP), else its page — for CM slides, 1 page = 1 slide."""
+    return chunk.section if chunk.section else f"page:{chunk.page_no}"
+
+
+def _scope_texts(chunks) -> dict[str, str]:
+    """Group chunk contents by scope key so Contextual Retrieval situates each
+    chunk within its own section/slide rather than the whole document (which, for
+    a long doc, would hallucinate context from the opening pages)."""
+    groups: dict[str, list[str]] = {}
+    for chunk in chunks:
+        groups.setdefault(_scope_key(chunk), []).append(chunk.content)
+    return {key: "\n\n".join(parts) for key, parts in groups.items()}
+
+
 async def ingest_document(
     db: AsyncSession,
     document_id: uuid.UUID,
@@ -78,10 +94,14 @@ async def ingest_document(
         chunks = chunk_pages(pages, doc_type)
 
         # Contextual Retrieval: generate per-chunk context (CM path), embed augmented.
+        # [v7.2] The scope is the chunk's own section/slide — not the whole document
+        # — so context stays accurate and the call fits any small model on long docs.
+        scope_by_key = _scope_texts(chunks)
         contexts: list[str | None] = []
         for chunk in chunks:
             if plan.contextual_retrieval and context_fn is not None:
-                contexts.append(await context_fn(full_text, chunk.content))
+                scope = scope_by_key.get(_scope_key(chunk)) or chunk.content
+                contexts.append(await context_fn(scope, chunk.content))
             else:
                 contexts.append(None)
 

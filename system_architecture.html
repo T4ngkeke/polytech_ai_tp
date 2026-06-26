@@ -525,7 +525,7 @@
             <div class="card new">
                 <span class="tag">v7.2 · Context-Poor, Length-Safe</span>
                 <h3>Section-Scoped Contextual Retrieval</h3>
-                <p>Per-chunk context is generated from the chunk's <b>own section</b> instead of <code>full_text[:8000]</code>, so a long document never gets a context hallucinated from its opening pages — and the call fits any small model. No hard length gate; long docs simply degrade to per-section context, all on the off-peak <code>INGEST_MODEL</code>.</p>
+                <p>Per-chunk context is generated from the chunk's <b>own scope</b> — its section (TD/TP) or page/slide (CM) — instead of <code>full_text[:8000]</code>, so a long document never gets a context hallucinated from its opening pages, and the call fits any small model. No hard length gate; long docs simply degrade to per-slide context, all on the off-peak <code>INGEST_MODEL</code>.</p>
             </div>
 
             <div class="card new">

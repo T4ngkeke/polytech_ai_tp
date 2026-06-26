@@ -185,20 +185,25 @@ def _make_real_extract_fn(client, model: str) -> ExtractFn:  # pragma: no cover
 
 
 def _make_real_context_fn(client, model: str) -> ContextFn:  # pragma: no cover
-    """Contextual Retrieval: situate a chunk within its document (one short sentence)."""
+    """Contextual Retrieval: situate a chunk within its section/slide.
+
+    [v7.2] The ``scope`` is the chunk's own section/page, not the whole document,
+    so the context is accurate on long docs and fits a small model. A modest cap
+    guards against a pathologically large single section.
+    """
     _PROMPT = (
-        "Here is a course document:\n<document>\n{doc}\n</document>\n\n"
+        "Here is a section of a course document:\n<section>\n{scope}\n</section>\n\n"
         "Here is a chunk from it:\n<chunk>\n{chunk}\n</chunk>\n\n"
-        "Give a short, standalone sentence situating this chunk within the document "
-        "(section/topic) to improve retrieval. Answer with the sentence only."
+        "Give a short, standalone sentence situating this chunk within the section "
+        "(topic) to improve retrieval. Answer with the sentence only."
     )
 
-    async def context(full_text: str, chunk_text: str) -> str:
+    async def context(scope: str, chunk_text: str) -> str:
         resp = await client.chat.completions.create(
             model=model,
             messages=[{
                 "role": "user",
-                "content": _PROMPT.format(doc=full_text[:8000], chunk=chunk_text),
+                "content": _PROMPT.format(scope=scope[:4000], chunk=chunk_text),
             }],
         )
         return (resp.choices[0].message.content or "").strip()
@@ -237,19 +242,29 @@ def _pynvml_util() -> float:  # pragma: no cover
 
 
 async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
-    """Read LLM/embedding config from SystemConfigs, falling back to settings."""
+    """Resolve the worker's model routing from SystemConfigs.
+
+    [v7.2] The off-peak worker uses the dedicated ``INGEST_*`` endpoint/model when
+    set (a cheap 30B), falling back to the main LLM — so per-chunk Contextual
+    Retrieval doesn't consume the expensive chat model's RPM pool. Embedding uses
+    its own resolved endpoint too.
+    """
     from sqlalchemy import select
 
-    from backend.app.config import settings
     from backend.app.models import SystemConfig
+    from backend.app.services.model_routing import resolve_model_routing
 
     rows = (await db.execute(select(SystemConfig))).scalars().all()
-    cfg = {r.key: r.value for r in rows}
+    routing = resolve_model_routing({r.key: r.value for r in rows})
     return {
-        "base_url": cfg.get("LLM_BASE_URL", settings.LLM_BASE_URL),
-        "api_key": cfg.get("LLM_API_KEY", settings.LLM_API_KEY),
-        "model": cfg.get("LLM_MODEL", settings.LLM_MODEL),
-        "embedding_model": cfg.get("EMBEDDING_MODEL", "bge-m3"),
+        # Ingestion endpoint (context generation + exercise extraction).
+        "base_url": routing.ingest.base_url,
+        "api_key": routing.ingest.api_key,
+        "model": routing.ingest.model,
+        # Embedding endpoint (independently configurable).
+        "embedding_base_url": routing.embedding.base_url,
+        "embedding_api_key": routing.embedding.api_key,
+        "embedding_model": routing.embedding.model,
     }
 
 
@@ -262,10 +277,15 @@ async def main() -> None:  # pragma: no cover - entrypoint
 
     async with AsyncSessionLocal() as db:
         cfg = await _load_config(db)
-        client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
-        embed_fn = _make_real_embed_fn(client, cfg["embedding_model"])
-        extract_fn = _make_real_extract_fn(client, cfg["model"])
-        context_fn = _make_real_context_fn(client, cfg["model"])
+        # Ingestion client (may be a separate cheap engine from chat); embedding
+        # may live on its own endpoint too.
+        ingest_client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
+        embed_client = AsyncOpenAI(
+            api_key=cfg["embedding_api_key"], base_url=cfg["embedding_base_url"]
+        )
+        embed_fn = _make_real_embed_fn(embed_client, cfg["embedding_model"])
+        extract_fn = _make_real_extract_fn(ingest_client, cfg["model"])
+        context_fn = _make_real_context_fn(ingest_client, cfg["model"])
         # Primary gate: live chat load (engine-agnostic). Optional: GPU idle
         # (no-ops on a remote API where _pynvml_util reads idle).
         chat_gate = ChatLoadGate()
