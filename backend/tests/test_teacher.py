@@ -56,7 +56,7 @@ async def seed_data(db_session: AsyncSession) -> dict:
     m1 = Message(session_id=session.id, sender=SenderType.user, content="Hello",
                  total_tokens=10)
     m2 = Message(session_id=session.id, sender=SenderType.llm, content="Hi!",
-                 total_tokens=15)
+                 total_tokens=15, billed_tokens=9)
     db_session.add_all([m1, m2])
 
     usage = UsageStat(user_id=student_a.id, date=date.today(),
@@ -479,7 +479,9 @@ class TestTeacherClassAnalytics:
         assert resp.status_code == 200
         body = resp.json()
         assert body["class_id"] == str(seed_data["class"].id)
-        assert body["total_tokens"] >= 25  # 10 + 15 from messages
+        # [v7.2] analytics tokens are billed tokens (reconcile with quota), so the
+        # llm message's billed_tokens=9, not the raw 25.
+        assert body["total_tokens"] == 9
         assert len(body["labs"]) >= 1
         assert len(body["labs"][0]["students"]) >= 1
 

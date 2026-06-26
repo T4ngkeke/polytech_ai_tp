@@ -403,6 +403,8 @@ class TestStreamingAndBackgroundTask:
         assert messages[3].content == "Bonjour monde"
         assert messages[3].prompt_tokens == 10
         assert messages[3].completion_tokens == 5
+        # [v7.2] billed = 10*0.2 + 5*1.0 = 7, stored so analytics reconcile with quota.
+        assert messages[3].billed_tokens == 7
 
         # Verify usage stats
         usage_result = await db_session.execute(

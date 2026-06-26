@@ -194,8 +194,8 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 > applied by **recreating** the dev database — there is no production data to migrate.
 >
 > **v7.2 schema note:** same approach — the v7.2 changes (add `Exercise.number_normalized` +
-> `Exercise.audience`; add the `SkillPresets` table; add the v7.2 `SystemConfigs` keys with
-> defaults in `seed.py`) are applied by **recreating** the dev database.
+> `Exercise.audience`; add `Message.billed_tokens`; add the `SkillPresets` table; add the v7.2
+> `SystemConfigs` keys with defaults in `seed.py`) are applied by **recreating** the dev database.
 
 ### 1. SystemConfigs
 | Column | Type | Constraints / Notes |
@@ -601,8 +601,11 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
      per message, but the quota is charged on **billed tokens** =
      `prompt·TOKEN_ALPHA + completion·TOKEN_BETA` (admin-set, default `0.2`/`1.0`). The daily
      quota check (`429`) compares accumulated **billed** tokens against `daily_token_quota`, and
-     `GET /api/student/usage` reports billed-vs-quota. Prefill being cheaper is now reflected in
-     the limit instead of counting decode and prefill equally.
+     `GET /api/student/usage` reports billed-vs-quota. The per-message `billed_tokens` is also
+     stored on the LLM `Message` so class/lab analytics reconcile with the quota (re-deriving it
+     later would be wrong once an admin changes the weights). The streaming `create()` call sets
+     `stream_options={"include_usage": True}` so real token counts arrive — without it usage
+     would be omitted and billing would fall back to a flat estimate.
 
 ---
 

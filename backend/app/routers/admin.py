@@ -57,6 +57,7 @@ from backend.app.schemas import (
     UserResponse,
 )
 from backend.app.services import class_service, lab_service, analytics_service
+from backend.app.services.model_routing import resolve_model_routing
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -241,13 +242,6 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
 }
 
 
-def _float_config(configs: dict[str, str], key: str, default: float) -> float:
-    try:
-        return float(configs[key])
-    except (KeyError, TypeError, ValueError):
-        return default
-
-
 # ===================================================================
 # GET /api/admin/llm/config
 # ===================================================================
@@ -268,8 +262,10 @@ async def get_llm_config(
     payload = {
         field: configs.get(key, "") for field, key in _LLM_CONFIG_STR_FIELDS.items()
     }
-    payload["token_alpha"] = _float_config(configs, "TOKEN_ALPHA", 0.2)
-    payload["token_beta"] = _float_config(configs, "TOKEN_BETA", 1.0)
+    # Token weights: reuse the single source of truth for parsing + defaults.
+    routing = resolve_model_routing(configs)
+    payload["token_alpha"] = routing.token_alpha
+    payload["token_beta"] = routing.token_beta
     return LLMConfigResponse(**payload)
 
 

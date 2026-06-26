@@ -46,7 +46,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.agent.exercise_number import normalize_exercise_number
 from backend.app.agent.graph import build_agent
 from backend.app.auth import get_current_user
-from backend.app.config import settings
 from backend.app.database import AsyncSessionLocal, get_db
 from backend.app.models import (
     ClassStudent,
@@ -317,6 +316,7 @@ async def save_chat_background_task(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
+                billed_tokens=billed_tokens,
             )
             db.add_all([user_msg, llm_msg])
 

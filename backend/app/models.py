@@ -494,6 +494,10 @@ class Message(Base):
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # [v7.2] Weighted billed tokens (prompt·α + completion·β) stored at write time
+    # so per-lab/class analytics reconcile with the quota's billed accounting
+    # (recomputing later would be wrong once admin changes α/β).
+    billed_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

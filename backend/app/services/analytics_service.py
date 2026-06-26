@@ -71,7 +71,7 @@ async def get_class_analytics(db: AsyncSession, class_id: uuid.UUID, class_name:
         stats_result = await db.execute(
             select(
                 Session.user_id,
-                func.coalesce(func.sum(Message.total_tokens), 0),
+                func.coalesce(func.sum(Message.billed_tokens), 0),
                 func.count(Message.id).filter(Message.sender == SenderType.llm),
             )
             .join(Message, Message.session_id == Session.id)
