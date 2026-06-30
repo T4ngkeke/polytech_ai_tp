@@ -227,6 +227,7 @@ class ChunkResponse(BaseModel):
     """[v7.1] One indexed chunk — the 'is it well processed?' inspector surface."""
     model_config = ConfigDict(from_attributes=True)
 
+    id: uuid.UUID
     chunk_index: int
     page_no: int | None
     section: str | None
@@ -234,13 +235,26 @@ class ChunkResponse(BaseModel):
     context: str | None
 
 
+class ChunkUpdateRequest(BaseModel):
+    """[v7.2] Teacher correction of a chunk's text (triggers re-embed + re-index)."""
+    content: str = Field(..., min_length=1)
+
+
 class DocExerciseResponse(BaseModel):
     """[v7.1] An extracted exercise. Deliberately has no `solution`."""
     model_config = ConfigDict(from_attributes=True)
 
+    id: uuid.UUID
     number: str
     statement: str
     hints: str | None
+
+
+class ExerciseUpdateRequest(BaseModel):
+    """[v7.2] Teacher correction of an extracted exercise (statements only)."""
+    number: str | None = Field(None, min_length=1, max_length=255)
+    statement: str | None = Field(None, min_length=1)
+    hints: str | None = None
 
 
 class LabUpdateRequest(BaseModel):

@@ -10,6 +10,7 @@ parse step is injectable (`parse_fn`) so the pipeline is testable without a live
 or a real PDF; in production they call the engine configured in SystemConfigs.
 """
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -22,6 +23,8 @@ from backend.app.models import DocChunk, Document, DocumentStatus, DocType, Exer
 from backend.worker.chunking import chunk_pages
 from backend.worker.parsing import GateResult, character_yield_gate, extract_pdf_text
 from backend.worker.routing import plan_for
+
+logger = logging.getLogger(__name__)
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 ExtractFn = Callable[[str], Awaitable[list[dict]]]
@@ -129,7 +132,26 @@ async def ingest_document(
             ))
 
         if plan.extract_exercises and extract_fn is not None:
-            for ex in await extract_fn(full_text):
+            # [v7.2] Exercise extraction is best-effort and decoupled from chunk
+            # indexing: an engine without guided/structured decoding may return
+            # nothing or malformed output. Degrade to "0 exercises" with a warning
+            # rather than failing the whole document — the chunks/RAG still work.
+            try:
+                extracted = await extract_fn(full_text)
+            except Exception as exc:
+                logger.warning(
+                    "Exercise extraction failed for document %s (%s); "
+                    "indexing chunks with 0 exercises.", doc.id, repr(exc)
+                )
+                extracted = []
+            for ex in extracted:
+                # Guard per-item shape: a non-compliant engine can yield non-dict
+                # or incomplete items. Skip anything missing the required fields.
+                if not isinstance(ex, dict) or not ex.get("number") or not ex.get("statement"):
+                    logger.warning(
+                        "Skipping malformed exercise item in document %s: %r", doc.id, ex
+                    )
+                    continue
                 db.add(Exercise(
                     id=uuid.uuid4(),
                     document_id=doc.id,

@@ -1,5 +1,5 @@
 /**
- * Login.jsx — Full-screen login page for Edu-LLM v6.
+ * Login.jsx — Full-screen login page for Edu-LLM v7.2.
  * "Dossier Noir" aesthetic: dark editorial with cyan CTA.
  */
 
@@ -158,7 +158,7 @@ export default function Login() {
 
         {/* Footer */}
         <p className="text-center text-[11px] text-cream-muted mt-6 font-body tracking-wide">
-          Edu-LLM v6 Class-Lab Architecture — Polytech AI
+          Edu-LLM v7.2 Class-Lab Architecture — Polytech AI
         </p>
       </div>
     </div>

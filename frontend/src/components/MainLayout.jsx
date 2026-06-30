@@ -1,7 +1,7 @@
 /**
- * MainLayout.jsx — Minimal layout shell for Edu-LLM v6.
+ * MainLayout.jsx — Minimal layout shell for Edu-LLM v7.2.
  *
- * v6: Each page (Chat, Teacher, Admin) manages its own sidebar internally.
+ * v7.2: Each page (Chat, Teacher, Admin) manages its own sidebar internally.
  * MainLayout only provides the authenticated route outlet — no global sidebar.
  */
 

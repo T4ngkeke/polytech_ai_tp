@@ -541,7 +541,12 @@ async def chat_stream(
                     delta = chunk.choices[0].delta
                     if delta.content:
                         stream_results["content"] += delta.content
-                        yield f"data: {delta.content}\n\n"
+                        # JSON-encode the token so embedded newlines survive SSE
+                        # framing. A raw `data: foo\nbar\n\n` would split on the
+                        # inner newline and the client would lose it, collapsing
+                        # multi-line code/markdown into one line (renders only
+                        # correctly after a refresh, which reloads the DB copy).
+                        yield f"data: {json.dumps(delta.content)}\n\n"
 
             # After the token stream: emit citations, then a terminal `done`
             # event (the client stops streaming and refreshes quota on `done`).

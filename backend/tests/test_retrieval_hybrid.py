@@ -49,3 +49,20 @@ async def test_apply_rerank_orders_by_score_and_truncates():
 
     assert [h.content for h in out] == ["bbb", "aaa"]  # bbb first; ties keep order
     assert len(out) == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_rerank_degrades_to_fusion_order_when_reranker_fails():
+    """[v7.2] A failing reranker (bad/unreachable endpoint, malformed body) must
+    never break retrieval: it degrades to the incoming fusion order, truncated to
+    top_k — the same path as 'rerank unset'."""
+    hits = [_hit("aaa"), _hit("bbb"), _hit("ccc")]
+
+    async def boom_rerank(query, documents):
+        raise RuntimeError("404 Not Found for rerank endpoint")
+
+    out = await apply_rerank("q", hits, boom_rerank, top_k=2)
+
+    # Fusion order preserved (no reranking applied), truncated to top_k.
+    assert [h.content for h in out] == ["aaa", "bbb"]
+    assert len(out) == 2

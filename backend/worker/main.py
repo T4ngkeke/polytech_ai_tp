@@ -13,6 +13,9 @@ SystemConfigs (wired later).
 """
 
 import asyncio
+import json
+import logging
+import re
 from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models import IngestionJob, JobStatus
 from backend.worker.ingest import ContextFn, EmbedFn, ExtractFn, ingest_document
 from backend.worker.queue import claim_next_job
+
+logger = logging.getLogger(__name__)
 
 # How long to sleep when the queue is empty vs. when the GPU gate is closed.
 IDLE_SLEEP_SECONDS = 5.0
@@ -176,20 +181,63 @@ def _make_real_embed_fn(client, model: str) -> EmbedFn:  # pragma: no cover
     return embed
 
 
-def _make_real_extract_fn(client, model: str) -> ExtractFn:  # pragma: no cover
-    import json
+def _parse_exercises(content: str | None) -> list[dict]:
+    """Parse the extractor's response into a list of exercise dicts.
 
+    [v7.2] Robust to engines that don't *guarantee* structured output: empty /
+    whitespace, code-fenced JSON, or JSON wrapped in prose all degrade to ``[]``
+    rather than crashing the worker on ``json.loads("")``. Only well-formed JSON
+    with an ``exercises`` array yields items; per-item shape is validated later in
+    ``ingest_document``.
+    """
+    if not content or not content.strip():
+        return []
+    text = content.strip()
+
+    # Strip a ```json ... ``` / ``` ... ``` code fence if the model added one.
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+
+    # If prose surrounds the JSON, slice to the first {...} object.
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            return []
+        text = text[start:end + 1]
+
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("Exercise extraction returned non-JSON output; treating as 0 exercises.")
+        return []
+    if not isinstance(data, dict):
+        return []
+    exercises = data.get("exercises", [])
+    return exercises if isinstance(exercises, list) else []
+
+
+def _make_real_extract_fn(client, model: str) -> ExtractFn:  # pragma: no cover
     async def extract(text: str) -> list[dict]:
+        # [v7.2] Use the OpenAI-standard `response_format: json_schema` for
+        # structured output. vLLM/SGLang enforce it via guided decoding, and
+        # gateways like Albert support it natively — unlike the vLLM-only
+        # `guided_json` extra_body, which other engines silently ignore (returning
+        # empty/prose → json.loads crash). Parsing still degrades gracefully.
         resp = await client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": "Extract every exercise as JSON."},
+                {"role": "system", "content":
+                    "Extract every exercise from the document. Respond with JSON only, "
+                    "matching the provided schema."},
                 {"role": "user", "content": text},
             ],
-            extra_body={"guided_json": _EXTRACTION_SCHEMA},
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "exercises", "schema": _EXTRACTION_SCHEMA},
+            },
         )
-        data = json.loads(resp.choices[0].message.content)
-        return data.get("exercises", [])
+        return _parse_exercises(resp.choices[0].message.content)
     return extract
 
 

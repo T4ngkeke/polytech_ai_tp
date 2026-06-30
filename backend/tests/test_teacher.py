@@ -450,6 +450,23 @@ class TestUpdateLab:
             f"/api/teacher/labs/{seed_data['lab'].id}", json={"name": "X"})
         assert resp.status_code == 403
 
+    async def test_teacher_cannot_update_foreign_lab_403(self, teacher_client, db_session):
+        """[v7.2 bugfix #1] The teacher route still enforces ownership — only the
+        new admin route bypasses it."""
+        other = make_user(role=UserRole.teacher, username="other_t_lab")
+        db_session.add(other)
+        await db_session.flush()
+        fcls = Class(name="Foreign", teacher_id=other.id, invite_code="FRGNLB")
+        db_session.add(fcls)
+        await db_session.flush()
+        flab = Lab(class_id=fcls.id, name="Foreign Lab")
+        db_session.add(flab)
+        await db_session.commit()
+
+        resp = await teacher_client.put(
+            f"/api/teacher/labs/{flab.id}", json={"is_active": False})
+        assert resp.status_code == 403
+
 
 class TestSoftDeleteLab:
     async def test_soft_deletes(self, teacher_client, seed_data, db_session):

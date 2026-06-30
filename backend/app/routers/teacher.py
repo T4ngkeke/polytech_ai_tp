@@ -20,6 +20,8 @@ PUT    /api/teacher/classes/{class_id}
 DELETE /api/teacher/classes/{class_id}
 PUT    /api/teacher/labs/{lab_id}
 DELETE /api/teacher/labs/{lab_id}
+PUT    /api/teacher/documents/{document_id}/chunks/{chunk_id}      [v7.2] edit + re-index
+PUT    /api/teacher/documents/{document_id}/exercises/{exercise_id} [v7.2] edit
 GET    /api/teacher/analytics/classes/{class_id}
 """
 
@@ -37,7 +39,8 @@ from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    Audience, Class, ClassStudent, DocType, Lab, RuleLevel, Session, UsageStat, User, UserRole,
+    Audience, Class, ClassStudent, DocType, Lab, RuleLevel, Session,
+    SystemConfig, UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
     ClassAnalyticsResponse,
@@ -49,7 +52,9 @@ from backend.app.schemas import (
     LabResponse,
     LabUpdateRequest,
     ChunkResponse,
+    ChunkUpdateRequest,
     DocExerciseResponse,
+    ExerciseUpdateRequest,
     DocumentResponse,
     DocumentSummaryResponse,
     ApplySkillRequest,
@@ -75,6 +80,31 @@ router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 def get_storage_root() -> str:
     """Storage root for uploaded documents (overridable in tests)."""
     return settings.DOCUMENTS_STORAGE_ROOT
+
+
+async def get_embed_fn(db: AsyncSession = Depends(get_db)) -> document_service.EmbedFn:
+    """[v7.2] Build the config-driven embedder used to re-index an edited chunk.
+
+    A FastAPI dependency so tests can override it with a fake (no live embedding
+    server needed), mirroring `get_db` / `get_storage_root`.
+    """
+    from openai import AsyncOpenAI
+
+    from backend.app.services.model_routing import resolve_model_routing
+
+    rows = (await db.execute(select(SystemConfig))).scalars().all()
+    routing = resolve_model_routing({r.key: r.value for r in rows})
+    client = AsyncOpenAI(
+        api_key=routing.embedding.api_key, base_url=routing.embedding.base_url
+    )
+
+    async def embed(texts: list[str]) -> list[list[float]]:
+        resp = await client.embeddings.create(
+            model=routing.embedding.model, input=texts, encoding_format="float"
+        )
+        return [item.embedding for item in resp.data]
+
+    return embed
 
 
 async def _verify_class_ownership(db: AsyncSession, class_id: uuid.UUID, teacher: User) -> Class:
@@ -310,6 +340,47 @@ async def get_document_exercises(
     await _owned_document_or_404(db, document_id, teacher)
     exercises = await document_service.get_document_exercises(db, document_id)
     return [DocExerciseResponse.model_validate(e) for e in exercises]
+
+
+@router.put("/documents/{document_id}/chunks/{chunk_id}", response_model=ChunkResponse)
+async def update_document_chunk(
+    document_id: uuid.UUID,
+    chunk_id: uuid.UUID,
+    body: ChunkUpdateRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+    embed_fn: document_service.EmbedFn = Depends(get_embed_fn),
+) -> ChunkResponse:
+    """[v7.2] Correct a mis-split chunk's text. The edit re-embeds + re-indexes the
+    chunk so retrieval reflects the correction. Ownership enforced via the document."""
+    await _owned_document_or_404(db, document_id, teacher)
+    chunk = await document_service.get_chunk_in_document(db, document_id, chunk_id)
+    if chunk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found")
+    chunk = await document_service.update_chunk(db, chunk, content=body.content, embed_fn=embed_fn)
+    return ChunkResponse.model_validate(chunk)
+
+
+@router.put(
+    "/documents/{document_id}/exercises/{exercise_id}", response_model=DocExerciseResponse
+)
+async def update_document_exercise(
+    document_id: uuid.UUID,
+    exercise_id: uuid.UUID,
+    body: ExerciseUpdateRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> DocExerciseResponse:
+    """[v7.2] Correct an extracted exercise (number/statement/hints). No solution
+    field exists. Ownership enforced via the document."""
+    await _owned_document_or_404(db, document_id, teacher)
+    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    exercise = await document_service.update_exercise(
+        db, exercise, number=body.number, statement=body.statement, hints=body.hints
+    )
+    return DocExerciseResponse.model_validate(exercise)
 
 
 # ===================================================================

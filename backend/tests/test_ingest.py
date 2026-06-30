@@ -238,18 +238,71 @@ async def boom_extract(text):
     raise ValueError("bad extract")
 
 
+async def boom_embed(texts):
+    raise ValueError("embedding service down")
+
+
 @pytest.mark.asyncio
-async def test_ingest_marks_failed_and_rolls_back_on_error(db_session, tmp_path):
+async def test_ingest_marks_failed_and_rolls_back_on_indexing_error(db_session, tmp_path):
+    """A genuine indexing failure (e.g. the embedding service is down) must roll
+    back partial writes and mark the document failed."""
     doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
                                body="Exercice 1\nSum two numbers.\n")
 
     with pytest.raises(ValueError):
-        await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=boom_extract)
+        await ingest_document(db_session, doc.id, embed_fn=boom_embed, extract_fn=fake_extract)
 
     await db_session.refresh(doc)
     assert doc.status == DocumentStatus.failed
-    assert "bad extract" in (doc.error_message or "")
+    assert "embedding service down" in (doc.error_message or "")
     chunks = (await db_session.execute(
         select(DocChunk).where(DocChunk.document_id == doc.id)
     )).scalars().all()
     assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_extraction_failure_leaves_document_indexed_with_chunks(db_session, tmp_path):
+    """[v7.2] Exercise extraction is decoupled from chunk indexing: an extractor
+    that raises (e.g. engine lacks structured decoding) must NOT fail the whole
+    document — chunks index normally and exercises degrade to 0."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="Exercice 1\nSum two numbers.\n")
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=boom_extract)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed
+    chunks = (await db_session.execute(
+        select(DocChunk).where(DocChunk.document_id == doc.id)
+    )).scalars().all()
+    assert len(chunks) >= 1
+    exercises = (await db_session.execute(
+        select(Exercise).where(Exercise.document_id == doc.id)
+    )).scalars().all()
+    assert exercises == []
+
+
+@pytest.mark.asyncio
+async def test_ingest_skips_malformed_exercise_items(db_session, tmp_path):
+    """[v7.2] A non-compliant engine may emit incomplete/non-dict items. Those are
+    skipped; well-formed items are still ingested; the document stays indexed."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD, body="x")
+
+    async def messy_extract(text):
+        return [
+            {"number": "Exercice 1", "statement": "Valid one."},
+            {"number": "Exercice 2"},          # missing statement → skip
+            {"statement": "No number."},        # missing number → skip
+            "not even a dict",                  # non-dict → skip
+        ]
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=messy_extract)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed
+    exercises = (await db_session.execute(
+        select(Exercise).where(Exercise.document_id == doc.id)
+    )).scalars().all()
+    assert len(exercises) == 1
+    assert exercises[0].number == "Exercice 1"

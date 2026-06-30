@@ -11,6 +11,7 @@ Two invariants enforced here, not by callers:
     student-safe statements are stored, so there is nothing solution-shaped to leak.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Hashable
@@ -19,6 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import Audience, DocChunk, Exercise
+
+logger = logging.getLogger(__name__)
 
 # A reranker: scores each candidate document for the query (higher = better).
 RerankFn = Callable[[str, list[str]], Awaitable[list[float]]]
@@ -64,10 +67,23 @@ async def apply_rerank(
     rerank_fn: RerankFn,
     top_k: int,
 ) -> list[ChunkHit]:
-    """Reorder hits by reranker score (stable on ties) and take the top-k."""
+    """Reorder hits by reranker score (stable on ties) and take the top-k.
+
+    [v7.2] Reranking is a best-effort enhancement, never a hard dependency: a
+    misconfigured / unreachable / non-compliant rerank endpoint (e.g. RERANK_URL
+    pointing at the chat `/v1` base → 404) must not break a student's chat. Any
+    failure logs a warning and degrades to fusion-only ordering — the same result
+    as 'rerank unset'.
+    """
     if not hits:
         return []
-    scores = await rerank_fn(query, [h.content for h in hits])
+    try:
+        scores = await rerank_fn(query, [h.content for h in hits])
+    except Exception as exc:
+        logger.warning(
+            "Rerank failed (%s); degrading to fusion-only ordering.", repr(exc)
+        )
+        return hits[:top_k]
     order = sorted(range(len(hits)), key=lambda i: scores[i], reverse=True)
     return [hits[i] for i in order[:top_k]]
 

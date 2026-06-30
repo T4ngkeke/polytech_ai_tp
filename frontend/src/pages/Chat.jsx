@@ -18,8 +18,12 @@ import useAuthStore from '../store/authStore';
 import api from '../lib/api';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 // Lazy: the markdown/highlight/KaTeX stack is heavy and only needed once the
-// student opens a chat — code-split it out of the initial bundle.
-const MessageContent = lazy(() => import('../components/MessageContent'));
+// student opens a chat — code-split it out of the initial bundle. We warm this
+// chunk on mount (see effect below) so the first assistant message renders as
+// real markdown instead of showing the raw-text Suspense fallback ("squished
+// markdown") while the large chunk downloads.
+const loadMessageContent = () => import('../components/MessageContent');
+const MessageContent = lazy(loadMessageContent);
 
 export default function Chat() {
   const { labId: urlLabId } = useParams();
@@ -79,6 +83,10 @@ export default function Chat() {
   }, []);
 
   useEffect(() => { loadClasses(); }, [loadClasses]);
+
+  // Warm the markdown/highlight/KaTeX chunk immediately so the first message
+  // doesn't fall back to raw-text rendering while it downloads.
+  useEffect(() => { loadMessageContent(); }, []);
 
   // ── Load usage stats ──
   const loadUsage = useCallback(async () => {
@@ -216,8 +224,13 @@ export default function Chat() {
             return;
           }
           if (ev.data) {
+            // Content tokens are JSON-encoded so embedded newlines survive SSE
+            // framing (otherwise multi-line code collapses to one line). Fall
+            // back to the raw string for safety if a token isn't valid JSON.
+            let chunk = ev.data;
+            try { chunk = JSON.parse(ev.data); } catch { /* keep raw */ }
             setMessages((prev) => prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: m.content + ev.data } : m
+              m.id === assistantMsgId ? { ...m, content: m.content + chunk } : m
             ));
           }
         },
@@ -466,8 +479,12 @@ export default function Chat() {
             </div>
           )}
 
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+          {messages.map((msg, i) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
+            />
           ))}
           <div ref={messagesEndRef} />
         </div>
@@ -549,7 +566,7 @@ export default function Chat() {
 }
 
 /* ── Message Bubble ── */
-const MessageBubble = memo(function MessageBubble({ message }) {
+const MessageBubble = memo(function MessageBubble({ message, streaming }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -568,7 +585,7 @@ const MessageBubble = memo(function MessageBubble({ message }) {
               ? <span className="whitespace-pre-wrap">{message.content}</span>
               : (
                 <Suspense fallback={<span className="whitespace-pre-wrap">{message.content}</span>}>
-                  <MessageContent content={message.content} />
+                  <MessageContent content={message.content} streaming={streaming} />
                 </Suspense>
               ))
           : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}

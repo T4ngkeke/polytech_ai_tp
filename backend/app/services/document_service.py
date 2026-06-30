@@ -8,13 +8,17 @@ Stores uploaded bytes under a storage root, registers a `Document` in the
 import hashlib
 import uuid
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.agent.exercise_number import normalize_exercise_number
 from backend.app.models import (
     Audience, Class, DocChunk, Document, DocType, Exercise, IngestionJob,
 )
+
+EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 
 
 async def create_document(
@@ -133,3 +137,86 @@ async def get_document_exercises(
         .order_by(Exercise.number)
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# [v7.2] Teacher edits — correct chunking / extraction mistakes in place.
+#
+# The author is the ground-truth oracle for "was this processed well?", so they
+# can fix a mis-split chunk or a wrong exercise. Editing a chunk re-embeds and
+# re-indexes it so retrieval stays consistent with the corrected text.
+# ---------------------------------------------------------------------------
+
+def _augmented(context: str | None, content: str) -> str:
+    """Text fed to the vector + BM25 indexes — must match worker/ingest._augmented."""
+    return f"{context}\n{content}" if context else content
+
+
+def _tsv_value(db: AsyncSession, text: str):
+    """BM25 tsvector (Postgres only; None elsewhere) — matches ingest._tsv_value."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        return func.to_tsvector("simple", text)
+    return None
+
+
+async def get_chunk_in_document(
+    db: AsyncSession, document_id: uuid.UUID, chunk_id: uuid.UUID
+) -> DocChunk | None:
+    """Fetch a chunk only if it belongs to the given document (scopes the edit)."""
+    stmt = select(DocChunk).where(
+        DocChunk.id == chunk_id, DocChunk.document_id == document_id
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def update_chunk(
+    db: AsyncSession, chunk: DocChunk, *, content: str, embed_fn: EmbedFn
+) -> DocChunk:
+    """Replace a chunk's text and rebuild its retrieval artifacts.
+
+    The original `content` is what citations/the inspector show; the vector and
+    BM25 index are built over the *augmented* text (existing context + new
+    content), so the teacher's correction is what students actually retrieve.
+    """
+    augmented = _augmented(chunk.context, content)
+    embeddings = await embed_fn([augmented])
+    chunk.content = content
+    chunk.embedding = embeddings[0]
+    chunk.tsv = _tsv_value(db, augmented)
+    db.add(chunk)
+    await db.flush()
+    await db.refresh(chunk)
+    return chunk
+
+
+async def get_exercise_in_document(
+    db: AsyncSession, document_id: uuid.UUID, exercise_id: uuid.UUID
+) -> Exercise | None:
+    """Fetch an exercise only if it belongs to the given document."""
+    stmt = select(Exercise).where(
+        Exercise.id == exercise_id, Exercise.document_id == document_id
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def update_exercise(
+    db: AsyncSession,
+    exercise: Exercise,
+    *,
+    number: str | None = None,
+    statement: str | None = None,
+    hints: str | None = None,
+) -> Exercise:
+    """Update an exercise's fields. Changing the label re-derives the canonical
+    `number_normalized` via the same normalizer used at ingest + query time."""
+    if number is not None:
+        exercise.number = number
+        exercise.number_normalized = normalize_exercise_number(number)
+    if statement is not None:
+        exercise.statement = statement
+    if hints is not None:
+        exercise.hints = hints
+    db.add(exercise)
+    await db.flush()
+    await db.refresh(exercise)
+    return exercise

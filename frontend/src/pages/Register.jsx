@@ -1,5 +1,5 @@
 /**
- * Register.jsx — Student self-registration page for Edu-LLM v6.
+ * Register.jsx — Student self-registration page for Edu-LLM v7.2.
  */
 
 import { useState } from 'react';

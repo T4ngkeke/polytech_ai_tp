@@ -583,6 +583,41 @@ class TestAdminDeleteLab:
         assert resp.status_code == 403
 
 
+class TestAdminUpdateLab:
+    """[v7.2 bugfix #1] Admin can lock/unlock any lab, bypassing ownership — the
+    lab in seed_full is owned by `teacher`, never by the admin."""
+
+    async def test_admin_locks_lab_it_does_not_own(self, admin_full_client, seed_full, db_session):
+        lid = seed_full["lab"].id
+        resp = await admin_full_client.put(f"/api/admin/labs/{lid}", json={"is_active": False})
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is False
+        r = await db_session.execute(select(Lab).where(Lab.id == lid))
+        assert r.scalar_one().is_active is False
+
+    async def test_admin_unlocks_lab(self, admin_full_client, seed_full):
+        lid = seed_full["lab"].id
+        await admin_full_client.put(f"/api/admin/labs/{lid}", json={"is_active": False})
+        resp = await admin_full_client.put(f"/api/admin/labs/{lid}", json={"is_active": True})
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is True
+
+    async def test_admin_renames_lab(self, admin_full_client, seed_full):
+        lid = seed_full["lab"].id
+        resp = await admin_full_client.put(f"/api/admin/labs/{lid}", json={"name": "Locked Lab"})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Locked Lab"
+
+    async def test_nonexistent_lab_404(self, admin_full_client):
+        resp = await admin_full_client.put(f"/api/admin/labs/{uuid.uuid4()}", json={"is_active": False})
+        assert resp.status_code == 404
+
+    async def test_student_rejected_403(self, student_full_client, seed_full):
+        resp = await student_full_client.put(
+            f"/api/admin/labs/{seed_full['lab'].id}", json={"is_active": False})
+        assert resp.status_code == 403
+
+
 class TestAdminClassAnalytics:
     async def test_returns_hierarchical_analytics(self, admin_full_client, seed_full):
         resp = await admin_full_client.get(

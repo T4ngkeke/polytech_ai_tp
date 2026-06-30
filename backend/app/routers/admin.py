@@ -20,6 +20,7 @@ GET    /api/admin/classes/{class_id}/students
 PUT    /api/admin/classes/{class_id}/transfer
 DELETE /api/admin/classes/{class_id}
 GET    /api/admin/labs
+PUT    /api/admin/labs/{lab_id}
 DELETE /api/admin/labs/{lab_id}
 GET    /api/admin/analytics
 GET    /api/admin/analytics/classes/{class_id}
@@ -46,6 +47,7 @@ from backend.app.schemas import (
     CSVImportPreviewResponse,
     DailyUsage,
     LabResponse,
+    LabUpdateRequest,
     LLMConfigRequest,
     LLMConfigResponse,
     PruneRequest,
@@ -496,6 +498,26 @@ async def force_delete_lab(
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.soft_delete_lab(db, lab)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ===================================================================
+# PUT /api/admin/labs/{lab_id}
+# ===================================================================
+
+
+@router.put("/labs/{lab_id}", response_model=LabResponse)
+async def force_update_lab(
+    lab_id: uuid.UUID,
+    body: LabUpdateRequest,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> LabResponse:
+    """[v7.2] God-mode lab update: lock/unlock (``is_active``) or rename any lab
+    system-wide, bypassing ownership. Mirrors the ``DELETE /api/admin/labs``
+    pattern — the teacher route still enforces ownership."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    lab = await lab_service.update_lab(db, lab, name=body.name, is_active=body.is_active)
+    return LabResponse.model_validate(lab)
 
 
 # ===================================================================

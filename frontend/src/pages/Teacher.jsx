@@ -1,5 +1,5 @@
 /**
- * Teacher.jsx — Teacher workspace v6.
+ * Teacher.jsx — Teacher workspace v7.2.
  * Layout: Left HierarchicalSidebar + Right context-sensitive panel.
  * Selected node determines right panel: Class (students/rules) | Lab (rules/analytics/audit).
  */

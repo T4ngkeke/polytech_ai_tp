@@ -170,7 +170,9 @@ async def mock_openai():
                         self.choices = [Choice(content)]
                         self.usage = usage
 
-                yield Chunk("Bonjour")
+                # First token embeds a newline — the regression case: it must
+                # survive SSE framing (JSON-escaped), not collapse the stream.
+                yield Chunk("Bonjour\n")
                 yield Chunk(" monde", Usage())
 
             return mock_generator()
@@ -385,8 +387,11 @@ class TestStreamingAndBackgroundTask:
                     chunks.append(chunk)
 
                 full_text = "".join(chunks)
-                assert "data: Bonjour\n\n" in full_text
-                assert "data:  monde\n\n" in full_text
+                # [v7.2] Content tokens are JSON-encoded so embedded newlines
+                # survive SSE framing (a bare `data: Bonjour\n\n` would lose the
+                # newline). "Bonjour\n" → `data: "Bonjour\n"` (escaped, one line).
+                assert 'data: "Bonjour\\n"\n\n' in full_text
+                assert 'data: " monde"\n\n' in full_text
 
         # Verify DB writes (background task)
         result = await db_session.execute(
@@ -400,7 +405,7 @@ class TestStreamingAndBackgroundTask:
         assert messages[2].sender == SenderType.user
         assert messages[2].content == "stream test"
         assert messages[3].sender == SenderType.llm
-        assert messages[3].content == "Bonjour monde"
+        assert messages[3].content == "Bonjour\n monde"
         assert messages[3].prompt_tokens == 10
         assert messages[3].completion_tokens == 5
         # [v7.2] billed = 10*0.2 + 5*1.0 = 7, stored so analytics reconcile with quota.

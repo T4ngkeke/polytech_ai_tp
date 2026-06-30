@@ -1,5 +1,5 @@
 /**
- * HierarchicalSidebar.jsx — Role-aware Class→Lab tree navigation for Edu-LLM v6.
+ * HierarchicalSidebar.jsx — Role-aware Class→Lab tree navigation for Edu-LLM v7.2.
  *
  * Props:
  *   role: 'student' | 'teacher' | 'admin'
