@@ -41,9 +41,20 @@ class ModelRouting:
     embedding: Endpoint
     rerank: Endpoint
     ingest: Endpoint
+    # [v7.3] The live auxiliary model: router classification, self-eval verdict
+    # and query rewrite all share this slot (same latency/cost profile).
     router: Endpoint
+    # [v7.3] The answer→tiered-hints generator (off-peak; point it at the BIG
+    # model — quality over latency, the GPU gate keeps it off student time).
+    hint: Endpoint
     token_alpha: float
     token_beta: float
+    # [v7.3] Absolute relevance floor for context injection. None = gate off
+    # (ships disabled until calibrated on the golden set).
+    rerank_score_threshold: float | None
+    # [v7.3] Worker budgets: per-exercise derivation samples / per-document tokens.
+    hint_max_samples: int
+    ingest_token_budget: int
 
 
 def _get(configs: Mapping[str, str], key: str, default: str = "") -> str:
@@ -55,6 +66,13 @@ def _get(configs: Mapping[str, str], key: str, default: str = "") -> str:
 def _to_float(raw: str, default: float) -> float:
     try:
         return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(raw: str, default: int) -> int:
+    try:
+        return int(raw)
     except (TypeError, ValueError):
         return default
 
@@ -93,12 +111,28 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         model=_get(configs, "ROUTER_MODEL", main_model),
     )
 
+    hint = Endpoint(
+        base_url=_get(configs, "HINT_BASE_URL", main_base),
+        api_key=_get(configs, "HINT_API_KEY", main_key),
+        model=_get(configs, "HINT_MODEL", main_model),
+    )
+
+    raw_threshold = _get(configs, "RERANK_SCORE_THRESHOLD", "")
+    try:
+        threshold: float | None = float(raw_threshold) if raw_threshold else None
+    except (TypeError, ValueError):
+        threshold = None
+
     return ModelRouting(
         llm=llm,
         embedding=embedding,
         rerank=rerank,
         ingest=ingest,
         router=router,
+        hint=hint,
         token_alpha=_to_float(_get(configs, "TOKEN_ALPHA", ""), _DEFAULT_TOKEN_ALPHA),
         token_beta=_to_float(_get(configs, "TOKEN_BETA", ""), _DEFAULT_TOKEN_BETA),
+        rerank_score_threshold=threshold,
+        hint_max_samples=_to_int(_get(configs, "HINT_MAX_SAMPLES", ""), 4),
+        ingest_token_budget=_to_int(_get(configs, "INGEST_TOKEN_BUDGET", ""), 200_000),
     )

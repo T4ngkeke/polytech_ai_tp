@@ -64,6 +64,16 @@ DEFAULT_SYSTEM_CONFIGS = [
     # [v7.2] weighted-token quota: billed = prompt*alpha + completion*beta.
     {"key": "TOKEN_ALPHA", "value": "0.2"},       # prefill is cheaper than decode
     {"key": "TOKEN_BETA", "value": "1.0"},
+    # [v7.3] answer→tiered-hints generator: point at the BIG model (off-peak,
+    # quality over latency — the GPU gate keeps it off student time). Empty → main LLM.
+    {"key": "HINT_MODEL", "value": ""},
+    {"key": "HINT_BASE_URL", "value": ""},
+    {"key": "HINT_API_KEY", "value": ""},
+    # [v7.3] context-injection gate: empty = OFF until calibrated on the golden set.
+    {"key": "RERANK_SCORE_THRESHOLD", "value": ""},
+    # [v7.3] worker budgets: per-exercise derivation samples / per-document tokens.
+    {"key": "HINT_MAX_SAMPLES", "value": "4"},
+    {"key": "INGEST_TOKEN_BUDGET", "value": "200000"},
 ]
 
 

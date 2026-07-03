@@ -32,6 +32,7 @@ async def create_document(
     storage_root: str | Path,
     doc_type: DocType | None = None,
     audience: Audience | None = None,
+    language: str = "fr",
 ) -> Document:
     """Persist an uploaded document and enqueue it for ingestion."""
     content_hash = hashlib.sha256(content).hexdigest()
@@ -64,6 +65,7 @@ async def create_document(
         content_hash=content_hash,
         doc_type=doc_type,
         audience=audience,
+        language=language,
         uploaded_by=uploaded_by,
     )
     db.add(doc)
@@ -152,10 +154,15 @@ def _augmented(context: str | None, content: str) -> str:
     return f"{context}\n{content}" if context else content
 
 
-def _tsv_value(db: AsyncSession, text: str):
-    """BM25 tsvector (Postgres only; None elsewhere) — matches ingest._tsv_value."""
+def _tsv_value(db: AsyncSession, text: str, language: str = "fr"):
+    """BM25 tsvector (Postgres only; None elsewhere) — matches ingest._tsv_value.
+
+    [v7.3] Config from the document's language: edit-side rebuilds must use the
+    same config as ingest or the corrected chunk stops matching."""
+    from backend.app.services.retrieval_service import ts_config_for
+
     if db.bind is not None and db.bind.dialect.name == "postgresql":
-        return func.to_tsvector("simple", text)
+        return func.to_tsvector(ts_config_for(language), text)
     return None
 
 
@@ -180,9 +187,12 @@ async def update_chunk(
     """
     augmented = _augmented(chunk.context, content)
     embeddings = await embed_fn([augmented])
+    parent = await db.get(Document, chunk.document_id)
     chunk.content = content
     chunk.embedding = embeddings[0]
-    chunk.tsv = _tsv_value(db, augmented)
+    chunk.tsv = _tsv_value(db, augmented, parent.language if parent else "fr")
+    # [v7.3] Flag the correction so idempotent re-ingestion preserves it.
+    chunk.edited_by_teacher = True
     db.add(chunk)
     await db.flush()
     await db.refresh(chunk)
@@ -216,6 +226,8 @@ async def update_exercise(
         exercise.statement = statement
     if hints is not None:
         exercise.hints = hints
+    # [v7.3] Flag the correction so idempotent re-ingestion preserves it.
+    exercise.edited_by_teacher = True
     db.add(exercise)
     await db.flush()
     await db.refresh(exercise)

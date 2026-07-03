@@ -39,11 +39,6 @@ async def fake_embed(chunks):
     return [[0.0] * EMBEDDING_DIM for _ in chunks]
 
 
-async def fake_extract(text):
-    return [{"number": "Ex 1", "statement": "do it", "hints": None,
-             "concept": None}]
-
-
 async def _seed_job(session, tmp_path):
     teacher = make_user(role=UserRole.teacher)
     session.add(teacher)
@@ -71,7 +66,7 @@ async def test_run_tick_skips_and_sleeps_when_gate_closed(pg_session, tmp_path):
         sleeps.append(seconds)
 
     processed = await run_tick(
-        pg_session, gate, embed_fn=fake_embed, extract_fn=fake_extract, sleep_fn=fake_sleep,
+        pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
     )
 
     assert processed is False
@@ -92,7 +87,7 @@ async def test_run_tick_processes_when_gate_open(pg_session, tmp_path):
         sleeps.append(seconds)
 
     processed = await run_tick(
-        pg_session, gate, embed_fn=fake_embed, extract_fn=fake_extract, sleep_fn=fake_sleep,
+        pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
     )
 
     assert processed is True
@@ -116,7 +111,7 @@ async def test_run_tick_skips_when_chat_busy_even_if_gpu_idle(pg_session, tmp_pa
         return 50.0  # lots of recent chat activity
 
     processed = await run_tick(
-        pg_session, gate, embed_fn=fake_embed, extract_fn=fake_extract, sleep_fn=fake_sleep,
+        pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
         chat_gate=chat_gate, chat_load_fn=busy_chat_load,
     )
 
@@ -143,7 +138,7 @@ async def test_run_tick_processes_when_chat_quiet_and_gpu_idle(pg_session, tmp_p
         return 0.0  # no recent chat
 
     processed = await run_tick(
-        pg_session, gate, embed_fn=fake_embed, extract_fn=fake_extract, sleep_fn=fake_sleep,
+        pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
         chat_gate=chat_gate, chat_load_fn=quiet_chat_load,
     )
 

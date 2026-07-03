@@ -1,10 +1,15 @@
 """
-test_ingest.py — [v7.1] worker ingestion pipeline.
+test_ingest.py — [v7.1→v7.3] worker ingestion pipeline.
 
-The pipeline takes injected parse / embed / extract / context functions, so it runs
-on SQLite with fakes (no live LLM, embedding service, or real PDF needed). Covers:
-  * structure-aware chunking + denormalized routing metadata,
-  * statement-only exercise extraction on the TD/TP path (no solution),
+The pipeline takes injected parse / embed / context / resegment functions, so it
+runs on SQLite with fakes (no live LLM, embedding service, or real PDF). Covers:
+  * [v7.3] strict split: CM → chunks only (hybrid RAG); TD/TP → Exercises only
+    (agentic search) — exercises never enter the chunk store,
+  * [v7.3] deterministic exercise build: number = the segmentation-captured
+    label, statement = the segment body — no LLM on the happy path,
+  * [v7.3] numbering anomaly (duplicate numbers = sub-questions mistaken for
+    exercises) or zero boundaries → one LLM re-segmentation; its failure keeps
+    the regex segmentation (never fails the document),
   * Contextual Retrieval (augmented text embedded; original stored),
   * the character-yield gate → `needs_review` (never silently ingest garbage),
   * idempotent re-index and failure rollback.
@@ -36,10 +41,6 @@ async def fake_embed(texts):
     return [[0.1, 0.2, 0.3] for _ in texts]
 
 
-async def fake_extract(text):
-    return [{"number": "Exercice 1", "statement": "Sum two numbers.", "hints": "use +"}]
-
-
 async def _seed_document(
     session,
     tmp_path,
@@ -66,82 +67,357 @@ async def _seed_document(
     return doc
 
 
+async def _chunks_of(session, doc):
+    return (await session.execute(
+        select(DocChunk).where(DocChunk.document_id == doc.id)
+    )).scalars().all()
+
+
+async def _exercises_of(session, doc):
+    return (await session.execute(
+        select(Exercise).where(Exercise.document_id == doc.id)
+    )).scalars().all()
+
+
+# --- CM path: chunks only -----------------------------------------------------
+
+_PARA_ONE = ("Le codage binaire represente les nombres en base deux et sert de "
+             "fondement a toute l'informatique moderne, du processeur au reseau.")
+_PARA_TWO = ("La numeration hexadecimale utilise seize symboles et offre une "
+             "notation compacte pour les valeurs binaires longues en memoire.")
+
+
 @pytest.mark.asyncio
 async def test_cm_ingest_writes_chunks_with_routing_metadata_no_exercises(db_session, tmp_path):
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM)
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM,
+                               body=f"{_PARA_ONE}\n\n{_PARA_TWO}")
 
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=fake_extract)
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
 
     await db_session.refresh(doc)
     assert doc.status == DocumentStatus.indexed
 
-    chunks = (await db_session.execute(
-        select(DocChunk).where(DocChunk.document_id == doc.id)
-    )).scalars().all()
+    chunks = await _chunks_of(db_session, doc)
     assert len(chunks) == 2  # two paragraphs
     assert all(c.lab_id == doc.lab_id for c in chunks)
     # Routing metadata denormalized onto the chunk for query-time filtering.
     assert all(c.doc_type == DocType.CM for c in chunks)
     assert all(c.audience == Audience.student for c in chunks)
 
-    # CM is not the exercise path — nothing extracted even though extract_fn was given.
-    exercises = (await db_session.execute(
-        select(Exercise).where(Exercise.document_id == doc.id)
-    )).scalars().all()
-    assert exercises == []
+    # CM is not the exercise path.
+    assert await _exercises_of(db_session, doc) == []
+
+
+# --- TD/TP path: deterministic exercises, zero chunks -------------------------
+
+@pytest.mark.asyncio
+async def test_td_ingest_builds_exercises_deterministically(db_session, tmp_path):
+    """[v7.3] number = the regex-captured label, statement = the segment body —
+    no LLM call is needed on the happy path."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nSum two numbers.\n\nExercice 2\nSort a list.\n",
+    )
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed
+
+    exercises = sorted(await _exercises_of(db_session, doc),
+                       key=lambda e: e.number_normalized)
+    assert [e.number for e in exercises] == ["Exercice 1", "Exercice 2"]
+    assert "Sum two numbers." in exercises[0].statement
+    assert "Sort a list." in exercises[1].statement
+    assert not hasattr(exercises[0], "solution")
+    # Hints are teacher-triggered later — never generated at ingest.
+    assert exercises[0].hints is None
 
 
 @pytest.mark.asyncio
-async def test_td_ingest_extracts_statements_only(db_session, tmp_path):
+async def test_td_produces_zero_chunks_strict_split(db_session, tmp_path):
+    """[v7.3] Exercises are answered from the Exercises table only (agentic
+    search); TD/TP text must never enter the RAG chunk store."""
     doc = await _seed_document(
         db_session, tmp_path, doc_type=DocType.TD,
         body="Exercice 1\nSum two numbers.\n",
     )
 
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=fake_extract)
+    embed_calls: list[str] = []
 
-    exercises = (await db_session.execute(
-        select(Exercise).where(Exercise.document_id == doc.id)
-    )).scalars().all()
-    assert len(exercises) == 1
-    assert exercises[0].number == "Exercice 1"
-    assert not hasattr(exercises[0], "solution")
+    async def counting_embed(texts):
+        embed_calls.extend(texts)
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+    await ingest_document(db_session, doc.id, embed_fn=counting_embed)
+
+    assert await _chunks_of(db_session, doc) == []
+    assert embed_calls == []  # no chunks → no embeddings paid for
 
 
 @pytest.mark.asyncio
 async def test_ingest_populates_normalized_exercise_number(db_session, tmp_path):
-    """[v7.2] The raw label is stored verbatim, but number_normalized carries the
-    canonical int so query-side matching is decoupled from the printed format."""
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD, body="x")
+    """The raw label is stored verbatim; number_normalized carries the canonical
+    int so query-side matching is decoupled from the printed format."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="Exercice III\nDo the thing.\n")
 
-    async def roman_extract(text):
-        return [{"number": "Exercice III", "statement": "Do the thing.", "hints": None}]
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
 
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=roman_extract)
-
-    ex = (await db_session.execute(
-        select(Exercise).where(Exercise.document_id == doc.id)
-    )).scalars().one()
+    ex = (await _exercises_of(db_session, doc))[0]
     assert ex.number == "Exercice III"   # raw label preserved
     assert ex.number_normalized == 3      # canonical int
 
 
 @pytest.mark.asyncio
 async def test_ingest_denormalizes_audience_onto_exercise(db_session, tmp_path):
-    """[v7.2 fix] Exercise.audience is copied from the source Document so the
-    student-audience filter can be enforced in the exercise search WHERE clause."""
+    """Exercise.audience is copied from the source Document so the student
+    filter can be enforced in the exercise-search WHERE clause."""
     doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
-                               body="x", audience=Audience.teacher)
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=fake_extract)
-    ex = (await db_session.execute(
-        select(Exercise).where(Exercise.document_id == doc.id)
-    )).scalars().one()
+                               body="Exercice 1\nDo it.\n", audience=Audience.teacher)
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+    ex = (await _exercises_of(db_session, doc))[0]
     assert ex.audience == Audience.teacher
 
 
+# --- [v7.3] anomaly → LLM re-segmentation -------------------------------------
+
+_OVERSPLIT_BODY = (
+    "Exercice 1\n"
+    "Calculer :\n"
+    "1. la somme\n"
+    "2. le produit\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_numbering_triggers_llm_resegmentation(db_session, tmp_path):
+    """Sub-questions mistaken for exercises give numbers [1, 1, 2] — the LLM
+    names the true boundary and sub-items fold into the parent exercise."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body=_OVERSPLIT_BODY)
+
+    async def llm_picks_parent(text):
+        return ["Exercice 1"]
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
+                          resegment_fn=llm_picks_parent)
+
+    exercises = await _exercises_of(db_session, doc)
+    assert len(exercises) == 1
+    assert exercises[0].number == "Exercice 1"
+    assert "le produit" in exercises[0].statement
+
+
+@pytest.mark.asyncio
+async def test_resegment_failure_keeps_regex_segmentation(db_session, tmp_path):
+    """A failing re-segmentation LLM must never fail the document — the regex
+    segmentation is kept and the document still indexes."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body=_OVERSPLIT_BODY)
+
+    async def boom_resegment(text):
+        raise ValueError("router model down")
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
+                          resegment_fn=boom_resegment)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed
+    exercises = await _exercises_of(db_session, doc)
+    assert len(exercises) == 3  # regex over-split kept — teacher fixes via report
+
+
+@pytest.mark.asyncio
+async def test_zero_boundaries_asks_llm_then_degrades_to_no_exercises(db_session, tmp_path):
+    """A TD whose headings the regex cannot see triggers the LLM fallback; if
+    the LLM finds nothing either, the document indexes with 0 exercises."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="Du texte sans aucune structure de numerotation.")
+
+    asked: list[str] = []
+
+    async def llm_finds_nothing(text):
+        asked.append(text)
+        return []
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
+                          resegment_fn=llm_finds_nothing)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed
+    assert asked, "zero regex boundaries must trigger the LLM fallback"
+    assert await _exercises_of(db_session, doc) == []
+
+
+# --- [v7.3] reconciliation report (ingest_report) ------------------------------
+# The teacher audits a warning list instead of re-reading the document.
+
+@pytest.mark.asyncio
+async def test_ingest_report_flags_number_gap(db_session, tmp_path):
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nA.\n\nExercice 2\nB.\n\nExercice 4\nD.\n",
+    )
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    await db_session.refresh(doc)
+    report = doc.ingest_report
+    assert report is not None
+    assert report["anomaly"] == "number_gap"
+    assert report["gaps"] == [3]
+    assert report["exercise_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_ingest_report_clean_doc_has_no_warnings(db_session, tmp_path):
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nA.\n\nExercice 2\nB.\n",
+    )
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    await db_session.refresh(doc)
+    report = doc.ingest_report
+    assert report["anomaly"] is None
+    assert report["gaps"] == []
+    assert report["collisions"] == []
+    assert report["resegmented"] is False
+    assert report["exercise_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_ingest_report_flags_lab_number_collision(db_session, tmp_path):
+    """Two documents in one lab both claiming 'Exercice 1' — query-time
+    ambiguity the teacher must resolve. The second ingest reports it."""
+    doc_a = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                                 body="Exercice 1\nFrom doc A.\n")
+    await ingest_document(db_session, doc_a.id, embed_fn=fake_embed)
+
+    # Second document in the SAME lab.
+    doc_b = await create_document(
+        db_session, class_id=doc_a.class_id, lab_id=doc_a.lab_id,
+        filename="doc-b.txt", content=b"Exercice 1\nFrom doc B.\n",
+        uploaded_by=doc_a.uploaded_by, storage_root=tmp_path,
+        doc_type=DocType.TD, audience=Audience.student,
+    )
+    await ingest_document(db_session, doc_b.id, embed_fn=fake_embed)
+
+    await db_session.refresh(doc_b)
+    collisions = doc_b.ingest_report["collisions"]
+    assert collisions == [1]
+
+
+@pytest.mark.asyncio
+async def test_ingest_report_marks_llm_resegmentation(db_session, tmp_path):
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body=_OVERSPLIT_BODY)
+
+    async def llm_picks_parent(text):
+        return ["Exercice 1"]
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
+                          resegment_fn=llm_picks_parent)
+
+    await db_session.refresh(doc)
+    assert doc.ingest_report["resegmented"] is True
+    assert doc.ingest_report["exercise_count"] == 1
+
+
+# --- [v7.3] teacher edits survive re-ingestion ---------------------------------
+# Idempotent rebuild is delete-and-recreate; rows the teacher hand-corrected
+# (`edited_by_teacher`) are the most valuable data in the system and must not
+# be wiped by a re-run.
+
+@pytest.mark.asyncio
+async def test_edited_exercise_survives_reingest(db_session, tmp_path):
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="Exercice 1\nOriginal statement.\n")
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    ex = (await _exercises_of(db_session, doc))[0]
+    ex.statement = "Teacher-corrected statement."
+    ex.edited_by_teacher = True
+    await db_session.commit()
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    exercises = await _exercises_of(db_session, doc)
+    assert len(exercises) == 1
+    assert exercises[0].statement == "Teacher-corrected statement."
+    assert exercises[0].edited_by_teacher is True
+
+
+@pytest.mark.asyncio
+async def test_edited_exercise_kept_even_if_number_disappears(db_session, tmp_path):
+    """Teacher work is never silently dropped — an edited exercise whose number
+    no longer exists in the re-ingested doc is kept as an extra row."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="Exercice 7\nRare statement.\n")
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    ex = (await _exercises_of(db_session, doc))[0]
+    ex.statement = "Teacher-written statement."
+    ex.edited_by_teacher = True
+    await db_session.commit()
+
+    # Simulate a re-export where the doc now only contains exercise 1.
+    def new_parse(storage_path):
+        return ["Exercice 1\nNew content.\n"], GateResult(ok=True)
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, parse_fn=new_parse)
+
+    exercises = await _exercises_of(db_session, doc)
+    statements = {e.statement for e in exercises}
+    assert "Teacher-written statement." in statements
+    assert any("New content." in s for s in statements)
+
+
+@pytest.mark.asyncio
+async def test_unedited_rows_are_rebuilt_fresh(db_session, tmp_path):
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="Exercice 1\nOriginal.\n")
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    ex = (await _exercises_of(db_session, doc))[0]
+    ex.statement = "Silently drifted copy."   # NOT flagged as a teacher edit
+    await db_session.commit()
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    exercises = await _exercises_of(db_session, doc)
+    assert len(exercises) == 1
+    assert "Original." in exercises[0].statement
+
+
+@pytest.mark.asyncio
+async def test_edited_chunk_survives_reingest(db_session, tmp_path):
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM,
+                               body=f"{_PARA_ONE}\n\n{_PARA_TWO}")
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    chunk = sorted(await _chunks_of(db_session, doc), key=lambda c: c.chunk_index)[0]
+    chunk.content = "Teacher-fixed chunk text."
+    chunk.edited_by_teacher = True
+    await db_session.commit()
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    chunks = sorted(await _chunks_of(db_session, doc), key=lambda c: c.chunk_index)
+    assert len(chunks) == 2
+    assert chunks[0].content == "Teacher-fixed chunk text."
+    assert chunks[0].edited_by_teacher is True
+    assert chunks[1].content == _PARA_TWO
+
+
+# --- Contextual Retrieval (CM) -------------------------------------------------
+
 @pytest.mark.asyncio
 async def test_contextual_retrieval_embeds_augmented_stores_original(db_session, tmp_path):
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM, body="lone slide fragment")
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM,
+                               body="lone slide fragment")
 
     embedded: list[str] = []
 
@@ -153,13 +429,10 @@ async def test_contextual_retrieval_embeds_augmented_stores_original(db_session,
         return "CONTEXT: about binary coding"
 
     await ingest_document(
-        db_session, doc.id,
-        embed_fn=capturing_embed, extract_fn=fake_extract, context_fn=fake_context,
+        db_session, doc.id, embed_fn=capturing_embed, context_fn=fake_context,
     )
 
-    chunk = (await db_session.execute(
-        select(DocChunk).where(DocChunk.document_id == doc.id)
-    )).scalars().one()
+    chunk = (await _chunks_of(db_session, doc))[0]
     # Original text stored for citation; generated context stored separately.
     assert chunk.content == "lone slide fragment"
     assert chunk.context == "CONTEXT: about binary coding"
@@ -170,8 +443,8 @@ async def test_contextual_retrieval_embeds_augmented_stores_original(db_session,
 
 @pytest.mark.asyncio
 async def test_contextual_retrieval_is_page_scoped_not_whole_document(db_session, tmp_path):
-    """[v7.2] A chunk's context is generated from its own page/slide, never the
-    whole document — so long docs don't get a context hallucinated from page 1."""
+    """A chunk's context is generated from its own page/slide, never the whole
+    document — so long docs don't get a context hallucinated from page 1."""
     doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM)
 
     def two_page_parse(storage_path):
@@ -185,8 +458,7 @@ async def test_contextual_retrieval_is_page_scoped_not_whole_document(db_session
 
     await ingest_document(
         db_session, doc.id,
-        embed_fn=fake_embed, extract_fn=fake_extract,
-        context_fn=capturing_context, parse_fn=two_page_parse,
+        embed_fn=fake_embed, context_fn=capturing_context, parse_fn=two_page_parse,
     )
 
     # The scope handed to context_fn for the "alpha" chunk must contain alpha but
@@ -197,23 +469,56 @@ async def test_contextual_retrieval_is_page_scoped_not_whole_document(db_session
 
 
 @pytest.mark.asyncio
+async def test_context_generation_runs_concurrently_and_stays_aligned(db_session, tmp_path):
+    """[v7.3] Per-chunk context calls run concurrently (gather) — completion
+    order must not scramble the chunk↔context pairing."""
+    import asyncio
+
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM)
+
+    def three_page_parse(storage_path):
+        return ["alpha slide content", "beta slide content", "gamma slide content"], \
+            GateResult(ok=True)
+
+    in_flight = 0
+    max_in_flight = 0
+
+    async def slow_context(scope, chunk_text):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        # Earlier chunks sleep longer → later ones finish first.
+        delay = {"alpha": 0.03, "beta": 0.02, "gamma": 0.01}
+        await asyncio.sleep(delay[chunk_text.split()[0]])
+        in_flight -= 1
+        return f"CTX-{chunk_text.split()[0]}"
+
+    await ingest_document(
+        db_session, doc.id,
+        embed_fn=fake_embed, context_fn=slow_context, parse_fn=three_page_parse,
+    )
+
+    chunks = await _chunks_of(db_session, doc)
+    for chunk in chunks:
+        assert chunk.context == f"CTX-{chunk.content.split()[0]}"
+    assert max_in_flight > 1, "context calls must overlap (gather), not run serially"
+
+
+# --- gate / idempotency / failure ----------------------------------------------
+
+@pytest.mark.asyncio
 async def test_bad_pdf_is_flagged_needs_review_not_ingested(db_session, tmp_path):
     doc = await _seed_document(db_session, tmp_path)
 
     def bad_parse(storage_path):
         return [], GateResult(ok=False, reason="Low character yield — looks scanned.")
 
-    await ingest_document(
-        db_session, doc.id, embed_fn=fake_embed, extract_fn=fake_extract, parse_fn=bad_parse,
-    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, parse_fn=bad_parse)
 
     await db_session.refresh(doc)
     assert doc.status == DocumentStatus.needs_review
     assert "scanned" in (doc.error_message or "")
-    chunks = (await db_session.execute(
-        select(DocChunk).where(DocChunk.document_id == doc.id)
-    )).scalars().all()
-    assert chunks == []
+    assert await _chunks_of(db_session, doc) == []
 
 
 @pytest.mark.asyncio
@@ -221,21 +526,11 @@ async def test_ingest_is_idempotent_on_rerun(db_session, tmp_path):
     doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
                                body="Exercice 1\nSum two numbers.\n")
 
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=fake_extract)
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=fake_extract)
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
 
-    chunks = (await db_session.execute(
-        select(DocChunk).where(DocChunk.document_id == doc.id)
-    )).scalars().all()
-    exercises = (await db_session.execute(
-        select(Exercise).where(Exercise.document_id == doc.id)
-    )).scalars().all()
-    assert len(chunks) == 1
-    assert len(exercises) == 1
-
-
-async def boom_extract(text):
-    raise ValueError("bad extract")
+    assert await _chunks_of(db_session, doc) == []       # strict split
+    assert len(await _exercises_of(db_session, doc)) == 1
 
 
 async def boom_embed(texts):
@@ -245,64 +540,64 @@ async def boom_embed(texts):
 @pytest.mark.asyncio
 async def test_ingest_marks_failed_and_rolls_back_on_indexing_error(db_session, tmp_path):
     """A genuine indexing failure (e.g. the embedding service is down) must roll
-    back partial writes and mark the document failed."""
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
-                               body="Exercice 1\nSum two numbers.\n")
+    back partial writes and mark the document failed. CM body — only the chunk
+    path calls the embedder under the strict split."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM,
+                               body="Un paragraphe de cours.")
 
     with pytest.raises(ValueError):
-        await ingest_document(db_session, doc.id, embed_fn=boom_embed, extract_fn=fake_extract)
+        await ingest_document(db_session, doc.id, embed_fn=boom_embed)
 
     await db_session.refresh(doc)
     assert doc.status == DocumentStatus.failed
     assert "embedding service down" in (doc.error_message or "")
-    chunks = (await db_session.execute(
-        select(DocChunk).where(DocChunk.document_id == doc.id)
-    )).scalars().all()
-    assert chunks == []
+    assert await _chunks_of(db_session, doc) == []
 
 
-@pytest.mark.asyncio
-async def test_extraction_failure_leaves_document_indexed_with_chunks(db_session, tmp_path):
-    """[v7.2] Exercise extraction is decoupled from chunk indexing: an extractor
-    that raises (e.g. engine lacks structured decoding) must NOT fail the whole
-    document — chunks index normally and exercises degrade to 0."""
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
-                               body="Exercice 1\nSum two numbers.\n")
-
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=boom_extract)
-
-    await db_session.refresh(doc)
-    assert doc.status == DocumentStatus.indexed
-    chunks = (await db_session.execute(
-        select(DocChunk).where(DocChunk.document_id == doc.id)
-    )).scalars().all()
-    assert len(chunks) >= 1
-    exercises = (await db_session.execute(
-        select(Exercise).where(Exercise.document_id == doc.id)
-    )).scalars().all()
-    assert exercises == []
-
+# --- [v7.3] upstream cleaning --------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_ingest_skips_malformed_exercise_items(db_session, tmp_path):
-    """[v7.2] A non-compliant engine may emit incomplete/non-dict items. Those are
-    skipped; well-formed items are still ingested; the document stays indexed."""
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD, body="x")
+async def test_repeated_headers_are_stripped_before_chunking(db_session, tmp_path):
+    """A header repeated on every page ('TD3 – Informatique') must not reach
+    the chunks — it pollutes recall with near-identical garbage."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM)
 
-    async def messy_extract(text):
-        return [
-            {"number": "Exercice 1", "statement": "Valid one."},
-            {"number": "Exercice 2"},          # missing statement → skip
-            {"statement": "No number."},        # missing number → skip
-            "not even a dict",                  # non-dict → skip
+    def three_page_parse(storage_path):
+        pages = [
+            "TD3 – Informatique – Polytech\n\nLe codage binaire en base deux.",
+            "TD3 – Informatique – Polytech\n\nLa numeration hexadecimale.",
+            "TD3 – Informatique – Polytech\n\nLes operateurs logiques.",
         ]
+        return pages, GateResult(ok=True)
 
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed, extract_fn=messy_extract)
+    await ingest_document(
+        db_session, doc.id, embed_fn=fake_embed, parse_fn=three_page_parse,
+    )
 
-    await db_session.refresh(doc)
-    assert doc.status == DocumentStatus.indexed
-    exercises = (await db_session.execute(
-        select(Exercise).where(Exercise.document_id == doc.id)
-    )).scalars().all()
-    assert len(exercises) == 1
-    assert exercises[0].number == "Exercice 1"
+    chunks = await _chunks_of(db_session, doc)
+    assert chunks, "content paragraphs must still be ingested"
+    assert all("TD3 – Informatique" not in c.content for c in chunks)
+    assert any("codage binaire" in c.content for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_chunks_within_document_are_deduped(db_session, tmp_path):
+    """The same paragraph appearing on several pages (below the header-strip
+    threshold) is stored once — duplicates waste recall slots."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM)
+
+    notice = "Rappel: rendre le compte-rendu avant vendredi."
+
+    def two_page_parse(storage_path):
+        return [
+            f"{notice}\n\nLe codage binaire en base deux.",
+            f"{notice}\n\nLa numeration hexadecimale.",
+        ], GateResult(ok=True)
+
+    await ingest_document(
+        db_session, doc.id, embed_fn=fake_embed, parse_fn=two_page_parse,
+    )
+
+    chunks = await _chunks_of(db_session, doc)
+    notice_chunks = [c for c in chunks if notice in c.content]
+    assert len(notice_chunks) == 1

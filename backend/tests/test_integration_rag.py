@@ -37,10 +37,6 @@ async def _fixed_embed(texts):
     return [_unit(1) for _ in texts]
 
 
-async def _extract_one(text):
-    return [{"number": "Exercice 1", "statement": "Compute the parity bit.", "hints": "XOR"}]
-
-
 async def _seed_lab(session, name="Lab 1"):
     teacher = make_user(role=UserRole.teacher)
     session.add(teacher)
@@ -60,15 +56,17 @@ async def test_e2e_ingest_then_agent_retrieves_context(pg_session, tmp_path):
     teacher, cls, lab = await _seed_lab(pg_session)
     student = make_user(role=UserRole.student)
     pg_session.add(student)
-    body = "Exercice 1\nParity and error detection in binary coding.\n"
+    # [v7.3] strict split: concept RAG is fed by CM material only (a TD would
+    # produce Exercises, never chunks).
+    body = "Parity and error detection in binary coding.\n"
     doc = await create_document(
-        pg_session, class_id=cls.id, lab_id=lab.id, filename="td.txt",
+        pg_session, class_id=cls.id, lab_id=lab.id, filename="cm.txt",
         content=body.encode(), uploaded_by=teacher.id, storage_root=tmp_path,
-        doc_type=DocType.TD, audience=Audience.student,
+        doc_type=DocType.CM, audience=Audience.student,
     )
 
-    # Worker ingests: writes DocChunks (with tsv via to_tsvector) + Exercises.
-    await ingest_document(pg_session, doc.id, embed_fn=_fixed_embed, extract_fn=_extract_one)
+    # Worker ingests: writes DocChunks (with tsv via to_tsvector).
+    await ingest_document(pg_session, doc.id, embed_fn=_fixed_embed)
 
     # Agent answers a concept question end-to-end.
     agent = build_agent(pg_session, embed_fn=_fixed_embed)
@@ -84,6 +82,30 @@ async def test_e2e_ingest_then_agent_retrieves_context(pg_session, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_ingest_builds_french_tsv_matching_inflected_queries(pg_session, tmp_path):
+    """[v7.3] The worker writes the tsvector with the document's language config
+    (default fr), so a singular query matches the plural document via stemming.
+    Ingest and query sides sharing the config is what keeps BM25 alive."""
+    from backend.app.services.retrieval_service import bm25_search
+
+    teacher, cls, lab = await _seed_lab(pg_session)
+    body = "Les fonctions recursives sont puissantes et elegantes en pratique.\n"
+    doc = await create_document(
+        pg_session, class_id=cls.id, lab_id=lab.id, filename="cm.txt",
+        content=body.encode(), uploaded_by=teacher.id, storage_root=tmp_path,
+        doc_type=DocType.CM, audience=Audience.student,
+    )
+    await ingest_document(pg_session, doc.id, embed_fn=_fixed_embed)
+
+    hits = await bm25_search(
+        pg_session, "fonction recursive", lab.id,
+        audience=Audience.student, language="fr",
+    )
+    assert len(hits) == 1
+    assert "fonctions recursives" in hits[0].content
+
+
+@pytest.mark.asyncio
 async def test_redline_cross_tenant_and_audience_and_no_solution(pg_session, tmp_path):
     teacher, cls, lab_a = await _seed_lab(pg_session, "Lab A")
     student = make_user(role=UserRole.student)
@@ -95,7 +117,7 @@ async def test_redline_cross_tenant_and_audience_and_no_solution(pg_session, tmp
         content=b"Exercice 1\nthreads in lab A\n", uploaded_by=teacher.id,
         storage_root=tmp_path, doc_type=DocType.TD, audience=Audience.student,
     )
-    await ingest_document(pg_session, doc_a.id, embed_fn=_fixed_embed, extract_fn=_extract_one)
+    await ingest_document(pg_session, doc_a.id, embed_fn=_fixed_embed)
 
     # A second lab with its own chunk (cross-tenant bait).
     lab_b = Lab(id=uuid.uuid4(), class_id=cls.id, name="Lab B")
@@ -106,7 +128,7 @@ async def test_redline_cross_tenant_and_audience_and_no_solution(pg_session, tmp
         content=b"threads in lab B\n", uploaded_by=teacher.id,
         storage_root=tmp_path, doc_type=DocType.CM, audience=Audience.student,
     )
-    await ingest_document(pg_session, doc_b.id, embed_fn=_fixed_embed, extract_fn=_extract_one)
+    await ingest_document(pg_session, doc_b.id, embed_fn=_fixed_embed)
 
     # A teacher-only chunk inside lab A (audience bait).
     pg_session.add(DocChunk(

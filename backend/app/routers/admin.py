@@ -241,6 +241,13 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "router_model": "ROUTER_MODEL",
     "rag_max_retries": "RAG_MAX_RETRIES",
     "router_knn_threshold": "ROUTER_KNN_THRESHOLD",
+    # [v7.3] hint slot + injection gate + worker budgets.
+    "hint_base_url": "HINT_BASE_URL",
+    "hint_api_key": "HINT_API_KEY",
+    "hint_model": "HINT_MODEL",
+    "rerank_score_threshold": "RERANK_SCORE_THRESHOLD",
+    "hint_max_samples": "HINT_MAX_SAMPLES",
+    "ingest_token_budget": "INGEST_TOKEN_BUDGET",
 }
 
 

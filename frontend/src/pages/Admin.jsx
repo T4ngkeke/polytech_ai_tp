@@ -695,14 +695,36 @@ function LLMConfigTab() {
               placeholder="inherits main LLM" />
           </ConfigSection>
 
-          {/* Router (live exercise-number fallback) */}
-          <ConfigSection title="Router model (live exercise fallback)">
+          {/* Router = ALL live auxiliary calls (router / self-eval / rewrite) */}
+          <ConfigSection title="Auxiliary model (router · self-eval · rewrite)"
+            desc="All live auxiliary calls share this slot. Point it at a small fast model (e.g. a 9B).">
             <Field label="Model Name" value={config.router_model} onChange={set('router_model')}
-              placeholder="inherits main LLM — e.g. qwen3:30b" />
+              placeholder="inherits main LLM — e.g. ministral-8b" />
             <Field label="Base URL" value={config.router_base_url} onChange={set('router_base_url')}
               placeholder="inherits main LLM" />
             <SecretField label="API Key" value={config.router_api_key} onChange={set('router_api_key')}
               placeholder="inherits main LLM" />
+            {!config.router_model && (
+              <p className="text-xs text-amber-400 mt-1">
+                ⚠ Empty — auxiliary calls run on the main (big) chat model and compete
+                with students for its capacity.
+              </p>
+            )}
+          </ConfigSection>
+
+          {/* [v7.3] Hint generator (answer → tiered hints, off-peak) */}
+          <ConfigSection title="Hint generator (answer → tiered hints, off-peak)"
+            desc="Runs off-peak on the worker — point it at the BIG model (quality over latency).">
+            <Field label="Model Name" value={config.hint_model} onChange={set('hint_model')}
+              placeholder="inherits main LLM" />
+            <Field label="Base URL" value={config.hint_base_url} onChange={set('hint_base_url')}
+              placeholder="inherits main LLM" />
+            <SecretField label="API Key" value={config.hint_api_key} onChange={set('hint_api_key')}
+              placeholder="inherits main LLM" />
+            <Field label="Max derivation samples / exercise" value={config.hint_max_samples}
+              onChange={set('hint_max_samples')} placeholder="4" />
+            <Field label="Token budget / document" value={config.ingest_token_budget}
+              onChange={set('ingest_token_budget')} placeholder="200000" />
           </ConfigSection>
 
           {/* Token cost weights */}
@@ -711,6 +733,9 @@ function LLMConfigTab() {
               placeholder="0.2" />
             <Field label="β — decode weight" value={config.token_beta} onChange={set('token_beta')}
               placeholder="1.0" />
+            <Field label="Rerank score threshold (empty = gate off)"
+              value={config.rerank_score_threshold} onChange={set('rerank_score_threshold')}
+              placeholder="empty until calibrated — e.g. 0.35" />
           </ConfigSection>
         </div>
 

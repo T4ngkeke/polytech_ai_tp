@@ -72,3 +72,26 @@ def test_returns_none_when_no_number(raw):
 def test_ingest_and_query_labels_match_via_normalization():
     # A stored label "Exercice II" and a student's "exercise 2" collapse to 2.
     assert normalize_exercise_number("Exercice II") == normalize_exercise_number("exercise 2")
+
+
+# [v7.3] Document-level prefixes (TD n / TP n / CM n) must not be read as the
+# exercise number: "TD 2 – Exercice 3" is exercise 3 of document TD 2, not
+# exercise 2. The first-digit-run rule alone gets this wrong.
+@pytest.mark.parametrize("raw,expected", [
+    ("TD 2 – Exercice 3", 3),
+    ("TP1 Exercice 2", 2),
+    ("td3 - exercise 5", 5),
+    ("CM 1 Question 4", 4),
+    ("TD 2 TP 3 Exercice 7", 7),      # multiple prefixes all stripped
+    ("l'exercice 3 du TD 2", 3),      # query-side phrasing: exercise digits come first
+])
+def test_strips_doc_prefix_before_number(raw, expected):
+    assert normalize_exercise_number(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "TD 2",       # a bare document label is not an exercise number
+    "TP 1",
+])
+def test_bare_doc_label_is_not_an_exercise(raw):
+    assert normalize_exercise_number(raw) is None

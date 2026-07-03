@@ -299,6 +299,35 @@ class TestLLMConfig:
         })
         assert resp.status_code == 403
 
+    async def test_v73_hint_and_threshold_keys_roundtrip(self, admin_client):
+        """[v7.3] The hint slot (answer→hints big model) and the rerank score
+        threshold are admin-configurable and survive a GET after PUT."""
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "hint_base_url": "http://big/v1",
+            "hint_api_key": "big-key",
+            "hint_model": "qwen3-235b",
+            "rerank_score_threshold": "0.35",
+            "hint_max_samples": "8",
+            "ingest_token_budget": "50000",
+        })
+        assert resp.status_code == 200
+
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["hint_model"] == "qwen3-235b"
+        assert got["hint_base_url"] == "http://big/v1"
+        assert got["rerank_score_threshold"] == "0.35"
+        assert got["hint_max_samples"] == "8"
+        assert got["ingest_token_budget"] == "50000"
+
+    async def test_v73_fields_default_empty(self, admin_client):
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+        })
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["hint_model"] == ""
+        assert got["rerank_score_threshold"] == ""  # gate ships OFF
+
     # --- [v7.2] full model-routing table ---------------------------------
 
     async def test_admin_sets_and_reads_routing_fields(self, admin_client):

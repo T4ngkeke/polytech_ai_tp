@@ -1,9 +1,9 @@
-# Edu-LLM: v7.2 Agentic Class-Lab Architecture
+# Edu-LLM: v7.3 Agentic Class-Lab Architecture
 ---
 
 ## 1. Project Overview
 
-**Edu-LLM (v7.1 Agentic Class-Lab Architecture)** is a full-stack educational platform
+**Edu-LLM (v7.3 Agentic Class-Lab Architecture)** is a full-stack educational platform
 designed for a controlled classroom environment. It keeps the entire v6 foundation —
 strict 3-tier RBAC, Invite-Code zero-friction joining, real-time DB-based rate limiting,
 and **Three-Tier Rule Injection** (Class → Lab → Student) — and the v7 shift from a
@@ -73,22 +73,75 @@ by Docker Compose, with **no external message queue** (PostgreSQL itself is the 
 - **Student-facing markdown rendering**: the chat UI renders markdown, syntax-highlighted code
   blocks (with copy), and KaTeX math, with stream-safe incremental rendering.
 
+**v7.3 Upgrade (this release) — pipeline hardening:**
+- **Single-source exercise segmentation**: TD/TP segmentation happens **once**, deterministically
+  (expanded boundary regex — Arabic / Roman / `Question n` / bare-numbered headings). Exercises
+  are built **deterministically** from the segmentation: `number` = the regex-captured label,
+  `statement` = the segment body — **no LLM on the happy path** (the whole-document LLM
+  extractor, the root cause of wrong exercise numbers, is deleted). An LLM (`resegment_fn`, the
+  `INGEST_MODEL`) is consulted **only** when the numbering looks wrong: duplicate normalized
+  numbers (sub-questions mistaken for exercises — `1,1,2,3`) or zero boundaries. It names the
+  true boundary heading lines verbatim; splitting stays deterministic; its failure keeps the
+  regex result. Sub-questions fold into their parent exercise.
+- **Strict split (red line)**: concept questions are answered from **CM chunks only** (hybrid
+  RAG) and exercises from the **Exercises table only** (agentic search) — so **TD/TP never
+  produce DocChunks** (no embedding, no tsv; `IngestionPlan.produce_chunks`) and DocChunks come
+  from CM only. Leakage is cut on the write side; the read path needs no trust.
+- **Ingestion cleanup**: repeated header/footer lines stripped (two narrow rules — byte-identical
+  repeats and pure pagination lines — so numbered structure is never eaten); TOC pages removed
+  once for the whole pipeline; CM chunks get min/max size control (merge tiny, sentence-split
+  huge — 120–1600 chars) with **code-aware paragraph splitting** (blank lines inside indented
+  blocks don't cut); document-level paragraph dedup; `normalize_exercise_number()` strips
+  `TD n`/`TP n` prefixes before reading the number ("TD 2 – Exercice 3" is exercise 3, not 2);
+  per-chunk Contextual-Retrieval calls run concurrently (bounded gather).
+- **Reconciliation report**: ingestion writes `Documents.ingest_report` (numbering anomaly,
+  gaps, in-lab number collisions, whether the LLM re-segmented, exercise count) — the teacher
+  audits a warning list instead of re-reading the document.
+- **Teacher-edit protection**: chunk/exercise rows edited by a teacher (`edited_by_teacher`)
+  survive idempotent re-ingestion instead of being wiped by delete-and-rebuild; an edited
+  exercise whose number vanished from a re-export is kept as an extra row, never silently dropped.
+- **Retrieval fixes**: BM25 was silently dead for natural-language French questions
+  (`simple` config + `plainto_tsquery` AND semantics — one extra query word zeroed the recall);
+  now **OR semantics** over content words with per-document **`language`** configs (fr default /
+  en), stemming included ("fonction" matches "fonctions"), same config on ingest and query
+  sides. The reranker now scores the **augmented** text (context + content) — the same text
+  recall matched on — instead of vetoing the context-poor slide chunks Contextual Retrieval was
+  built to save. A **`RERANK_SCORE_THRESHOLD`** injection gate is wired end-to-end in the
+  retrieval layer (below-threshold chunks dropped, `all_filtered` signalled) and **ships
+  disabled** until calibrated on a golden set; the zero-context disclaimer branch that consumes
+  the signal lands in v8.0.
+- **Model-routing slots (v8.0 groundwork)**: `HINT_MODEL/URL/KEY` (reserved for the v8.0
+  answer→hints generator; empty → main LLM), `RERANK_SCORE_THRESHOLD`, `HINT_MAX_SAMPLES`,
+  `INGEST_TOKEN_BUDGET` — all admin-configurable. The admin UI renames the router slot to
+  **"Auxiliary model (router · self-eval · rewrite)"** and warns when it is empty (auxiliary
+  load silently landing on the big chat model). Tiering convention: chat = the big model;
+  live auxiliary = small fast model; `INGEST_*` = small; `HINT_*` = big, off-peak only.
+
+*(v8.0 — next release — replaces the router with a single LLM call carrying dialogue state,
+adds answer-grounded tiered hints with a teacher review lifecycle, per-message trace telemetry,
+and the zero-context disclaimer branch. See `V8.0_PLAN.md`.)*
+
 **v6 Principles (still in force):**
 - **Service Layer**: All business/DB logic lives in `backend/app/services/`. Routers are thin.
 - **No Cross-Router Calls**: routers call services independently — no router imports another.
 - **Audit Integrity**: A student "delete" is a **soft delete** (`is_deleted=True`) — the session is hidden from the student but permanently retained and fully visible to teacher/admin audit (flagged as deleted). Only admin can hard-delete. History is immutable and teacher-auditable.
 - **Hierarchical UI**: Class → Lab tree navigation across all roles.
 
-**v7.1 Red Lines (security/governance):**
+**Red Lines (v7.1, revised v7.3 — security/governance):**
 - **Tenant isolation in SQL, never in the prompt**: every retrieval is filtered by
   `lab_id` / `class_id` (and `audience` for students) in the **SQL WHERE clause** — re-checked
   after fusion/rerank. Prompt-injection cannot break a query filter. No cross-class / cross-lab
   access.
 - **No corrigé ingestion — nothing to leak**: solutions are **not stored anywhere**. The
   `Exercise.solution` column is **dropped**; only student-safe exercise **statements** are
-  ingested. A 120B model can derive this exercise level itself, so the entire solution-leak
-  surface is deleted rather than guarded. Any non-derivable instructor convention goes in the
-  **class-level prompt** (3-tier injection), not a per-exercise field or an ingested answer key.
+  ingested. Any non-derivable instructor convention goes in the **class-level prompt**
+  (3-tier injection), not a per-exercise field or an ingested answer key. *(v8.0 revises this
+  into "answers stored for offline hint generation, never in the student path" — see
+  `V8.0_PLAN.md`.)*
+- **[v7.3] Strict split**: **TD/TP documents never produce DocChunks** — exercises live only in
+  the structured `Exercises` table (agentic search) and the RAG chunk store is fed by CM only.
+  Exercise text cannot surface through concept retrieval; the separation is enforced at write
+  time, not by query-time filters.
 - **Security in the database, pedagogy in the prompt**: the Socratic guardrail is a *behavioral*
   guardrail; if a student jailbreaks it the harm is low (no stored answer key). Security
   boundaries must never degrade into a prompt guardrail.
@@ -119,13 +172,13 @@ polytech_ai_tp/
 │   │   │   ├── document_service.py  # [v7] Upload (+doc_type/audience) + enqueue ingestion jobs; chunk/exercise reads (Phase 6)
 │   │   │   ├── learner_service.py   # [v7] prompt-literacy effort/lazy profiles
 │   │   │   ├── llm_service.py       # [v7.1] OpenAI-compatible clients from SystemConfigs: generate / embed / rerank ([v7.2] + ingest/router clients, fallback to main LLM)
-│   │   │   ├── retrieval_service.py # [v7.1] hybrid (vector+BM25) + rerank, tenant/audience-filtered in SQL
+│   │   │   ├── retrieval_service.py # [v7.1] hybrid (vector+BM25) + rerank, tenant/audience-filtered in SQL ([v7.3] + score-threshold gate, language-aware OR BM25)
 │   │   │   ├── skill_preset_service.py # [v7.2] teacher skill-preset library CRUD + snapshot-copy into class rule
 │   │   │   └── billing.py           # [v7.2] weighted billed-token helper (prompt·α + completion·β)
 │   │   ├── agent/                   # [v7] LangGraph agent
 │   │   │   ├── __init__.py
 │   │   │   ├── graph.py             # Router → [agentic_search | rag | direct] → self-eval loop → Synthesize → SSE
-│   │   │   ├── router.py            # [v7.1] exercise-number regex fast-path + bge-m3 kNN intent router ([v7.2] + ROUTER_MODEL LLM fallback)
+│   │   │   ├── router.py            # [v7.1] exercise-number regex fast-path + bge-m3 kNN intent router ([v7.2] + ROUTER_MODEL LLM fallback; replaced by a one-call LLM router in v8.0)
 │   │   │   ├── exercise_number.py   # [v7.2] shared normalize_exercise_number() (Roman/Arabic/3.1 → canonical int)
 │   │   │   ├── selfeval.py          # [v7.1] cheap gate + guided good/partial/bad verdict + bounded re-retrieval
 │   │   │   ├── prompt.py            # Prompt Controller (skill.md → 3-tier rules → context → history → question)
@@ -144,7 +197,7 @@ polytech_ai_tp/
 │   │   ├── queue.py                 # FOR UPDATE SKIP LOCKED claim + stale-lock reclaim
 │   │   ├── ingest.py                # [v7.1] pymupdf parse + char-yield gate + structure-aware chunk + Contextual Retrieval + statement-only extract + tsvector
 │   │   ├── parsing.py               # [v7.1] PDF text extraction (pymupdf) + character-yield gate
-│   │   ├── chunking.py              # [v7.1] structure-aware chunking (keep exercises/code intact, drop TOC)
+│   │   ├── chunking.py              # [v7.3] single-source segmentation (expanded boundaries, anomaly detection, LLM re-segmentation, size control, code blocks)
 │   │   └── gpu_gate.py              # chat-load gate (+ optional pynvml GPU signal); off-peak scheduling
 │   ├── .env                         # DATABASE_URL, JWT_SECRET (LLM configs live in DB)
 │   ├── requirements.txt
@@ -175,6 +228,8 @@ polytech_ai_tp/
 │   ├── tailwind.config.js           # Tailwind v3 config
 │   ├── nginx.conf                   # Nginx reverse proxy config for prod
 │   └── Dockerfile                   # Node builder + Nginx multi-stage build
+├── scripts/
+│   └── router_accuracy.py           # [v7.2] router eval harness (kNN vs LLM classification)
 └── docker-compose.yml               # Postgres(pgvector) + Backend + Worker + Frontend + named volumes
 ```
 
@@ -196,6 +251,11 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 > **v7.2 schema note:** same approach — the v7.2 changes (add `Exercise.number_normalized` +
 > `Exercise.audience`; add `Message.billed_tokens`; add the `SkillPresets` table; add the v7.2
 > `SystemConfigs` keys with defaults in `seed.py`) are applied by **recreating** the dev database.
+>
+> **v7.3 schema note:** same approach. Changes: `Documents` + `language` + `ingest_report`;
+> `DocChunks` + `edited_by_teacher`; `Exercises` + `edited_by_teacher`; the v7.3
+> `SystemConfigs` keys (hint slot reserved for v8.0, rerank score threshold, worker budgets)
+> — applied by **recreating** the dev database.
 
 ### 1. SystemConfigs
 | Column | Type | Constraints / Notes |
@@ -225,6 +285,15 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 >
 > Ingestion (off-peak) and router (live) have different latency/cost needs, so they are
 > configured independently; point them at the same endpoint to reuse one engine.
+>
+> **v7.3 keys.** `HINT_MODEL` / `HINT_BASE_URL` / `HINT_API_KEY` (empty → main LLM; reserved
+> for the **v8.0** answer→hints generator — point it at the **big** model, quality over
+> latency), `RERANK_SCORE_THRESHOLD` (absolute relevance floor for context injection;
+> **ships empty = off** until calibrated on a golden set), `HINT_MAX_SAMPLES` (per-exercise
+> derivation sampling budget), `INGEST_TOKEN_BUDGET` (per-document worker budget). By
+> convention the `ROUTER_*` slots serve **all live auxiliary calls** (router, self-eval
+> verdict, rewrite); the admin UI warns when the slot is empty (auxiliary load would silently
+> land on the big chat model). `ROUTER_KNN_THRESHOLD` is removed in v8.0 with the kNN router.
 
 > **v7.1 — all model calls are config-driven HTTP.** Generation, embeddings (`bge-m3`), and
 > reranking (`bge-reranker-v2-m3`) all hit OpenAI-compatible endpoints read from this table at
@@ -311,6 +380,8 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 | content_hash | String | Hash of file content — dedup + change detection (triggers re-index) |
 | doc_type | Enum | **[v7.1]** `CM` / `TD` / `TP`. Set at upload — the deterministic routing signal (chunk-path vs exercise-path) |
 | audience | Enum | **[v7.1]** `student` / `teacher`. Set at upload. Students never retrieve `teacher`-audience docs (SQL filter) |
+| language | String | **[v7.3]** `fr` (default) / `en`. Set at upload — selects the BM25 `tsvector` config (ingest and query side must match) |
+| ingest_report | JSON | **[v7.3]** reconciliation report: numbering anomaly, gaps, in-lab number collisions, LLM re-segmentation flag, exercise count — the teacher audits a warning list |
 | status | Enum | `pending` → `processing` → `indexed` → `failed`. **[v7.1]** plus `needs_review` (char-yield gate rejected the PDF back to the teacher) |
 | error_message | Text | Populated on `failed`; also carries the `needs_review` reason |
 | page_count | Integer | **[v7.1]** parsed page count (Phase 6 summary). Nullable until processed |
@@ -338,6 +409,7 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 | embedding | `vector(N)` | Embedded over the **augmented** text (`context + content`). N = embedding dim (`bge-m3` = 1024) |
 | tsv | `tsvector` | **[v7.1]** BM25 full-text index, built over the **augmented** text (multilingual config) |
 | page_no | Integer | Citation support — source page |
+| edited_by_teacher | Boolean | **[v7.3]** default False. Teacher-corrected chunks survive idempotent re-ingestion |
 | created_at | Timestamp | Timezone-aware (UTC) |
 
 *Indexes:* `USING hnsw (embedding vector_cosine_ops)` for ANN; `USING gin (tsv)` for BM25;
@@ -354,14 +426,16 @@ B-tree on `lab_id` for the mandatory tenant filter.
 | number | String | Raw label as printed — e.g. "Exercise 2", "3.1", "II". Used for display/citation |
 | number_normalized | Integer | **[v7.2]** canonical integer derived from `number` (Roman→int, `3.1`→main `3`, etc.), nullable. Both ingest-side extraction and query-side matching run the **same** `normalize_exercise_number()` over it — decouples matching from the unstable printed format |
 | statement | Text | Exercise body. **Student-safe** — this is all that is stored |
-| hints | Text | Hints (safe to surface to students) |
+| hints | Text | Hints (safe to surface to students). **[v7.3]** always NULL at ingest — hint generation becomes a teacher-triggered, reviewed workflow in v8.0 |
+| edited_by_teacher | Boolean | **[v7.3]** default False. Teacher-corrected exercises survive idempotent re-ingestion |
 | concept | String | **[reserved]** knowledge-point tag for future Adaptive Tutoring (nullable now) |
 | created_at | Timestamp | Timezone-aware (UTC) |
 
 > **🔴 v7.1 red line — no `solution` column.** The corrigé is **not ingested**: there is no
 > `solution` field on this table. Only student-visible **statements** are stored, so there is
-> nothing to leak (the old "never SELECT solution" query rule is replaced by *not storing it
-> at all*). Non-derivable instructor conventions live in the class-level prompt, not here.
+> nothing to leak. **[v7.3]** the exercise `number` now comes from the deterministic
+> segmentation label (not an LLM reading the whole document), and rows the teacher corrected
+> survive re-ingestion.
 
 ### 12. IngestionJobs (DB-as-queue)
 | Column | Type | Constraints / Notes |
@@ -406,7 +480,8 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 
 > **[v7.1]** Accumulates real multilingual queries the embedding-kNN router was unsure about,
 > so a future BERT/XLM-R router has a labeled data source. Write-only telemetry; nothing in the
-> live path reads it.
+> live path reads it. *(v8.0 redefines this to record **every** routing decision made by the
+> LLM router.)*
 
 ### 15. SkillPresets (per-teacher instructor-style library — §5/v7.2)
 | Column | Type | Constraints / Notes |
@@ -459,7 +534,7 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | PUT | `/api/admin/users/{id}/quota` | require_admin | Update user's daily token quota. |
 | DELETE | `/api/admin/users/{id}` | require_admin | Soft-delete a user. |
 | POST | `/api/admin/users/import` | require_admin | CSV Bulk Import. Dry-run by default. `?force=true` executes. |
-| GET | `/api/admin/llm/config` | require_admin | Read current LLM config (base_url, model, api_key, embedding_model; **v7.1**: rerank_url, rerank_model, rag_max_retries, router_knn_threshold; **v7.2**: embedding_url/key, rerank_key, ingest_model/url/key, router_model/url/key, token_alpha, token_beta). |
+| GET | `/api/admin/llm/config` | require_admin | Read current LLM config (base_url, model, api_key, embedding_model; **v7.1**: rerank_url, rerank_model, rag_max_retries, router_knn_threshold; **v7.2**: embedding_url/key, rerank_key, ingest_model/url/key, router_model/url/key, token_alpha, token_beta; **v7.3**: hint_model/url/key, rerank_score_threshold, hint_max_samples, ingest_token_budget). |
 | PUT | `/api/admin/llm/config` | require_admin | Zero-downtime update of SystemConfigs (all keys above; **v7.2** the full model-routing table + `TOKEN_ALPHA`/`TOKEN_BETA` cost weights). Empty ingest/router/embedding endpoint fields fall back to the main LLM. |
 | GET | `/api/admin/classes` | require_admin | God Mode: List all classes across the system (no ownership filter). |
 | GET | `/api/admin/classes/{class_id}/labs` | require_admin | God Mode: List all labs in a class. |
@@ -467,6 +542,7 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | GET | `/api/admin/labs` | require_admin | God Mode: List all labs across the system. |
 | PUT | `/api/admin/classes/{class_id}/transfer` | require_admin | Force transfer class ownership (`teacher_id`). |
 | DELETE | `/api/admin/classes/{class_id}` | require_admin | Force soft-delete any class (bypasses ownership). |
+| PUT | `/api/admin/labs/{lab_id}` | require_admin | **[v7.2]** God-mode lab update: lock/unlock (`is_active`) or rename any lab (bypasses ownership). The teacher route still enforces ownership. |
 | DELETE | `/api/admin/labs/{lab_id}` | require_admin | Force soft-delete any lab (bypasses ownership). |
 | GET | `/api/admin/analytics` | require_admin | Global platform-wide token usage dashboard (hierarchical). |
 | GET | `/api/admin/analytics/classes/{class_id}` | require_admin | Per-class hierarchical analytics (class→lab→student). |
@@ -497,10 +573,12 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | POST | `/api/teacher/classes/{class_id}/skill` | require_teacher | **[v7.2]** Apply a preset to a class — **snapshot-copies** `preset.content` into the class's `level=class` skill rule. Body: `{preset_id}` or raw `{content}` for an ad-hoc edit. |
 | GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W`. **Includes student soft-deleted sessions** (each row carries `is_deleted` so the UI can flag the hidden ones). |
 | GET | `/api/teacher/analytics/classes/{class_id}` | require_teacher | Hierarchical token usage: class → lab → student breakdown. |
-| POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] Upload a **PDF** course document. Multipart form **requires `doc_type` (CM/TD/TP) + `audience` (student/teacher)** → stored in volume + enqueued for ingestion. |
-| GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] List documents + status (`pending/processing/indexed/failed/needs_review`) + summary (pages / chunks / exercises) + warnings. |
+| POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] Upload a **PDF** course document. Multipart form **requires `doc_type` (CM/TD/TP) + `audience` (student/teacher)**; **[v7.3]** + optional `language` (`fr` default / `en`) selecting the BM25 config → stored + enqueued. |
+| GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] List documents + status (`pending/processing/indexed/failed/needs_review`) + summary (pages / chunks / exercises) + warnings. **[v7.3]** documents carry `ingest_report` (numbering warnings for teacher audit). |
 | GET | `/api/teacher/documents/{document_id}/chunks` | require_teacher | [v7.1] Paginated chunk text + `page_no` (+ generated `context`) — the core "is it well processed?" inspector surface. |
 | GET | `/api/teacher/documents/{document_id}/exercises` | require_teacher | [v7.1] Extracted exercises (`number / statement / hints`). No solution exists. |
+| PUT | `/api/teacher/documents/{document_id}/chunks/{chunk_id}` | require_teacher | **[v7.2]** Correct a mis-split chunk's text. Re-embeds the augmented text + rebuilds the BM25 `tsv` (with the document's `language` config). **[v7.3]** sets `edited_by_teacher` — the fix survives re-ingestion. |
+| PUT | `/api/teacher/documents/{document_id}/exercises/{exercise_id}` | require_teacher | **[v7.2]** Correct an extracted exercise; re-derives `number_normalized`. **[v7.3]** sets `edited_by_teacher` — the fix survives re-ingestion. Still no solution field. |
 | DELETE | `/api/teacher/documents/{document_id}` | require_teacher | [v7] Delete a document (cascades chunks/exercises; triggers re-index cleanup). |
 
 ### C. Student Flow (Session & Chat)
@@ -565,7 +643,8 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
    * **Router-first, multilingual**: a deterministic exercise-number regex catches exact
      missions; everything else is classified by `bge-m3` cosine-kNN against in-code multilingual
      anchor exemplars (zh/fr/en route alike). Below the confidence threshold → fall back to the
-     safest branch (`rag`) and log the query for the future BERT router.
+     safest branch (`rag`) and log the query for the future BERT router. *(v8.0 replaces this
+     stack with a single LLM-router call carrying dialogue state.)*
    * **[v7.2] LLM exercise-number fallback**: the regex fast-path runs first and, **when it
      hits, the query proceeds with zero added latency**. Only when the regex misses *but the
      query looks exercise-shaped* is a cheap `ROUTER_MODEL` (defaults to `LLM_MODEL`) asked to
@@ -576,7 +655,13 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
      filters `lab_id` / `class_id` (and `audience='student'` for students) **in the WHERE
      clause** — re-checked after fusion/rerank. Prompt-injection cannot break a query filter.
    * **Hybrid + rerank**: `rag` recalls via vector ANN *and* BM25 (`tsvector`), fuses with RRF,
-     reranks with `bge-reranker-v2-m3`, takes top-k.
+     reranks with `bge-reranker-v2-m3`, takes top-k. **[v7.3]** BM25 uses OR semantics with the
+     document-language config (fr/en — `simple`+AND silently returned nothing for natural
+     French questions); the reranker scores the **augmented** text (context + content), so
+     context-poor slide chunks aren't vetoed at the last step; a `RERANK_SCORE_THRESHOLD`
+     injection gate is wired in the retrieval layer (drops below-threshold hits, signals
+     `all_filtered`) and **ships disabled** — the zero-context disclaimer branch that consumes
+     it lands in v8.0.
    * **Self-eval is bounded and cheap**: a deterministic gate (cosine threshold / empty recall)
      blocks the obviously-bad before any LLM; the grade is a guided 1-token verdict; only
      re-generation is expensive, so the loop is capped at `RAG_MAX_RETRIES` (default 1).
@@ -609,7 +694,7 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 
 ---
 
-## 7. Ingestion Pipeline (v7.1)
+## 7. Ingestion Pipeline (v7.1, hardened v7.3)
 
 A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live students.
 **No Airflow, no k8s, no OCR, no LibreOffice.**
@@ -640,10 +725,37 @@ A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live
      (defaults to `LLM_MODEL`), so a cheap off-peak model can do this without touching the chat
      model.
   5. **Exercise extraction — statements only**: extract `number / statement / hints` via
-     **guided/structured decoding**. **No `solution` is extracted or stored** (the column does
-     not exist).
-  6. **Build the BM25 column** (`tsvector`, multilingual config) and enrich metadata
-     (`doc_type` / `audience` / `section` / `page_no` / reserved `concept`).
+     **structured decoding**. **[v7.2]** uses the OpenAI-standard
+     `response_format: {"type":"json_schema", …}` (enforced by vLLM/SGLang guided decoding,
+     supported natively by gateways like Albert) — **not** the vLLM-only `guided_json` extra_body,
+     which other engines silently ignore. Parsing is defensive (empty / fenced / prose output →
+     `0 exercises`), and extraction is **decoupled from chunk indexing**: if it yields nothing the
+     document still reaches `indexed` (chunks/RAG work) rather than `failed`. **No `solution` is
+     extracted or stored** (the column does not exist).
+  6. **Build the BM25 column** (`tsvector`, **[v7.3]** config selected by the document's
+     `language`) and enrich metadata (`doc_type` / `audience` / `section` / `page_no`).
+- **[v7.3] Pipeline hardening + the answers path:**
+  1. **Clean once, upstream**: repeated header/footer lines stripped; TOC pages removed once —
+     every downstream step (chunking *and* extraction) sees only cleaned pages.
+  2. **Segmentation is the single source of truth**: expanded deterministic boundaries
+     (Arabic / Roman / `Question n` / bare-numbered headings). The exercise `number` comes
+     from the captured label — never from an LLM reading the whole document.
+  3. **Deterministic exercise build + LLM only on anomaly**: exercises are written straight
+     from the segments (number = label, statement = segment body, hints = NULL) with **zero
+     LLM calls on the happy path**. A numbering anomaly — duplicate normalized numbers
+     (sub-questions mistaken for exercises: `1,1,2,3`) or zero boundaries — triggers **one**
+     `resegment_fn` call (`INGEST_MODEL`): the LLM names the true boundary heading lines
+     verbatim, splitting stays deterministic, hallucinated anchors are ignored, and its
+     failure keeps the regex result (never fails the document).
+  4. **Strict split** (`IngestionPlan.produce_chunks`): TD/TP skip the chunk/embed/tsv stage
+     entirely; CM skips exercise building. **CM size control**: tiny paragraphs merged,
+     oversized ones sentence-split at 1600 chars, code blocks kept intact (blank lines inside
+     indented blocks don't split), document-level paragraph dedup.
+  5. **Reconciliation report** (`ingest_report`): numbering anomaly, gaps, in-lab number
+     collisions, LLM re-segmentation flag, exercise count — the teacher audits a warning
+     list, not the whole document. Teacher-edited rows (`edited_by_teacher`) survive
+     re-ingestion (matched back by chunk_index / number_normalized; an edited exercise whose
+     number vanished is kept as an extra row).
 - **Config-driven engine, optionally split:** embeddings and Contextual-Retrieval generation
   are read from `SystemConfigs` — nothing hardcoded, no torch. **[v7.2]** by default they still
   fall back to the one chat engine, but an admin can point `INGEST_MODEL` / `INGEST_BASE_URL`
@@ -748,13 +860,27 @@ The application is fully containerized using Docker, allowing for a single-comma
     smaller model — e.g. `qwen3:30b` / `mistral-small` — to keep the expensive chat model's RPM
     pool for students. Leave empty to reuse `LLM_MODEL`. Embedding/rerank likewise get optional
     independent endpoints (`EMBEDDING_URL`, `RERANK_API_KEY`, …).
+  - **[v7.3] Tiering convention (write it into your config, the code only provides slots):**
+    **chat = the big model** (non-negotiable — the only thing students see);
+    **`ROUTER_*` = one small fast model shared by ALL live auxiliary calls** (router,
+    self-eval verdict, rewrite — e.g. a 9B like Ministral);
+    **`INGEST_*` = small model** (context generation, extraction, classification);
+    **`HINT_*` = the big model, off-peak only** (reserved for the v8.0 answer→hints
+    generator — quality over latency; the GPU gate keeps it off student time).
+    **Auxiliary tasks never run on the
+    chat model's live capacity**; an empty slot falls back to the main LLM, and the admin UI
+    warns when that silently puts auxiliary load on the big model.
   - **Embeddings (RAG + router kNN):** `bge-m3` (1024-dim, matches `EMBEDDING_DIM`) →
     `EMBEDDING_MODEL`. Pull it once: `ollama pull bge-m3`. Indexing, querying, and router
     exemplars must all use this same model.
   - **Reranker (v7.1):** `bge-reranker-v2-m3`, served behind an OpenAI-compatible rerank
-    endpoint (e.g. TEI / Infinity / vLLM) → `RERANK_URL` + `RERANK_MODEL`. Ollama does not
-    expose a rerank API, so point these at whatever rerank server you run. If unset, retrieval
-    degrades gracefully to fusion-only ordering.
+    endpoint (e.g. TEI / Infinity / vLLM / Albert `…/v1/rerank`) → `RERANK_URL` + `RERANK_MODEL`.
+    Ollama does not expose a rerank API, so point these at whatever rerank server you run.
+    **`RERANK_URL` must be a real rerank endpoint** (the full path that accepts
+    `{query, documents}`, e.g. `https://albert.api.etalab.gouv.fr/v1/rerank`) — **not** the chat
+    `…/v1` base, which 404s on a rerank body. **[v7.2]** If unset *or failing* (unreachable /
+    4xx-5xx / malformed response), retrieval degrades gracefully to fusion-only ordering and logs
+    a warning — a bad reranker never breaks a student's chat.
 - `pgvector`-enabled PostgreSQL image (e.g. `pgvector/pgvector:pg16`). v7.1 also uses Postgres
   full-text (`tsvector` / GIN) for BM25 — no extra extension needed.
 

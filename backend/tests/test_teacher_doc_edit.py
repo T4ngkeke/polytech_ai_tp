@@ -82,6 +82,8 @@ async def test_teacher_edits_chunk_reembeds(db_session):
     assert chunk.content == "corrected text"
     # The re-embed ran: the stored vector is the fake's, not the original.
     assert list(chunk.embedding) == [0.5, 0.6, 0.7]
+    # [v7.3] The correction is flagged so re-ingestion preserves it.
+    assert chunk.edited_by_teacher is True
 
 
 @pytest.mark.asyncio
@@ -105,6 +107,8 @@ async def test_teacher_edits_exercise_renormalizes_number(db_session):
     await db_session.refresh(ex)
     assert ex.statement == "fixed statement"
     assert ex.number_normalized == 3  # re-derived from the new label
+    # [v7.3] The correction is flagged so re-ingestion preserves it.
+    assert ex.edited_by_teacher is True
 
 
 @pytest.mark.asyncio

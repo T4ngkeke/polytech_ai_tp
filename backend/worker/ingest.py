@@ -1,35 +1,54 @@
 """
-ingest.py — [v7.1] document ingestion pipeline.
+ingest.py — [v7.1→v7.3] document ingestion pipeline.
 
-Turns a stored document into retrieval artifacts: structure-aware chunks with
-Contextual-Retrieval-augmented embeddings (for hybrid RAG) and, on the TD/TP path,
-statement-only structured exercises (for agentic search).
+Strict split: CM produces Contextual-Retrieval chunks for hybrid RAG and never
+exercises; TD/TP produce structured Exercises for agentic search and never
+chunks. Exercises are built deterministically from the segmentation labels —
+an LLM (`resegment_fn`) is consulted only when the regex segmentation looks
+wrong (duplicate numbers = sub-questions mistaken for exercises, or zero
+boundaries), and its failure keeps the regex result rather than failing the doc.
 
-Model-touching steps are injected (`embed_fn` / `extract_fn` / `context_fn`) and the
-parse step is injectable (`parse_fn`) so the pipeline is testable without a live model
-or a real PDF; in production they call the engine configured in SystemConfigs.
+Model-touching steps are injected (`embed_fn` / `context_fn` / `resegment_fn`)
+and the parse step is injectable (`parse_fn`) so the pipeline is testable
+without a live model or a real PDF.
 """
 
+import asyncio
 import logging
 import uuid
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.exercise_number import normalize_exercise_number
 from backend.app.models import DocChunk, Document, DocumentStatus, DocType, Exercise
-from backend.worker.chunking import chunk_pages
-from backend.worker.parsing import GateResult, character_yield_gate, extract_pdf_text
+from backend.worker.chunking import (
+    Chunk,
+    chunk_pages,
+    detect_numbering_anomaly,
+    resegment_with_llm,
+)
+from backend.worker.parsing import (
+    GateResult,
+    character_yield_gate,
+    extract_pdf_text,
+    strip_repeated_lines,
+)
 from backend.worker.routing import plan_for
 
 logger = logging.getLogger(__name__)
 
+# [v7.3] Bounded concurrency for per-chunk Contextual-Retrieval calls.
+CONTEXT_CONCURRENCY = 4
+
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
-ExtractFn = Callable[[str], Awaitable[list[dict]]]
 ContextFn = Callable[[str, str], Awaitable[str]]
 ParseFn = Callable[[str], tuple[list[str], GateResult]]
+# [v7.3] Given the joined document text, name the true exercise-boundary
+# heading lines (verbatim). Only called when the regex segmentation is suspect.
+ResegmentFn = Callable[[str], Awaitable[list[str]]]
 
 
 def _default_parse(storage_path: str) -> tuple[list[str], GateResult]:
@@ -66,16 +85,113 @@ def _scope_texts(chunks) -> dict[str, str]:
     return {key: "\n\n".join(parts) for key, parts in groups.items()}
 
 
+async def _segment_exercises_checked(
+    pages: list[str],
+    doc_type: DocType,
+    resegment_fn: ResegmentFn | None,
+    document_id: uuid.UUID,
+) -> tuple[list, bool]:
+    """Segment a TD/TP and sanity-check the numbering.
+
+    Deterministic segmentation first; the LLM is consulted only when it looks
+    wrong (zero boundaries, or duplicate numbers = sub-questions mistaken for
+    exercises). LLM failure or an empty answer keeps the regex result.
+    Returns (segments, resegmented) — the flag feeds the ingest report.
+    """
+    segments = chunk_pages(pages, doc_type)
+    labeled = [c for c in segments if c.section]
+
+    anomaly = detect_numbering_anomaly([c.section for c in labeled])
+    suspect = not labeled or anomaly == "duplicate_numbers"
+    if not (suspect and resegment_fn is not None):
+        return labeled, False
+
+    try:
+        rejudged = await resegment_with_llm(pages, resegment_fn)
+    except Exception as exc:
+        logger.warning(
+            "LLM re-segmentation failed for document %s (%s); keeping the "
+            "regex segmentation.", document_id, repr(exc),
+        )
+        return labeled, False
+    if not rejudged:
+        return labeled, False
+    return rejudged, True
+
+
+def _find_gaps(numbers: list[int]) -> list[int]:
+    """Missing numbers inside the observed range — likely missed boundaries."""
+    if not numbers:
+        return []
+    present = set(numbers)
+    return [n for n in range(min(present), max(present)) if n not in present]
+
+
+async def _lab_collisions(db: AsyncSession, doc, numbers: list[int]) -> list[int]:
+    """Numbers already claimed by ANOTHER document in the same lab — a
+    query-time ambiguity the teacher must resolve."""
+    if not numbers:
+        return []
+    rows = await db.execute(
+        select(Exercise.number_normalized).where(
+            Exercise.lab_id == doc.lab_id,
+            Exercise.document_id != doc.id,
+            Exercise.number_normalized.in_(numbers),
+        )
+    )
+    return sorted({row[0] for row in rows})
+
+
+async def _snapshot_teacher_edits(db: AsyncSession, document_id: uuid.UUID):
+    """[v7.3] Capture teacher-corrected rows before the idempotent rebuild wipes
+    them. Chunks are matched back by chunk_index, exercises by
+    number_normalized; unmatched edited exercises are re-added as extra rows —
+    teacher work is never silently dropped."""
+    edited_chunks = (await db.execute(
+        select(DocChunk).where(
+            DocChunk.document_id == document_id,
+            DocChunk.edited_by_teacher.is_(True),
+        )
+    )).scalars().all()
+    edited_exercises = (await db.execute(
+        select(Exercise).where(
+            Exercise.document_id == document_id,
+            Exercise.edited_by_teacher.is_(True),
+        )
+    )).scalars().all()
+
+    chunk_snaps = {
+        c.chunk_index: {
+            "content": c.content,
+            "context": c.context,
+            "section": c.section,
+            "embedding": list(c.embedding) if c.embedding is not None else None,
+            "page_no": c.page_no,
+        }
+        for c in edited_chunks
+    }
+    exercise_snaps = {
+        e.number_normalized: {
+            "number": e.number,
+            "statement": e.statement,
+            "hints": e.hints,
+            "concept": e.concept,
+        }
+        for e in edited_exercises
+    }
+    return chunk_snaps, exercise_snaps
+
+
 async def ingest_document(
     db: AsyncSession,
     document_id: uuid.UUID,
     *,
     embed_fn: EmbedFn,
-    extract_fn: ExtractFn | None = None,
     context_fn: ContextFn | None = None,
     parse_fn: ParseFn | None = None,
+    resegment_fn: ResegmentFn | None = None,
 ) -> None:
-    """Parse → gate → chunk → contextualize → embed → extract a document."""
+    """Parse → gate → clean → segment → [CM: chunks | TD/TP: exercises]."""
     doc = await db.get(Document, document_id)
     pages, gate = (parse_fn or _default_parse)(doc.storage_path)
 
@@ -90,80 +206,138 @@ async def ingest_document(
     plan = plan_for(doc_type)
 
     try:
+        # [v7.3] Teacher-corrected rows survive the rebuild.
+        chunk_snaps, exercise_snaps = await _snapshot_teacher_edits(db, doc.id)
+
         # Idempotent: clear any artifacts from a previous run before rebuilding.
         await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
         await db.execute(delete(Exercise).where(Exercise.document_id == doc.id))
 
-        full_text = "\n".join(pages)
-        chunks = chunk_pages(pages, doc_type)
+        # [v7.3] Clean once, upstream: repeated headers/footers pollute chunks
+        # and exercise segments alike. Every downstream step sees cleaned pages.
+        pages = strip_repeated_lines(pages)
 
-        # Contextual Retrieval: generate per-chunk context (CM path), embed augmented.
-        # [v7.2] The scope is the chunk's own section/slide — not the whole document
-        # — so context stays accurate and the call fits any small model on long docs.
-        scope_by_key = _scope_texts(chunks)
-        contexts: list[str | None] = []
-        for chunk in chunks:
+        if plan.produce_chunks:
+            chunks = _dedup_chunks(chunk_pages(pages, doc_type))
+
+            # Contextual Retrieval: per-chunk context generated from the chunk's
+            # own section/slide — never the whole document. [v7.3] Calls run
+            # concurrently (bounded) — off-peak, but a long doc shouldn't take
+            # chunk-count × latency.
+            scope_by_key = _scope_texts(chunks)
             if plan.contextual_retrieval and context_fn is not None:
-                scope = scope_by_key.get(_scope_key(chunk)) or chunk.content
-                contexts.append(await context_fn(scope, chunk.content))
+                semaphore = asyncio.Semaphore(CONTEXT_CONCURRENCY)
+
+                async def _one_context(chunk):
+                    async with semaphore:
+                        scope = scope_by_key.get(_scope_key(chunk)) or chunk.content
+                        return await context_fn(scope, chunk.content)
+
+                contexts = list(await asyncio.gather(
+                    *(_one_context(chunk) for chunk in chunks)
+                ))
             else:
-                contexts.append(None)
+                contexts = [None] * len(chunks)
 
-        augmented = [_augmented(ctx, chunk.content) for ctx, chunk in zip(contexts, chunks)]
-        embeddings = await embed_fn(augmented) if augmented else []
+            augmented = [_augmented(ctx, c.content) for ctx, c in zip(contexts, chunks)]
+            embeddings = await embed_fn(augmented) if augmented else []
 
-        for index, (chunk, context, embedding, aug) in enumerate(
-            zip(chunks, contexts, embeddings, augmented)
-        ):
-            db.add(DocChunk(
-                id=uuid.uuid4(),
-                document_id=doc.id,
-                class_id=doc.class_id,
-                lab_id=doc.lab_id,
-                doc_type=doc_type,
-                audience=doc.audience,
-                chunk_index=index,
-                content=chunk.content,
-                context=context,
-                section=chunk.section,
-                embedding=embedding,
-                tsv=_tsv_value(db, aug),
-                page_no=chunk.page_no,
-            ))
-
-        if plan.extract_exercises and extract_fn is not None:
-            # [v7.2] Exercise extraction is best-effort and decoupled from chunk
-            # indexing: an engine without guided/structured decoding may return
-            # nothing or malformed output. Degrade to "0 exercises" with a warning
-            # rather than failing the whole document — the chunks/RAG still work.
-            try:
-                extracted = await extract_fn(full_text)
-            except Exception as exc:
-                logger.warning(
-                    "Exercise extraction failed for document %s (%s); "
-                    "indexing chunks with 0 exercises.", doc.id, repr(exc)
-                )
-                extracted = []
-            for ex in extracted:
-                # Guard per-item shape: a non-compliant engine can yield non-dict
-                # or incomplete items. Skip anything missing the required fields.
-                if not isinstance(ex, dict) or not ex.get("number") or not ex.get("statement"):
-                    logger.warning(
-                        "Skipping malformed exercise item in document %s: %r", doc.id, ex
-                    )
+            for index, (chunk, context, embedding, aug) in enumerate(
+                zip(chunks, contexts, embeddings, augmented)
+            ):
+                snap = chunk_snaps.get(index)
+                if snap:
+                    # Teacher-corrected chunk: keep the corrected text (and its
+                    # already-recomputed embedding from the edit endpoint).
+                    db.add(DocChunk(
+                        id=uuid.uuid4(),
+                        document_id=doc.id,
+                        class_id=doc.class_id,
+                        lab_id=doc.lab_id,
+                        doc_type=doc_type,
+                        audience=doc.audience,
+                        chunk_index=index,
+                        content=snap["content"],
+                        context=snap["context"],
+                        section=snap["section"],
+                        embedding=snap["embedding"],
+                        tsv=_tsv_value(db, _augmented(snap["context"], snap["content"]),
+                                       doc.language),
+                        page_no=snap["page_no"],
+                        edited_by_teacher=True,
+                    ))
                     continue
+                db.add(DocChunk(
+                    id=uuid.uuid4(),
+                    document_id=doc.id,
+                    class_id=doc.class_id,
+                    lab_id=doc.lab_id,
+                    doc_type=doc_type,
+                    audience=doc.audience,
+                    chunk_index=index,
+                    content=chunk.content,
+                    context=context,
+                    section=chunk.section,
+                    embedding=embedding,
+                    tsv=_tsv_value(db, aug, doc.language),
+                    page_no=chunk.page_no,
+                ))
+
+        if plan.extract_exercises:
+            # [v7.3] Deterministic build: number = the segmentation-captured
+            # label, statement = the segment body. No LLM on the happy path;
+            # hints are teacher-triggered later, never generated at ingest.
+            segments, resegmented = await _segment_exercises_checked(
+                pages, doc_type, resegment_fn, doc.id,
+            )
+            for segment in segments:
+                norm = normalize_exercise_number(segment.section)
+                snap = exercise_snaps.pop(norm, None)
                 db.add(Exercise(
                     id=uuid.uuid4(),
                     document_id=doc.id,
                     class_id=doc.class_id,
                     lab_id=doc.lab_id,
                     audience=doc.audience,
-                    number=ex["number"],
-                    number_normalized=normalize_exercise_number(ex["number"]),
-                    statement=ex["statement"],
-                    hints=ex.get("hints"),
-                    concept=ex.get("concept"),
+                    number=snap["number"] if snap else segment.section,
+                    number_normalized=norm,
+                    statement=snap["statement"] if snap else segment.content,
+                    hints=snap["hints"] if snap else None,
+                    concept=snap["concept"] if snap else None,
+                    edited_by_teacher=bool(snap),
                 ))
+
+            # Edited exercises whose number vanished from the re-ingested doc:
+            # teacher work is never silently dropped.
+            for norm, snap in exercise_snaps.items():
+                db.add(Exercise(
+                    id=uuid.uuid4(),
+                    document_id=doc.id,
+                    class_id=doc.class_id,
+                    lab_id=doc.lab_id,
+                    audience=doc.audience,
+                    number=snap["number"],
+                    number_normalized=norm,
+                    statement=snap["statement"],
+                    hints=snap["hints"],
+                    concept=snap["concept"],
+                    edited_by_teacher=True,
+                ))
+
+            # [v7.3] Reconciliation report — the teacher audits warnings, not
+            # the whole document.
+            labels = [s.section for s in segments]
+            numbers = [
+                n for n in (normalize_exercise_number(l) for l in labels)
+                if n is not None
+            ]
+            doc.ingest_report = {
+                "anomaly": detect_numbering_anomaly(labels),
+                "gaps": _find_gaps(numbers),
+                "collisions": await _lab_collisions(db, doc, numbers),
+                "resegmented": resegmented,
+                "exercise_count": len(segments),
+            }
 
         doc.status = DocumentStatus.indexed
         doc.page_count = len(pages)
@@ -178,8 +352,26 @@ async def ingest_document(
         raise
 
 
-def _tsv_value(db: AsyncSession, text: str):
-    """BM25 tsvector built at ingest time (Postgres only; None elsewhere)."""
+def _dedup_chunks(chunks):
+    """[v7.3] Drop chunks whose content already appeared in this document —
+    recurring notices below the header-strip threshold waste recall slots."""
+    seen: set[str] = set()
+    unique = []
+    for chunk in chunks:
+        key = chunk.content.strip()
+        if key not in seen:
+            seen.add(key)
+            unique.append(chunk)
+    return unique
+
+
+def _tsv_value(db: AsyncSession, text: str, language: str = "fr"):
+    """BM25 tsvector built at ingest time (Postgres only; None elsewhere).
+
+    [v7.3] The config comes from the document's language — ingest and query
+    sides must share it or stemming silently breaks matching."""
+    from backend.app.services.retrieval_service import ts_config_for
+
     if db.bind is not None and db.bind.dialect.name == "postgresql":
-        return func.to_tsvector("simple", text)
+        return func.to_tsvector(ts_config_for(language), text)
     return None

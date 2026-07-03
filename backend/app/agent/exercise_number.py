@@ -15,6 +15,9 @@ from __future__ import annotations
 import re
 
 _ARABIC_RE = re.compile(r"\d+")
+# [v7.3] Document-level prefix ("TD 2", "TP1", "CM 3"): its digits are the
+# document number, never the exercise number — strip before reading digits.
+_DOC_PREFIX_RE = re.compile(r"(?i)\b(?:td|tp|cm)\s*\d+")
 # Restrict to I/V/X only: exercise numbering never exceeds ~XXXIX, and excluding
 # L/C/D/M avoids mis-reading lettered sub-parts ("Problème C") and ordinary words
 # ("mix", "civil") as Roman numerals.
@@ -65,7 +68,7 @@ def normalize_exercise_number(raw: str | None) -> int | None:
     """
     if not raw:
         return None
-    text = raw.strip()
+    text = _DOC_PREFIX_RE.sub("", raw).strip()
 
     # 1. Arabic integer — the first run of digits (so "3.1" → 3, "Exercise 2" → 2).
     arabic = _ARABIC_RE.search(text)

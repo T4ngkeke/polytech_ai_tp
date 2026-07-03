@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM v7.2 Agentic Class-Lab Architecture</title>
+    <title>Edu-LLM v7.3 Agentic Class-Lab Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -309,7 +309,7 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v7.2 — Agentic Class-Lab Architecture</div>
+            <div class="pill">Architecture v7.3 — Agentic Class-Lab Architecture</div>
             <h1>Edu-LLM: Agentic RAG, Hybrid Retrieval & Off-Peak Ingestion</h1>
             <p class="subtitle">The v6 foundation (3-tier RBAC, invite codes, hierarchical rule injection) plus a
                 LangGraph agent and the v7.1 retrieval core (PDF-only structured ingestion with Contextual
@@ -318,7 +318,16 @@
                 (split a cheap off-peak ingestion / live router model from the expensive chat model),
                 cost-aware weighted-token quota, an LLM-assisted exercise-number fallback with canonical
                 normalization, per-teacher skill presets, section-scoped (length-safe) Contextual Retrieval,
-                and a markdown / code-highlight / KaTeX student chat UI — plus self-service password change.</p>
+                and a markdown / code-highlight / KaTeX student chat UI — plus self-service password change.
+                <b>v7.3</b> hardens the data pipeline: single-source deterministic exercise
+                segmentation (the whole-document LLM extractor — the root cause of wrong exercise
+                numbers — is deleted; an LLM re-judges boundaries only on numbering anomalies), a
+                <b>strict split</b> (TD/TP never produce RAG chunks; DocChunks come from CM only),
+                header/TOC cleanup with size-controlled code-aware CM chunking, teacher edits that
+                survive re-ingestion, a per-document reconciliation report, and retrieval fixes —
+                OR-semantics language-aware BM25 (the old AND+simple leg was silently dead),
+                reranking over the augmented text, and a score-threshold injection gate wired in
+                the retrieval layer (ships disabled until calibrated).</p>
         </header>
 
         <div class="legend">
@@ -360,7 +369,7 @@
                 R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
                 RateLimit["Rate Limiter\n(DB Quota Check)"]
                 Router["LangGraph Router\nexercise regex → bge-m3 kNN\n+ ROUTER_MODEL fallback (v7.2)"]
-                Retrieval["Retrieval Service\nhybrid vector+BM25 → RRF → rerank"]
+                Retrieval["Retrieval Service\nhybrid vector+BM25 (OR, fr/en) → RRF →\nrerank on augmented text → threshold gate (v7.3, ships off)"]
                 SelfEval["Self-Eval Loop\ngate → good/partial/bad → bounded retry"]
                 Synth["Synthesize Node\nskill.md + 3-tier rules + context"]
                 SSE["astream_events → SSE\nadapter"]
@@ -383,7 +392,7 @@
                 subgraph WK ["④ Ingestion Worker (docker-compose)"]
                 Poll["Poll Loop\nconcurrency=1"]
                 GpuGate["GPU Gate\npynvml off-peak"]
-                Extract["Parse + chunk + section-scoped Contextual Retrieval +\nembed + tsv + guided-JSON extract\n(INGEST_MODEL, v7.2)"]
+                Extract["Clean (headers/TOC) → deterministic segmentation →\nCM: size-controlled chunks + Contextual Retrieval + embed + tsv\nTD/TP: deterministic exercises (LLM only on numbering anomaly)"]
                 end
 
                 subgraph COMPUTE ["⑤ Compute Layer (one shared engine)"]
@@ -430,8 +439,8 @@
                 GpuGate -.->|"util < threshold?"| Poll
                 Poll ==>|"run"| Extract
                 Extract -.->|"low-priority batch"| LLM
-                Extract -.->|"write chunks"| DB_Chunks
-                Extract -.->|"write exercises"| DB_Exercises
+                Extract -.->|"write chunks (CM only, v7.3)"| DB_Chunks
+                Extract -.->|"write exercises (TD/TP only, v7.3)"| DB_Exercises
 
                 class DB_SysConf,DB_Classes,DB_Rules,DB_Chunks,DB_Exercises,DB_Jobs,DB_RouterLog newNode;
                 class Auth auth;
@@ -533,6 +542,18 @@
                 <h3>Markdown + Code + KaTeX Chat</h3>
                 <p>The student chat renders markdown, syntax-highlighted code blocks (with copy), and KaTeX math, using stream-safe incremental rendering so a half-streamed fenced block never collapses into plain text. Plus self-service password change for every role.</p>
             </div>
+
+            <div class="card new">
+                <span class="tag">v7.3 · Deterministic Ingestion</span>
+                <h3>Single-Source Segmentation + Strict Split</h3>
+                <p>Headers/footers stripped and TOC removed <b>once</b> for the whole pipeline. TD/TP exercises are built <b>deterministically</b> from expanded boundary patterns (Arabic / Roman / <code>Question n</code> / bare-numbered headings): number = the captured label, statement = the segment body — the whole-document LLM extractor (root cause of wrong numbers) is <b>deleted</b>. An LLM re-judges boundaries only on numbering anomalies (<code>1,1,2,3</code> = sub-questions mistaken for exercises); its failure keeps the regex result. <b>Strict split</b>: TD/TP never produce RAG chunks; DocChunks come from CM only. Teacher edits survive re-ingestion; a per-document <code>ingest_report</code> gives the teacher a warning list.</p>
+            </div>
+
+            <div class="card new">
+                <span class="tag">v7.3 · Retrieval Fixes</span>
+                <h3>BM25 Revived + Honest Reranking</h3>
+                <p>The BM25 leg was silently dead: <code>simple</code> config + AND semantics meant one extra word in a natural French question zeroed the recall. Now <b>OR semantics</b> over content words with per-document <b>language configs</b> (fr/en, stemming: "fonction" matches "fonctions"), same config at ingest and query time. The reranker scores the <b>augmented</b> text (context + content) instead of vetoing the context-poor slide chunks Contextual Retrieval was built to save. A <code>RERANK_SCORE_THRESHOLD</code> injection gate is wired in the retrieval layer and <b>ships disabled</b> until calibrated — its zero-context disclaimer branch lands in v8.0. CM chunks get size control (120–1600 chars) with code-aware splitting.</p>
+            </div>
         </div>
 
         <div class="schema-section">
@@ -551,7 +572,7 @@
                         <td><code>system_configs</code></td>
                         <td><span class="badge changed">v7.2</span></td>
                         <td><code>id, key, value</code></td>
-                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping. <b>v7.2</b> adds the full model-routing table (<code>EMBEDDING_URL/KEY</code>, <code>RERANK_API_KEY</code>, <code>INGEST_MODEL/URL/KEY</code>, <code>ROUTER_MODEL/URL/KEY</code> — empty falls back to the main LLM) plus cost weights <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>.</td>
+                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping. <b>v7.2</b> adds the full model-routing table (<code>EMBEDDING_URL/KEY</code>, <code>RERANK_API_KEY</code>, <code>INGEST_MODEL/URL/KEY</code>, <code>ROUTER_MODEL/URL/KEY</code> — empty falls back to the main LLM) plus cost weights <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>. <b>v7.3</b> adds <code>HINT_MODEL/URL/KEY</code> (reserved for the v8.0 hint generator), <code>RERANK_SCORE_THRESHOLD</code> (ships empty = off) and worker budgets <code>HINT_MAX_SAMPLES</code>/<code>INGEST_TOKEN_BUDGET</code>.</td>
                     </tr>
                     <tr>
                         <td><code>classes & labs</code></td>
@@ -580,8 +601,8 @@
                     <tr>
                         <td><code>documents</code></td>
                         <td><span class="badge new">New v7 · v7.1</span></td>
-                        <td><code>class_id, lab_id, storage_path, content_hash, doc_type, audience, status</code></td>
-                        <td>PDF-only registry with a state machine (<code>pending→processing→indexed→failed</code>, <b>v7.1</b> adds <code>needs_review</code> for the char-yield gate). <b>v7.1</b> <code>doc_type</code> (CM/TD/TP) + <code>audience</code> (student/teacher) are the deterministic routing + filter signals. Files persist in the <code>documents_data</code> volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
+                        <td><code>class_id, lab_id, storage_path, content_hash, doc_type, audience, status, language, ingest_report</code></td>
+                        <td>PDF-only registry with a state machine (<code>pending→processing→indexed→failed</code>, <b>v7.1</b> adds <code>needs_review</code> for the char-yield gate). <b>v7.1</b> <code>doc_type</code> (CM/TD/TP) + <code>audience</code> (student/teacher) are the deterministic routing + filter signals. <b>v7.3</b> adds <code>language</code> (fr default/en — selects the BM25 config) and <code>ingest_report</code> (numbering warnings the teacher audits). Files persist in the <code>documents_data</code> volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
                     </tr>
                     <tr>
                         <td><code>doc_chunks</code></td>
@@ -592,8 +613,8 @@
                     <tr>
                         <td><code>exercises</code></td>
                         <td><span class="badge new">New v7 · v7.1 · v7.2</span></td>
-                        <td><code>number, number_normalized, audience, statement, hints, concept</code></td>
-                        <td>LLM-extracted via guided decoding — target of agentic structured search. <b>🔴 v7.1 red line:</b> the <code>solution</code> column is <b>dropped</b> — only student-safe statements are stored, so there is nothing to leak. <b>v7.2</b> adds <code>number_normalized</code> (canonical int) so matching is decoupled from the unstable printed label. <code>concept</code> is reserved for future Adaptive Tutoring.</td>
+                        <td><code>number, number_normalized, audience, statement, hints, edited_by_teacher</code></td>
+                        <td>Target of agentic structured search. <b>🔴 red line:</b> still no <code>solution</code> column. <b>v7.3</b>: <code>number</code> comes from the segmentation-captured label (not whole-doc LLM reading); <code>hints</code> stay NULL at ingest (the teacher-reviewed hint workflow lands in v8.0); teacher edits survive re-ingestion (<code>edited_by_teacher</code>).</td>
                     </tr>
                     <tr>
                         <td><code>ingestion_jobs</code></td>
@@ -611,7 +632,7 @@
                         <td><code>router_query_log</code></td>
                         <td><span class="badge new">New v7.1</span></td>
                         <td><code>message, chosen_route, top_similarity, lab_id</code></td>
-                        <td>Write-only telemetry: real multilingual queries the embedding-kNN router was unsure about (below threshold → safe <code>rag</code> fallback), so a future BERT/XLM-R router has a labeled data source. Nothing in the live path reads it.</td>
+                        <td>Write-only telemetry: real multilingual queries the embedding-kNN router was unsure about (below threshold → safe <code>rag</code> fallback), so a future BERT/XLM-R router has a labeled data source. Nothing in the live path reads it. <i>(v8.0 redefines this to record every LLM-router decision.)</i></td>
                     </tr>
                     <tr>
                         <td><code>skill_presets</code></td>

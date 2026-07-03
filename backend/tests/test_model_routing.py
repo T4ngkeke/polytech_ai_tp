@@ -115,3 +115,58 @@ def test_token_weights_parse_admin_overrides():
     routing = resolve_model_routing({**_BASE, "TOKEN_ALPHA": "0.5", "TOKEN_BETA": "0.9"})
     assert routing.token_alpha == 0.5
     assert routing.token_beta == 0.9
+
+
+# --- [v7.3] hint slot (answer→tiered-hints generator, off-peak big model) ---
+
+
+def test_hint_falls_back_to_main_llm_when_unset():
+    routing = resolve_model_routing(_BASE)
+    assert routing.hint.base_url == "http://main/v1"
+    assert routing.hint.api_key == "main-key"
+    assert routing.hint.model == "qwen3-120b"
+
+
+def test_hint_uses_its_own_endpoint_when_set():
+    routing = resolve_model_routing({
+        **_BASE,
+        "HINT_BASE_URL": "http://big/v1",
+        "HINT_API_KEY": "big-key",
+        "HINT_MODEL": "qwen3-235b",
+    })
+    assert routing.hint.base_url == "http://big/v1"
+    assert routing.hint.api_key == "big-key"
+    assert routing.hint.model == "qwen3-235b"
+
+
+# --- [v7.3] rerank score threshold (ships OFF until calibrated) --------------
+
+
+def test_rerank_score_threshold_defaults_to_none_meaning_off():
+    routing = resolve_model_routing(_BASE)
+    assert routing.rerank_score_threshold is None
+
+
+def test_rerank_score_threshold_parses_when_set():
+    routing = resolve_model_routing({**_BASE, "RERANK_SCORE_THRESHOLD": "0.35"})
+    assert routing.rerank_score_threshold == 0.35
+
+
+def test_rerank_score_threshold_garbage_means_off():
+    routing = resolve_model_routing({**_BASE, "RERANK_SCORE_THRESHOLD": "oops"})
+    assert routing.rerank_score_threshold is None
+
+
+# --- [v7.3] worker budgets ----------------------------------------------------
+
+
+def test_worker_budgets_have_defaults_and_parse():
+    routing = resolve_model_routing(_BASE)
+    assert routing.hint_max_samples == 4
+    assert routing.ingest_token_budget == 200_000
+
+    routing = resolve_model_routing({
+        **_BASE, "HINT_MAX_SAMPLES": "8", "INGEST_TOKEN_BUDGET": "50000",
+    })
+    assert routing.hint_max_samples == 8
+    assert routing.ingest_token_budget == 50_000

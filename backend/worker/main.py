@@ -21,7 +21,7 @@ from typing import Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import IngestionJob, JobStatus
-from backend.worker.ingest import ContextFn, EmbedFn, ExtractFn, ingest_document
+from backend.worker.ingest import ContextFn, EmbedFn, ResegmentFn, ingest_document
 from backend.worker.queue import claim_next_job
 
 logger = logging.getLogger(__name__)
@@ -48,8 +48,8 @@ async def process_one(
     db: AsyncSession,
     *,
     embed_fn: EmbedFn,
-    extract_fn: ExtractFn,
     context_fn: ContextFn | None = None,
+    resegment_fn: ResegmentFn | None = None,
 ) -> bool:
     """
     Claim and process one ingestion job.
@@ -67,7 +67,7 @@ async def process_one(
     try:
         await ingest_document(
             db, document_id,
-            embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+            embed_fn=embed_fn, context_fn=context_fn, resegment_fn=resegment_fn,
         )
         await _mark_job(db, job_id, JobStatus.done)
     except Exception as exc:  # ingest already marked the document failed
@@ -83,8 +83,8 @@ async def run_tick(
     gate,
     *,
     embed_fn: EmbedFn,
-    extract_fn: ExtractFn,
     context_fn: ContextFn | None = None,
+    resegment_fn: ResegmentFn | None = None,
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
     idle_seconds: float = IDLE_SLEEP_SECONDS,
     gate_seconds: float = GATE_SLEEP_SECONDS,
@@ -118,7 +118,7 @@ async def run_tick(
         return False
 
     processed = await process_one(
-        db, embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+        db, embed_fn=embed_fn, context_fn=context_fn, resegment_fn=resegment_fn,
     )
     if not processed:
         await sleep_fn(idle_seconds)
@@ -130,15 +130,16 @@ async def run_forever(
     gate,
     *,
     embed_fn: EmbedFn,
-    extract_fn: ExtractFn,
     context_fn: ContextFn | None = None,
+    resegment_fn: ResegmentFn | None = None,
     chat_gate=None,
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
 ) -> None:  # pragma: no cover - thin infinite-loop glue
     """Run the ingestion worker loop forever."""
     while True:
         await run_tick(
-            db, gate, embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+            db, gate, embed_fn=embed_fn, context_fn=context_fn,
+            resegment_fn=resegment_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
         )
 
@@ -147,25 +148,17 @@ async def run_forever(
 # Production glue (not unit-tested: hits the engine / GPU / DB)
 # ---------------------------------------------------------------------------
 
-# Schema the extractor is constrained to (guided JSON / structured decoding).
-_EXTRACTION_SCHEMA = {
+# [v7.3] Schema the re-segmentation call is constrained to: the LLM's only job
+# is to name the verbatim heading lines that START each true exercise.
+_ANCHOR_SCHEMA = {
     "type": "object",
     "properties": {
-        "exercises": {
+        "anchors": {
             "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "number": {"type": "string"},
-                    "statement": {"type": "string"},
-                    "hints": {"type": ["string", "null"]},
-                    "concept": {"type": ["string", "null"]},
-                },
-                "required": ["number", "statement"],
-            },
+            "items": {"type": "string"},
         }
     },
-    "required": ["exercises"],
+    "required": ["anchors"],
 }
 
 
@@ -181,14 +174,13 @@ def _make_real_embed_fn(client, model: str) -> EmbedFn:  # pragma: no cover
     return embed
 
 
-def _parse_exercises(content: str | None) -> list[dict]:
-    """Parse the extractor's response into a list of exercise dicts.
+def _parse_anchors(content: str | None) -> list[str]:
+    """Parse the re-segmentation response into a list of anchor strings.
 
-    [v7.2] Robust to engines that don't *guarantee* structured output: empty /
+    Robust to engines that don't *guarantee* structured output: empty /
     whitespace, code-fenced JSON, or JSON wrapped in prose all degrade to ``[]``
-    rather than crashing the worker on ``json.loads("")``. Only well-formed JSON
-    with an ``exercises`` array yields items; per-item shape is validated later in
-    ``ingest_document``.
+    (= "no better segmentation") rather than crashing the worker. Non-string
+    items are dropped.
     """
     if not content or not content.strip():
         return []
@@ -209,36 +201,41 @@ def _parse_exercises(content: str | None) -> list[dict]:
     try:
         data = json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        logger.warning("Exercise extraction returned non-JSON output; treating as 0 exercises.")
+        logger.warning("Re-segmentation returned non-JSON output; keeping regex result.")
         return []
     if not isinstance(data, dict):
         return []
-    exercises = data.get("exercises", [])
-    return exercises if isinstance(exercises, list) else []
+    anchors = data.get("anchors", [])
+    if not isinstance(anchors, list):
+        return []
+    return [a for a in anchors if isinstance(a, str)]
 
 
-def _make_real_extract_fn(client, model: str) -> ExtractFn:  # pragma: no cover
-    async def extract(text: str) -> list[dict]:
-        # [v7.2] Use the OpenAI-standard `response_format: json_schema` for
-        # structured output. vLLM/SGLang enforce it via guided decoding, and
-        # gateways like Albert support it natively — unlike the vLLM-only
-        # `guided_json` extra_body, which other engines silently ignore (returning
-        # empty/prose → json.loads crash). Parsing still degrades gracefully.
+def _make_real_resegment_fn(client, model: str) -> ResegmentFn:  # pragma: no cover
+    """[v7.3] The anomaly-triggered boundary re-judge: given the document text,
+    the LLM names the verbatim heading lines that start each TRUE exercise
+    (sub-questions inside an exercise are not boundaries). Splitting itself
+    stays deterministic in `resegment_with_llm`."""
+
+    async def resegment(text: str) -> list[str]:
         resp = await client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content":
-                    "Extract every exercise from the document. Respond with JSON only, "
-                    "matching the provided schema."},
+                    "The document below is a problem sheet whose automatic "
+                    "segmentation looks wrong. List the heading lines that start "
+                    "each TOP-LEVEL exercise, copied verbatim from the text. "
+                    "Sub-questions inside an exercise are NOT boundaries. "
+                    "Respond with JSON only, matching the provided schema."},
                 {"role": "user", "content": text},
             ],
             response_format={
                 "type": "json_schema",
-                "json_schema": {"name": "exercises", "schema": _EXTRACTION_SCHEMA},
+                "json_schema": {"name": "anchors", "schema": _ANCHOR_SCHEMA},
             },
         )
-        return _parse_exercises(resp.choices[0].message.content)
-    return extract
+        return _parse_anchors(resp.choices[0].message.content)
+    return resegment
 
 
 def _make_real_context_fn(client, model: str) -> ContextFn:  # pragma: no cover
@@ -341,14 +338,15 @@ async def main() -> None:  # pragma: no cover - entrypoint
             api_key=cfg["embedding_api_key"], base_url=cfg["embedding_base_url"]
         )
         embed_fn = _make_real_embed_fn(embed_client, cfg["embedding_model"])
-        extract_fn = _make_real_extract_fn(ingest_client, cfg["model"])
+        resegment_fn = _make_real_resegment_fn(ingest_client, cfg["model"])
         context_fn = _make_real_context_fn(ingest_client, cfg["model"])
         # Primary gate: live chat load (engine-agnostic). Optional: GPU idle
         # (no-ops on a remote API where _pynvml_util reads idle).
         chat_gate = ChatLoadGate()
         gate = GpuGate(util_fn=_pynvml_util)
         await run_forever(
-            db, gate, embed_fn=embed_fn, extract_fn=extract_fn, context_fn=context_fn,
+            db, gate, embed_fn=embed_fn, context_fn=context_fn,
+            resegment_fn=resegment_fn,
             chat_gate=chat_gate, chat_load_fn=_recent_chat_count,
         )
 

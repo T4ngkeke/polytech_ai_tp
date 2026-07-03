@@ -20,6 +20,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Date,
@@ -550,8 +551,15 @@ class Document(Base):
     )
     # [v7.1] Populated on `failed` and carries the `needs_review` rejection reason.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [v7.3] Document language (fr/en) — selects the BM25 tsvector config.
+    # Default fr: the upload form pre-fills it, teachers usually never touch it.
+    language: Mapped[str] = mapped_column(String(8), nullable=False, default="fr")
     # [v7.1] Parsed page count — Phase 6 summary. Nullable until processed.
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # [v7.3] Reconciliation report written at ingest: numbering anomaly, gaps,
+    # in-lab number collisions, whether the LLM re-segmented, and counts. The
+    # teacher audits a warning list instead of re-reading the document.
+    ingest_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -630,6 +638,8 @@ class DocChunk(Base):
     # [v7.1] BM25 full-text index, built over the augmented text at ingest time.
     tsv: Mapped[str | None] = mapped_column(TSVector(), nullable=True)
     page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # [v7.3] Teacher-corrected rows survive idempotent re-ingestion.
+    edited_by_teacher: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
@@ -669,6 +679,8 @@ class Exercise(Base):
     # stored anywhere — only student-safe statements are kept, so nothing can leak.
     # Reserved for future Adaptive Tutoring (per-concept scoring). Nullable for now.
     concept: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # [v7.3] Teacher-corrected rows survive idempotent re-ingestion.
+    edited_by_teacher: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

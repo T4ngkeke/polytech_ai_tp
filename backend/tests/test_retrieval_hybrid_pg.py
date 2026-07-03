@@ -21,7 +21,7 @@ from backend.app.models import (
     Lab,
     UserRole,
 )
-from backend.app.services.retrieval_service import hybrid_search
+from backend.app.services.retrieval_service import bm25_search, hybrid_search
 from backend.tests.conftest import make_user
 
 
@@ -52,12 +52,13 @@ async def _seed_lab(session):
     return cls, lab, doc
 
 
-def _chunk(doc, cls, lab, *, idx, content, emb, audience=Audience.student):
+def _chunk(doc, cls, lab, *, idx, content, emb, audience=Audience.student,
+           ts_config="french"):
     return DocChunk(
         id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
         doc_type=DocType.CM, audience=audience, chunk_index=idx,
         content=content, embedding=emb, page_no=idx + 1,
-        tsv=func.to_tsvector("simple", content),
+        tsv=func.to_tsvector(ts_config, content),
     )
 
 
@@ -71,7 +72,7 @@ async def test_hybrid_search_returns_lab_scoped_relevant_chunk(pg_session):
     ])
     await pg_session.commit()
 
-    hits = await hybrid_search(
+    hits, _all_filtered = await hybrid_search(
         pg_session, query_text="threads", query_embedding=_unit(1),
         lab_id=lab.id, audience=Audience.student, top_k=2,
     )
@@ -90,7 +91,7 @@ async def test_hybrid_search_excludes_teacher_audience_for_student(pg_session):
     ])
     await pg_session.commit()
 
-    hits = await hybrid_search(
+    hits, _all_filtered = await hybrid_search(
         pg_session, query_text="threads", query_embedding=_unit(1),
         lab_id=lab.id, audience=Audience.student, top_k=5,
     )
@@ -119,12 +120,68 @@ async def test_hybrid_search_does_not_leak_across_labs(pg_session):
     ])
     await pg_session.commit()
 
-    hits = await hybrid_search(
+    hits, _all_filtered = await hybrid_search(
         pg_session, query_text="threads", query_embedding=_unit(1),
         lab_id=lab_a.id, audience=Audience.student, top_k=5,
     )
 
     assert [h.content for h in hits] == ["lab A threads"]
+
+
+# --- [v7.3] BM25 OR semantics + language config --------------------------------
+# plainto_tsquery is AND: one query word missing from the chunk → zero recall.
+# Natural-language French questions always carry extra words, so the old
+# ('simple' + AND) BM25 leg was silently dead. OR semantics + French stemming.
+
+@pytest.mark.asyncio
+async def test_bm25_or_matches_despite_extra_query_words(pg_session):
+    cls, lab, doc = await _seed_lab(pg_session)
+    pg_session.add(_chunk(
+        doc, cls, lab, idx=0,
+        content="La recursivite est une methode ou une fonction s'appelle elle-meme.",
+        emb=_unit(0),
+    ))
+    await pg_session.commit()
+
+    # 'informatique' does not appear in the chunk — AND semantics returns nothing.
+    hits = await bm25_search(
+        pg_session, "Qu'est-ce que la recursivite en informatique ?",
+        lab.id, audience=Audience.student, language="fr",
+    )
+
+    assert len(hits) == 1
+    assert "recursivite" in hits[0].content
+
+
+@pytest.mark.asyncio
+async def test_bm25_french_stemming_matches_inflections(pg_session):
+    cls, lab, doc = await _seed_lab(pg_session)
+    pg_session.add(_chunk(
+        doc, cls, lab, idx=0,
+        content="Les fonctions recursives sont puissantes et elegantes.",
+        emb=_unit(0),
+    ))
+    await pg_session.commit()
+
+    # Singular query vs plural document — French stemming bridges the gap.
+    hits = await bm25_search(
+        pg_session, "fonction recursive",
+        lab.id, audience=Audience.student, language="fr",
+    )
+
+    assert len(hits) == 1
+
+
+@pytest.mark.asyncio
+async def test_bm25_stopword_only_query_returns_empty(pg_session):
+    cls, lab, doc = await _seed_lab(pg_session)
+    pg_session.add(_chunk(doc, cls, lab, idx=0, content="contenu reel", emb=_unit(0)))
+    await pg_session.commit()
+
+    hits = await bm25_search(
+        pg_session, "de la les", lab.id, audience=Audience.student, language="fr",
+    )
+    assert hits == []
 
 
 @pytest.mark.asyncio
@@ -140,7 +197,7 @@ async def test_hybrid_search_applies_reranker(pg_session):
         # Prefer the "beta" chunk regardless of recall order.
         return [1.0 if "beta" in d else 0.0 for d in documents]
 
-    hits = await hybrid_search(
+    hits, _all_filtered = await hybrid_search(
         pg_session, query_text="threads", query_embedding=_unit(1),
         lab_id=lab.id, audience=Audience.student, rerank_fn=fake_rerank, top_k=1,
     )

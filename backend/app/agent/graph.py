@@ -167,7 +167,9 @@ def build_agent(
             else:
                 embedding = (await embed_fn([query]))[0]
             # Hybrid recall (vector + BM25) → RRF → rerank, student-audience scoped in SQL.
-            return await hybrid_search(
+            # [v7.3] The all_filtered flag (threshold gate) is consumed by the
+            # disclaimer branch in Phase 2; the gate ships disabled until calibrated.
+            hits, _all_filtered = await hybrid_search(
                 db,
                 query_text=query,
                 query_embedding=embedding,
@@ -176,6 +178,7 @@ def build_agent(
                 rerank_fn=rerank_fn,
                 top_k=4,
             )
+            return hits
 
         low_evidence = False
         if grade_fn is None:

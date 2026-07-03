@@ -44,3 +44,22 @@ def test_token_weights_default_prefill_cheaper():
     by_key = {c["key"]: c["value"] for c in DEFAULT_SYSTEM_CONFIGS}
     assert by_key["TOKEN_ALPHA"] == "0.2"
     assert by_key["TOKEN_BETA"] == "1.0"
+
+
+def test_seed_includes_v73_keys():
+    keys = {row["key"] for row in DEFAULT_SYSTEM_CONFIGS}
+    assert {"HINT_MODEL", "HINT_BASE_URL", "HINT_API_KEY",
+            "RERANK_SCORE_THRESHOLD", "HINT_MAX_SAMPLES",
+            "INGEST_TOKEN_BUDGET"} <= keys
+
+
+def test_v73_hint_slot_defaults_empty_for_fallback():
+    values = {row["key"]: row["value"] for row in DEFAULT_SYSTEM_CONFIGS}
+    assert values["HINT_MODEL"] == ""
+    assert values["HINT_BASE_URL"] == ""
+    assert values["HINT_API_KEY"] == ""
+
+
+def test_v73_threshold_ships_disabled():
+    values = {row["key"]: row["value"] for row in DEFAULT_SYSTEM_CONFIGS}
+    assert values["RERANK_SCORE_THRESHOLD"] == ""   # off until calibrated

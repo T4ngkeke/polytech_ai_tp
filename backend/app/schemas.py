@@ -129,6 +129,13 @@ class LLMConfigRequest(BaseModel):
     router_model: str | None = None
     rag_max_retries: str | None = None
     router_knn_threshold: str | None = None
+    # [v7.3] hint slot (answer→tiered-hints big model) + injection gate + budgets.
+    hint_base_url: str | None = None
+    hint_api_key: str | None = None
+    hint_model: str | None = None
+    rerank_score_threshold: str | None = None
+    hint_max_samples: str | None = None
+    ingest_token_budget: str | None = None
     token_alpha: float | None = None
     token_beta: float | None = None
 
@@ -152,6 +159,14 @@ class LLMConfigResponse(BaseModel):
     router_model: str = ""
     rag_max_retries: str = ""
     router_knn_threshold: str = ""
+    # [v7.3] raw stored values — hint slot empty = inherits main LLM;
+    # threshold empty = injection gate OFF (until calibrated).
+    hint_base_url: str = ""
+    hint_api_key: str = ""
+    hint_model: str = ""
+    rerank_score_threshold: str = ""
+    hint_max_samples: str = ""
+    ingest_token_budget: str = ""
     token_alpha: float = 0.2
     token_beta: float = 1.0
 
