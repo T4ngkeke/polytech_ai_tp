@@ -470,6 +470,65 @@ class TestStreamingAndBackgroundTask:
         # done comes after citations.
         assert full_text.index("event: citations") < full_text.index("event: done")
 
+    async def test_stream_emits_status_event_first(
+        self, client1, seed_chat, db_session, mock_openai
+    ):
+        """[v8.0] The stream opens with a `status` event so the client can show a
+        'working…' indicator, and it arrives before the first token."""
+        sess = seed_chat["sess1"]
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+
+        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+            async with client1.stream("POST", "/api/chat/stream", json={
+                "session_id": str(sess.id), "message": "status test",
+            }) as resp:
+                assert resp.status_code == 200
+                full_text = "".join([c async for c in resp.aiter_text()])
+
+        assert "event: status\n" in full_text
+        assert full_text.index("event: status") < full_text.index('data: "Bonjour')
+
+    async def test_stream_updates_session_last_route(
+        self, client1, seed_chat, db_session, mock_openai
+    ):
+        """[v8.0] The session remembers its route so the clarify anti-loop can see a
+        previous clarify turn (here: mock router → direct)."""
+        sess = seed_chat["sess1"]
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+
+        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+            async with client1.stream("POST", "/api/chat/stream", json={
+                "session_id": str(sess.id), "message": "hi there",
+            }) as resp:
+                assert resp.status_code == 200
+                _ = "".join([c async for c in resp.aiter_text()])
+
+        await db_session.refresh(sess)
+        assert sess.last_route == "direct"
+
+    async def test_stream_writes_agent_trace_row(
+        self, client1, seed_chat, db_session, mock_openai
+    ):
+        """[v8.0] Each chat request flushes exactly one AgentTraceLog row (the
+        health-panel / self-eval data source), carrying the route + message ref."""
+        from backend.app.models import AgentTraceLog
+
+        sess = seed_chat["sess1"]
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+
+        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+            async with client1.stream("POST", "/api/chat/stream", json={
+                "session_id": str(sess.id), "message": "trace this",
+            }) as resp:
+                assert resp.status_code == 200
+                _ = "".join([c async for c in resp.aiter_text()])
+
+        rows = (await db_session.execute(select(AgentTraceLog))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].route == "direct"   # mock router → direct
+        assert rows[0].session_id == sess.id
+        assert rows[0].message_id is not None
+
     async def test_legacy_session_without_lab_works(
         self, client1, seed_chat, db_session, mock_openai
     ):

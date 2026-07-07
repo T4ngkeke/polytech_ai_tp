@@ -18,6 +18,7 @@ def test_session_has_dialogue_state_and_test_flag():
     cols = _cols(Session)
     assert "current_exercise_id" in cols  # sticky exercise fill
     assert "is_test" in cols              # teacher test-drive
+    assert "last_route" in cols           # clarify anti-loop signal
 
 
 def test_router_query_log_v2_columns():

@@ -26,6 +26,7 @@ from backend.app.models import (
     RouterQueryLog,
     UserRole,
 )
+from backend.app.services.trace_service import TraceBuilder
 from backend.tests.conftest import make_user
 
 
@@ -85,6 +86,47 @@ async def _seed_bare_lab(session):
     session.add(doc)
     await session.flush()
     return cls, lab, doc, teacher
+
+
+@pytest.mark.asyncio
+async def test_trace_captures_route(db_session):
+    """[v8.0] An injected TraceBuilder records the final route for the AgentTraceLog."""
+    tb = TraceBuilder()
+
+    async def fake_embed(texts):
+        return [_unit(1) for _ in texts]
+
+    agent = build_agent(db_session, embed_fn=fake_embed,
+                        router_llm_fn=_fake_router(route="direct", exercise_number=None),
+                        trace=tb)
+    await agent.ainvoke({
+        "message": "hello there", "class_id": None, "lab_id": None,
+        "user_id": uuid.uuid4(), "history": [],
+    })
+
+    assert tb.fields.get("route") == "direct"
+
+
+@pytest.mark.asyncio
+async def test_trace_flags_router_degradation(db_session):
+    """A degraded router decision (garbage output → safe rag) is flagged in the trace."""
+    tb = TraceBuilder()
+
+    async def fake_embed(texts):
+        return [_unit(1) for _ in texts]
+
+    async def garbage_router(messages):
+        return "not json at all"
+
+    agent = build_agent(db_session, embed_fn=fake_embed, router_llm_fn=garbage_router,
+                        trace=tb)
+    await agent.ainvoke({
+        "message": "???", "class_id": None, "lab_id": None,
+        "user_id": uuid.uuid4(), "history": [],
+    })
+
+    assert tb.fields.get("route") == "rag"
+    assert tb.degraded_flags.get("router") is True
 
 
 @pytest.mark.asyncio
@@ -484,6 +526,28 @@ async def test_non_exercise_route_ignores_coaching_signals(db_session):
     system = result["messages_payload"][0]["content"]
     assert "ANSWER GUARDRAIL" not in system
     assert "[COACHING]" not in system
+
+
+@pytest.mark.asyncio
+async def test_rag_embedding_failure_degrades_to_bm25_only(pg_session):
+    """[v8.0] A dead embedding endpoint must not 500 the chat — rag degrades to
+    BM25-only and flags it in the trace (only the main LLM + main DB are hard deps)."""
+    cls, lab, student = await _seed_lab_with_chunk(pg_session, "note", at=1)
+    tb = TraceBuilder()
+
+    async def failing_embed(texts):
+        raise RuntimeError("embedding endpoint down")
+
+    agent = build_agent(pg_session, embed_fn=failing_embed,
+                        router_llm_fn=_fake_router(route="rag", exercise_number=None),
+                        trace=tb)
+    result = await agent.ainvoke({
+        "message": "What is a thread?", "class_id": cls.id, "lab_id": lab.id,
+        "user_id": student.id, "history": [],
+    })
+
+    assert result["route"] == "rag"                       # did not blow up
+    assert tb.degraded_flags.get("embedding") is True     # degradation recorded
 
 
 @pytest.mark.asyncio

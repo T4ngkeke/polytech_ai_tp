@@ -64,6 +64,7 @@ from backend.app.schemas import ChatStreamRequest
 from backend.app.services import rule_service
 from backend.app.services.billing import compute_billed_tokens
 from backend.app.services.model_routing import resolve_model_routing
+from backend.app.services.trace_service import TraceBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,7 @@ async def save_chat_background_task(
     completion_tokens: int,
     token_alpha: float = 1.0,
     token_beta: float = 1.0,
+    trace: TraceBuilder | None = None,
 ):
     """
     Background task to save messages and upsert usage stats.
@@ -318,6 +320,11 @@ async def save_chat_background_task(
                 billed_tokens=billed_tokens,
             )
             db.add_all([user_msg, llm_msg])
+
+            # [v8.0] One AgentTraceLog row per message (health panel / self-eval data).
+            if trace is not None:
+                await db.flush()  # materialize llm_msg.id for the soft reference
+                await trace.flush(db, message_id=llm_msg.id)
 
             # 3. Upsert UsageStat for today
             today = date.today()
@@ -387,6 +394,10 @@ async def chat_stream(
     # Resolve lab → class for rule injection and membership check
     class_id = None
     lab_id = session.lab_id
+
+    # [v8.0] Clarify anti-loop: if the previous turn already asked "which exercise?",
+    # a still-unresolved turn falls through to rag instead of clarifying again.
+    prev_was_clarify = session.last_route == "clarify"
 
     # [v8.0] Sticky exercise → the router's dialogue-state inputs (number + a short
     # statement excerpt). It only fills a blank number; it never picks the route.
@@ -465,6 +476,12 @@ async def chat_stream(
 
     rule_texts = await rule_service.get_active_rule_texts(db, class_id, lab_id, current_user.id)
 
+    # [v8.0] Per-request trace: the graph writes route + degradation flags; here we
+    # add the injection red-flag and, after the run, recall/all-filtered. Flushed to
+    # one AgentTraceLog row in the background task (the health panel's data source).
+    trace = TraceBuilder(session_id=body.session_id, lab_id=lab_id)
+    trace.mark_if_suspicious(body.message)
+
     agent = build_agent(
         db,
         embed_fn=_make_embed_fn(llm_config),
@@ -478,6 +495,7 @@ async def chat_stream(
             float(llm_config["rerank_score_threshold"])
             if llm_config["rerank_score_threshold"] else None
         ),
+        trace=trace,
     )
     agent_result = await agent.ainvoke({
         "message": body.message,
@@ -487,10 +505,17 @@ async def chat_stream(
         "history": history,
         "sticky_number": sticky_number,
         "sticky_excerpt": sticky_excerpt,
+        "prev_was_clarify": prev_was_clarify,
         "is_test": session.is_test,
         **rule_texts,
     })
     messages_payload = agent_result["messages_payload"]
+    trace.set("recall_count", len(agent_result.get("citations", [])))
+    trace.set("all_filtered", bool(agent_result.get("no_material")))
+
+    # [v8.0] Remember this turn's route for the next turn's clarify anti-loop.
+    session.last_route = agent_result["route"]
+    await db.flush()
 
     # [v8.0] Sticky write-back: on an exercise hit, remember it on the session so a
     # later numberless follow-up ("and the next part?") reconnects seamlessly.
@@ -561,6 +586,10 @@ async def chat_stream(
 
     async def event_generator():
         disconnected = False
+        # [v8.0] Open with a status event so the client can show a "working…"
+        # indicator; it carries the resolved route. (Per-node progress would need
+        # graph.astream_events — deferred.)
+        yield f"event: status\ndata: {json.dumps({'route': agent_result['route']})}\n\n"
         try:
             async for chunk in stream:
                 if await request.is_disconnected():
@@ -609,6 +638,7 @@ async def chat_stream(
                 completion_tokens=ct,
                 token_alpha=float(llm_config["token_alpha"]),
                 token_beta=float(llm_config["token_beta"]),
+                trace=trace,
             )
 
     return StreamingResponse(

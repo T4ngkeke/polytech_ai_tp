@@ -38,7 +38,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.auth import hash_password, require_admin
 from backend.app.database import get_db
-from backend.app.models import Class, Message, Session, SystemConfig, User, UserRole
+from backend.app.models import (
+    AgentTraceLog,
+    Class,
+    Message,
+    RouterQueryLog,
+    Session,
+    SystemConfig,
+    User,
+    UserRole,
+)
 from backend.app.schemas import (
     AdminAnalyticsResponse,
     AdminResetPasswordRequest,
@@ -602,19 +611,34 @@ async def prune_old_data(
     from datetime import datetime, timedelta, timezone
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=body.older_than_days)
+
+    # [v8.0] Aged telemetry logs are pruned independently of sessions.
+    router_logs_deleted = (await db.execute(
+        select(func.count(RouterQueryLog.id)).where(RouterQueryLog.created_at < cutoff)
+    )).scalar_one()
+    await db.execute(delete(RouterQueryLog).where(RouterQueryLog.created_at < cutoff))
+    trace_logs_deleted = (await db.execute(
+        select(func.count(AgentTraceLog.id)).where(AgentTraceLog.created_at < cutoff)
+    )).scalar_one()
+    await db.execute(delete(AgentTraceLog).where(AgentTraceLog.created_at < cutoff))
+
     old_sessions_result = await db.execute(select(Session.id).where(Session.created_at < cutoff))
     old_session_ids = [row[0] for row in old_sessions_result.all()]
 
-    if not old_session_ids:
-        return PruneResponse(sessions_deleted=0, messages_deleted=0)
+    messages_deleted = 0
+    if old_session_ids:
+        msg_count_result = await db.execute(
+            select(func.count(Message.id)).where(Message.session_id.in_(old_session_ids))
+        )
+        messages_deleted = msg_count_result.scalar_one()
+        await db.execute(delete(Message).where(Message.session_id.in_(old_session_ids)))
+        await db.execute(delete(Session).where(Session.id.in_(old_session_ids)))
 
-    msg_count_result = await db.execute(
-        select(func.count(Message.id)).where(Message.session_id.in_(old_session_ids))
-    )
-    messages_deleted = msg_count_result.scalar_one()
-
-    await db.execute(delete(Message).where(Message.session_id.in_(old_session_ids)))
-    await db.execute(delete(Session).where(Session.id.in_(old_session_ids)))
     await db.flush()
 
-    return PruneResponse(sessions_deleted=len(old_session_ids), messages_deleted=messages_deleted)
+    return PruneResponse(
+        sessions_deleted=len(old_session_ids),
+        messages_deleted=messages_deleted,
+        router_logs_deleted=router_logs_deleted,
+        trace_logs_deleted=trace_logs_deleted,
+    )

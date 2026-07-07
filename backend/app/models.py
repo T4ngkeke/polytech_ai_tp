@@ -466,6 +466,9 @@ class Session(Base):
     # own lab to preview the tutor. Excluded from analytics / router-training /
     # learner-profile writes; may preview pending_review hint drafts.
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # [v8.0] The previous turn's route — powers the clarify anti-loop: a second
+    # consecutive unresolved turn falls through to rag instead of clarifying again.
+    last_route: Mapped[str | None] = mapped_column(String(16), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow

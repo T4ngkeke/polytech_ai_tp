@@ -459,6 +459,8 @@ class PruneRequest(BaseModel):
 class PruneResponse(BaseModel):
     sessions_deleted: int
     messages_deleted: int
+    router_logs_deleted: int = 0
+    trace_logs_deleted: int = 0
 
 
 class DailyUsage(BaseModel):

@@ -555,6 +555,29 @@ class TestAdminPrune:
         r = await db_session.execute(select(Session).where(Session.id == recent_id))
         assert r.scalar_one_or_none() is not None
 
+    async def test_prunes_old_router_and_trace_logs(self, admin_full_client, db_session):
+        """[v8.0] prune also clears aged RouterQueryLog + AgentTraceLog rows,
+        independent of whether any session is old."""
+        import uuid
+        from datetime import datetime, timedelta, timezone
+
+        from backend.app.models import AgentTraceLog, RouterQueryLog
+
+        old = datetime.now(timezone.utc) - timedelta(days=60)
+        db_session.add(RouterQueryLog(id=uuid.uuid4(), message="old", route="rag",
+                                      number_source="none", degraded=False, created_at=old))
+        db_session.add(AgentTraceLog(id=uuid.uuid4(), route="rag", created_at=old))
+        await db_session.commit()
+
+        resp = await admin_full_client.post("/api/admin/maintenance/prune",
+                                            json={"older_than_days": 30})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["router_logs_deleted"] == 1
+        assert body["trace_logs_deleted"] == 1
+        assert (await db_session.execute(select(RouterQueryLog))).scalars().all() == []
+        assert (await db_session.execute(select(AgentTraceLog))).scalars().all() == []
+
     async def test_nothing_to_prune(self, admin_full_client):
         resp = await admin_full_client.post("/api/admin/maintenance/prune",
                                             json={"older_than_days": 9999})

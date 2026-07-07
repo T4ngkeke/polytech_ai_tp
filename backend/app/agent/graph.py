@@ -42,6 +42,7 @@ from backend.app.services.retrieval_service import (
     list_exercise_numbers,
     search_exercises,
 )
+from backend.app.services.trace_service import TraceBuilder
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 
@@ -110,6 +111,7 @@ def build_agent(
     max_retries: int = 1,
     router_model_name: str = "",
     rerank_score_threshold: float | None = None,
+    trace: TraceBuilder | None = None,
 ):
     """Compile the chat agent graph bound to a DB session, a query embedder, and
     the one-call router LLM (`router_llm_fn`)."""
@@ -184,6 +186,10 @@ def build_agent(
             lab_id=state.get("lab_id"),
             is_test=state.get("is_test", False),
         )
+        if trace is not None:
+            trace.set("route", route)
+            if decision.degraded:
+                trace.flag("router")
         result = {
             "route": route,
             "exercise_number": number,
@@ -251,10 +257,17 @@ def build_agent(
         async def retrieve_fn(query: str) -> list:
             nonlocal all_filtered
             # Reuse the router's embedding for the original query; embed rewrites.
-            if query == message and base_embedding:
-                embedding = base_embedding
-            else:
-                embedding = (await embed_fn([query]))[0]
+            # [v8.0] Embedding endpoint down → BM25-only (embedding None) + flag, never
+            # a 500. Only the main LLM and main DB are hard dependencies.
+            try:
+                if query == message and base_embedding:
+                    embedding = base_embedding
+                else:
+                    embedding = (await embed_fn([query]))[0]
+            except Exception:
+                embedding = None
+                if trace is not None:
+                    trace.flag("embedding")
             # Hybrid recall (vector + BM25) → RRF → rerank, student-audience scoped in SQL.
             # [v8.0] all_filtered (the rerank threshold dropped everything) drives the
             # zero-context disclaimer branch below; the gate ships disabled (threshold

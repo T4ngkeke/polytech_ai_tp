@@ -238,7 +238,7 @@ async def bm25_search(
 async def hybrid_search(
     db: AsyncSession,
     query_text: str,
-    query_embedding: list[float],
+    query_embedding: list[float] | None,
     lab_id: uuid.UUID,
     *,
     audience: Audience | None = None,
@@ -255,7 +255,11 @@ async def hybrid_search(
     Tenant + audience isolation is enforced in the SQL WHERE of each recall, so it
     holds regardless of fusion/rerank order — never a prompt rule.
     """
-    vector_hits = await vector_search(db, query_embedding, lab_id, audience=audience, k=recall_k)
+    # [v8.0] query_embedding None = embedding endpoint degraded → BM25-only recall.
+    vector_hits = (
+        await vector_search(db, query_embedding, lab_id, audience=audience, k=recall_k)
+        if query_embedding is not None else []
+    )
     bm25_hits = await bm25_search(
         db, query_text, lab_id, audience=audience, k=recall_k, language=language,
     )
