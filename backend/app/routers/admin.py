@@ -240,7 +240,6 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "router_api_key": "ROUTER_API_KEY",
     "router_model": "ROUTER_MODEL",
     "rag_max_retries": "RAG_MAX_RETRIES",
-    "router_knn_threshold": "ROUTER_KNN_THRESHOLD",
     # [v7.3] hint slot + injection gate + worker budgets.
     "hint_base_url": "HINT_BASE_URL",
     "hint_api_key": "HINT_API_KEY",

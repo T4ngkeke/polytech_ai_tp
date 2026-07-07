@@ -1,6 +1,20 @@
 # Edu-LLM: v7.3 Agentic Class-Lab Architecture
 ---
 
+> **📌 Status — this README describes v7.3 (shipped, commit `07c9cf6`).**
+> **v8.0 is in progress; the authoritative spec is `V8.0_PLAN.md` + `v8_workflow.html`.**
+> Sections that v8.0 will change are **not yet implemented** and are marked inline with
+> *(v8.0 …)*. The main ones to know before relying on this document:
+> - **Red line “no solution stored anywhere” (§1, §3.11)** → v8.0 stores answers in a main-DB
+>   `Answers` table for **offline** hint generation; students still never reach it (architecture test).
+> - **`RouterQueryLog` schema (§3.14)** → redefined (route / exercise_number / number_source /
+>   degraded / model_name / prompt_version / latency_ms / is_test).
+> - **`Exercises.hints` NULL at ingest (§3.11)** → v8.0 adds a teacher-triggered, per-exercise
+>   review lifecycle (`hint_status` / `hint_source`).
+> - **`doc_type` = CM/TD/TP (§3.9)** → v8.0 adds `corrigé` (standalone answer doc).
+> - **Router = regex + bge-m3 kNN (§6)** → replaced by one LLM-router call carrying dialogue state.
+> - This README + `system_architecture.html` are rewritten to v8.0 only at release (PR-2b).
+
 ## 1. Project Overview
 
 **Edu-LLM (v7.3 Agentic Class-Lab Architecture)** is a full-stack educational platform

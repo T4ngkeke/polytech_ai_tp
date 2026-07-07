@@ -146,6 +146,27 @@ async def search_exercises(
     return [ExerciseHit(number=r.number, statement=r.statement, hints=r.hints) for r in rows]
 
 
+async def list_exercise_numbers(
+    db: AsyncSession,
+    lab_id: uuid.UUID,
+    *,
+    audience: Audience | None = None,
+) -> list[tuple[str, int | None]]:
+    """Every exercise number in a lab as ``(number_raw, number_normalized)``,
+    ordered by the normalized number. [v8.0] One cheap SELECT powering three
+    call sites: the clarify question's number list, "what comes after 3.3"
+    navigation, and router DB validation (does the resolved number exist?).
+    Audience-scoped in SQL — students never see teacher-audience numbers."""
+    stmt = select(Exercise.number, Exercise.number_normalized).where(
+        Exercise.lab_id == lab_id
+    )
+    if audience is not None:
+        stmt = stmt.where(Exercise.audience == audience)
+    stmt = stmt.order_by(Exercise.number_normalized)
+    rows = (await db.execute(stmt)).all()
+    return [(r.number, r.number_normalized) for r in rows]
+
+
 def _scope(stmt, lab_id: uuid.UUID, audience: Audience | None):
     """Apply the mandatory tenant filter (+ student audience filter) in SQL."""
     stmt = stmt.where(DocChunk.lab_id == lab_id)

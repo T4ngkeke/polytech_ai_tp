@@ -155,6 +155,23 @@ async def mock_openai():
             captured_create_kwargs.clear()
             captured_create_kwargs.update(kwargs)
 
+            # [v8.0] The one-call router uses a non-streaming json_schema request.
+            # Return a fixed `direct` decision so these tests stay on the SQLite-safe
+            # path (no pgvector), matching the previous kNN-routes-to-direct setup.
+            if (kwargs.get("response_format") or {}).get("type") == "json_schema":
+                class _Msg:
+                    content = json.dumps({"route": "direct", "exercise_number": None,
+                                          "number_source": "none", "search_terms": [],
+                                          "sticky_matches": False})
+
+                class _Choice:
+                    message = _Msg()
+
+                class _Resp:
+                    choices = [_Choice()]
+
+                return _Resp()
+
             async def mock_generator():
                 class Delta:
                     def __init__(self, content):
@@ -177,13 +194,8 @@ async def mock_openai():
 
             return mock_generator()
 
-        # The kNN router embeds every message. Return 2-D vectors that send the
-        # rag anchor exemplars to one axis and everything else (incl. these test
-        # queries) to the other, so the test messages deterministically route to
-        # `direct` — the SQLite-safe path (no pgvector ops).
-        from backend.app.agent.router import INTENT_EXEMPLARS
-        _rag_exemplars = set(INTENT_EXEMPLARS["rag"])
-
+        # [v8.0] Routing is decided by the mocked router call above (→ direct), so
+        # embeddings are never requested on this path; a constant vector suffices.
         async def mock_embed_create(*args, model=None, input=None, **kwargs):
             class _Item:
                 def __init__(self, embedding):
@@ -193,11 +205,7 @@ async def mock_openai():
                 def __init__(self, items):
                     self.data = items
 
-            vectors = [
-                _Item([1.0, 0.0] if text in _rag_exemplars else [0.0, 1.0])
-                for text in input
-            ]
-            return _Resp(vectors)
+            return _Resp([_Item([1.0, 0.0]) for _ in input])
 
         instance = mock.return_value
         instance.chat.completions.create = mock_create

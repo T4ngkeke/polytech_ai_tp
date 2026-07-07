@@ -55,5 +55,5 @@ def test_docchunk_has_v71_retrieval_columns():
 def test_router_query_log_table_exists():
     cols = RouterQueryLog.__table__.columns
     assert "message" in cols
-    assert "chosen_route" in cols
-    assert "top_similarity" in cols
+    # [v8.0] chosen_route/top_similarity were redefined away; see test_schema_v8.
+    assert "route" in cols

@@ -47,8 +47,6 @@ DEFAULT_SYSTEM_CONFIGS = [
     {"key": "RERANK_MODEL", "value": "BAAI/bge-reranker-v2-m3"},
     # [v7.1] bounded self-eval loop: max re-retrieval rounds (admin-configurable, default 1).
     {"key": "RAG_MAX_RETRIES", "value": "1"},
-    # [v7.1] router kNN confidence threshold: below this, fall back to RAG + log.
-    {"key": "ROUTER_KNN_THRESHOLD", "value": "0.35"},
     # [v7.2] model-routing table. Empty endpoint/key/model values inherit the main
     # LLM (see model_routing.resolve_model_routing), so a fresh install runs as a
     # single engine and the cheap-model split is purely opt-in by the admin.

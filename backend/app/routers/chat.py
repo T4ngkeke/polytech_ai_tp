@@ -43,7 +43,7 @@ from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agent.exercise_number import normalize_exercise_number
+from backend.app.agent.router import _ROUTER_SCHEMA
 from backend.app.agent.graph import build_agent
 from backend.app.auth import get_current_user
 from backend.app.database import AsyncSessionLocal, get_db
@@ -51,6 +51,8 @@ from backend.app.models import (
     ClassStudent,
     Document,
     Lab,
+    Audience,
+    Exercise,
     Message,
     SenderType,
     Session,
@@ -93,10 +95,12 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "embedding_base_url": routing.embedding.base_url,
         "embedding_api_key": routing.embedding.api_key,
         "embedding_model": routing.embedding.model,
-        "router_knn_threshold": configs.get("ROUTER_KNN_THRESHOLD", "0.35"),
         "rerank_url": routing.rerank.base_url,
         "rerank_api_key": routing.rerank.api_key,
         "rerank_model": routing.rerank.model,
+        # [v7.3/v8.0] absolute relevance floor for context injection; empty = off
+        # (ships disabled until calibrated). Drives the zero-context disclaimer.
+        "rerank_score_threshold": configs.get("RERANK_SCORE_THRESHOLD", ""),
         # [v7.2] router model for the live exercise-number LLM fallback.
         "router_base_url": routing.router.base_url,
         "router_api_key": routing.router.api_key,
@@ -245,31 +249,26 @@ def _make_rewrite_fn(llm_config: dict[str, str]):
     return rewrite
 
 
-def _make_exercise_extract_fn(llm_config: dict[str, str]):
-    """[v7.2] Resolve an exercise-shaped query to its number via the cheap
-    ROUTER_MODEL, then normalize deterministically. Returns None when the model
-    can't identify an exercise (so the graph keeps its kNN decision)."""
-    async def extract(message: str) -> int | None:  # pragma: no cover
+def _make_router_llm_fn(llm_config: dict[str, str]):
+    """[v8.0] The one-call router. `classify()` assembles the messages; this closes
+    over the ROUTER_MODEL endpoint + json_schema and returns the raw JSON string.
+    The router's tokens are cheap and are not billed to the student's quota."""
+    async def router_llm(messages: list[dict]) -> str:  # pragma: no cover
         client = AsyncOpenAI(
             api_key=llm_config["router_api_key"],
             base_url=llm_config["router_base_url"],
         )
         resp = await client.chat.completions.create(
             model=llm_config["router_model"],
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Which exercise number is this message about? Reply with just the "
-                    "number/label (e.g. '2', 'II', '3.1'), or 'none' if it isn't about "
-                    "a specific exercise.\n\n"
-                    f"{message}"
-                ),
-            }],
-            max_tokens=8,
+            messages=messages,
+            max_tokens=200,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "router_decision", "schema": _ROUTER_SCHEMA},
+            },
         )
-        raw = (resp.choices[0].message.content or "").strip()
-        return normalize_exercise_number(raw)
-    return extract
+        return resp.choices[0].message.content or ""
+    return router_llm
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +388,16 @@ async def chat_stream(
     class_id = None
     lab_id = session.lab_id
 
+    # [v8.0] Sticky exercise → the router's dialogue-state inputs (number + a short
+    # statement excerpt). It only fills a blank number; it never picks the route.
+    sticky_number = None
+    sticky_excerpt = None
+    if session.current_exercise_id is not None:
+        sticky_ex = await db.get(Exercise, session.current_exercise_id)
+        if sticky_ex is not None:
+            sticky_number = sticky_ex.number_normalized
+            sticky_excerpt = (sticky_ex.statement or "")[:100]
+
     if lab_id:
         # [v7.2] The lab must exist, be active, and not be soft-deleted — a locked
         # or deleted lab is read-only and must reject chat (README §6 step 1).
@@ -459,14 +468,16 @@ async def chat_stream(
     agent = build_agent(
         db,
         embed_fn=_make_embed_fn(llm_config),
-        router_threshold=float(llm_config["router_knn_threshold"]),
-        embedding_model=llm_config["embedding_model"],
-        embedding_base_url=llm_config["embedding_base_url"],
+        router_llm_fn=_make_router_llm_fn(llm_config),
         rerank_fn=_make_rerank_fn(llm_config),
         grade_fn=_make_grade_fn(llm_config),
         rewrite_fn=_make_rewrite_fn(llm_config),
-        exercise_extract_fn=_make_exercise_extract_fn(llm_config),
         max_retries=int(llm_config["rag_max_retries"]),
+        router_model_name=llm_config["router_model"],
+        rerank_score_threshold=(
+            float(llm_config["rerank_score_threshold"])
+            if llm_config["rerank_score_threshold"] else None
+        ),
     )
     agent_result = await agent.ainvoke({
         "message": body.message,
@@ -474,9 +485,33 @@ async def chat_stream(
         "lab_id": lab_id,
         "user_id": current_user.id,
         "history": history,
+        "sticky_number": sticky_number,
+        "sticky_excerpt": sticky_excerpt,
+        "is_test": session.is_test,
         **rule_texts,
     })
     messages_payload = agent_result["messages_payload"]
+
+    # [v8.0] Sticky write-back: on an exercise hit, remember it on the session so a
+    # later numberless follow-up ("and the next part?") reconnects seamlessly.
+    if (
+        agent_result.get("route") == "exercise"
+        and agent_result.get("exercise_number") is not None
+        and lab_id
+    ):
+        matched = await db.execute(
+            select(Exercise.id)
+            .where(
+                Exercise.lab_id == lab_id,
+                Exercise.number_normalized == agent_result["exercise_number"],
+                Exercise.audience == Audience.student,
+            )
+            .limit(1)
+        )
+        ex_id = matched.scalar_one_or_none()
+        if ex_id is not None:
+            session.current_exercise_id = ex_id
+            await db.flush()
 
     # Resolve citations now, while the request DB session is still open (the
     # streaming generator runs after the request returns and cannot use `db`).

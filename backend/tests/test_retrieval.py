@@ -12,6 +12,7 @@ import uuid
 import pytest
 
 from backend.app.models import (
+    Audience,
     Class,
     DocChunk,
     Document,
@@ -20,7 +21,11 @@ from backend.app.models import (
     Lab,
     UserRole,
 )
-from backend.app.services.retrieval_service import rag_search, search_exercises
+from backend.app.services.retrieval_service import (
+    list_exercise_numbers,
+    rag_search,
+    search_exercises,
+)
 from backend.tests.conftest import make_user
 
 
@@ -73,6 +78,30 @@ async def test_search_exercises_is_lab_scoped_and_solution_free(pg_session):
     assert hit.statement == "Implement a thread-safe counter."
     # Red line: there is no solution to surface (the column does not exist).
     assert not hasattr(hit, "solution")
+
+
+@pytest.mark.asyncio
+async def test_list_exercise_numbers_raw_normalized_audience_scoped(pg_session):
+    """[v8.0] Powers the clarify list, next-exercise navigation, and DB validation:
+    every number in the lab (raw + normalized), ordered, teacher-audience excluded."""
+    cls, lab, doc = await _seed_class_with_lab(pg_session)
+    pg_session.add_all([
+        Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 audience=Audience.student, number="Exercise II", number_normalized=2,
+                 statement="b"),
+        Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 audience=Audience.student, number="Exercise 1", number_normalized=1,
+                 statement="a"),
+        Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 audience=Audience.teacher, number="Teacher 3", number_normalized=3,
+                 statement="c"),
+    ])
+    await pg_session.commit()
+
+    nums = await list_exercise_numbers(pg_session, lab.id, audience=Audience.student)
+
+    # Ordered by normalized number; teacher-audience excluded; raw + normalized.
+    assert nums == [("Exercise 1", 1), ("Exercise II", 2)]
 
 
 @pytest.mark.asyncio

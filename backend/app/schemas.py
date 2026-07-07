@@ -128,7 +128,6 @@ class LLMConfigRequest(BaseModel):
     router_api_key: str | None = None
     router_model: str | None = None
     rag_max_retries: str | None = None
-    router_knn_threshold: str | None = None
     # [v7.3] hint slot (answer→tiered-hints big model) + injection gate + budgets.
     hint_base_url: str | None = None
     hint_api_key: str | None = None
@@ -158,7 +157,6 @@ class LLMConfigResponse(BaseModel):
     router_api_key: str = ""
     router_model: str = ""
     rag_max_retries: str = ""
-    router_knn_threshold: str = ""
     # [v7.3] raw stored values — hint slot empty = inherits main LLM;
     # threshold empty = injection gate OFF (until calibrated).
     hint_base_url: str = ""

@@ -37,6 +37,17 @@ async def _fixed_embed(texts):
     return [_unit(1) for _ in texts]
 
 
+def _rag_router():
+    """A router_llm_fn that classifies every message as a concept (rag) query."""
+    import json
+
+    async def llm_fn(messages):
+        return json.dumps({"route": "rag", "exercise_number": None,
+                           "number_source": "none", "search_terms": [],
+                           "sticky_matches": False})
+    return llm_fn
+
+
 async def _seed_lab(session, name="Lab 1"):
     teacher = make_user(role=UserRole.teacher)
     session.add(teacher)
@@ -69,7 +80,7 @@ async def test_e2e_ingest_then_agent_retrieves_context(pg_session, tmp_path):
     await ingest_document(pg_session, doc.id, embed_fn=_fixed_embed)
 
     # Agent answers a concept question end-to-end.
-    agent = build_agent(pg_session, embed_fn=_fixed_embed)
+    agent = build_agent(pg_session, embed_fn=_fixed_embed, router_llm_fn=_rag_router())
     result = await agent.ainvoke({
         "message": "Explain parity in binary coding",
         "class_id": cls.id, "lab_id": lab.id, "user_id": student.id, "history": [],
@@ -138,7 +149,7 @@ async def test_redline_cross_tenant_and_audience_and_no_solution(pg_session, tmp
     ))
     await pg_session.commit()
 
-    agent = build_agent(pg_session, embed_fn=_fixed_embed)
+    agent = build_agent(pg_session, embed_fn=_fixed_embed, router_llm_fn=_rag_router())
     result = await agent.ainvoke({
         "message": "Tell me about threads",
         "class_id": cls.id, "lab_id": lab_a.id, "user_id": student.id, "history": [],

@@ -455,6 +455,17 @@ class Session(Base):
         index=True,
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # [v8.0] Dialogue state: the exercise this session is currently discussing,
+    # so follow-ups ("et la question 2 ?") can omit the number. Updated on every
+    # agentic-search hit; ON DELETE SET NULL so re-ingestion (which deletes and
+    # rebuilds exercises) self-clears a stale pointer instead of dangling.
+    current_exercise_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("exercises.id", ondelete="SET NULL"), nullable=True
+    )
+    # [v8.0] Teacher test-drive session: the owning teacher chats against their
+    # own lab to preview the tutor. Excluded from analytics / router-training /
+    # learner-profile writes; may preview pending_review hint drafts.
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -734,17 +745,27 @@ class LearnerProfile(Base):
 
 
 class RouterQueryLog(Base):
-    """Write-only log of queries the embedding-kNN router was unsure about.
+    """[v8.0] Write-only log of EVERY LLM-router decision (redefined from the v7.1
+    low-confidence-only kNN telemetry).
 
-    Accumulates real multilingual data so a future BERT/XLM-R router has a labeled
-    source. Nothing in the live path reads it.
+    Records route + number attribution for each message so a future distilled
+    router has a labelled source. `degraded` marks timeout/failure fallbacks — not
+    a real label, so it must be excludable when distilling. `is_test` marks teacher
+    test-drive traffic (also excluded). Nothing in the live path reads it back.
     """
     __tablename__ = "router_query_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    chosen_route: Mapped[str] = mapped_column(String(32), nullable=False)
-    top_similarity: Mapped[float] = mapped_column(Float, nullable=False)
+    route: Mapped[str] = mapped_column(String(16), nullable=False)
+    exercise_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # explicit | context | sticky | none — the resolved number's origin.
+    number_source: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+    degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -752,6 +773,46 @@ class RouterQueryLog(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return (
-            f"<RouterQueryLog route={self.chosen_route} "
-            f"sim={self.top_similarity:.3f}>"
+            f"<RouterQueryLog route={self.route} "
+            f"num={self.exercise_number} src={self.number_source}>"
         )
+
+
+# ---------------------------------------------------------------------------
+# 16. AgentTraceLog — [v8.0] per-message observability
+# ---------------------------------------------------------------------------
+
+
+class AgentTraceLog(Base):
+    """Write-only, one row per chat message: which route, per-node latencies,
+    which fallbacks fired, retrieval/threshold counts, and the self-eval verdict.
+
+    This is the data source that decides the self-eval loop's fate (bad-verdict
+    rate / retry-flip rate / false-grounding rate) and calibrates the rerank
+    threshold. Nothing in the live path reads it. Soft references (nullable GUIDs)
+    for message/lab so the async write never fights row-creation ordering.
+    """
+    __tablename__ = "agent_trace_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    route: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Per-node milliseconds: router / retrieval / rerank / selfeval / first-token.
+    node_latencies: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Which fallbacks fired: router / embedding / rerank / all_filtered.
+    degraded_flags: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    recall_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rerank_filtered_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    all_filtered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    verdict: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    retry_flipped: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Optional regex injection-attempt marker (log-only, teacher-audit sort key).
+    red_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<AgentTraceLog msg={self.message_id} route={self.route}>"

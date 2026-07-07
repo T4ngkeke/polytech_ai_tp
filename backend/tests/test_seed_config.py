@@ -14,7 +14,7 @@ def test_seed_includes_v71_config_keys():
     # v7 keys still present
     assert {"LLM_BASE_URL", "LLM_MODEL", "EMBEDDING_MODEL"} <= keys
     # v7.1 additions
-    assert {"RERANK_URL", "RERANK_MODEL", "RAG_MAX_RETRIES", "ROUTER_KNN_THRESHOLD"} <= keys
+    assert {"RERANK_URL", "RERANK_MODEL", "RAG_MAX_RETRIES"} <= keys  # [v8.0] ROUTER_KNN_THRESHOLD removed
 
 
 def test_rag_max_retries_defaults_to_one():

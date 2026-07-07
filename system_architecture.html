@@ -328,6 +328,13 @@
                 OR-semantics language-aware BM25 (the old AND+simple leg was silently dead),
                 reranking over the augmented text, and a score-threshold injection gate wired in
                 the retrieval layer (ships disabled until calibrated).</p>
+            <p style="max-width:760px;margin:1.4rem auto 0;padding:0.9rem 1.2rem;background:#fffbeb;
+                border:1px solid #fde68a;border-radius:10px;color:#78350f;font-size:0.85rem;line-height:1.6;">
+                <b>📌 Status:</b> this diagram describes <b>v7.3 (shipped)</b>. <b>v8.0 is in progress</b> —
+                authoritative spec is <code>V8.0_PLAN.md</code> + <code>v8_workflow.html</code>. v8.0 replaces
+                the kNN router with a one-call LLM router, adds a main-DB <code>Answers</code> table with a
+                teacher-reviewed hint lifecycle, redefines <code>RouterQueryLog</code>, and adds
+                <code>doc_type=corrigé</code>. This page is rewritten to v8.0 only at release (PR-2b).</p>
         </header>
 
         <div class="legend">
