@@ -31,3 +31,31 @@ def test_tp_extracts_exercises_no_contextual():
     assert plan.extract_exercises is True
     assert plan.contextual_retrieval is False
     assert plan.produce_chunks is False
+
+
+# [v8.0] Third dimension: answers. CM none; TD/TP+has_answers add answers; a
+# standalone corrigé produces ONLY answers (no chunks, no exercises of its own).
+
+def test_cm_produces_no_answers():
+    assert plan_for(DocType.CM).produce_answers is False
+
+
+def test_td_without_answers_produces_no_answers():
+    plan = plan_for(DocType.TD, has_answers=False)
+    assert plan.extract_exercises is True
+    assert plan.produce_answers is False
+
+
+def test_td_with_answers_produces_exercises_and_answers():
+    plan = plan_for(DocType.TD, has_answers=True)
+    assert plan.extract_exercises is True
+    assert plan.produce_answers is True
+    assert plan.produce_chunks is False
+
+
+def test_corrige_produces_answers_only():
+    plan = plan_for(DocType.corrige)
+    assert plan.produce_answers is True
+    assert plan.extract_exercises is False   # it pairs to a TD, not its own exercises
+    assert plan.produce_chunks is False      # never RAG chunks
+    assert plan.contextual_retrieval is False

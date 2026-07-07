@@ -14,19 +14,32 @@ from backend.app.models import DocType
 
 @dataclass(frozen=True)
 class IngestionPlan:
-    """Per-type ingestion switches."""
+    """Per-type ingestion switches (three independent products)."""
     extract_exercises: bool
     contextual_retrieval: bool
     produce_chunks: bool
+    produce_answers: bool = False
 
 
-def plan_for(doc_type: DocType) -> IngestionPlan:
-    """Map a document type to its ingestion plan."""
+def plan_for(doc_type: DocType, has_answers: bool = False) -> IngestionPlan:
+    """Map a document type (+ whether it carries answers) to its ingestion plan.
+
+    [v8.0] Three products, never overlapping the strict split: CM → chunks only;
+    TD/TP → exercises (+ answers when the doc carries them); a standalone corrigé
+    → answers ONLY (no chunks, no exercises — it pairs to an existing TD's
+    exercises by number, so re-extracting would duplicate rows)."""
+    if doc_type == DocType.corrige:
+        return IngestionPlan(
+            extract_exercises=False, contextual_retrieval=False,
+            produce_chunks=False, produce_answers=True,
+        )
     if doc_type in (DocType.TD, DocType.TP):
         return IngestionPlan(
-            extract_exercises=True, contextual_retrieval=False, produce_chunks=False,
+            extract_exercises=True, contextual_retrieval=False,
+            produce_chunks=False, produce_answers=has_answers,
         )
     # CM (and any default) — lecture material, often fragmentary slides.
     return IngestionPlan(
-        extract_exercises=False, contextual_retrieval=True, produce_chunks=True,
+        extract_exercises=False, contextual_retrieval=True,
+        produce_chunks=True, produce_answers=False,
     )

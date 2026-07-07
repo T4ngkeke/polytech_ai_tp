@@ -36,7 +36,8 @@ def test_document_has_doc_type_and_audience():
     assert "doc_type" in Document.__table__.columns
     assert "audience" in Document.__table__.columns
     assert "page_count" in Document.__table__.columns
-    assert {t.value for t in DocType} == {"CM", "TD", "TP"}
+    # v7.1 core types (v8.0 adds `corrigé` — see test_schema_pr2b).
+    assert {"CM", "TD", "TP"} <= {t.value for t in DocType}
     assert {a.value for a in Audience} == {"student", "teacher"}
 
 
