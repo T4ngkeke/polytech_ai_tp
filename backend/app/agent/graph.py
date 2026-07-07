@@ -239,6 +239,7 @@ def build_agent(
                 audience=Audience.student,
                 rerank_fn=rerank_fn,
                 top_k=3,
+                class_id=state.get("class_id"),
             )
             for h in cm_hits:
                 blocks.append(h.content)
@@ -281,6 +282,7 @@ def build_agent(
                 rerank_fn=rerank_fn,
                 top_k=4,
                 score_threshold=rerank_score_threshold,
+                class_id=state.get("class_id"),
             )
             return hits
 

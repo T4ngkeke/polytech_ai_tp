@@ -167,9 +167,19 @@ async def list_exercise_numbers(
     return [(r.number, r.number_normalized) for r in rows]
 
 
-def _scope(stmt, lab_id: uuid.UUID, audience: Audience | None):
-    """Apply the mandatory tenant filter (+ student audience filter) in SQL."""
-    stmt = stmt.where(DocChunk.lab_id == lab_id)
+def _scope(stmt, lab_id: uuid.UUID, audience: Audience | None,
+           class_id: uuid.UUID | None = None):
+    """Apply the mandatory tenant filter (+ student audience filter) in SQL.
+
+    [v8.0] With `class_id`, the scope is 'this lab OR class-wide shared
+    (lab_id NULL)' bounded to the class — shared CM is reachable from every lab
+    of the class and never leaks across classes. Without it (legacy callers) it
+    stays strict lab-only."""
+    if class_id is not None:
+        stmt = stmt.where(DocChunk.class_id == class_id)
+        stmt = stmt.where((DocChunk.lab_id == lab_id) | (DocChunk.lab_id.is_(None)))
+    else:
+        stmt = stmt.where(DocChunk.lab_id == lab_id)
     if audience is not None:
         # Students never retrieve teacher-audience material — enforced in WHERE.
         stmt = stmt.where(DocChunk.audience == audience)
@@ -183,13 +193,14 @@ async def vector_search(
     *,
     audience: Audience | None = None,
     k: int = 20,
+    class_id: uuid.UUID | None = None,
 ) -> list[ChunkHit]:
-    """Vector ANN recall (cosine), scoped to a lab (+ audience)."""
+    """Vector ANN recall (cosine), scoped to a lab (+ audience, + class-wide CM)."""
     distance = DocChunk.embedding.cosine_distance(query_embedding)
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context),
-        lab_id, audience,
+        lab_id, audience, class_id,
     ).order_by(distance).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
@@ -207,6 +218,7 @@ async def bm25_search(
     audience: Audience | None = None,
     k: int = 20,
     language: str = "fr",
+    class_id: uuid.UUID | None = None,
 ) -> list[ChunkHit]:
     """BM25-style full-text recall over the `tsv` column (Postgres only).
 
@@ -225,7 +237,7 @@ async def bm25_search(
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context),
-        lab_id, audience,
+        lab_id, audience, class_id,
     ).where(DocChunk.tsv.op("@@")(tsquery)).order_by(rank.desc()).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
@@ -247,6 +259,7 @@ async def hybrid_search(
     top_k: int = 5,
     score_threshold: float | None = None,
     language: str = "fr",
+    class_id: uuid.UUID | None = None,
 ) -> tuple[list[ChunkHit], bool]:
     """Vector + BM25 recall → RRF fusion → optional rerank + threshold → top-k.
 
@@ -257,11 +270,13 @@ async def hybrid_search(
     """
     # [v8.0] query_embedding None = embedding endpoint degraded → BM25-only recall.
     vector_hits = (
-        await vector_search(db, query_embedding, lab_id, audience=audience, k=recall_k)
+        await vector_search(db, query_embedding, lab_id, audience=audience,
+                            k=recall_k, class_id=class_id)
         if query_embedding is not None else []
     )
     bm25_hits = await bm25_search(
         db, query_text, lab_id, audience=audience, k=recall_k, language=language,
+        class_id=class_id,
     )
 
     by_id: dict[uuid.UUID, ChunkHit] = {}

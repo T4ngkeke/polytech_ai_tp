@@ -243,6 +243,7 @@ async def upload_document(
     doc_type: DocType = Form(...),
     audience: Audience = Form(...),
     language: str = Form("fr"),
+    shared: bool = Form(False),
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
     storage_root: str = Depends(get_storage_root),
@@ -262,11 +263,15 @@ async def upload_document(
             detail="Only PDF uploads are supported. Export slides to PDF first.",
         )
 
+    # [v8.0] Only CM may be shared class-wide (lab_id NULL → reachable from every
+    # lab of the class); TD/TP stay strictly lab-scoped (exercises are lab-level).
+    doc_lab_id = None if (shared and doc_type == DocType.CM) else lab.id
+
     content = await file.read()
     doc = await document_service.create_document(
         db,
         class_id=lab.class_id,
-        lab_id=lab.id,
+        lab_id=doc_lab_id,
         filename=file.filename,
         content=content,
         uploaded_by=teacher.id,

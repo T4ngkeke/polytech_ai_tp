@@ -62,6 +62,51 @@ async def test_teacher_uploads_document_to_own_lab(db_session, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_shared_cm_uploads_class_wide(db_session, tmp_path):
+    """[v8.0] A CM uploaded with shared=true is class-wide (lab_id NULL), reachable
+    from every lab of the class; the class tenant boundary is preserved."""
+    teacher, cls, lab = await _teacher_with_lab(db_session)
+    app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.post(
+            f"/api/teacher/labs/{lab.id}/documents",
+            files={"file": ("cm.pdf", b"lecture", "application/pdf")},
+            data={"doc_type": "CM", "audience": "student", "shared": "true"},
+        )
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    docs = (await db_session.execute(select(Document))).scalars().all()
+    assert len(docs) == 1
+    assert docs[0].lab_id is None        # class-wide shared
+    assert docs[0].class_id == cls.id    # tenant boundary kept
+
+
+@pytest.mark.asyncio
+async def test_shared_flag_ignored_for_td(db_session, tmp_path):
+    """TD/TP stay strictly lab-scoped even if shared is passed."""
+    teacher, cls, lab = await _teacher_with_lab(db_session)
+    app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.post(
+            f"/api/teacher/labs/{lab.id}/documents",
+            files={"file": ("td.pdf", b"sheet", "application/pdf")},
+            data={"doc_type": "TD", "audience": "student", "shared": "true"},
+        )
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    docs = (await db_session.execute(select(Document))).scalars().all()
+    assert docs[0].lab_id == lab.id      # not shared — exercises are lab-level
+
+
+@pytest.mark.asyncio
 async def test_upload_requires_doc_type_and_audience(db_session, tmp_path):
     teacher, cls, lab = await _teacher_with_lab(db_session)
     app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
