@@ -218,7 +218,9 @@ def chunk_pages(
     """
     kept = [(i + 1, text) for i, text in enumerate(pages) if not _is_toc(text)]
 
-    if doc_type in (DocType.TD, DocType.TP):
+    # [v8.0] A corrigé is numbered like a TD/TP (answers per exercise number),
+    # so it segments on the same boundaries — the bodies become Answer rows.
+    if doc_type in (DocType.TD, DocType.TP, DocType.corrige):
         return _chunk_exercises(kept)
 
     chunks: list[Chunk] = []

@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.app.models import (
+    Answer,
     Audience,
     Class,
     DocChunk,
@@ -77,6 +78,101 @@ async def _exercises_of(session, doc):
     return (await session.execute(
         select(Exercise).where(Exercise.document_id == doc.id)
     )).scalars().all()
+
+
+async def _answers_of(session, doc):
+    return (await session.execute(
+        select(Answer).where(Answer.document_id == doc.id)
+    )).scalars().all()
+
+
+# --- corrigé path: answers only (no chunks, no exercises of its own) ----------
+
+@pytest.mark.asyncio
+async def test_corrige_ingest_extracts_answers_by_number(db_session, tmp_path):
+    """[v8.0 §9] A standalone corrigé produces `Answers` rows (segmented by
+    number, body = answer text) and nothing else — it pairs to a TD's exercises
+    by number later. answer_form (classified) and exercise_id (paired) stay NULL
+    until hint generation."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.corrige,
+        body="Exercice 1\nThe sum is 42.\n\nExercice 2\nUse a merge sort.\n",
+    )
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed
+
+    answers = sorted(await _answers_of(db_session, doc),
+                     key=lambda a: a.number_normalized)
+    assert [a.number_normalized for a in answers] == [1, 2]
+    assert [a.number_raw for a in answers] == ["Exercice 1", "Exercice 2"]
+    assert "42" in answers[0].answer_text
+    assert "merge sort" in answers[1].answer_text
+    # Classified at generation, paired at generation — both NULL at ingest.
+    assert all(a.answer_form is None and a.exercise_id is None for a in answers)
+
+    # A corrigé is neither the chunk nor the exercise path.
+    assert await _chunks_of(db_session, doc) == []
+    assert await _exercises_of(db_session, doc) == []
+
+
+@pytest.mark.asyncio
+async def test_corrige_reingest_does_not_duplicate_answers(db_session, tmp_path):
+    """[v8.0 §9] Re-ingesting a corrigé rebuilds its Answers rather than
+    appending duplicates (same idempotency as chunks/exercises)."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.corrige,
+        body="Exercice 1\nThe sum is 42.\n\nExercice 2\nUse a merge sort.\n",
+    )
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed)
+
+    answers = await _answers_of(db_session, doc)
+    assert len(answers) == 2  # not 4
+
+
+@pytest.mark.asyncio
+async def test_ingested_corrige_answers_pair_to_td_exercises(db_session, tmp_path):
+    """[v8.0 §9] End-to-end chain: a TD's exercises and a separate corrigé's
+    answers land in the same lab; pairing then links each Answer to its Exercise
+    by number — proving ingest's number_normalized matches pairing's."""
+    from backend.app.services.answer_service import pair_answers
+
+    teacher = make_user(role=UserRole.teacher)
+    db_session.add(teacher)
+    await db_session.flush()
+    cls = Class(id=uuid.uuid4(), name="Algo", teacher_id=teacher.id,
+                invite_code=uuid.uuid4().hex[:6])
+    db_session.add(cls)
+    await db_session.flush()
+    lab = Lab(id=uuid.uuid4(), class_id=cls.id, name="Lab 1")
+    db_session.add(lab)
+    await db_session.flush()
+
+    async def _doc(body, doc_type):
+        return await create_document(
+            db_session, class_id=cls.id, lab_id=lab.id, filename=f"{doc_type.value}.txt",
+            content=body.encode(), uploaded_by=teacher.id, storage_root=tmp_path,
+            doc_type=doc_type, audience=Audience.student,
+        )
+
+    td = await _doc("Exercice 1\nSum two numbers.\n\nExercice 2\nSort a list.\n",
+                    DocType.TD)
+    corrige = await _doc("Exercice 1\nThe sum is 42.\n\nExercice 2\nUse a merge sort.\n",
+                         DocType.corrige)
+    await ingest_document(db_session, td.id, embed_fn=fake_embed)
+    await ingest_document(db_session, corrige.id, embed_fn=fake_embed)
+
+    report = await pair_answers(db_session, lab.id)
+    assert report.paired == 2
+
+    # Each answer now points at the matching exercise (same number).
+    exercises = {e.number_normalized: e.id for e in await _exercises_of(db_session, td)}
+    for ans in await _answers_of(db_session, corrige):
+        assert ans.exercise_id == exercises[ans.number_normalized]
 
 
 # --- CM path: chunks only -----------------------------------------------------

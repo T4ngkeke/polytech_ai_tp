@@ -23,7 +23,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.exercise_number import normalize_exercise_number
-from backend.app.models import DocChunk, Document, DocumentStatus, DocType, Exercise
+from backend.app.models import (
+    Answer, DocChunk, Document, DocumentStatus, DocType, Exercise,
+)
 from backend.worker.chunking import (
     Chunk,
     chunk_pages,
@@ -203,7 +205,7 @@ async def ingest_document(
         return
 
     doc_type = doc.doc_type or DocType.CM
-    plan = plan_for(doc_type)
+    plan = plan_for(doc_type, has_answers=bool(doc.has_answers))
 
     try:
         # [v7.3] Teacher-corrected rows survive the rebuild.
@@ -212,6 +214,7 @@ async def ingest_document(
         # Idempotent: clear any artifacts from a previous run before rebuilding.
         await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
         await db.execute(delete(Exercise).where(Exercise.document_id == doc.id))
+        await db.execute(delete(Answer).where(Answer.document_id == doc.id))
 
         # [v7.3] Clean once, upstream: repeated headers/footers pollute chunks
         # and exercise segments alike. Every downstream step sees cleaned pages.
@@ -338,6 +341,22 @@ async def ingest_document(
                 "resegmented": resegmented,
                 "exercise_count": len(segments),
             }
+
+        if plan.produce_answers:
+            # [v8.0 §9] Segment the answer-bearing document by number (a corrigé
+            # or an answers-carrying TD/TP is numbered like a problem set) and
+            # store one Answer row per number. answer_form (classified) and
+            # exercise_id (paired) are filled later, at hint generation. This is
+            # worker-only code — the student path never touches the Answers table
+            # (guarded by test_answers_isolation).
+            for segment in (c for c in chunk_pages(pages, doc_type) if c.section):
+                db.add(Answer(
+                    id=uuid.uuid4(),
+                    document_id=doc.id,
+                    number_raw=segment.section,
+                    number_normalized=normalize_exercise_number(segment.section),
+                    answer_text=segment.content,
+                ))
 
         doc.status = DocumentStatus.indexed
         doc.page_count = len(pages)
