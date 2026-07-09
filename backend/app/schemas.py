@@ -271,6 +271,18 @@ class ExerciseUpdateRequest(BaseModel):
     hints: list[str] | None = None
 
 
+class GenerateHintsRequest(BaseModel):
+    """[v8.0 §10] `urgent` skips the chat-load queue gate (priority=0)."""
+    urgent: bool = False
+
+
+class GenerateHintsResponse(BaseModel):
+    """[v8.0 §10] How many exercises were queued, and the job (None if nothing
+    needed generating)."""
+    queued: int
+    job_id: uuid.UUID | None
+
+
 class LabUpdateRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     is_active: bool | None = None

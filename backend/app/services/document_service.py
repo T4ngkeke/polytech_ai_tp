@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.exercise_number import normalize_exercise_number
 from backend.app.models import (
-    Audience, Class, DocChunk, Document, DocType, Exercise, IngestionJob,
+    Audience, Class, DocChunk, Document, DocType, Exercise, HintStatus,
+    IngestionJob, JobType,
 )
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
@@ -207,6 +208,54 @@ async def get_exercise_in_document(
         Exercise.id == exercise_id, Exercise.document_id == document_id
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+def _make_hint_job(document: Document, exercise_ids, urgent: bool) -> IngestionJob:
+    """A hint_generate job carrying its target exercise ids. Urgent jobs use
+    priority=0 so the queue (ORDER BY priority) claims them ahead of ingestion."""
+    return IngestionJob(
+        id=uuid.uuid4(),
+        document_id=document.id,
+        job_type=JobType.hint_generate,
+        payload={"exercise_ids": [str(i) for i in exercise_ids]},
+        priority=0 if urgent else 100,
+    )
+
+
+async def start_batch_hint_generation(
+    db: AsyncSession, document: Document, *, urgent: bool = False
+) -> tuple[int, uuid.UUID | None]:
+    """[v8.0 §10] Enqueue hint generation for every exercise in the document that
+    still has no hints (hint_status == none). Idempotent: pending_review/approved/
+    failed/edited exercises are skipped (single-exercise regen is their only entry).
+    Marks the targeted exercises `generating`. Returns (count, job_id | None)."""
+    exercises = (await db.execute(
+        select(Exercise).where(
+            Exercise.document_id == document.id,
+            Exercise.hint_status == HintStatus.none,
+        )
+    )).scalars().all()
+    if not exercises:
+        return 0, None
+    for exercise in exercises:
+        exercise.hint_status = HintStatus.generating
+    job = _make_hint_job(document, [e.id for e in exercises], urgent)
+    db.add(job)
+    await db.flush()
+    return len(exercises), job.id
+
+
+async def start_single_hint_generation(
+    db: AsyncSession, document: Document, exercise: Exercise, *, urgent: bool = False
+) -> uuid.UUID:
+    """[v8.0 §10] Enqueue hint generation for one exercise regardless of its
+    current status — the only entry that overwrites an already-reviewed/edited
+    exercise. Marks it `generating`. Returns the job id."""
+    exercise.hint_status = HintStatus.generating
+    job = _make_hint_job(document, [exercise.id], urgent)
+    db.add(job)
+    await db.flush()
+    return job.id
 
 
 async def update_exercise(

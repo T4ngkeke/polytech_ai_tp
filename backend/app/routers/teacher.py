@@ -55,6 +55,8 @@ from backend.app.schemas import (
     ChunkUpdateRequest,
     DocExerciseResponse,
     ExerciseUpdateRequest,
+    GenerateHintsRequest,
+    GenerateHintsResponse,
     DocumentResponse,
     DocumentSummaryResponse,
     ApplySkillRequest,
@@ -388,6 +390,49 @@ async def update_document_exercise(
         db, exercise, number=body.number, statement=body.statement, hints=body.hints
     )
     return DocExerciseResponse.model_validate(exercise)
+
+
+@router.post(
+    "/documents/{document_id}/generate-hints", response_model=GenerateHintsResponse
+)
+async def generate_document_hints(
+    document_id: uuid.UUID,
+    body: GenerateHintsRequest = GenerateHintsRequest(),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> GenerateHintsResponse:
+    """[v8.0 §10] Batch-generate hints for a document: queues a hint job for every
+    exercise still missing hints (idempotent — skips reviewed/edited ones)."""
+    document = await _owned_document_or_404(db, document_id, teacher)
+    queued, job_id = await document_service.start_batch_hint_generation(
+        db, document, urgent=body.urgent
+    )
+    await db.commit()
+    return GenerateHintsResponse(queued=queued, job_id=job_id)
+
+
+@router.post(
+    "/documents/{document_id}/exercises/{exercise_id}/generate-hints",
+    response_model=GenerateHintsResponse,
+)
+async def generate_exercise_hints(
+    document_id: uuid.UUID,
+    exercise_id: uuid.UUID,
+    body: GenerateHintsRequest = GenerateHintsRequest(),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> GenerateHintsResponse:
+    """[v8.0 §10] Regenerate hints for one exercise — the only entry that
+    overwrites an already-reviewed or hand-edited exercise."""
+    document = await _owned_document_or_404(db, document_id, teacher)
+    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    job_id = await document_service.start_single_hint_generation(
+        db, document, exercise, urgent=body.urgent
+    )
+    await db.commit()
+    return GenerateHintsResponse(queued=1, job_id=job_id)
 
 
 # ===================================================================
