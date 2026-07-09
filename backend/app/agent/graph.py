@@ -212,9 +212,12 @@ def build_agent(
             return {"context_blocks": []}
         hits = await search_exercises(
             db, lab_id, number=state.get("exercise_number"), audience=Audience.student,
+            # Test-drive sessions preview pending_review drafts; students never do.
+            include_draft_hints=state.get("is_test", False),
         )
         blocks = [
-            f"{h.number}: {h.statement}" + (f"\nHint: {h.hints}" if h.hints else "")
+            f"{h.number}: {h.statement}"
+            + ("\nHints:\n" + "\n".join(f"- {t}" for t in h.hints) if h.hints else "")
             for h in hits
         ]
 

@@ -18,6 +18,7 @@ from backend.app.models import (
     Document,
     Exercise,
     EMBEDDING_DIM,
+    HintStatus,
     Lab,
     UserRole,
 )
@@ -66,7 +67,7 @@ async def test_search_exercises_is_lab_scoped_and_solution_free(pg_session):
     ex = Exercise(
         id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
         number="Exercise 2", statement="Implement a thread-safe counter.",
-        hints="Think about locks.",
+        hints=["Think about locks."],
     )
     pg_session.add(ex)
     await pg_session.commit()
@@ -79,6 +80,50 @@ async def test_search_exercises_is_lab_scoped_and_solution_free(pg_session):
     assert hit.statement == "Implement a thread-safe counter."
     # Red line: there is no solution to surface (the column does not exist).
     assert not hasattr(hit, "solution")
+
+
+@pytest.mark.asyncio
+async def test_search_exercises_only_surfaces_approved_hints(pg_session):
+    """[v8.0 §10] Red line: hints reach students ONLY after approval. A
+    pending_review draft (or any non-approved status) is never surfaced by the
+    default student search — the statement still is."""
+    cls, lab, doc = await _seed_class_with_lab(pg_session)
+    pg_session.add_all([
+        Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 audience=Audience.student, number="Exercise 1", number_normalized=1,
+                 statement="approved one", hints=["nudge", "method", "close"],
+                 hint_status=HintStatus.approved),
+        Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 audience=Audience.student, number="Exercise 2", number_normalized=2,
+                 statement="draft one", hints=["secret nudge"],
+                 hint_status=HintStatus.pending_review),
+    ])
+    await pg_session.commit()
+
+    hits = {h.number: h for h in await search_exercises(pg_session, lab_id=lab.id)}
+
+    assert hits["Exercise 1"].hints == ["nudge", "method", "close"]
+    assert hits["Exercise 2"].hints is None          # draft withheld from students
+    assert hits["Exercise 2"].statement == "draft one"  # statement still available
+
+
+@pytest.mark.asyncio
+async def test_search_exercises_test_drive_previews_draft_hints(pg_session):
+    """[v8.0 §10/§5A] The teacher's test-drive session is the one exception —
+    `include_draft_hints=True` lets it preview pending_review drafts to verify
+    them before approval."""
+    cls, lab, doc = await _seed_class_with_lab(pg_session)
+    pg_session.add(Exercise(
+        id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+        audience=Audience.student, number="Exercise 1", number_normalized=1,
+        statement="draft one", hints=["draft nudge"],
+        hint_status=HintStatus.pending_review,
+    ))
+    await pg_session.commit()
+
+    hits = await search_exercises(pg_session, lab_id=lab.id, include_draft_hints=True)
+
+    assert hits[0].hints == ["draft nudge"]
 
 
 @pytest.mark.asyncio

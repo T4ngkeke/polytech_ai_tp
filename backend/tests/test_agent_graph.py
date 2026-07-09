@@ -164,7 +164,7 @@ async def test_agent_exercise_path_surfaces_statement_only(pg_session):
     )).first()
     pg_session.add(Exercise(
         id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
-        number="Exercise 1", number_normalized=1, statement="Sum two numbers.", hints="use +",
+        number="Exercise 1", number_normalized=1, statement="Sum two numbers.", hints=["use +"],
     ))
     await pg_session.commit()
 

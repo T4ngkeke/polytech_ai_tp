@@ -49,7 +49,7 @@ async def _seed_doc(session, *, status=DocumentStatus.indexed, chunks=2, exercis
     for i in range(exercises):
         session.add(Exercise(
             id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
-            number=f"Exercice {i}", statement=f"statement {i}", hints="a hint",
+            number=f"Exercice {i}", statement=f"statement {i}", hints=["a hint"],
         ))
     await session.commit()
     return teacher, cls, lab, doc

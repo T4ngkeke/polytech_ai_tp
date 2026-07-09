@@ -158,7 +158,7 @@ async def test_exercise_concept_is_optional(db_session):
         class_id=cls.id,
         number="Exercise 2",
         statement="Implement a thread-safe counter.",
-        hints="Think about locks.",
+        hints=["Think about locks."],
     )
     db_session.add(ex)
     await db_session.flush()

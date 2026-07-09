@@ -260,14 +260,15 @@ class DocExerciseResponse(BaseModel):
     id: uuid.UUID
     number: str
     statement: str
-    hints: str | None
+    hints: list[str] | None
 
 
 class ExerciseUpdateRequest(BaseModel):
-    """[v7.2] Teacher correction of an extracted exercise (statements only)."""
+    """[v7.2] Teacher correction of an extracted exercise (statements only).
+    [v8.0 §10] hints is a tiered L1/L2/L3 array; a teacher hand-edit is trusted."""
     number: str | None = Field(None, min_length=1, max_length=255)
     statement: str | None = Field(None, min_length=1)
-    hints: str | None = None
+    hints: list[str] | None = None
 
 
 class LabUpdateRequest(BaseModel):

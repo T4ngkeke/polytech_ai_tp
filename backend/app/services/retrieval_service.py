@@ -20,7 +20,7 @@ from typing import Awaitable, Callable, Hashable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Audience, DocChunk, Exercise
+from backend.app.models import Audience, DocChunk, Exercise, HintStatus
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class ExerciseHit:
     """A retrieval result for an exercise. Deliberately has no `solution`."""
     number: str
     statement: str
-    hints: str | None
+    hints: list[str] | None
 
 
 @dataclass(frozen=True)
@@ -125,6 +125,7 @@ async def search_exercises(
     limit: int = 10,
     number: int | None = None,
     audience: Audience | None = None,
+    include_draft_hints: bool = False,
 ) -> list[ExerciseHit]:
     """Return exercises for a lab as solution-free hits.
 
@@ -133,17 +134,34 @@ async def search_exercises(
     I do exercise II?" query surfaces only that exercise, not the whole lab. When
     ``audience`` is given (``student`` for chat), teacher-audience exercises are
     excluded in the WHERE clause — students never retrieve teacher material.
+
+    [v8.0 §10] Red line: hints reach students ONLY after approval. This is the
+    single injection gate — a hit's ``hints`` is populated only when the
+    exercise is ``approved`` (or ``pending_review`` when ``include_draft_hints``
+    is set, which only the teacher's test-drive session does). Statements are
+    always surfaced; the answer is never stored here to begin with.
     """
-    stmt = select(Exercise.number, Exercise.statement, Exercise.hints).where(
-        Exercise.lab_id == lab_id
-    )
+    stmt = select(
+        Exercise.number, Exercise.statement, Exercise.hints, Exercise.hint_status,
+    ).where(Exercise.lab_id == lab_id)
     if number is not None:
         stmt = stmt.where(Exercise.number_normalized == number)
     if audience is not None:
         stmt = stmt.where(Exercise.audience == audience)
     stmt = stmt.order_by(Exercise.number).limit(limit)
     rows = (await db.execute(stmt)).all()
-    return [ExerciseHit(number=r.number, statement=r.statement, hints=r.hints) for r in rows]
+
+    visible = {HintStatus.approved}
+    if include_draft_hints:
+        visible.add(HintStatus.pending_review)
+    return [
+        ExerciseHit(
+            number=r.number,
+            statement=r.statement,
+            hints=r.hints if r.hint_status in visible else None,
+        )
+        for r in rows
+    ]
 
 
 async def list_exercise_numbers(

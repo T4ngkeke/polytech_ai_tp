@@ -744,10 +744,10 @@ class Exercise(Base):
     # via normalize_exercise_number. Decouples matching from the unstable label.
     number_normalized: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     statement: Mapped[str] = mapped_column(Text, nullable=False)
-    # [v7.3] hints stay NULL at ingest. [v8.0 §9] will retype this Text→JSON (tiered
-    # L1/L2/L3) when the generation workflow first produces tiers; kept Text here so
-    # §7 stays purely additive.
-    hints: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [v7.3] hints stay NULL at ingest. [v8.0 §10] tiered L1/L2/L3 JSON array,
+    # written by the generation workflow (and teacher edits); only surfaced to
+    # students once hint_status == approved (retrieval_service gates it).
+    hints: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     # [v8.0] Teacher-reviewed hint lifecycle. `hint_status` = review pipeline position
     # (only `approved` is injected for students); `hint_source` = how it was grounded.
     hint_status: Mapped[HintStatus] = mapped_column(

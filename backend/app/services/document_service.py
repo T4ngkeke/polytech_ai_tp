@@ -215,7 +215,7 @@ async def update_exercise(
     *,
     number: str | None = None,
     statement: str | None = None,
-    hints: str | None = None,
+    hints: list[str] | None = None,
 ) -> Exercise:
     """Update an exercise's fields. Changing the label re-derives the canonical
     `number_normalized` via the same normalizer used at ingest + query time."""

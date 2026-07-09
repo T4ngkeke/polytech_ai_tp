@@ -2,7 +2,7 @@
 test_schema_pr2b.py — [v8.0 PR-2b] schema batch 2 (hint lifecycle + answers).
 
 Additive column/table/enum guards for the hint system foundation. (The
-Exercises.hints Text→JSON tiering is deferred to §9, where the generation
+Exercises.hints is now a JSON tiered array (§10); the generation
 workflow first produces tiered data and its consumers are rewritten together.)
 """
 
