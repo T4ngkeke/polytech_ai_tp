@@ -22,6 +22,7 @@ from backend.app.models import (
     EMBEDDING_DIM,
     IngestionJob,
     JobStatus,
+    JobType,
     Lab,
     UserRole,
 )
@@ -79,6 +80,38 @@ async def test_process_one_runs_job_and_marks_done(pg_session, tmp_path):
         IngestionJob.__table__.select().where(IngestionJob.document_id == doc.id)
     )).first()
     assert job.status == JobStatus.done
+
+
+@pytest.mark.asyncio
+async def test_process_one_dispatches_hint_generate_to_injected_runner(pg_session, tmp_path):
+    """[v8.0 §10] The worker dispatches on job_type: a hint_generate job routes to
+    the injected hint runner, never the ingest path. (embed_fn=boom proves the
+    ingest branch is not taken — it would raise and fail the job.)"""
+    doc = await _seed_job(pg_session, tmp_path)  # also enqueues an ingest job (priority 100)
+    hint_job = IngestionJob(
+        id=uuid.uuid4(), document_id=doc.id, job_type=JobType.hint_generate,
+        payload={"document_id": str(doc.id)}, priority=0,  # urgent → claimed first
+    )
+    pg_session.add(hint_job)
+    await pg_session.commit()
+
+    seen = {}
+
+    async def fake_run_hint_job(db, job):
+        seen["job_id"] = job.id
+        seen["job_type"] = job.job_type
+
+    processed = await process_one(
+        pg_session, embed_fn=boom_embed, run_hint_job=fake_run_hint_job,
+    )
+
+    assert processed is True
+    assert seen["job_id"] == hint_job.id
+    assert seen["job_type"] == JobType.hint_generate
+    await pg_session.refresh(hint_job)
+    assert hint_job.status == JobStatus.done
+    await pg_session.refresh(doc)
+    assert doc.status != DocumentStatus.indexed  # ingest path was NOT taken
 
 
 @pytest.mark.asyncio

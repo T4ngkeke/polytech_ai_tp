@@ -20,7 +20,7 @@ from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import IngestionJob, JobStatus
+from backend.app.models import IngestionJob, JobStatus, JobType
 from backend.worker.ingest import ContextFn, EmbedFn, ResegmentFn, ingest_document
 from backend.worker.queue import claim_next_job
 
@@ -50,27 +50,36 @@ async def process_one(
     embed_fn: EmbedFn,
     context_fn: ContextFn | None = None,
     resegment_fn: ResegmentFn | None = None,
+    run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
 ) -> bool:
     """
-    Claim and process one ingestion job.
+    Claim and process one queued job.
 
     Returns True if a job was processed (success or failure), False if the
     queue was empty.
+
+    [v8.0] Dispatches on `job.job_type`: `ingest` runs the ingestion pipeline;
+    `hint_generate` runs the injected `run_hint_job` (teacher-triggered hint
+    generation). Both mark the job done/failed the same way.
     """
     job = await claim_next_job(db)
     if job is None:
         return False
 
     job_id = job.id
-    document_id = job.document_id
 
     try:
-        await ingest_document(
-            db, document_id,
-            embed_fn=embed_fn, context_fn=context_fn, resegment_fn=resegment_fn,
-        )
+        if job.job_type == JobType.hint_generate:
+            if run_hint_job is None:
+                raise RuntimeError("no hint runner configured for hint_generate job")
+            await run_hint_job(db, job)
+        else:
+            await ingest_document(
+                db, job.document_id,
+                embed_fn=embed_fn, context_fn=context_fn, resegment_fn=resegment_fn,
+            )
         await _mark_job(db, job_id, JobStatus.done)
-    except Exception as exc:  # ingest already marked the document failed
+    except Exception as exc:  # ingest/hint already recorded the failure on its row
         await db.rollback()
         await _mark_job(db, job_id, JobStatus.failed, str(exc))
 
