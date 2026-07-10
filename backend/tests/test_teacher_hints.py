@@ -115,6 +115,49 @@ async def test_generate_hints_single_overrides_any_status(db_session):
 
 
 @pytest.mark.asyncio
+async def test_approve_transitions_pending_review_to_approved(db_session):
+    teacher, doc, fresh, approved = await _seed_doc_with_exercises(db_session)
+    fresh.hint_status = HintStatus.pending_review
+    fresh.hints = ["draft nudge", "draft method", "draft close"]
+    await db_session.commit()
+
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.put(
+            f"/api/teacher/documents/{doc.id}/exercises/{fresh.id}/hints/approve"
+        )
+    finally:
+        await client.aclose()
+
+    assert resp.status_code == 200
+    await db_session.refresh(fresh)
+    assert fresh.hint_status == HintStatus.approved
+
+
+@pytest.mark.asyncio
+async def test_hand_editing_hints_marks_them_approved(db_session):
+    """[v8.0 §10] A teacher hand-editing hints trusts their own text → approved
+    directly (no self-review). Editing sets edited_by_teacher too (ingest keeps it)."""
+    teacher, doc, fresh, approved = await _seed_doc_with_exercises(db_session)
+    fresh.hint_status = HintStatus.pending_review
+    await db_session.commit()
+
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.put(
+            f"/api/teacher/documents/{doc.id}/exercises/{fresh.id}",
+            json={"hints": ["my own hint"]},
+        )
+    finally:
+        await client.aclose()
+
+    assert resp.status_code == 200
+    await db_session.refresh(fresh)
+    assert fresh.hints == ["my own hint"]
+    assert fresh.hint_status == HintStatus.approved
+
+
+@pytest.mark.asyncio
 async def test_generate_hints_rejects_foreign_document(db_session):
     teacher, doc, fresh, approved = await _seed_doc_with_exercises(db_session)
     intruder = make_user(role=UserRole.teacher)

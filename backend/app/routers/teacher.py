@@ -435,6 +435,26 @@ async def generate_exercise_hints(
     return GenerateHintsResponse(queued=1, job_id=job_id)
 
 
+@router.put(
+    "/documents/{document_id}/exercises/{exercise_id}/hints/approve",
+    response_model=DocExerciseResponse,
+)
+async def approve_exercise_hints(
+    document_id: uuid.UUID,
+    exercise_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> DocExerciseResponse:
+    """[v8.0 §10] Approve a reviewed draft → students can now see the hints."""
+    await _owned_document_or_404(db, document_id, teacher)
+    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    exercise = await document_service.approve_exercise_hints(db, exercise)
+    await db.commit()
+    return DocExerciseResponse.model_validate(exercise)
+
+
 # ===================================================================
 # PUT /api/teacher/rules
 # ===================================================================

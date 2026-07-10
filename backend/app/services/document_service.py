@@ -275,9 +275,21 @@ async def update_exercise(
         exercise.statement = statement
     if hints is not None:
         exercise.hints = hints
+        # [v8.0 §10] Teacher-written hints are trusted — approved directly, no
+        # self-review (they authored them).
+        exercise.hint_status = HintStatus.approved
     # [v7.3] Flag the correction so idempotent re-ingestion preserves it.
     exercise.edited_by_teacher = True
     db.add(exercise)
+    await db.flush()
+    await db.refresh(exercise)
+    return exercise
+
+
+async def approve_exercise_hints(db: AsyncSession, exercise: Exercise) -> Exercise:
+    """[v8.0 §10] Approve a reviewed draft → students can now see the hints
+    (the retrieval gate only surfaces `approved`)."""
+    exercise.hint_status = HintStatus.approved
     await db.flush()
     await db.refresh(exercise)
     return exercise
