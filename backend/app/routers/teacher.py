@@ -44,6 +44,7 @@ from backend.app.models import (
 )
 from backend.app.schemas import (
     AnswerResponse,
+    ExerciseHotspot,
     ClassAnalyticsResponse,
     ClassCreate,
     ClassResponse,
@@ -75,6 +76,7 @@ from backend.app.services import (
     class_service,
     document_service,
     lab_service,
+    router_service,
     rule_service,
     session_service,
     skill_preset_service,
@@ -533,6 +535,20 @@ async def create_test_session(
     )
     await db.commit()
     return TestSessionResponse(session_id=session.id)
+
+
+@router.get("/labs/{lab_id}/hotspots", response_model=list[ExerciseHotspot])
+async def lab_hotspots(
+    lab_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[ExerciseHotspot]:
+    """[v8.0 §11C] The lab's most-asked exercises (teacher test-drives excluded) —
+    shows where students are getting stuck."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    rows = await router_service.lab_exercise_hotspots(db, lab_id)
+    return [ExerciseHotspot(exercise_number=n, count=c) for n, c in rows]
 
 
 # ===================================================================

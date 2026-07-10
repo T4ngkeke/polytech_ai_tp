@@ -299,6 +299,12 @@ class HealthDegradationsResponse(BaseModel):
     degradations: dict[str, int]
 
 
+class ExerciseHotspot(BaseModel):
+    """[v8.0 §11C] One row of the teaching-hotspot panel."""
+    exercise_number: int
+    count: int
+
+
 class AnswerResponse(BaseModel):
     """[v8.0 §10] An uploaded answer with its pairing state. Teacher-only surface
     (decision B); the student path never reads Answers."""

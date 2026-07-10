@@ -11,6 +11,7 @@ the chat response.
 
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import RouterQueryLog
@@ -47,3 +48,24 @@ async def log_decision(
         lab_id=lab_id,
     ))
     await db.flush()
+
+
+async def lab_exercise_hotspots(
+    db: AsyncSession, lab_id: uuid.UUID, limit: int = 10
+) -> list[tuple[int, int]]:
+    """[v8.0 §11C] The lab's most-asked exercises: (exercise_number, count) ranked
+    by count desc, from the exercise-route router logs, excluding teacher
+    test-drives. Powers the teaching-hotspot panel."""
+    rows = (await db.execute(
+        select(RouterQueryLog.exercise_number, func.count().label("hits"))
+        .where(
+            RouterQueryLog.lab_id == lab_id,
+            RouterQueryLog.route == "exercise",
+            RouterQueryLog.exercise_number.isnot(None),
+            RouterQueryLog.is_test.is_(False),
+        )
+        .group_by(RouterQueryLog.exercise_number)
+        .order_by(func.count().desc(), RouterQueryLog.exercise_number)
+        .limit(limit)
+    )).all()
+    return [(r[0], r[1]) for r in rows]
