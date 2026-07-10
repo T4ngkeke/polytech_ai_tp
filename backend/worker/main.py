@@ -99,6 +99,7 @@ async def run_tick(
     gate_seconds: float = GATE_SLEEP_SECONDS,
     chat_gate=None,
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
+    run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
 ) -> bool:
     """
     One iteration of the worker loop.
@@ -128,6 +129,7 @@ async def run_tick(
 
     processed = await process_one(
         db, embed_fn=embed_fn, context_fn=context_fn, resegment_fn=resegment_fn,
+        run_hint_job=run_hint_job,
     )
     if not processed:
         await sleep_fn(idle_seconds)
@@ -143,6 +145,7 @@ async def run_forever(
     resegment_fn: ResegmentFn | None = None,
     chat_gate=None,
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
+    run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
 ) -> None:  # pragma: no cover - thin infinite-loop glue
     """Run the ingestion worker loop forever."""
     while True:
@@ -150,6 +153,7 @@ async def run_forever(
             db, gate, embed_fn=embed_fn, context_fn=context_fn,
             resegment_fn=resegment_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
+            run_hint_job=run_hint_job,
         )
 
 
@@ -328,7 +332,22 @@ async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
         "embedding_base_url": routing.embedding.base_url,
         "embedding_api_key": routing.embedding.api_key,
         "embedding_model": routing.embedding.model,
+        # Hint endpoint (the big model, off-peak) for teacher-triggered generation.
+        "hint_base_url": routing.hint.base_url,
+        "hint_api_key": routing.hint.api_key,
+        "hint_model": routing.hint.model,
     }
+
+
+def _make_real_hint_fn(client, model: str):  # pragma: no cover
+    """A hint-model call: assembled prompt → raw reply. One helper serves the
+    classify / generate / judge steps of the hint workflow (thinking left on)."""
+    async def hint(prompt: str) -> str:
+        resp = await client.chat.completions.create(
+            model=model, messages=[{"role": "user", "content": prompt}],
+        )
+        return resp.choices[0].message.content or ""
+    return hint
 
 
 async def main() -> None:  # pragma: no cover - entrypoint
@@ -349,6 +368,22 @@ async def main() -> None:  # pragma: no cover - entrypoint
         embed_fn = _make_real_embed_fn(embed_client, cfg["embedding_model"])
         resegment_fn = _make_real_resegment_fn(ingest_client, cfg["model"])
         context_fn = _make_real_context_fn(ingest_client, cfg["model"])
+
+        # Hint generation (teacher-triggered) runs on the big model, off-peak.
+        from backend.worker.hint_jobs import run_hint_job as _run_hint_job
+        from backend.worker.hints import generate_hints_for_exercise
+        hint_client = AsyncOpenAI(api_key=cfg["hint_api_key"], base_url=cfg["hint_base_url"])
+        hint_fn = _make_real_hint_fn(hint_client, cfg["hint_model"])
+
+        async def generate_fn(statement: str, answer_text: str):
+            return await generate_hints_for_exercise(
+                statement, answer_text,
+                classify_fn=hint_fn, generate_fn=hint_fn, judge_fn=hint_fn,
+            )
+
+        async def run_hint_job(db_, job):
+            await _run_hint_job(db_, job, generate_fn=generate_fn)
+
         # Primary gate: live chat load (engine-agnostic). Optional: GPU idle
         # (no-ops on a remote API where _pynvml_util reads idle).
         chat_gate = ChatLoadGate()
@@ -357,6 +392,7 @@ async def main() -> None:  # pragma: no cover - entrypoint
             db, gate, embed_fn=embed_fn, context_fn=context_fn,
             resegment_fn=resegment_fn,
             chat_gate=chat_gate, chat_load_fn=_recent_chat_count,
+            run_hint_job=run_hint_job,
         )
 
 

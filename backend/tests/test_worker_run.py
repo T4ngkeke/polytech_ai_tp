@@ -16,6 +16,7 @@ from backend.app.models import (
     EMBEDDING_DIM,
     IngestionJob,
     JobStatus,
+    JobType,
     Lab,
     UserRole,
 )
@@ -94,6 +95,37 @@ async def test_run_tick_processes_when_gate_open(pg_session, tmp_path):
     await pg_session.refresh(doc)
     assert doc.status == DocumentStatus.indexed
     assert sleeps == []  # did work, no idle sleep
+
+
+@pytest.mark.asyncio
+async def test_run_tick_forwards_run_hint_job(pg_session, tmp_path):
+    """[v8.0 §10] run_tick threads run_hint_job through to process_one, so a
+    hint_generate job actually runs in production (not just in a direct
+    process_one call)."""
+    doc = await _seed_job(pg_session, tmp_path)  # also an ingest job (priority 100)
+    hint_job = IngestionJob(
+        id=uuid.uuid4(), document_id=doc.id, job_type=JobType.hint_generate,
+        payload={"exercise_ids": []}, priority=0,  # claimed ahead of ingest
+    )
+    pg_session.add(hint_job)
+    await pg_session.commit()
+
+    gate = FakeGate(is_open=True)
+    seen = {}
+
+    async def fake_run_hint_job(db, job):
+        seen["job_id"] = job.id
+
+    async def fake_sleep(seconds):
+        pass
+
+    processed = await run_tick(
+        pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
+        run_hint_job=fake_run_hint_job,
+    )
+
+    assert processed is True
+    assert seen["job_id"] == hint_job.id
 
 
 @pytest.mark.asyncio
