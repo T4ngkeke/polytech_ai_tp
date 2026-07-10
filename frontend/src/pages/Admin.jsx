@@ -759,6 +759,47 @@ function ConfigSection({ title, desc, children }) {
 }
 
 /* ═══════════════════════════ MAINTENANCE TAB ═════════════════════════════ */
+// [v8.0 §11D] Health panel — recent graceful-degradation counts, so silent
+// fallbacks (router→rag, embedding→BM25, rerank→fusion, all_filtered) are visible.
+const DEGRADATION_LABEL = {
+  router: 'Router → RAG', embedding: 'Embedding → BM25-only',
+  rerank: 'Rerank → fusion order', all_filtered: 'All retrieval filtered',
+};
+
+function HealthPanel() {
+  const [data, setData] = useState(null);
+
+  const load = useCallback(() => {
+    api.get('/api/admin/health/degradations').then(setData).catch(() => setData(null));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const entries = data ? Object.entries(data.degradations || {}) : [];
+  return (
+    <div className="mb-6 p-5 rounded-xl bg-ink-raised border border-border-subtle">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-cream">System Health</p>
+        <button onClick={load} className="text-xs text-cyan hover:underline cursor-pointer">Refresh</button>
+      </div>
+      <p className="mt-1 text-xs text-cream-muted">
+        Fallbacks fired in the last {data?.window_minutes ?? 60} min.
+      </p>
+      {entries.length === 0 ? (
+        <p className="mt-3 text-sm text-emerald-300">✓ No degradations — all systems nominal.</p>
+      ) : (
+        <ul className="mt-3 space-y-1.5">
+          {entries.map(([k, n]) => (
+            <li key={k} className="flex items-center justify-between text-sm">
+              <span className="text-cream-secondary">{DEGRADATION_LABEL[k] || k}</span>
+              <span className="font-mono text-gold">{n}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function MaintenanceTab() {
   const [days, setDays] = useState(30);
   const [pruning, setPruning] = useState(false);
@@ -778,6 +819,7 @@ function MaintenanceTab() {
   return (
     <div className="p-8 overflow-y-auto h-full">
       <div className="max-w-md mx-auto">
+        <HealthPanel />
         <PageHeader title="Database Maintenance" subtitle="Permanently remove old sessions to free disk space." />
         <div className="p-5 rounded-xl bg-danger-muted border border-danger/20 space-y-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-danger">

@@ -314,7 +314,12 @@ export default function Teacher() {
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
-              {level === 'lab' && activeTab === 2 && <AnalyticsPanel analytics={analytics} filterLabId={selectedLab.id} />}
+              {level === 'lab' && activeTab === 2 && (
+                <div className="space-y-6">
+                  <HotspotPanel labId={selectedLab.id} />
+                  <AnalyticsPanel analytics={analytics} filterLabId={selectedLab.id} />
+                </div>
+              )}
               {level === 'lab' && activeTab === 3 && <AuditPanel sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
@@ -478,6 +483,44 @@ function LabSettingsPanel({ lab, onToggle }) {
           {lab.is_active ? '🔒 Lock' : '🔓 Unlock'}
         </button>
       </div>
+    </div>
+  );
+}
+
+// [v8.0 §11C] Teaching hotspots — the lab's most-asked exercises (test-drives
+// excluded), so a teacher sees where students get stuck.
+function HotspotPanel({ labId }) {
+  const [rows, setRows] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.get(`/api/teacher/labs/${labId}/hotspots`)
+      .then((r) => { if (alive) setRows(r); })
+      .catch(() => { if (alive) setRows([]); });
+    return () => { alive = false; };
+  }, [labId]);
+
+  if (rows === null) return null;
+  const max = rows.reduce((m, r) => Math.max(m, r.count), 0) || 1;
+  return (
+    <div className="p-5 rounded-xl bg-ink-raised border border-border-subtle">
+      <p className="text-sm font-semibold text-cream">Teaching hotspots</p>
+      <p className="mt-1 text-xs text-cream-muted">Most-asked exercises in this lab (test-drives excluded).</p>
+      {rows.length === 0 ? (
+        <p className="mt-3 text-sm text-cream-muted">No exercise questions yet.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {rows.map((r) => (
+            <li key={r.exercise_number} className="flex items-center gap-3">
+              <span className="w-14 shrink-0 text-sm text-cream-secondary">Ex. {r.exercise_number}</span>
+              <span className="h-2 flex-1 rounded-full bg-ink-deep overflow-hidden">
+                <span className="block h-full gradient-cyan" style={{ width: `${(r.count / max) * 100}%` }} />
+              </span>
+              <span className="w-8 shrink-0 text-right font-mono text-xs text-cyan">{r.count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
