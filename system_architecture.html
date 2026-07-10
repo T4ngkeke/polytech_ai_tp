@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM v7.3 Agentic Class-Lab Architecture</title>
+    <title>Edu-LLM v8.0 Agentic Class-Lab Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -309,32 +309,30 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v7.3 — Agentic Class-Lab Architecture</div>
+            <div class="pill">Architecture v8.0 — Agentic Class-Lab Architecture</div>
             <h1>Edu-LLM: Agentic RAG, Hybrid Retrieval & Off-Peak Ingestion</h1>
             <p class="subtitle">The v6 foundation (3-tier RBAC, invite codes, hierarchical rule injection) plus a
                 LangGraph agent and the v7.1 retrieval core (PDF-only structured ingestion with Contextual
-                Retrieval, a multilingual embedding-kNN router, hybrid vector + BM25 retrieval with reranking,
-                a bounded LLM self-eval loop). <b>v7.2</b> adds a full config-driven model-routing table
+                Retrieval, hybrid vector + BM25 retrieval with reranking, a bounded LLM self-eval loop). <b>v7.2</b> adds a full config-driven model-routing table
                 (split a cheap off-peak ingestion / live router model from the expensive chat model),
                 cost-aware weighted-token quota, an LLM-assisted exercise-number fallback with canonical
                 normalization, per-teacher skill presets, section-scoped (length-safe) Contextual Retrieval,
                 and a markdown / code-highlight / KaTeX student chat UI — plus self-service password change.
-                <b>v7.3</b> hardens the data pipeline: single-source deterministic exercise
-                segmentation (the whole-document LLM extractor — the root cause of wrong exercise
-                numbers — is deleted; an LLM re-judges boundaries only on numbering anomalies), a
-                <b>strict split</b> (TD/TP never produce RAG chunks; DocChunks come from CM only),
-                header/TOC cleanup with size-controlled code-aware CM chunking, teacher edits that
-                survive re-ingestion, a per-document reconciliation report, and retrieval fixes —
-                OR-semantics language-aware BM25 (the old AND+simple leg was silently dead),
-                reranking over the augmented text, and a score-threshold injection gate wired in
-                the retrieval layer (ships disabled until calibrated).</p>
+                <b>v7.3</b> hardened the data pipeline (single-source deterministic exercise
+                segmentation, strict CM/TD-TP split, language-aware OR-semantics BM25).
+                <b>v8.0</b> replaces the kNN router with a <b>one-call LLM router carrying dialogue
+                state</b> (a sticky exercise fills a blank number but never picks the route;
+                unresolvable numbers ask a clarifying question), adds a <b>teacher-driven hint
+                lifecycle</b> (ingestion never generates hints; a teacher triggers generation, reviews
+                per-exercise, and only <b>approved</b> hints reach students), stores uploaded answers in
+                a main-DB <code>Answers</code> table for <b>offline</b> hint generation (the student path
+                never imports the <code>Answer</code> model), and adds the human loop — teacher
+                test-drive, student feedback, an admin health panel, and a teaching-hotspot panel.</p>
             <p style="max-width:760px;margin:1.4rem auto 0;padding:0.9rem 1.2rem;background:#fffbeb;
                 border:1px solid #fde68a;border-radius:10px;color:#78350f;font-size:0.85rem;line-height:1.6;">
-                <b>📌 Status:</b> this diagram describes <b>v7.3 (shipped)</b>. <b>v8.0 is in progress</b> —
-                authoritative spec is <code>V8.0_PLAN.md</code> + <code>v8_workflow.html</code>. v8.0 replaces
-                the kNN router with a one-call LLM router, adds a main-DB <code>Answers</code> table with a
-                teacher-reviewed hint lifecycle, redefines <code>RouterQueryLog</code>, and adds
-                <code>doc_type=corrigé</code>. This page is rewritten to v8.0 only at release (PR-2b).</p>
+                <b>📌 Status:</b> the <b>v8.0 backend is shipped</b> (branch <code>v7.2-upgrade</code>); the
+                v8.0 frontend and the retrieval golden-set eval are still in progress. Authoritative design
+                log: <code>V8.0_PLAN.md</code> + <code>v8_workflow.html</code>.</p>
         </header>
 
         <div class="legend">
@@ -375,7 +373,7 @@
                 R_Teacher["Teacher Routes\n(Classes, Labs, Rules, Documents)"]
                 R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
                 RateLimit["Rate Limiter\n(DB Quota Check)"]
-                Router["LangGraph Router\nexercise regex → bge-m3 kNN\n+ ROUTER_MODEL fallback (v7.2)"]
+                Router["LangGraph Router (v8.0)\none LLM call: route + number + dialogue state\nexercise | rag | direct | clarify"]
                 Retrieval["Retrieval Service\nhybrid vector+BM25 (OR, fr/en) → RRF →\nrerank on augmented text → threshold gate (v7.3, ships off)"]
                 SelfEval["Self-Eval Loop\ngate → good/partial/bad → bounded retry"]
                 Synth["Synthesize Node\nskill.md + 3-tier rules + context"]
@@ -388,12 +386,13 @@
                 DB_Classes["Classes & Labs\ninvite_code, teacher_id"]
                 DB_Users["Users\nid · role · daily_token_quota"]
                 DB_Rules["Hierarchical Rules\nlevel(class/lab/student) + skill.md"]
-                DB_Sessions["Sessions\nid · user_id · lab_id · is_deleted (soft-delete)"]
-                DB_Messages["Messages & Usage Stats"]
+                DB_Sessions["Sessions\nid · user_id · lab_id · current_exercise_id · is_test (v8.0)"]
+                DB_Messages["Messages & Usage Stats\n+ feedback up/down (v8.0)"]
                 DB_Chunks["DocChunks\nembedding vector(N) · tsv (BM25) · context · lab_id · audience"]
-                DB_Exercises["Exercises\nnumber · statement · hints (no solution)"]
-                DB_Jobs["IngestionJobs\nDB-as-queue · SKIP LOCKED"]
-                DB_RouterLog["RouterQueryLog\nlow-confidence routing telemetry"]
+                DB_Exercises["Exercises\nnumber · statement · hints(JSON) · hint_status (v8.0, no solution)"]
+                DB_Answers["Answers (v8.0)\nexercise_id · answer_text · form — teacher/worker only"]
+                DB_Jobs["IngestionJobs\nDB-as-queue · SKIP LOCKED · job_type (v8.0)"]
+                DB_RouterLog["RouterQueryLog v2 + AgentTraceLog\nevery route decision · degradation flags"]
                 end
 
                 subgraph WK ["④ Ingestion Worker (docker-compose)"]
@@ -425,11 +424,11 @@
                 RateLimit ==>|"quota OK"| Router
                 RateLimit -->|"429 — over limit"| UI_S
 
-                Router ==>|"agentic_search | rag"| Retrieval
-                Router ==>|"direct"| Synth
-                Router -.->|"low-confidence → log"| DB_RouterLog
+                Router ==>|"exercise | rag"| Retrieval
+                Router ==>|"direct | clarify"| Synth
+                Router -.->|"every decision → log"| DB_RouterLog
                 Retrieval -.->|"vector + BM25 (lab + audience)"| DB_Chunks
-                Retrieval -.->|"structured search (statements only)"| DB_Exercises
+                Retrieval -.->|"exercise search (statements + approved hints)"| DB_Exercises
                 Retrieval ==>|"hybrid + rerank"| SelfEval
                 SelfEval -.->|"bad → rewrite & re-retrieve (≤ max)"| Retrieval
                 SelfEval ==>|"context + citations"| Synth
@@ -448,8 +447,9 @@
                 Extract -.->|"low-priority batch"| LLM
                 Extract -.->|"write chunks (CM only, v7.3)"| DB_Chunks
                 Extract -.->|"write exercises (TD/TP only, v7.3)"| DB_Exercises
+                Extract -.->|"write answers (corrigé → offline, v8.0)"| DB_Answers
 
-                class DB_SysConf,DB_Classes,DB_Rules,DB_Chunks,DB_Exercises,DB_Jobs,DB_RouterLog newNode;
+                class DB_SysConf,DB_Classes,DB_Rules,DB_Chunks,DB_Exercises,DB_Answers,DB_Jobs,DB_RouterLog newNode;
                 class Auth auth;
                 class Router,Retrieval,SelfEval,Synth danger;
                 class SSE,LLM streaming;
@@ -463,7 +463,7 @@
             <div class="card new">
                 <span class="tag">Agent, not Proxy</span>
                 <h3>LangGraph Agentic RAG</h3>
-                <p>The chat endpoint is a graph: <code>Router → [agentic_search | rag | direct] → self-eval loop → Synthesize → SSE</code>. The router is cheap and multilingual — a deterministic exercise-number regex fast-path, then <code>bge-m3</code> cosine-kNN over in-code anchor exemplars — avoiding pure ReAct so slow-bandwidth decodes aren't wasted on every step.</p>
+                <p>The chat endpoint is a graph: <code>router → [exercise → tutor | rag | direct | clarify] → self-eval loop → Synthesize → SSE</code>. <b>[v8.0]</b> the router is <b>one LLM call</b> per message that classifies the route AND carries dialogue state: a sticky exercise (from <code>session.current_exercise_id</code>) fills a blank number but never picks the route, and an unresolvable number produces a clarifying question rather than a wrong-exercise guess. Timeout/failure degrades to a safe <code>rag</code> and is flagged. This replaced the v7.1 regex + <code>bge-m3</code> kNN exemplar router.</p>
             </div>
 
             <div class="card new">
@@ -579,7 +579,7 @@
                         <td><code>system_configs</code></td>
                         <td><span class="badge changed">v7.2</span></td>
                         <td><code>id, key, value</code></td>
-                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping. <b>v7.2</b> adds the full model-routing table (<code>EMBEDDING_URL/KEY</code>, <code>RERANK_API_KEY</code>, <code>INGEST_MODEL/URL/KEY</code>, <code>ROUTER_MODEL/URL/KEY</code> — empty falls back to the main LLM) plus cost weights <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>. <b>v7.3</b> adds <code>HINT_MODEL/URL/KEY</code> (reserved for the v8.0 hint generator), <code>RERANK_SCORE_THRESHOLD</code> (ships empty = off) and worker budgets <code>HINT_MAX_SAMPLES</code>/<code>INGEST_TOKEN_BUDGET</code>.</td>
+                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping. <b>v7.2</b> adds the full model-routing table (<code>EMBEDDING_URL/KEY</code>, <code>RERANK_API_KEY</code>, <code>INGEST_MODEL/URL/KEY</code>, <code>ROUTER_MODEL/URL/KEY</code> — empty falls back to the main LLM) plus cost weights <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>. <b>v7.3</b> adds <code>HINT_MODEL/URL/KEY</code> (<b>v8.0</b>: the big off-peak model the hint workflow runs on), <code>RERANK_SCORE_THRESHOLD</code> (ships empty = off) and worker budgets <code>HINT_MAX_SAMPLES</code>/<code>INGEST_TOKEN_BUDGET</code>. <b>v8.0</b> removes <code>ROUTER_KNN_THRESHOLD</code> with the kNN router.</td>
                     </tr>
                     <tr>
                         <td><code>classes & labs</code></td>
@@ -609,7 +609,7 @@
                         <td><code>documents</code></td>
                         <td><span class="badge new">New v7 · v7.1</span></td>
                         <td><code>class_id, lab_id, storage_path, content_hash, doc_type, audience, status, language, ingest_report</code></td>
-                        <td>PDF-only registry with a state machine (<code>pending→processing→indexed→failed</code>, <b>v7.1</b> adds <code>needs_review</code> for the char-yield gate). <b>v7.1</b> <code>doc_type</code> (CM/TD/TP) + <code>audience</code> (student/teacher) are the deterministic routing + filter signals. <b>v7.3</b> adds <code>language</code> (fr default/en — selects the BM25 config) and <code>ingest_report</code> (numbering warnings the teacher audits). Files persist in the <code>documents_data</code> volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
+                        <td>PDF-only registry with a state machine (<code>pending→processing→indexed→failed</code>, <b>v7.1</b> adds <code>needs_review</code> for the char-yield gate). <b>v7.1</b> <code>doc_type</code> (CM/TD/TP) + <code>audience</code> (student/teacher) are the deterministic routing + filter signals. <b>v7.3</b> adds <code>language</code> and <code>ingest_report</code>. <b>v8.0</b> adds <code>doc_type=corrigé</code> (a standalone answer file → produces only <code>Answers</code>), <code>has_answers</code>, and <code>answers_for_document_id</code> (a corrigé's target TD, for pairing). Files persist in the <code>documents_data</code> volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
                     </tr>
                     <tr>
                         <td><code>doc_chunks</code></td>
@@ -620,14 +620,14 @@
                     <tr>
                         <td><code>exercises</code></td>
                         <td><span class="badge new">New v7 · v7.1 · v7.2</span></td>
-                        <td><code>number, number_normalized, audience, statement, hints, edited_by_teacher</code></td>
-                        <td>Target of agentic structured search. <b>🔴 red line:</b> still no <code>solution</code> column. <b>v7.3</b>: <code>number</code> comes from the segmentation-captured label (not whole-doc LLM reading); <code>hints</code> stay NULL at ingest (the teacher-reviewed hint workflow lands in v8.0); teacher edits survive re-ingestion (<code>edited_by_teacher</code>).</td>
+                        <td><code>number, number_normalized, audience, statement, hints(JSON), hint_status, hint_source, edited_by_teacher</code></td>
+                        <td>Target of agentic structured search. <b>🔴 red line:</b> no <code>solution</code> column; answers live in the teacher/worker-only <code>Answers</code> table. <b>v8.0</b>: <code>hints</code> is a tiered JSON array with a review lifecycle (<code>hint_status</code>: none→generating→pending_review→approved/failed) — only <b>approved</b> hints are surfaced to students (retrieval gate); a teacher hand-edit is approved directly.</td>
                     </tr>
                     <tr>
                         <td><code>ingestion_jobs</code></td>
                         <td><span class="badge new">New v7</span></td>
-                        <td><code>document_id, status, priority, attempts, locked_at</code></td>
-                        <td>DB-as-queue for the worker. Atomic pickup via <code>FOR UPDATE SKIP LOCKED</code>; stale <code>processing</code> jobs are reclaimed for crash recovery.</td>
+                        <td><code>document_id, status, priority, attempts, locked_at, job_type, payload</code></td>
+                        <td>DB-as-queue for the worker. Atomic pickup via <code>FOR UPDATE SKIP LOCKED</code>; stale <code>processing</code> jobs are reclaimed. <b>v8.0</b>: <code>job_type</code> (ingest | hint_generate) is dispatched on; an urgent hint job uses <code>priority=0</code>.</td>
                     </tr>
                     <tr>
                         <td><code>learner_profiles</code></td>
@@ -637,9 +637,21 @@
                     </tr>
                     <tr>
                         <td><code>router_query_log</code></td>
-                        <td><span class="badge new">New v7.1</span></td>
-                        <td><code>message, chosen_route, top_similarity, lab_id</code></td>
-                        <td>Write-only telemetry: real multilingual queries the embedding-kNN router was unsure about (below threshold → safe <code>rag</code> fallback), so a future BERT/XLM-R router has a labeled data source. Nothing in the live path reads it. <i>(v8.0 redefines this to record every LLM-router decision.)</i></td>
+                        <td><span class="badge new">v7.1 · redefined v8.0</span></td>
+                        <td><code>message, route, exercise_number, number_source, degraded, is_test, model_name, prompt_version, latency_ms, lab_id</code></td>
+                        <td>Write-only: <b>every</b> LLM-router decision (v8.0), so a distilled router has a labelled source and the hotspot panel can rank the most-asked exercises. <code>degraded</code>/<code>is_test</code> rows are excludable when distilling. Nothing in the live path reads it.</td>
+                    </tr>
+                    <tr>
+                        <td><code>answers</code></td>
+                        <td><span class="badge new">New v8.0</span></td>
+                        <td><code>exercise_id, document_id, number_raw/normalized, answer_form, answer_text, derivation_text, verified</code></td>
+                        <td><b>🔴</b> Uploaded answers for <b>offline</b> hint generation + the teacher answer-view. The student path (chat/agent/prompt/retrieval) never imports the <code>Answer</code> model — enforced by <code>test_answers_isolation</code>. No physical vault; the boundary is the import discipline.</td>
+                    </tr>
+                    <tr>
+                        <td><code>agent_trace_log</code></td>
+                        <td><span class="badge new">New v8.0</span></td>
+                        <td><code>message_id, route, node_latencies, degraded_flags, verdict, retry_flipped, red_flag</code></td>
+                        <td>Per-message observability: which fallbacks fired, per-node latencies, self-eval verdict. Feeds the admin health panel (degradation counts) and the two-week self-eval keep/drop decision.</td>
                     </tr>
                     <tr>
                         <td><code>skill_presets</code></td>
