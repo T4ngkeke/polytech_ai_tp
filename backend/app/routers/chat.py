@@ -55,13 +55,14 @@ from backend.app.models import (
     Audience,
     Exercise,
     Message,
+    MessageFeedback,
     SenderType,
     Session,
     SystemConfig,
     UsageStat,
     User,
 )
-from backend.app.schemas import ChatStreamRequest
+from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
 from backend.app.services import rule_service
 from backend.app.services.billing import compute_billed_tokens
 from backend.app.services.model_routing import resolve_model_routing
@@ -656,3 +657,27 @@ async def chat_stream(
         event_generator(),
         media_type="text/event-stream",
     )
+
+
+@router.post("/messages/{message_id}/feedback")
+async def rate_message(
+    message_id: uuid.UUID,
+    body: MessageFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """[v8.0 §11B] Thumbs up/down on an assistant message — a free golden-set
+    label (a 👎 links back to the message's AgentTraceLog for review). A student
+    may only rate a message in a session they own."""
+    message = (await db.execute(
+        select(Message)
+        .join(Session, Message.session_id == Session.id)
+        .where(Message.id == message_id, Session.user_id == current_user.id)
+    )).scalar_one_or_none()
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+    message.feedback = MessageFeedback(body.feedback.value)
+    await db.commit()
+    return {"message_id": message_id, "feedback": body.feedback.value}

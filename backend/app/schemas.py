@@ -31,6 +31,16 @@ class SenderType(str, Enum):
     llm = "llm"
 
 
+class MessageFeedbackValue(str, Enum):
+    up = "up"
+    down = "down"
+
+
+class MessageFeedbackRequest(BaseModel):
+    """[v8.0 §11B] A student's thumbs on an assistant message."""
+    feedback: MessageFeedbackValue
+
+
 class RuleLevel(str, Enum):
     class_ = "class"
     lab = "lab"
