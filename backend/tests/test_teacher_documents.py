@@ -86,6 +86,39 @@ async def test_shared_cm_uploads_class_wide(db_session, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_corrige_upload_pins_target_document(db_session, tmp_path):
+    """[v8.0 §10] A corrigé (answer file) may pin its target question document via
+    answers_for_document_id, so pairing scopes to that TD (multi-file labs don't
+    cross-match). The answer file only ever produces Answers — never exercises —
+    so nothing leaks into student-visible statements."""
+    teacher, cls, lab = await _teacher_with_lab(db_session)
+    td = Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="td.pdf",
+                  storage_path="/x", content_hash=uuid.uuid4().hex,
+                  uploaded_by=teacher.id, doc_type=DocType.TD)
+    db_session.add(td)
+    await db_session.commit()
+
+    app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.post(
+            f"/api/teacher/labs/{lab.id}/documents",
+            files={"file": ("corrige.pdf", b"answers", "application/pdf")},
+            data={"doc_type": "corrigé", "audience": "student",
+                  "answers_for_document_id": str(td.id)},
+        )
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    corrige = (await db_session.execute(
+        select(Document).where(Document.doc_type == DocType.corrige)
+    )).scalar_one()
+    assert corrige.answers_for_document_id == td.id
+
+
+@pytest.mark.asyncio
 async def test_shared_flag_ignored_for_td(db_session, tmp_path):
     """TD/TP stay strictly lab-scoped even if shared is passed."""
     teacher, cls, lab = await _teacher_with_lab(db_session)

@@ -249,6 +249,7 @@ async def upload_document(
     audience: Audience = Form(...),
     language: str = Form("fr"),
     shared: bool = Form(False),
+    answers_for_document_id: uuid.UUID | None = Form(None),
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
     storage_root: str = Depends(get_storage_root),
@@ -284,6 +285,7 @@ async def upload_document(
         doc_type=doc_type,
         audience=audience,
         language=language,
+        answers_for_document_id=answers_for_document_id,
     )
     return DocumentResponse.model_validate(doc)
 

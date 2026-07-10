@@ -34,8 +34,12 @@ async def create_document(
     doc_type: DocType | None = None,
     audience: Audience | None = None,
     language: str = "fr",
+    answers_for_document_id: uuid.UUID | None = None,
 ) -> Document:
-    """Persist an uploaded document and enqueue it for ingestion."""
+    """Persist an uploaded document and enqueue it for ingestion.
+
+    [v8.0 §10] `answers_for_document_id` pins a corrigé (answer file) to its
+    question document so pairing scopes to that TD in a multi-file lab."""
     content_hash = hashlib.sha256(content).hexdigest()
 
     # Dedup: identical content in the same scope is unchanged — return the
@@ -67,6 +71,7 @@ async def create_document(
         doc_type=doc_type,
         audience=audience,
         language=language,
+        answers_for_document_id=answers_for_document_id,
         uploaded_by=uploaded_by,
     )
     db.add(doc)
