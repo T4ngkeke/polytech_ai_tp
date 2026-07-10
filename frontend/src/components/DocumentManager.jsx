@@ -31,6 +31,7 @@ import api from '../lib/api';
 const DOC_TYPE_OPTIONS = [
   { value: 'CM', label: 'Course (CM)' },
   { value: 'TD', label: 'Exercises (TD/TP)' },
+  { value: 'corrigé', label: 'Answers (corrigé)' },
 ];
 const AUDIENCES = ['student', 'teacher'];
 
@@ -47,6 +48,19 @@ const STATUS_BADGE = {
 
 const IN_PROGRESS = new Set(['pending', 'processing']);
 
+// [v8.0] Hint review lifecycle: none → generating → pending_review → approved/failed.
+const HINT_STATUS_BADGE = {
+  none: 'bg-ink-surface text-cream-muted',
+  generating: 'bg-cyan-muted text-cyan animate-pulse',
+  pending_review: 'bg-gold-muted text-gold',
+  approved: 'bg-emerald-500/15 text-emerald-300',
+  failed: 'bg-danger-muted text-danger',
+};
+const HINT_STATUS_LABEL = {
+  none: 'no hints', generating: 'generating…', pending_review: 'review',
+  approved: 'approved', failed: 'failed',
+};
+
 export default function DocumentManager({ labId }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -56,6 +70,8 @@ export default function DocumentManager({ labId }) {
   const fileRef = useRef(null);
   const [docType, setDocType] = useState('CM');
   const [audience, setAudience] = useState('student');
+  const [shared, setShared] = useState(false);            // CM class-wide
+  const [answersFor, setAnswersFor] = useState('');        // corrigé → target TD
 
   const loadDocuments = useCallback(async () => {
     if (!labId) return [];
@@ -94,6 +110,8 @@ export default function DocumentManager({ labId }) {
     form.append('file', file);
     form.append('doc_type', docType);
     form.append('audience', audience);
+    if (docType === 'CM' && shared) form.append('shared', 'true');
+    if (docType === 'corrigé' && answersFor) form.append('answers_for_document_id', answersFor);
 
     setUploading(true);
     try {
@@ -140,6 +158,25 @@ export default function DocumentManager({ labId }) {
             {AUDIENCES.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
+        {docType === 'CM' && (
+          <label className="flex items-center gap-1.5 pb-1.5 text-xs text-cream-muted">
+            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)}
+              className="accent-cyan" />
+            Share class-wide
+          </label>
+        )}
+        {docType === 'corrigé' && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-cream-muted">Answers for</label>
+            <select value={answersFor} onChange={(e) => setAnswersFor(e.target.value)}
+              className="rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none">
+              <option value="">whole lab (by number)</option>
+              {documents.filter((d) => d.doc_type === 'TD' || d.doc_type === 'TP').map((d) => (
+                <option key={d.id} value={d.id}>{d.filename}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <button
           type="submit"
           disabled={uploading}
@@ -203,10 +240,27 @@ function SummaryChips({ doc }) {
   );
 }
 
+function IngestReport({ report }) {
+  if (!report) return null;
+  const warnings = [];
+  if (report.anomaly) warnings.push(`Numbering anomaly: ${report.anomaly}`);
+  if (report.gaps?.length) warnings.push(`Missing numbers: ${report.gaps.join(', ')}`);
+  if (report.collisions?.length) warnings.push(`In-lab number collisions: ${report.collisions.join(', ')}`);
+  if (report.resegmented) warnings.push('Boundaries re-judged by the LLM (numbering looked off)');
+  if (warnings.length === 0) return null;
+  return (
+    <ul className="mt-2 space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
+      {warnings.map((w, i) => <li key={i}>⚠ {w}</li>)}
+    </ul>
+  );
+}
+
 function DocumentDetail({ document: doc, onBack }) {
   const [chunks, setChunks] = useState([]);
   const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const [genBusy, setGenBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -226,6 +280,34 @@ function DocumentDetail({ document: doc, onBack }) {
     return () => { alive = false; };
   }, [doc.id]);
 
+  // [v8.0] While any exercise is generating, poll exercises so the badges settle
+  // to pending_review/failed once the worker finishes.
+  const anyGenerating = exercises.some((e) => e.hint_status === 'generating');
+  useEffect(() => {
+    if (!anyGenerating) return;
+    const id = setInterval(async () => {
+      try { setExercises(await api.get(`/api/teacher/documents/${doc.id}/exercises`)); } catch {}
+    }, 4000);
+    return () => clearInterval(id);
+  }, [anyGenerating, doc.id]);
+
+  const generateAll = async (urgent) => {
+    if (urgent && !window.confirm(
+      'Process now? Generation will compete with students for compute. Continue?')) return;
+    setGenBusy(true);
+    try {
+      const { queued } = await api.post(
+        `/api/teacher/documents/${doc.id}/generate-hints`, { urgent });
+      if (queued === 0) toast('All exercises already have hints (nothing queued).');
+      else toast.success(`Queued hint generation for ${queued} exercise${queued > 1 ? 's' : ''}`);
+      setExercises(await api.get(`/api/teacher/documents/${doc.id}/exercises`));
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <button type="button" onClick={onBack} className="text-sm text-cyan hover:underline">
@@ -244,6 +326,7 @@ function DocumentDetail({ document: doc, onBack }) {
         {doc.error_message && (
           <p className="mt-2 rounded bg-gold-muted p-2 text-xs text-gold">{doc.error_message}</p>
         )}
+        <IngestReport report={doc.ingest_report} />
       </div>
 
       {loading ? (
@@ -252,7 +335,24 @@ function DocumentDetail({ document: doc, onBack }) {
         <>
           {exercises.length > 0 && (
             <section>
-              <h4 className="mb-2 text-sm font-semibold text-cream-secondary">Extracted exercises</h4>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold text-cream-secondary">Extracted exercises</h4>
+                <div className="flex items-center gap-2">
+                  {anyGenerating && <span className="text-xs text-cyan">generating…</span>}
+                  <button type="button" onClick={() => generateAll(false)} disabled={genBusy}
+                    className="rounded gradient-cyan px-2.5 py-1 text-xs font-medium text-cream hover:brightness-110 disabled:opacity-50">
+                    {genBusy ? 'Queueing…' : 'Generate hints'}
+                  </button>
+                  <button type="button" onClick={() => generateAll(true)} disabled={genBusy}
+                    title="Skip the queue and process now"
+                    className="rounded border border-border-default px-2.5 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
+                    Now
+                  </button>
+                </div>
+              </div>
+              <p className="mb-2 text-xs text-cream-muted">
+                Batch only fills exercises with no hints; students see a hint only after you approve it.
+              </p>
               <ul className="space-y-2">
                 {exercises.map((ex) => (
                   <EditableExercise
@@ -367,15 +467,22 @@ function EditableExercise({ docId, exercise, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [number, setNumber] = useState(exercise.number);
   const [statement, setStatement] = useState(exercise.statement);
-  const [hints, setHints] = useState(exercise.hints || '');
+  // [v8.0] hints is a tiered array; edit one tier per line.
+  const [hintText, setHintText] = useState((exercise.hints || []).join('\n'));
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false); // generate/approve in flight
+
+  const status = exercise.hint_status || 'none';
+  const isBlind = exercise.hint_source === 'blind';
 
   const save = async () => {
     if (!number.trim() || !statement.trim()) { toast.error('Number and statement are required.'); return; }
     setSaving(true);
     try {
+      // A hand-edited tiered array; the backend marks it approved (trusted).
+      const tiers = hintText.split('\n').map((s) => s.trim()).filter(Boolean);
       const updated = await api.put(`/api/teacher/documents/${docId}/exercises/${exercise.id}`, {
-        number, statement, hints: hints.trim() ? hints : null,
+        number, statement, hints: tiers.length ? tiers : null,
       });
       onSaved(updated);
       setEditing(false);
@@ -390,8 +497,35 @@ function EditableExercise({ docId, exercise, onSaved }) {
   const cancel = () => {
     setNumber(exercise.number);
     setStatement(exercise.statement);
-    setHints(exercise.hints || '');
+    setHintText((exercise.hints || []).join('\n'));
     setEditing(false);
+  };
+
+  const regenerate = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/api/teacher/documents/${docId}/exercises/${exercise.id}/generate-hints`, {});
+      onSaved({ ...exercise, hint_status: 'generating' });
+      toast.success('Queued — generating hints');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approve = async () => {
+    setBusy(true);
+    try {
+      const updated = await api.put(
+        `/api/teacher/documents/${docId}/exercises/${exercise.id}/hints/approve`, {});
+      onSaved(updated);
+      toast.success('Approved — students can now see these hints');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (editing) {
@@ -410,11 +544,13 @@ function EditableExercise({ docId, exercise, onSaved }) {
           placeholder="Statement"
           className="w-full resize-y rounded border border-border-default bg-ink-deep p-2 text-sm text-cream focus:border-cyan/40 focus:outline-none"
         />
-        <input
-          value={hints}
-          onChange={(e) => setHints(e.target.value)}
-          placeholder="Hint (optional)"
-          className="w-full rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none"
+        <label className="block text-xs text-cream-muted">Hints — one tier per line (L1 → L3). Saving marks them approved.</label>
+        <textarea
+          value={hintText}
+          onChange={(e) => setHintText(e.target.value)}
+          rows={Math.min(8, Math.max(3, hintText.split('\n').length + 1))}
+          placeholder={'A gentle nudge\nThe method\nClose, but stop short of the answer'}
+          className="w-full resize-y rounded border border-border-default bg-ink-deep p-2 text-sm text-cream focus:border-cyan/40 focus:outline-none"
         />
         <div className="flex gap-2">
           <button type="button" onClick={save} disabled={saving}
@@ -430,16 +566,53 @@ function EditableExercise({ docId, exercise, onSaved }) {
     );
   }
 
+  const tiers = exercise.hints || [];
   return (
     <li className="rounded border border-border-default p-2">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-cream">{exercise.number}</p>
-        <button type="button" onClick={() => setEditing(true)} className="text-xs text-cyan hover:underline">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="truncate text-sm font-medium text-cream">{exercise.number}</p>
+          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${HINT_STATUS_BADGE[status]}`}>
+            {HINT_STATUS_LABEL[status]}
+          </span>
+          {isBlind && (
+            <span title="Solved without an answer key — audit before approving"
+              className="rounded bg-danger-muted px-1.5 py-0.5 text-xs font-medium text-danger">⚠ blind</span>
+          )}
+        </div>
+        <button type="button" onClick={() => setEditing(true)} className="shrink-0 text-xs text-cyan hover:underline">
           Edit
         </button>
       </div>
-      <p className="whitespace-pre-wrap text-sm text-cream-secondary">{exercise.statement}</p>
-      {exercise.hints && <p className="mt-1 text-xs text-cream-muted">Hint: {exercise.hints}</p>}
+      <p className="mt-1 whitespace-pre-wrap text-sm text-cream-secondary">{exercise.statement}</p>
+
+      {tiers.length > 0 && (
+        <ol className="mt-2 space-y-1 border-l-2 border-border-subtle pl-3">
+          {tiers.map((t, i) => (
+            <li key={i} className="text-xs text-cream-muted">
+              <span className="mr-1 font-semibold text-cyan">L{i + 1}</span>{t}
+            </li>
+          ))}
+        </ol>
+      )}
+      {exercise.hint_reason && status === 'failed' && (
+        <p className="mt-1 text-xs text-danger">Reason: {exercise.hint_reason}</p>
+      )}
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        {status === 'pending_review' && (
+          <button type="button" onClick={approve} disabled={busy}
+            className="rounded bg-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-50">
+            Approve
+          </button>
+        )}
+        {status !== 'generating' && (
+          <button type="button" onClick={regenerate} disabled={busy}
+            className="rounded border border-border-default px-2.5 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
+            {status === 'none' ? 'Generate hints' : 'Regenerate'}
+          </button>
+        )}
+      </div>
     </li>
   );
 }
