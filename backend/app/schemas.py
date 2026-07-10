@@ -293,6 +293,12 @@ class TestSessionResponse(BaseModel):
     session_id: uuid.UUID
 
 
+class HealthDegradationsResponse(BaseModel):
+    """[v8.0 §11D] Admin health panel: per-fallback counts over a recent window."""
+    window_minutes: int
+    degradations: dict[str, int]
+
+
 class AnswerResponse(BaseModel):
     """[v8.0 §10] An uploaded answer with its pairing state. Teacher-only surface
     (decision B); the student path never reads Answers."""

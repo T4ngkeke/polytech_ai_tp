@@ -15,10 +15,31 @@ from backend.app.auth import create_access_token, hash_password, verify_password
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import (
-    Class, ClassStudent, Lab, Message, SenderType,
+    AgentTraceLog, Class, ClassStudent, Lab, Message, SenderType,
     Session, SystemConfig, UsageStat, User, UserRole,
 )
 from tests.conftest import make_user
+
+
+class TestHealthPanel:
+    async def test_degradation_counts(self, admin_client, db_session):
+        """[v8.0 §11D] Admin health panel tallies recent silent degradations."""
+        db_session.add_all([
+            AgentTraceLog(id=uuid.uuid4(), route="rag", degraded_flags={"embedding": True}),
+            AgentTraceLog(id=uuid.uuid4(), route="rag", degraded_flags={"rerank": True}),
+        ])
+        await db_session.commit()
+
+        resp = await admin_client.get("/api/admin/health/degradations")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["degradations"]["embedding"] == 1
+        assert body["degradations"]["rerank"] == 1
+
+    async def test_student_rejected_403(self, student_client):
+        resp = await student_client.get("/api/admin/health/degradations")
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------

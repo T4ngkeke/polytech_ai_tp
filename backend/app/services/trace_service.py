@@ -14,7 +14,9 @@ The red-flag is a *log-only* audit sort key: it never blocks or filters a messag
 import re
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import AgentTraceLog
@@ -89,3 +91,25 @@ class TraceBuilder:
             red_flag=self.red_flag,
         ))
         await db.flush()
+
+
+async def recent_degradation_counts(
+    db: AsyncSession, window_minutes: int = 60
+) -> dict[str, int]:
+    """[v8.0 §11D] Health panel: per fallback (router / embedding / rerank /
+    all_filtered), how many messages in the recent window hit it — so silent
+    degradation becomes visible. Aggregated in Python since the flags are keys in
+    a JSON column (portable across SQLite/pg)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+    rows = (await db.execute(
+        select(AgentTraceLog.degraded_flags).where(AgentTraceLog.created_at >= cutoff)
+    )).scalars().all()
+
+    counts: dict[str, int] = {}
+    for flags in rows:
+        if not flags:
+            continue
+        for key, fired in flags.items():
+            if fired:
+                counts[key] = counts.get(key, 0) + 1
+    return counts

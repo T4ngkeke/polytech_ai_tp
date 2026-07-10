@@ -13,7 +13,28 @@ import pytest
 from sqlalchemy import select
 
 from backend.app.models import AgentTraceLog
-from backend.app.services.trace_service import TraceBuilder
+from backend.app.services.trace_service import (
+    TraceBuilder, recent_degradation_counts,
+)
+
+
+@pytest.mark.asyncio
+async def test_recent_degradation_counts_tallies_flags(db_session):
+    """[v8.0 §11D] The health panel counts, per fallback, how many recent messages
+    hit it — so silent degradation becomes visible to admins."""
+    db_session.add_all([
+        AgentTraceLog(id=uuid.uuid4(), route="rag", degraded_flags={"embedding": True}),
+        AgentTraceLog(id=uuid.uuid4(), route="rag",
+                      degraded_flags={"embedding": True, "rerank": True}),
+        AgentTraceLog(id=uuid.uuid4(), route="direct", degraded_flags=None),
+        AgentTraceLog(id=uuid.uuid4(), route="rag",
+                      degraded_flags={"embedding": False}),  # present but not fired
+    ])
+    await db_session.commit()
+
+    counts = await recent_degradation_counts(db_session, window_minutes=60)
+
+    assert counts == {"embedding": 2, "rerank": 1}
 
 
 def test_start_stop_records_node_latency():

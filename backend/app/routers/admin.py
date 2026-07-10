@@ -55,6 +55,7 @@ from backend.app.schemas import (
     ClassResponse,
     CSVImportPreviewResponse,
     DailyUsage,
+    HealthDegradationsResponse,
     LabResponse,
     LabUpdateRequest,
     LLMConfigRequest,
@@ -67,7 +68,7 @@ from backend.app.schemas import (
     UserCreateRequest,
     UserResponse,
 )
-from backend.app.services import class_service, lab_service, analytics_service
+from backend.app.services import class_service, lab_service, analytics_service, trace_service
 from backend.app.services.model_routing import resolve_model_routing
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -642,3 +643,16 @@ async def prune_old_data(
         router_logs_deleted=router_logs_deleted,
         trace_logs_deleted=trace_logs_deleted,
     )
+
+
+@router.get("/health/degradations", response_model=HealthDegradationsResponse)
+async def health_degradations(
+    window_minutes: int = Query(60, ge=1, le=1440),
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> HealthDegradationsResponse:
+    """[v8.0 §11D] Health panel: per-fallback counts of recent silent degradations
+    (router / embedding / rerank / all_filtered) — makes graceful degradation
+    visible to admins instead of invisible."""
+    counts = await trace_service.recent_degradation_counts(db, window_minutes)
+    return HealthDegradationsResponse(window_minutes=window_minutes, degradations=counts)
