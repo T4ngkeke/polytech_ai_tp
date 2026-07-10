@@ -65,3 +65,14 @@ async def pair_answers(db: AsyncSession, lab_id: uuid.UUID) -> PairingReport:
 
     await db.flush()
     return report
+
+
+async def list_lab_answers(db: AsyncSession, lab_id: uuid.UUID) -> list[Answer]:
+    """[v8.0 §10] Every answer uploaded into a lab, with its current pairing state
+    (`exercise_id` is None when unpaired). Teacher-side only (decision B)."""
+    return (await db.execute(
+        select(Answer)
+        .join(Document, Answer.document_id == Document.id)
+        .where(Document.lab_id == lab_id)
+        .order_by(Answer.number_normalized)
+    )).scalars().all()

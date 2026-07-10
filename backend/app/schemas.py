@@ -278,6 +278,20 @@ class ExerciseCreateRequest(BaseModel):
     hints: list[str] | None = None
 
 
+class AnswerResponse(BaseModel):
+    """[v8.0 §10] An uploaded answer with its pairing state. Teacher-only surface
+    (decision B); the student path never reads Answers."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    number_raw: str
+    number_normalized: int | None
+    answer_text: str
+    answer_form: str | None
+    exercise_id: uuid.UUID | None    # None = unpaired (ambiguity is visible)
+    document_id: uuid.UUID
+
+
 class GenerateHintsRequest(BaseModel):
     """[v8.0 §10] `urgent` skips the chat-load queue gate (priority=0)."""
     urgent: bool = False

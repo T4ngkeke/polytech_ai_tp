@@ -43,6 +43,7 @@ from backend.app.models import (
     SystemConfig, UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
+    AnswerResponse,
     ClassAnalyticsResponse,
     ClassCreate,
     ClassResponse,
@@ -69,6 +70,7 @@ from backend.app.schemas import (
     StudentSummaryResponse,
 )
 from backend.app.services import (
+    answer_service,
     class_service,
     document_service,
     lab_service,
@@ -492,6 +494,21 @@ async def delete_document_exercise(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     await document_service.delete_exercise(db, exercise)
     await db.commit()
+
+
+@router.get("/labs/{lab_id}/answers", response_model=list[AnswerResponse])
+async def list_lab_answers(
+    lab_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[AnswerResponse]:
+    """[v8.0 §10] Read uploaded answers + their pairing state (decision B). An
+    unpaired answer (exercise_id null) surfaces a numbering/collision ambiguity
+    for the teacher to resolve."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    answers = await answer_service.list_lab_answers(db, lab_id)
+    return [AnswerResponse.model_validate(a) for a in answers]
 
 
 # ===================================================================
