@@ -49,6 +49,7 @@ export default function Chat() {
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const streamedIdsRef = useRef(new Set()); // temp ids not yet persisted server-side
 
   // ── Join modal state ──
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -188,6 +189,9 @@ export default function Chat() {
     // server message ids, which would route streamed tokens to the wrong bubble.
     const userMsgId = crypto.randomUUID();
     const assistantMsgId = crypto.randomUUID();
+    // [v8.0] Client temp ids aren't the server Message ids, so this bubble can't
+    // be rated until the session reloads (feedback endpoint needs the real id).
+    streamedIdsRef.current.add(assistantMsgId);
     const userMsg = { id: userMsgId, sender: 'user', content: text, created_at: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
@@ -484,6 +488,7 @@ export default function Chat() {
               key={msg.id}
               message={msg}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
+              canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
             />
           ))}
           <div ref={messagesEndRef} />
@@ -566,7 +571,41 @@ export default function Chat() {
 }
 
 /* ── Message Bubble ── */
-const MessageBubble = memo(function MessageBubble({ message, streaming }) {
+function FeedbackButtons({ messageId, initial }) {
+  const [value, setValue] = useState(initial || null);
+  const [busy, setBusy] = useState(false);
+
+  const rate = async (v) => {
+    const next = value === v ? null : v; // click again to toggle off (visual)
+    setValue(next);
+    if (next === null) return;
+    setBusy(true);
+    try {
+      await api.post(`/api/chat/messages/${messageId}/feedback`, { feedback: next });
+    } catch {
+      setValue(value); // revert on failure
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex gap-1.5">
+      <button type="button" disabled={busy} onClick={() => rate('up')} aria-label="Helpful"
+        className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
+          value === 'up' ? 'bg-emerald-500/20 text-emerald-300' : 'text-cream-muted hover:bg-ink-hover'}`}>
+        👍
+      </button>
+      <button type="button" disabled={busy} onClick={() => rate('down')} aria-label="Not helpful"
+        className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
+          value === 'down' ? 'bg-danger-muted text-danger' : 'text-cream-muted hover:bg-ink-hover'}`}>
+        👎
+      </button>
+    </div>
+  );
+}
+
+const MessageBubble = memo(function MessageBubble({ message, streaming, canRate }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -603,6 +642,9 @@ const MessageBubble = memo(function MessageBubble({ message, streaming }) {
               </span>
             ))}
           </div>
+        )}
+        {!isUser && !streaming && canRate && (
+          <FeedbackButtons messageId={message.id} initial={message.feedback} />
         )}
       </div>
     </div>
