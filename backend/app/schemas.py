@@ -271,6 +271,9 @@ class DocExerciseResponse(BaseModel):
     number: str
     statement: str
     hints: list[str] | None
+    # [v8.0] the review lifecycle the DocumentManager renders (badge + blind flag).
+    hint_status: str | None = None
+    hint_source: str | None = None
 
 
 class ExerciseUpdateRequest(BaseModel):

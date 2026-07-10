@@ -141,6 +141,9 @@ async def test_get_document_exercises_has_no_solution(db_session):
     assert body[0]["number"] == "Exercice 0"
     assert body[0]["statement"] == "statement 0"
     assert "solution" not in body[0]
+    # [v8.0] the DocumentManager badge/blind flag need the lifecycle fields.
+    assert "hint_status" in body[0]
+    assert "hint_source" in body[0]
 
 
 @pytest.mark.asyncio
