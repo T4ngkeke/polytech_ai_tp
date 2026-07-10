@@ -54,6 +54,7 @@ from backend.app.schemas import (
     ChunkResponse,
     ChunkUpdateRequest,
     DocExerciseResponse,
+    ExerciseCreateRequest,
     ExerciseUpdateRequest,
     GenerateHintsRequest,
     GenerateHintsResponse,
@@ -453,6 +454,44 @@ async def approve_exercise_hints(
     exercise = await document_service.approve_exercise_hints(db, exercise)
     await db.commit()
     return DocExerciseResponse.model_validate(exercise)
+
+
+@router.post(
+    "/documents/{document_id}/exercises", response_model=DocExerciseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_document_exercise(
+    document_id: uuid.UUID,
+    body: ExerciseCreateRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> DocExerciseResponse:
+    """[v8.0 §10] Hand-add an exercise the extractor missed."""
+    document = await _owned_document_or_404(db, document_id, teacher)
+    exercise = await document_service.add_exercise(
+        db, document, number=body.number, statement=body.statement, hints=body.hints
+    )
+    await db.commit()
+    return DocExerciseResponse.model_validate(exercise)
+
+
+@router.delete(
+    "/documents/{document_id}/exercises/{exercise_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_document_exercise(
+    document_id: uuid.UUID,
+    exercise_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """[v8.0 §10] Remove a phantom exercise."""
+    await _owned_document_or_404(db, document_id, teacher)
+    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    await document_service.delete_exercise(db, exercise)
+    await db.commit()
 
 
 # ===================================================================

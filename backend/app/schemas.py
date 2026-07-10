@@ -271,6 +271,13 @@ class ExerciseUpdateRequest(BaseModel):
     hints: list[str] | None = None
 
 
+class ExerciseCreateRequest(BaseModel):
+    """[v8.0 §10] Hand-add an exercise the extractor missed."""
+    number: str = Field(..., min_length=1, max_length=255)
+    statement: str = Field(..., min_length=1)
+    hints: list[str] | None = None
+
+
 class GenerateHintsRequest(BaseModel):
     """[v8.0 §10] `urgent` skips the chat-load queue gate (priority=0)."""
     urgent: bool = False

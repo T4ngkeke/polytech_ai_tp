@@ -293,3 +293,35 @@ async def approve_exercise_hints(db: AsyncSession, exercise: Exercise) -> Exerci
     await db.flush()
     await db.refresh(exercise)
     return exercise
+
+
+async def add_exercise(
+    db: AsyncSession, document: Document, *,
+    number: str, statement: str, hints: list[str] | None = None,
+) -> Exercise:
+    """[v8.0 §10] Hand-add an exercise the extractor missed. Marked
+    edited_by_teacher so idempotent re-ingestion preserves it; the number is
+    normalized by the same function used at ingest + query time."""
+    exercise = Exercise(
+        id=uuid.uuid4(),
+        document_id=document.id,
+        class_id=document.class_id,
+        lab_id=document.lab_id,
+        audience=document.audience,
+        number=number,
+        number_normalized=normalize_exercise_number(number),
+        statement=statement,
+        hints=hints,
+        hint_status=HintStatus.approved if hints else HintStatus.none,
+        edited_by_teacher=True,
+    )
+    db.add(exercise)
+    await db.flush()
+    await db.refresh(exercise)
+    return exercise
+
+
+async def delete_exercise(db: AsyncSession, exercise: Exercise) -> None:
+    """[v8.0 §10] Remove a phantom exercise (e.g. a TOC line mis-extracted)."""
+    await db.delete(exercise)
+    await db.flush()
