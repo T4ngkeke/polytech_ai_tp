@@ -278,6 +278,11 @@ class ExerciseCreateRequest(BaseModel):
     hints: list[str] | None = None
 
 
+class TestSessionResponse(BaseModel):
+    """[v8.0 §11A] The id of a freshly created teacher test-drive session."""
+    session_id: uuid.UUID
+
+
 class AnswerResponse(BaseModel):
     """[v8.0 §10] An uploaded answer with its pairing state. Teacher-only surface
     (decision B); the student path never reads Answers."""

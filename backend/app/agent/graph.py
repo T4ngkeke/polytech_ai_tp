@@ -124,7 +124,8 @@ def build_agent(
         coaching_strategy = None
         lab_id = state.get("lab_id")
         user_id = state.get("user_id")
-        if lab_id and user_id:
+        # [v8.0 §11A] A teacher test-drive never updates student coaching data.
+        if lab_id and user_id and not state.get("is_test", False):
             score = _EFFORT_SCORE.get(state.get("effort"), 0.475)  # missing → neutral mid
             profile = await learner_service.record_effort(
                 db, user_id=user_id, lab_id=lab_id, score=score,

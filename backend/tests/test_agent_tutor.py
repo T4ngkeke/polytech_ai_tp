@@ -12,6 +12,8 @@ import uuid
 
 import pytest
 
+from sqlalchemy import select
+
 from backend.app.models import (
     Class,
     CoachingLevel,
@@ -106,3 +108,24 @@ async def test_exercise_effort_drives_coaching_strategy(pg_session):
     system = result["messages_payload"][0]["content"]
     assert "[COACHING]" in system
     assert "low-context" in system
+
+
+@pytest.mark.asyncio
+async def test_test_drive_does_not_update_learner_profile(pg_session):
+    """[v8.0 §11A] A teacher test-drive (is_test) never touches student coaching
+    data — record_effort is skipped, so no LearnerProfile is created/updated."""
+    student, cls, lab = await _seed_exercise_lab(pg_session)
+
+    agent = build_agent(pg_session, embed_fn=_fake_embed,
+                        router_llm_fn=_fake_router(effort="low"))
+    await agent.ainvoke({
+        "message": "exercise 1", "class_id": cls.id, "lab_id": lab.id,
+        "user_id": student.id, "history": [], "is_test": True,
+    })
+
+    profile = (await pg_session.execute(
+        select(LearnerProfile).where(
+            LearnerProfile.user_id == student.id, LearnerProfile.lab_id == lab.id,
+        )
+    )).scalar_one_or_none()
+    assert profile is None

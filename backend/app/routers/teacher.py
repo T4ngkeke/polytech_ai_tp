@@ -68,6 +68,7 @@ from backend.app.schemas import (
     SkillPresetResponse,
     SkillPresetUpsertRequest,
     StudentSummaryResponse,
+    TestSessionResponse,
 )
 from backend.app.services import (
     answer_service,
@@ -75,6 +76,7 @@ from backend.app.services import (
     document_service,
     lab_service,
     rule_service,
+    session_service,
     skill_preset_service,
     analytics_service,
 )
@@ -511,6 +513,26 @@ async def list_lab_answers(
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
     answers = await answer_service.list_lab_answers(db, lab_id)
     return [AnswerResponse.model_validate(a) for a in answers]
+
+
+@router.post(
+    "/labs/{lab_id}/test-session", response_model=TestSessionResponse, status_code=201
+)
+async def create_test_session(
+    lab_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> TestSessionResponse:
+    """[v8.0 §11A] Open a test-drive session on a lab the teacher owns — chat as a
+    preview (membership bypassed, draft hints visible, writes excluded from
+    analytics/LearnerProfile)."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    session = await session_service.create_session(
+        db, user_id=teacher.id, lab_id=lab_id, title="Test drive", is_test=True
+    )
+    await db.commit()
+    return TestSessionResponse(session_id=session.id)
 
 
 # ===================================================================

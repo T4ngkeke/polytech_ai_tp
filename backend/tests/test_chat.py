@@ -252,6 +252,39 @@ class TestGateChecks:
         })
         assert resp.status_code == 403
 
+    async def test_owner_test_session_bypasses_membership(
+        self, db_session, seed_chat, mock_openai
+    ):
+        """[v8.0 §11A] The owning teacher's is_test session bypasses the student
+        membership check — they aren't enrolled in their own class, but a
+        test-drive is theirs to open."""
+        teacher = seed_chat["teacher"]
+        test_sess = Session(user_id=teacher.id, lab_id=seed_chat["lab"].id,
+                            title="Test drive", is_test=True)
+        db_session.add(test_sess)
+        await db_session.commit()
+
+        async def override_get_db():
+            yield db_session
+        app.dependency_overrides[get_db] = override_get_db
+        token = create_access_token(teacher.id)
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+        transport = ASGITransport(app=app)
+        try:
+            with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+                async with AsyncClient(
+                    transport=transport, base_url="http://test",
+                    headers={"Authorization": f"Bearer {token}"},
+                ) as c:
+                    async with c.stream("POST", "/api/chat/stream", json={
+                        "session_id": str(test_sess.id), "message": "hi",
+                    }) as resp:
+                        assert resp.status_code == 200  # not 403 — membership bypassed
+                        async for _ in resp.aiter_text():
+                            pass
+        finally:
+            app.dependency_overrides.clear()
+
     async def test_quota_exceeded_returns_429(self, client1, seed_chat, db_session):
         # Max out the quota
         usage = UsageStat(user_id=seed_chat["student1"].id, date=date.today(), tokens_used=100)

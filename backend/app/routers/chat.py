@@ -48,6 +48,7 @@ from backend.app.agent.graph import build_agent
 from backend.app.auth import get_current_user
 from backend.app.database import AsyncSessionLocal, get_db
 from backend.app.models import (
+    Class,
     ClassStudent,
     Document,
     Lab,
@@ -427,18 +428,28 @@ async def chat_stream(
             )
         class_id = lab.class_id
 
-        # Verify student membership in the class
-        membership = await db.execute(
-            select(ClassStudent).where(
-                ClassStudent.class_id == class_id,
-                ClassStudent.student_id == current_user.id,
+        # [v8.0 §11A] The owning teacher's test-drive session bypasses the student
+        # membership check (they aren't enrolled in their own class).
+        is_owner_test_drive = False
+        if session.is_test:
+            owner_id = (await db.execute(
+                select(Class.teacher_id).where(Class.id == class_id)
+            )).scalar_one_or_none()
+            is_owner_test_drive = owner_id == current_user.id
+
+        if not is_owner_test_drive:
+            # Verify student membership in the class
+            membership = await db.execute(
+                select(ClassStudent).where(
+                    ClassStudent.class_id == class_id,
+                    ClassStudent.student_id == current_user.id,
+                )
             )
-        )
-        if membership.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You are not a member of the class that owns this lab",
-            )
+            if membership.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not a member of the class that owns this lab",
+                )
 
     # Check quota
     today = date.today()

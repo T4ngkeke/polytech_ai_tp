@@ -20,9 +20,13 @@ async def create_session(
     user_id: uuid.UUID,
     lab_id: uuid.UUID,
     title: str | None = None,
+    is_test: bool = False,
 ) -> Session:
-    """Create a new chat session scoped to a specific lab."""
-    session = Session(user_id=user_id, lab_id=lab_id, title=title)
+    """Create a new chat session scoped to a specific lab.
+
+    [v8.0 §11] `is_test` marks a teacher test-drive session — excluded from
+    analytics/LearnerProfile and allowed to preview pending_review draft hints."""
+    session = Session(user_id=user_id, lab_id=lab_id, title=title, is_test=is_test)
     db.add(session)
     await db.flush()
     await db.refresh(session)
