@@ -524,6 +524,10 @@ export default function Chat() {
               {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
             </button>
           </div>
+          {/* [v8.0] Transparency: students are told their teacher can see the chat. */}
+          <p className="mt-2 text-center text-[11px] text-cream-muted">
+            Your teacher can see this conversation.
+          </p>
         </div>
       </div>
 
