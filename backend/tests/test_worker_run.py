@@ -23,7 +23,35 @@ from backend.app.models import (
 from backend.app.services.document_service import create_document
 from backend.tests.conftest import make_user
 from backend.worker.gpu_gate import ChatLoadGate
-from backend.worker.main import run_tick
+from backend.worker.main import make_fn_builder, run_tick
+
+
+# --- [v8.0] config hot-reload: rebuild model clients only when config changes --
+# The worker reads SystemConfig each loop iteration; an admin config edit takes
+# effect without a restart, but the (heavier) client rebuild only runs on a change.
+
+@pytest.mark.asyncio
+async def test_fn_builder_rebuilds_only_when_config_changes():
+    configs = [{"model": "a"}, {"model": "a"}, {"model": "b"}]
+    i = {"n": 0}
+
+    async def fake_load(_db):
+        cfg = configs[i["n"]]
+        i["n"] += 1
+        return cfg
+
+    builds: list[dict] = []
+
+    def fake_build(cfg):
+        builds.append(dict(cfg))
+        return f"fns:{cfg['model']}"
+
+    build = make_fn_builder(load_config=fake_load, build_fns=fake_build)
+
+    assert await build(None) == "fns:a"   # first call → build
+    assert await build(None) == "fns:a"   # unchanged config → reuse cached fns
+    assert await build(None) == "fns:b"   # config changed → rebuild
+    assert builds == [{"model": "a"}, {"model": "b"}]  # rebuilt only on change
 
 
 class FakeGate:

@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,24 +138,57 @@ async def run_tick(
     return processed
 
 
+@dataclass
+class WorkerFns:
+    """The model-touching callables the worker loop needs, all bound to one
+    SystemConfig snapshot. Rebuilt when the config changes (hot-reload)."""
+    embed_fn: EmbedFn
+    context_fn: ContextFn | None
+    classify_fn: ClassifyLinesFn | None
+    run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None
+
+
+def make_fn_builder(load_config=None, build_fns=None):
+    """Return an async ``build(db)`` that reloads SystemConfig on every call and
+    rebuilds the model clients ONLY when the config changed — so an admin edit to
+    the LLM/embedding/ingest/hint config takes effect in the worker WITHOUT a
+    restart, while the (heavier) client construction still runs only on a change.
+
+    `load_config` / `build_fns` are injected in tests; production uses
+    `_load_config` (reads the DB) + `_build_worker_fns` (builds real clients)."""
+    _load = load_config or _load_config
+    _build = build_fns or _build_worker_fns
+    state: dict = {"cfg": None, "fns": None}
+
+    async def build(db):
+        cfg = await _load(db)
+        if cfg != state["cfg"]:
+            if state["cfg"] is not None:
+                logger.info("Worker SystemConfig changed — reloading model clients.")
+            state["cfg"] = cfg
+            state["fns"] = _build(cfg)
+        return state["fns"]
+
+    return build
+
+
 async def run_forever(
     db: AsyncSession,
     gate,
     *,
-    embed_fn: EmbedFn,
-    context_fn: ContextFn | None = None,
-    classify_fn: ClassifyLinesFn | None = None,
+    build_fns,
     chat_gate=None,
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
-    run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
 ) -> None:  # pragma: no cover - thin infinite-loop glue
-    """Run the ingestion worker loop forever."""
+    """Run the ingestion worker loop forever, hot-reloading model config each tick
+    (`build_fns(db)` re-reads SystemConfig and rebuilds clients on change)."""
     while True:
+        fns = await build_fns(db)
         await run_tick(
-            db, gate, embed_fn=embed_fn, context_fn=context_fn,
-            classify_fn=classify_fn,
+            db, gate, embed_fn=fns.embed_fn, context_fn=fns.context_fn,
+            classify_fn=fns.classify_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
-            run_hint_job=run_hint_job,
+            run_hint_job=fns.run_hint_job,
         )
 
 
@@ -390,49 +424,63 @@ def _make_real_hint_fn(client, model: str):  # pragma: no cover
     return hint
 
 
+def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
+    """Construct the model-touching callables from one SystemConfig snapshot.
+
+    The ingest client may be a separate cheap engine from chat; embedding and hint
+    generation may each live on their own endpoint. Called by the fn-builder only
+    when the config changed, so client churn is avoided on unchanged ticks."""
+    from openai import AsyncOpenAI
+
+    from backend.worker.hint_jobs import run_hint_job as _run_hint_job
+    from backend.worker.hints import generate_hints_for_exercise
+
+    ingest_client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
+    embed_client = AsyncOpenAI(
+        api_key=cfg["embedding_api_key"], base_url=cfg["embedding_base_url"]
+    )
+    hint_client = AsyncOpenAI(api_key=cfg["hint_api_key"], base_url=cfg["hint_base_url"])
+
+    embed_fn = _make_real_embed_fn(embed_client, cfg["embedding_model"])
+    classify_fn = _make_real_classify_fn(ingest_client, cfg["model"])
+    context_fn = _make_real_context_fn(ingest_client, cfg["model"])
+    hint_fn = _make_real_hint_fn(hint_client, cfg["hint_model"])
+
+    async def generate_fn(statement: str, answer_text: str):
+        return await generate_hints_for_exercise(
+            statement, answer_text,
+            classify_fn=hint_fn, generate_fn=hint_fn, judge_fn=hint_fn,
+        )
+
+    async def run_hint_job(db_, job):
+        await _run_hint_job(db_, job, generate_fn=generate_fn)
+
+    return WorkerFns(
+        embed_fn=embed_fn, context_fn=context_fn,
+        classify_fn=classify_fn, run_hint_job=run_hint_job,
+    )
+
+
 async def main() -> None:  # pragma: no cover - entrypoint
     """`python -m backend.worker.main` — run the ingestion worker."""
-    from openai import AsyncOpenAI
+    # INFO so operational events (config hot-reload, job activity) are visible;
+    # the default root level is WARNING, which would hide the reload notice.
+    logging.basicConfig(level=logging.INFO)
 
     from backend.app.database import AsyncSessionLocal
     from backend.worker.gpu_gate import ChatLoadGate, GpuGate
 
     async with AsyncSessionLocal() as db:
-        cfg = await _load_config(db)
-        # Ingestion client (may be a separate cheap engine from chat); embedding
-        # may live on its own endpoint too.
-        ingest_client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
-        embed_client = AsyncOpenAI(
-            api_key=cfg["embedding_api_key"], base_url=cfg["embedding_base_url"]
-        )
-        embed_fn = _make_real_embed_fn(embed_client, cfg["embedding_model"])
-        classify_fn = _make_real_classify_fn(ingest_client, cfg["model"])
-        context_fn = _make_real_context_fn(ingest_client, cfg["model"])
-
-        # Hint generation (teacher-triggered) runs on the big model, off-peak.
-        from backend.worker.hint_jobs import run_hint_job as _run_hint_job
-        from backend.worker.hints import generate_hints_for_exercise
-        hint_client = AsyncOpenAI(api_key=cfg["hint_api_key"], base_url=cfg["hint_base_url"])
-        hint_fn = _make_real_hint_fn(hint_client, cfg["hint_model"])
-
-        async def generate_fn(statement: str, answer_text: str):
-            return await generate_hints_for_exercise(
-                statement, answer_text,
-                classify_fn=hint_fn, generate_fn=hint_fn, judge_fn=hint_fn,
-            )
-
-        async def run_hint_job(db_, job):
-            await _run_hint_job(db_, job, generate_fn=generate_fn)
-
-        # Primary gate: live chat load (engine-agnostic). Optional: GPU idle
-        # (no-ops on a remote API where _pynvml_util reads idle).
+        # Model clients are (re)built from SystemConfig by the fn-builder, which
+        # re-reads config each tick so an admin config edit hot-reloads without a
+        # worker restart. Primary gate: live chat load (engine-agnostic). Optional:
+        # GPU idle (no-ops on a remote API where _pynvml_util reads idle).
+        build_fns = make_fn_builder()
         chat_gate = ChatLoadGate()
         gate = GpuGate(util_fn=_pynvml_util)
         await run_forever(
-            db, gate, embed_fn=embed_fn, context_fn=context_fn,
-            classify_fn=classify_fn,
+            db, gate, build_fns=build_fns,
             chat_gate=chat_gate, chat_load_fn=_recent_chat_count,
-            run_hint_job=run_hint_job,
         )
 
 
