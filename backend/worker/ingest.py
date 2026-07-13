@@ -33,6 +33,7 @@ from backend.app.models import (
     Answer, DocChunk, Document, DocumentStatus, DocType, Exercise,
 )
 from backend.worker.chunking import (
+    EXTRACTOR_VERSION,
     Chunk,
     ClassifyLinesFn,
     chunk_pages,
@@ -146,6 +147,51 @@ async def _segment_exercises_checked(
         "boundary_disagreements": disagreements,
         "dropped_invalid_lines": rep["dropped_invalid_lines"],
     }
+
+
+def _segments_to_cache(segments: list[Chunk]) -> list[dict]:
+    return [{"section": c.section, "content": c.content, "page_no": c.page_no}
+            for c in segments]
+
+
+def _segments_from_cache(items: list[dict]) -> list[Chunk]:
+    return [Chunk(content=i["content"], page_no=i["page_no"], section=i["section"])
+            for i in items]
+
+
+async def _segment_with_cache(
+    doc: Document,
+    pages: list[str],
+    doc_type: DocType,
+    classify_fn: ClassifyLinesFn | None,
+) -> tuple[list[Chunk], dict]:
+    """[v8.0 Step 6] Segment, reusing a cached result for an unchanged document.
+
+    A cache hit (same `content_hash` + `EXTRACTOR_VERSION`) rebuilds the boundary
+    segments deterministically with 0 classifier calls — hedging LLM
+    non-determinism and saving cost on idempotent re-ingestion. A content change
+    or a version bump misses and re-classifies, refreshing the cache."""
+    cache = doc.segmentation_cache
+    if (cache
+            and cache.get("extractor_version") == EXTRACTOR_VERSION
+            and cache.get("content_hash") == doc.content_hash):
+        return _segments_from_cache(cache["segments"]), {
+            "segmenter": "cache",
+            "boundary_disagreements": cache.get("boundary_disagreements", 0),
+            "dropped_invalid_lines": cache.get("dropped_invalid_lines", 0),
+        }
+
+    segments, report = await _segment_exercises_checked(
+        pages, doc_type, classify_fn, doc.id
+    )
+    doc.segmentation_cache = {
+        "extractor_version": EXTRACTOR_VERSION,
+        "content_hash": doc.content_hash,
+        "boundary_disagreements": report["boundary_disagreements"],
+        "dropped_invalid_lines": report["dropped_invalid_lines"],
+        "segments": _segments_to_cache(segments),
+    }
+    return segments, report
 
 
 def _find_gaps(numbers: list[int]) -> list[int]:
@@ -317,8 +363,8 @@ async def ingest_document(
             # [v7.3] Deterministic build: number = the segmentation-captured
             # label, statement = the segment body. No LLM on the happy path;
             # hints are teacher-triggered later, never generated at ingest.
-            segments, seg_report = await _segment_exercises_checked(
-                pages, doc_type, classify_fn, doc.id,
+            segments, seg_report = await _segment_with_cache(
+                doc, pages, doc_type, classify_fn,
             )
             for segment in segments:
                 norm = normalize_heading_number(segment.section)
@@ -380,8 +426,8 @@ async def ingest_document(
             # (guarded by test_answers_isolation). [v8.0 Step 5] Answers use the
             # SAME LLM-primary segmenter as the TD/TP so a corrigé and its problem
             # set derive number_normalized identically (else pairing mis-aligns).
-            answer_segments, _ = await _segment_exercises_checked(
-                pages, doc_type, classify_fn, doc.id,
+            answer_segments, _ = await _segment_with_cache(
+                doc, pages, doc_type, classify_fn,
             )
             for segment in (c for c in answer_segments if c.section):
                 db.add(Answer(

@@ -624,6 +624,12 @@ class Document(Base):
     # in-lab number collisions, whether the LLM re-segmented, and counts. The
     # teacher audits a warning list instead of re-reading the document.
     ingest_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # [v8.0 Step 6] Cached exercise segmentation (final boundary segments +
+    # extractor_version + content_hash). On re-ingest, an unchanged document
+    # (same hash + version) reuses these boundaries — 0 LLM classifier calls and
+    # teacher edits reattach by number_normalized 100% stably. A version bump or a
+    # content change invalidates it (re-classify).
+    segmentation_cache: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

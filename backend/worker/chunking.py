@@ -25,6 +25,11 @@ from backend.app.models import DocType
 # unit-testable without a live model (production closes over the INGEST_MODEL).
 ClassifyLinesFn = Callable[[str, str], Awaitable[list[dict]]]
 
+# [v8.0 Step 6] Bumped whenever anything that changes line numbering or boundary
+# semantics changes (e.g. parsing's sort=True, the taxonomy, reconcile rules) —
+# so a stale segmentation cache keyed on the old line order is invalidated.
+EXTRACTOR_VERSION = "v8.0-1"
+
 # A dotted leader followed by a page number — the signature of a TOC line.
 _TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
 _TOC_HEADING_RE = re.compile(

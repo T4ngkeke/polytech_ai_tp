@@ -361,6 +361,39 @@ async def test_llm_classifier_failure_falls_back_to_regex(db_session, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reingest_reuses_segmentation_cache_no_classify_calls(db_session, tmp_path):
+    """[Step 6] An unchanged document (same content_hash + extractor_version) on
+    re-ingest reuses the cached boundaries — the classifier is not called again."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nA.\n\nExercice 2\nB.\n",
+    )
+    calls = {"n": 0}
+    base = _heading_classifier(
+        lambda t: "exercise_heading" if _EXERCISE_LINE.match(t) else None
+    )
+
+    async def counting_classify(numbered_page, context):
+        calls["n"] += 1
+        return await base(numbered_page, context)
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
+                          classify_fn=counting_classify)
+    first = calls["n"]
+    assert first > 0
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
+                          classify_fn=counting_classify)
+    assert calls["n"] == first  # cache hit → no new classifier calls
+
+    exercises = sorted(await _exercises_of(db_session, doc),
+                       key=lambda e: e.number_normalized)
+    assert [e.number_normalized for e in exercises] == [1, 2]  # rebuilt correctly
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmenter"] == "cache"
+
+
+@pytest.mark.asyncio
 async def test_roman_section_promotion_numbers_via_heading_token(db_session, tmp_path):
     """[Step 3.5] Roman section headings promoted to boundaries take the ordinal
     token, not a digit in the title: 'III - Base 2 et base 16' → 3, not 2."""
@@ -495,7 +528,12 @@ async def test_edited_exercise_kept_even_if_number_disappears(db_session, tmp_pa
     ex.edited_by_teacher = True
     await db_session.commit()
 
-    # Simulate a re-export where the doc now only contains exercise 1.
+    # Simulate a re-export where the doc now only contains exercise 1. A real
+    # re-export is a new file → a new content_hash, which also misses the
+    # segmentation cache (Step 6) so the new content is re-segmented.
+    doc.content_hash = "reexport-" + uuid.uuid4().hex
+    await db_session.commit()
+
     def new_parse(storage_path):
         return ["Exercice 1\nNew content.\n"], GateResult(ok=True)
 
