@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from backend.app.agent.exercise_number import (
+    is_document_label,
     normalize_exercise_number,
     normalize_heading_number,
 )
@@ -28,7 +29,8 @@ ClassifyLinesFn = Callable[[str, str], Awaitable[list[dict]]]
 # [v8.0 Step 6] Bumped whenever anything that changes line numbering or boundary
 # semantics changes (e.g. parsing's sort=True, the taxonomy, reconcile rules) —
 # so a stale segmentation cache keyed on the old line order is invalidated.
-EXTRACTOR_VERSION = "v8.0-1"
+# v8.0-2: reconcile drops document-title labels (TD n / TP n) from boundaries.
+EXTRACTOR_VERSION = "v8.0-2"
 
 # A dotted leader followed by a page number — the signature of a TOC line.
 _TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
@@ -235,6 +237,10 @@ def reconcile_boundaries(lines: list[StructuralLine]) -> list[StructuralLine]:
          (section_headings don't split); with none, section_headings are promoted.
       2. toc_entry / subquestion are never boundaries (they aren't in either set).
     Returned in document order (page, line_no)."""
+    # Drop any heading that is really the document title ("TD 1 - ..."): the
+    # classifier sometimes labels it a heading, and a single spurious
+    # exercise_heading would otherwise suppress every real section (nesting rule).
+    lines = [l for l in lines if not is_document_label(l.text)]
     exercise_headings = [l for l in lines if l.kind == "exercise_heading"]
     section_headings = [l for l in lines if l.kind == "section_heading"]
     if exercise_headings:

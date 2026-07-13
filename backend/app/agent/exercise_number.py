@@ -124,3 +124,17 @@ def normalize_heading_number(heading: str | None) -> int | None:
 
     # No leading ordinal token → current whole-string behaviour.
     return normalize_exercise_number(text)
+
+
+def is_document_label(text: str | None) -> bool:
+    """True if ``text`` is a bare document label — ``"TD 1 - Codage"``, ``"TP 2"``,
+    ``"CM 3"`` — i.e. it starts with a ``TD/TP/CM n`` prefix and carries no
+    exercise ordinal of its own. Such a line is the document TITLE, never an
+    exercise boundary; the LLM line-classifier occasionally mislabels it as a
+    heading, so the segmenter drops it deterministically. ``"TD 1 Exercice 2"``
+    is NOT a document label (it has its own ordinal → 2)."""
+    if not text:
+        return False
+    if not _DOC_PREFIX_RE.match(text.strip()):
+        return False
+    return normalize_heading_number(text) is None

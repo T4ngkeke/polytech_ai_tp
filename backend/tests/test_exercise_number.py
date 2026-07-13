@@ -11,9 +11,27 @@ fixture set is the regression harness the user asked for.
 import pytest
 
 from backend.app.agent.exercise_number import (
+    is_document_label,
     normalize_exercise_number,
     normalize_heading_number,
 )
+
+
+# [v8.0] A bare document label ("TD 1 - Codage et numération") is the document
+# title, never an exercise boundary — the classifier sometimes mislabels it as a
+# heading, so the segmenter filters it deterministically.
+@pytest.mark.parametrize("text,expected", [
+    ("TD 1 - Codage et numération", True),   # the real TD1 title (was mis-promoted)
+    ("TP 2 - Les listes", True),
+    ("CM 3", True),
+    ("TD 1 Exercice 2", False),              # a real exercise under a TD prefix
+    ("Exercice 1", False),
+    ("I - Codage", False),                   # a genuine section heading
+    ("", False),
+    (None, False),
+])
+def test_is_document_label(text, expected):
+    assert is_document_label(text) is expected
 
 
 @pytest.mark.parametrize("raw,expected", [

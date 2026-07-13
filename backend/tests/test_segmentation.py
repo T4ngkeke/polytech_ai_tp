@@ -242,6 +242,20 @@ def test_no_printed_label_means_no_split():
     assert reconcile_boundaries(lines) == []
 
 
+def test_document_title_label_is_not_a_boundary():
+    # The classifier sometimes mislabels the "TD 1 - ..." document title as an
+    # exercise_heading; that must not suppress the real section headings (which it
+    # otherwise would, via the exercise-wins nesting rule). The title is dropped,
+    # so the sections promote to boundaries.
+    lines = [
+        _line(1, 2, "exercise_heading", "TD 1 - Codage et numération"),
+        _line(1, 13, "section_heading", "I - Codage"),
+        _line(3, 16, "section_heading", "II - Numération"),
+    ]
+    boundaries = reconcile_boundaries(lines)
+    assert [b.text for b in boundaries] == ["I - Codage", "II - Numération"]
+
+
 def test_boundaries_are_returned_in_document_order():
     lines = [
         _line(2, 1, "exercise_heading", "Exercice 2"),
