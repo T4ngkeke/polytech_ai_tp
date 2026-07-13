@@ -12,9 +12,15 @@ Pure logic over page strings; the worker feeds it pymupdf output.
 
 import re
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 from backend.app.agent.exercise_number import normalize_exercise_number
 from backend.app.models import DocType
+
+# [v8.0] The per-page line classifier: (line-numbered page text, rolling context)
+# → a list of {"line_no", "prefix", "kind"} dicts. Injected so the segmenter is
+# unit-testable without a live model (production closes over the INGEST_MODEL).
+ClassifyLinesFn = Callable[[str, str], Awaitable[list[dict]]]
 
 # A dotted leader followed by a page number — the signature of a TOC line.
 _TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
@@ -46,6 +52,245 @@ class Chunk:
     content: str
     page_no: int | None
     section: str | None
+
+
+def number_lines(text: str) -> str:
+    """Prefix each line of a page with its 1-indexed line number ("12| ...").
+
+    This is the deterministic substrate the LLM line-classifier references: the
+    model returns a `line_no`, never verbatim text, so there is no rewrite step
+    that could silently drop a boundary. Code owns the numbering and the text."""
+    return "\n".join(
+        f"{i + 1}| {line}" for i, line in enumerate(text.splitlines())
+    )
+
+
+# [v8.0] The four structural roles the per-page LLM classifier may assign a line.
+# No letter-ordinal role — see EXERCISE_SEGMENTATION_PLAN "最小可用".
+_STRUCTURAL_KINDS = {
+    "exercise_heading",   # a top-level exercise title ("Exercice 3", "Problème 2")
+    "section_heading",    # a part title ("I - Codage") — promoted to a boundary
+                          # only when the document has no exercise_heading
+    "subquestion",        # a sub-item inside an exercise ("(1).", "a)", "1.a")
+    "toc_entry",          # a table-of-contents / Contenu line — never a boundary
+}
+
+
+@dataclass(frozen=True)
+class StructuralLine:
+    """A validated structural line: the model's `kind` re-anchored to the real
+    printed text at a code-owned (page, line_no)."""
+    page: int
+    line_no: int
+    kind: str
+    text: str
+
+
+def _folded(s: str) -> str:
+    """Case-fold + collapse whitespace for tolerant prefix matching."""
+    return " ".join(s.split()).casefold()
+
+
+_ROLLING_TAIL_LINES = 3
+
+
+def build_rolling_context(
+    *,
+    last_exercise_heading: str | None,
+    last_section_heading: str | None,
+    prev_page_text: str | None,
+) -> str:
+    """Assemble the per-page classifier's rolling context (Step 2.3).
+
+    Carries the most recent exercise/section heading seen so far plus the tail of
+    the previous page, so a line opening a page (e.g. "(1).") is judged against the
+    ongoing exercise rather than as a fresh heading. Empty on the first page."""
+    parts: list[str] = []
+    if last_exercise_heading:
+        parts.append(f"Current exercise: {last_exercise_heading}")
+    if last_section_heading:
+        parts.append(f"Current section: {last_section_heading}")
+    if prev_page_text:
+        tail = [ln for ln in prev_page_text.splitlines() if ln.strip()][-_ROLLING_TAIL_LINES:]
+        if tail:
+            parts.append("Previous page ended with:\n" + "\n".join(tail))
+    return "\n".join(parts)
+
+
+def validate_page_classification(
+    page_text: str,
+    raw_items: list[dict],
+    *,
+    page: int,
+) -> tuple[list[StructuralLine], int]:
+    """Re-anchor the model's per-page classification against the printed text.
+
+    For each returned item, re-read line `line_no` and confirm it starts with the
+    reported `prefix` (whitespace-folded, case-insensitive); a ±1 off-by-one is
+    corrected. An out-of-range line, an unmatched prefix, or an unknown kind is
+    dropped. Returns the surviving lines and the dropped count (→ ingest_report).
+    """
+    lines = page_text.splitlines()
+    valid: list[StructuralLine] = []
+    dropped = 0
+    for item in raw_items:
+        line_no = item.get("line_no")
+        kind = item.get("kind")
+        prefix = _folded(item.get("prefix") or "")
+        if not isinstance(line_no, int) or isinstance(line_no, bool):
+            dropped += 1
+            continue
+        if kind not in _STRUCTURAL_KINDS or not prefix:
+            dropped += 1
+            continue
+        # Search the reported line first, then ±1 (off-by-one correction).
+        corrected = None
+        for candidate in (line_no, line_no + 1, line_no - 1):
+            if 1 <= candidate <= len(lines) and _folded(lines[candidate - 1]).startswith(prefix):
+                corrected = candidate
+                break
+        if corrected is None:
+            dropped += 1
+            continue
+        valid.append(
+            StructuralLine(page=page, line_no=corrected, kind=kind, text=lines[corrected - 1])
+        )
+    return valid, dropped
+
+
+async def _classify_page_with_retry(
+    classify_fn: ClassifyLinesFn,
+    numbered: str,
+    context: str,
+    retries: int,
+) -> list[dict]:
+    """Call the classifier for one page, retrying transient failures. Re-raises
+    after the last attempt so the caller can fall back to regex (Step 4)."""
+    for attempt in range(retries + 1):
+        try:
+            return await classify_fn(numbered, context)
+        except Exception:
+            if attempt == retries:
+                raise
+    return []  # unreachable
+
+
+async def classify_document(
+    pages: list[str],
+    classify_fn: ClassifyLinesFn,
+    *,
+    retries: int = 1,
+) -> tuple[list[StructuralLine], dict]:
+    """Classify a document's structural lines page-by-page (Step 2 driver).
+
+    Calls run **serially** because each page's rolling context depends on the
+    headings seen on earlier pages. Each page's result is validated/re-anchored
+    against the printed text (Step 2.4). A page that keeps failing after retries
+    raises — the caller falls back to the regex segmenter (Step 4). Returns all
+    validated structural lines and a report (`dropped_invalid_lines`)."""
+    all_lines: list[StructuralLine] = []
+    dropped_total = 0
+    last_exercise_heading: str | None = None
+    last_section_heading: str | None = None
+    prev_page_text: str | None = None
+
+    for index, text in enumerate(pages):
+        context = build_rolling_context(
+            last_exercise_heading=last_exercise_heading,
+            last_section_heading=last_section_heading,
+            prev_page_text=prev_page_text,
+        )
+        raw_items = await _classify_page_with_retry(
+            classify_fn, number_lines(text), context, retries
+        )
+        valid, dropped = validate_page_classification(text, raw_items, page=index + 1)
+        all_lines.extend(valid)
+        dropped_total += dropped
+        for line in valid:
+            if line.kind == "exercise_heading":
+                last_exercise_heading = line.text
+            elif line.kind == "section_heading":
+                last_section_heading = line.text
+        prev_page_text = text
+
+    return all_lines, {"dropped_invalid_lines": dropped_total}
+
+
+def reconcile_boundaries(lines: list[StructuralLine]) -> list[StructuralLine]:
+    """Select the final exercise boundaries from all classified lines (Step 3).
+
+    Deterministic, no LLM. Rules:
+      0. No exercise_heading AND no section_heading (no printed label to copy) →
+         return [] — the caller keeps the whole document as one exercise
+         (number_normalized=None). We never fabricate a boundary from position.
+      1. Nesting: with ≥1 exercise_heading, only exercise_headings are boundaries
+         (section_headings don't split); with none, section_headings are promoted.
+      2. toc_entry / subquestion are never boundaries (they aren't in either set).
+    Returned in document order (page, line_no)."""
+    exercise_headings = [l for l in lines if l.kind == "exercise_heading"]
+    section_headings = [l for l in lines if l.kind == "section_heading"]
+    if exercise_headings:
+        boundaries = exercise_headings
+    elif section_headings:
+        boundaries = section_headings
+    else:
+        return []  # rule 0 — no printed label → don't split
+    return sorted(boundaries, key=lambda l: (l.page, l.line_no))
+
+
+def split_into_exercises(
+    pages: list[str], boundaries: list[StructuralLine]
+) -> list[Chunk]:
+    """Slice the document into one statement per boundary (Step 3 rule 4).
+
+    Between adjacent boundaries, every line (across page breaks) belongs to the
+    earlier exercise; text before the first boundary is dropped (cover / intro /
+    TOC); a page with no boundary folds into the previous exercise. Each Chunk's
+    `section` is the boundary heading text (the printed label) and `content` is
+    the statement body (heading line included)."""
+    flat: list[tuple[int, int, str]] = [
+        (page_no, line_no, line)
+        for page_no, text in enumerate(pages, 1)
+        for line_no, line in enumerate(text.splitlines(), 1)
+    ]
+    index_of = {(p, ln): i for i, (p, ln, _) in enumerate(flat)}
+    starts = [index_of[(b.page, b.line_no)] for b in boundaries]
+
+    chunks: list[Chunk] = []
+    for i, start_idx in enumerate(starts):
+        end_idx = starts[i + 1] if i + 1 < len(starts) else len(flat)
+        body = "\n".join(flat[j][2] for j in range(start_idx, end_idx)).strip()
+        chunks.append(
+            Chunk(content=body, page_no=boundaries[i].page, section=boundaries[i].text)
+        )
+    return chunks
+
+
+async def segment_exercises(
+    pages: list[str],
+    classify_fn: ClassifyLinesFn,
+    *,
+    retries: int = 1,
+) -> tuple[list[Chunk], dict]:
+    """LLM-primary exercise segmenter (Steps 2+3 orchestrated).
+
+    classify each page's structural lines → reconcile to boundaries → split into
+    statements. With no printed label anywhere (rule 0) the whole document is kept
+    as a single label-less exercise (section=None → number_normalized=None), never
+    force-split. Returns the statement chunks and a report (`segmenter`,
+    `boundary_count`, `dropped_invalid_lines`). Raising propagates to the caller,
+    which falls back to the regex segmenter (Step 4)."""
+    lines, report = await classify_document(pages, classify_fn, retries=retries)
+    boundaries = reconcile_boundaries(lines)
+    report["segmenter"] = "llm"
+    report["boundary_count"] = len(boundaries)
+
+    if not boundaries:
+        whole = "\n".join(pages).strip()
+        chunks = [Chunk(content=whole, page_no=1, section=None)] if whole else []
+        return chunks, report
+
+    return split_into_exercises(pages, boundaries), report
 
 
 def _is_toc(text: str) -> bool:
