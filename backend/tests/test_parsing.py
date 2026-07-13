@@ -19,6 +19,10 @@ from backend.worker.parsing import (
 
 # The clean digital-born "golden smoke fixture" from the real course corpus.
 _CM_BOOK = Path(__file__).resolve().parents[2] / "docs" / "CM_book" / "INFO501.pdf"
+# A real TD whose page 3 has a two-column / formula layout that plain pymupdf
+# extraction reorders wrongly (variables pile up at page end, leaving voids).
+_TD1 = (Path(__file__).resolve().parents[2] / "docs" / "TD"
+        / "TD 1 - Codage et numération — Tds.pdf")
 
 
 def test_gate_rejects_near_empty_pages():
@@ -114,3 +118,26 @@ def test_extract_real_cm_book_pdf_yields_clean_text():
     assert any(len(p.strip()) > 200 for p in pages)
     # The golden fixture must sail through the gate.
     assert character_yield_gate(pages).ok is True
+
+
+@pytest.mark.skipif(not _TD1.exists(), reason="sample TD1 PDF not present")
+def test_extract_uses_reading_order_so_formula_text_is_intact():
+    """[v8.0] pymupdf must extract in reading order (sort=True); otherwise the
+    two-column formula layout on TD1 page 3 reorders and the running prose gets a
+    void where a variable was pulled to the page end."""
+    pages = extract_pdf_text(_TD1)
+    page3 = pages[2]
+    # This exact prose only reassembles when text is read in visual order.
+    assert "correspondant au casier a de la" in page3
+
+
+@pytest.mark.skipif(not _TD1.exists(), reason="sample TD1 PDF not present")
+def test_strip_repeated_lines_still_removes_header_after_sort():
+    """[v8.0] Regression guard: sort=True keeps the running header on every page,
+    so strip_repeated_lines must still remove it (real TD1 header repeats on all
+    3 pages)."""
+    pages = extract_pdf_text(_TD1)
+    header = "TD 1 - Codage et numération — Tds"
+    assert any(header in p for p in pages)                 # present before
+    stripped = strip_repeated_lines(pages)
+    assert all(header not in p for p in stripped)          # gone after

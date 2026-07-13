@@ -30,8 +30,11 @@ def extract_pdf_text(path: str | Path) -> list[str]:
     """Extract one text string per page from a PDF (pymupdf, no OCR)."""
     import fitz  # pymupdf — imported lazily so the gate stays import-light
 
+    # sort=True extracts in visual reading order, so two-column / formula-heavy
+    # pages don't reorder (variables pulled to the page end leaving voids in the
+    # running prose). Load-bearing for exercise segmentation on real TD/TP PDFs.
     with fitz.open(str(path)) as doc:
-        return [page.get_text("text") for page in doc]
+        return [page.get_text("text", sort=True) for page in doc]
 
 
 def character_yield_gate(
