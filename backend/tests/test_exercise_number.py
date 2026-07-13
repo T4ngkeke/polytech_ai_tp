@@ -10,7 +10,10 @@ fixture set is the regression harness the user asked for.
 
 import pytest
 
-from backend.app.agent.exercise_number import normalize_exercise_number
+from backend.app.agent.exercise_number import (
+    normalize_exercise_number,
+    normalize_heading_number,
+)
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -95,3 +98,34 @@ def test_strips_doc_prefix_before_number(raw, expected):
 ])
 def test_bare_doc_label_is_not_an_exercise(raw):
     assert normalize_exercise_number(raw) is None
+
+
+# [v8.0 §3.5] Heading-number: when a full heading LINE becomes an exercise
+# boundary, only its leading ordinal TOKEN is normalized — so digits inside the
+# title never masquerade as the number (the section-promotion silent-poison bug).
+@pytest.mark.parametrize("heading,expected", [
+    # Roman section headings — the ordinal, not a digit in the title.
+    ("I - Codage et décodage", 1),
+    ("II - Numération", 2),
+    ("II - Base 2 et base 16", 2),      # roman II, NOT the "2" in the title
+    ("III - Base 2 et base 16", 3),     # ⭐ regression anchor: whole-line normalize returns 2 here
+    # Keyword + arabic — the token extractor must not break existing cases.
+    ("Exercice 3 : conversion en base 2", 3),
+    ("Exercise 10: two's complement", 10),
+    # Keyword + roman + title digit — keyword strip then read the roman token.
+    ("Exercice III : base 2", 3),
+    # Bare arabic / dotted.
+    ("3. Écrire une fonction", 3),
+    ("3.1 sous-question", 3),
+])
+def test_heading_number_reads_the_ordinal_token(heading, expected):
+    assert normalize_heading_number(heading) == expected
+
+
+@pytest.mark.parametrize("heading", [
+    "Partie A",          # letter ordinal → not normalizable (we don't map letters)
+    "Partie B",
+    "Tri fusion",        # topic-only heading, no ordinal at all
+])
+def test_heading_number_none_for_letter_or_topic(heading):
+    assert normalize_heading_number(heading) is None

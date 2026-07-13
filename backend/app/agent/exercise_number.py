@@ -82,3 +82,45 @@ def normalize_exercise_number(raw: str | None) -> int | None:
 
     # 3. Chinese numeral.
     return _cjk_to_int(text)
+
+
+# [v8.0 §3.5] A leading structural keyword on a heading line (before the ordinal).
+_HEADING_KEYWORD_RE = re.compile(
+    r"(?i)^\s*(?:exercice|exercise|exo|probl[eè]me|problem|question|partie|section|q)"
+    r"\b[\s.:#)°\-–—]*"
+)
+_ARABIC_TOKEN_RE = re.compile(r"^\d+(?:\.\d+)*")
+_ROMAN_TOKEN_RE_START = re.compile(r"(?i)^[ivx]+")
+_LETTER_TOKEN_RE = re.compile(r"(?i)^[a-z](?![a-z])")
+
+
+def normalize_heading_number(heading: str | None) -> int | None:
+    """Canonical number for a full heading LINE that became an exercise boundary.
+
+    Unlike ``normalize_exercise_number`` (which scans the whole string for the
+    first digit), this reads only the leading ordinal TOKEN, so digits inside the
+    title never masquerade as the number: ``"III - Base 2 et base 16"`` → 3, not 2.
+
+    A leading letter ordinal (``"Partie A"``) is not mapped → ``None`` (we don't
+    support letter numbering). When there is no leading ordinal token at all, it
+    falls back to whole-string normalization (arabic ordinals already come before
+    any title digit, so that stays correct).
+    """
+    if not heading:
+        return None
+    text = _DOC_PREFIX_RE.sub("", heading).strip()
+    core = _HEADING_KEYWORD_RE.sub("", text).strip()
+
+    arabic = _ARABIC_TOKEN_RE.match(core)
+    if arabic:
+        return normalize_exercise_number(arabic.group())
+
+    roman = _ROMAN_TOKEN_RE_START.match(core)
+    if roman and _ROMAN_VALID_RE.match(roman.group()):
+        return _roman_to_int(roman.group())
+
+    if _LETTER_TOKEN_RE.match(core):
+        return None  # letter ordinal — deliberately unsupported
+
+    # No leading ordinal token → current whole-string behaviour.
+    return normalize_exercise_number(text)
