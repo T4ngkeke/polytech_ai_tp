@@ -394,6 +394,35 @@ async def test_reingest_reuses_segmentation_cache_no_classify_calls(db_session, 
 
 
 @pytest.mark.asyncio
+async def test_classifier_failure_does_not_poison_the_cache(db_session, tmp_path):
+    """[Step 6] A regex_fallback caused by a transient classifier failure must NOT
+    be cached — otherwise one outage permanently degrades the doc until its content
+    or the extractor_version changes. A later ingest with a working classifier must
+    re-run the LLM (cache miss) and segment properly."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nA.\n\nExercice 2\nB.\n",
+    )
+
+    async def boom(numbered_page, context):
+        raise ValueError("classifier down")
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=boom)
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmenter"] == "regex_fallback"
+    assert doc.segmentation_cache is None  # degraded result is not cached
+
+    # Classifier recovers → cache miss → LLM segmentation runs.
+    good = _heading_classifier(
+        lambda t: "exercise_heading" if _EXERCISE_LINE.match(t) else None
+    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=good)
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmenter"] == "llm"
+    assert doc.segmentation_cache is not None
+
+
+@pytest.mark.asyncio
 async def test_roman_section_promotion_numbers_via_heading_token(db_session, tmp_path):
     """[Step 3.5] Roman section headings promoted to boundaries take the ordinal
     token, not a digit in the title: 'III - Base 2 et base 16' → 3, not 2."""

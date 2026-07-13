@@ -184,13 +184,19 @@ async def _segment_with_cache(
     segments, report = await _segment_exercises_checked(
         pages, doc_type, classify_fn, doc.id
     )
-    doc.segmentation_cache = {
-        "extractor_version": EXTRACTOR_VERSION,
-        "content_hash": doc.content_hash,
-        "boundary_disagreements": report["boundary_disagreements"],
-        "dropped_invalid_lines": report["dropped_invalid_lines"],
-        "segments": _segments_to_cache(segments),
-    }
+    # Only cache a STABLE result: a real LLM segmentation, or the pure-regex path
+    # (no classifier configured). A `regex_fallback` is degraded — it may be a
+    # transient classifier outage — so caching it would let one failure poison the
+    # document until its content or the extractor_version changes. Leave it uncached
+    # so the next ingest retries the classifier.
+    if report["segmenter"] in ("llm", "regex"):
+        doc.segmentation_cache = {
+            "extractor_version": EXTRACTOR_VERSION,
+            "content_hash": doc.content_hash,
+            "boundary_disagreements": report["boundary_disagreements"],
+            "dropped_invalid_lines": report["dropped_invalid_lines"],
+            "segments": _segments_to_cache(segments),
+        }
     return segments, report
 
 
