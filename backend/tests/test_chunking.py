@@ -15,7 +15,6 @@ from backend.app.models import DocType
 from backend.worker.chunking import (
     chunk_pages,
     detect_numbering_anomaly,
-    resegment_with_llm,
 )
 
 
@@ -215,68 +214,6 @@ def test_gap_in_numbering_is_reported_as_gap():
 def test_unnumbered_labels_are_not_judged():
     # Paragraph-fallback chunks carry no labels — nothing to judge.
     assert detect_numbering_anomaly([None, None]) is None
-
-
-# --- [v7.3] LLM re-segmentation on anomaly -----------------------------------
-# The LLM's only job is to name the TRUE boundary heading lines; splitting
-# stays deterministic. Hallucinated anchors are ignored; an empty answer means
-# "no better segmentation" and the caller keeps the regex result.
-
-@pytest.mark.asyncio
-async def test_resegment_folds_subquestions_into_parent():
-    pages = [
-        "Exercice 1\n"
-        "Calculer :\n"
-        "1. la somme\n"
-        "2. le produit\n"
-        "3. la difference\n"
-    ]
-
-    async def llm_picks_parent(text):
-        return ["Exercice 1"]
-
-    chunks = await resegment_with_llm(pages, llm_picks_parent)
-    assert len(chunks) == 1
-    assert chunks[0].section == "Exercice 1"
-    assert "le produit" in chunks[0].content     # sub-items folded in
-
-
-@pytest.mark.asyncio
-async def test_resegment_splits_at_each_named_anchor():
-    pages = [
-        "Exercice 1\nPremiere partie.\n\nExercice 2\nSeconde partie.\n",
-    ]
-
-    async def llm_picks_both(text):
-        return ["Exercice 1", "Exercice 2"]
-
-    chunks = await resegment_with_llm(pages, llm_picks_both)
-    assert len(chunks) == 2
-    assert "Premiere" in chunks[0].content and "Seconde" not in chunks[0].content
-    assert "Seconde" in chunks[1].content
-
-
-@pytest.mark.asyncio
-async def test_resegment_ignores_hallucinated_anchors():
-    pages = ["Exercice 1\nContenu reel.\n"]
-
-    async def llm_hallucinates(text):
-        return ["Exercice 1", "Exercice 99 (inexistant)"]
-
-    chunks = await resegment_with_llm(pages, llm_hallucinates)
-    assert len(chunks) == 1
-    assert chunks[0].section == "Exercice 1"
-
-
-@pytest.mark.asyncio
-async def test_resegment_empty_answer_means_keep_original():
-    pages = ["Exercice 1\nContenu.\n"]
-
-    async def llm_gives_up(text):
-        return []
-
-    chunks = await resegment_with_llm(pages, llm_gives_up)
-    assert chunks == []
 
 
 def test_code_block_in_tp_exercise_stays_intact():

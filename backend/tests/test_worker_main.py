@@ -4,9 +4,9 @@ test_worker_main.py — v7 worker step that ties the queue to the pipeline.
 `process_one` claims one job (FOR UPDATE SKIP LOCKED → Postgres) and runs the
 ingest pipeline, marking the job done/failed. Uses pg_session.
 
-[v7.3] The full-text LLM extractor is gone: exercises are built
-deterministically from segmentation labels, and `resegment_fn` is the only
-LLM hook (consulted on numbering anomalies; its failure never fails a job).
+[v8.0] Exercise segmentation is LLM-primary via `classify_fn` (per-page line
+classifier); regex is a log-only cross-check and a fallback. A classifier
+failure never fails a job — the regex segmentation is kept.
 """
 
 import uuid
@@ -28,7 +28,7 @@ from backend.app.models import (
 )
 from backend.app.services.document_service import create_document
 from backend.tests.conftest import make_user
-from backend.worker.main import _parse_anchors, process_one
+from backend.worker.main import _parse_classified_lines, process_one
 
 
 async def fake_embed(chunks):
@@ -39,7 +39,7 @@ async def boom_embed(chunks):
     raise ValueError("embedding service down")
 
 
-async def boom_resegment(text):
+async def boom_classify(numbered_page, context):
     raise ValueError("aux model down")
 
 
@@ -141,14 +141,14 @@ async def test_process_one_marks_job_failed_on_error(pg_session, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_process_one_done_when_resegment_fails(pg_session, tmp_path):
-    """[v7.3] The re-segmentation LLM failing must not fail the job — the
-    regex segmentation is kept and the job completes."""
-    oversplit = b"Exercice 1\nCalculer :\n1. la somme\n2. le produit\n"
-    doc = await _seed_job(pg_session, tmp_path, body=oversplit)
+async def test_process_one_done_when_classify_fails(pg_session, tmp_path):
+    """[v8.0] The per-page classifier failing must not fail the job — the regex
+    segmentation is kept as a fallback and the job completes."""
+    body = b"Exercice 1\nCalculer la somme.\n\nExercice 2\nCalculer le produit.\n"
+    doc = await _seed_job(pg_session, tmp_path, body=body)
 
     processed = await process_one(
-        pg_session, embed_fn=fake_embed, resegment_fn=boom_resegment,
+        pg_session, embed_fn=fake_embed, classify_fn=boom_classify,
     )
 
     assert processed is True
@@ -162,35 +162,41 @@ async def test_process_one_done_when_resegment_fails(pg_session, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _parse_anchors — robust JSON parsing (engine-agnostic, pure function)
+# _parse_classified_lines — robust JSON parsing (engine-agnostic, pure function)
 # ---------------------------------------------------------------------------
 
-def test_parse_anchors_clean_json():
-    out = _parse_anchors('{"anchors": ["Exercice 1", "Exercice 2"]}')
-    assert out == ["Exercice 1", "Exercice 2"]
+def test_parse_classified_clean_json():
+    out = _parse_classified_lines(
+        '{"lines": [{"line_no": 1, "prefix": "Exercice 1", "kind": "exercise_heading"}]}'
+    )
+    assert out == [{"line_no": 1, "prefix": "Exercice 1", "kind": "exercise_heading"}]
 
 
-def test_parse_anchors_empty_or_whitespace_returns_empty():
-    assert _parse_anchors("") == []
-    assert _parse_anchors("   \n  ") == []
-    assert _parse_anchors(None) == []
+def test_parse_classified_empty_or_whitespace_returns_empty():
+    assert _parse_classified_lines("") == []
+    assert _parse_classified_lines("   \n  ") == []
+    assert _parse_classified_lines(None) == []
 
 
-def test_parse_anchors_strips_code_fence():
-    fenced = '```json\n{"anchors": ["Exercice II"]}\n```'
-    assert _parse_anchors(fenced) == ["Exercice II"]
+def test_parse_classified_strips_code_fence():
+    fenced = '```json\n{"lines": [{"line_no": 2, "prefix": "II", "kind": "section_heading"}]}\n```'
+    assert _parse_classified_lines(fenced) == [
+        {"line_no": 2, "prefix": "II", "kind": "section_heading"}
+    ]
 
 
-def test_parse_anchors_extracts_json_from_prose():
-    prose = 'Sure! Here are the boundaries:\n{"anchors": []}\nHope that helps.'
-    assert _parse_anchors(prose) == []
+def test_parse_classified_extracts_json_from_prose():
+    prose = 'Sure! Here they are:\n{"lines": []}\nHope that helps.'
+    assert _parse_classified_lines(prose) == []
 
 
-def test_parse_anchors_garbage_returns_empty():
-    assert _parse_anchors("I could not find any exercises.") == []
-    assert _parse_anchors("{not valid json") == []
+def test_parse_classified_garbage_returns_empty():
+    assert _parse_classified_lines("I could not find any exercises.") == []
+    assert _parse_classified_lines("{not valid json") == []
 
 
-def test_parse_anchors_non_list_or_non_string_items_filtered():
-    assert _parse_anchors('{"anchors": "oops"}') == []
-    assert _parse_anchors('{"anchors": ["ok", 42, null]}') == ["ok"]
+def test_parse_classified_non_list_or_non_dict_items_filtered():
+    assert _parse_classified_lines('{"lines": "oops"}') == []
+    assert _parse_classified_lines(
+        '{"lines": [{"line_no": 1, "prefix": "a", "kind": "subquestion"}, 42, null]}'
+    ) == [{"line_no": 1, "prefix": "a", "kind": "subquestion"}]

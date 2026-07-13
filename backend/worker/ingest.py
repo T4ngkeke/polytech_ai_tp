@@ -1,14 +1,17 @@
 """
-ingest.py — [v7.1→v7.3] document ingestion pipeline.
+ingest.py — [v7.1→v8.0] document ingestion pipeline.
 
 Strict split: CM produces Contextual-Retrieval chunks for hybrid RAG and never
 exercises; TD/TP produce structured Exercises for agentic search and never
-chunks. Exercises are built deterministically from the segmentation labels —
-an LLM (`resegment_fn`) is consulted only when the regex segmentation looks
-wrong (duplicate numbers = sub-questions mistaken for exercises, or zero
-boundaries), and its failure keeps the regex result rather than failing the doc.
+chunks. [v8.0] Exercise segmentation is LLM-primary: a per-page line classifier
+(`classify_fn`) names each line's structural role and deterministic code
+reconciles boundaries, slices, and numbers (`normalize_heading_number`). The
+regex segmenter is a log-only cross-check and a fallback (no classify_fn, a
+classifier failure, or the LLM under-segmenting) — a classifier failure keeps the
+regex result rather than failing the doc. The exercise number always comes from a
+printed label, never from the model.
 
-Model-touching steps are injected (`embed_fn` / `context_fn` / `resegment_fn`)
+Model-touching steps are injected (`embed_fn` / `context_fn` / `classify_fn`)
 and the parse step is injectable (`parse_fn`) so the pipeline is testable
 without a live model or a real PDF.
 """
@@ -22,15 +25,19 @@ from typing import Awaitable, Callable
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agent.exercise_number import normalize_exercise_number
+from backend.app.agent.exercise_number import (
+    normalize_exercise_number,
+    normalize_heading_number,
+)
 from backend.app.models import (
     Answer, DocChunk, Document, DocumentStatus, DocType, Exercise,
 )
 from backend.worker.chunking import (
     Chunk,
+    ClassifyLinesFn,
     chunk_pages,
     detect_numbering_anomaly,
-    resegment_with_llm,
+    segment_exercises,
 )
 from backend.worker.parsing import (
     GateResult,
@@ -48,9 +55,6 @@ CONTEXT_CONCURRENCY = 4
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 ContextFn = Callable[[str, str], Awaitable[str]]
 ParseFn = Callable[[str], tuple[list[str], GateResult]]
-# [v7.3] Given the joined document text, name the true exercise-boundary
-# heading lines (verbatim). Only called when the regex segmentation is suspect.
-ResegmentFn = Callable[[str], Awaitable[list[str]]]
 
 
 def _default_parse(storage_path: str) -> tuple[list[str], GateResult]:
@@ -90,35 +94,58 @@ def _scope_texts(chunks) -> dict[str, str]:
 async def _segment_exercises_checked(
     pages: list[str],
     doc_type: DocType,
-    resegment_fn: ResegmentFn | None,
+    classify_fn: ClassifyLinesFn | None,
     document_id: uuid.UUID,
-) -> tuple[list, bool]:
-    """Segment a TD/TP and sanity-check the numbering.
+) -> tuple[list[Chunk], dict]:
+    """[v8.0] LLM-primary segmentation with regex as a log-only cross-check and
+    a safety-net fallback.
 
-    Deterministic segmentation first; the LLM is consulted only when it looks
-    wrong (zero boundaries, or duplicate numbers = sub-questions mistaken for
-    exercises). LLM failure or an empty answer keeps the regex result.
-    Returns (segments, resegmented) — the flag feeds the ingest report.
+    The per-page LLM classifier names each line's structural role; deterministic
+    code reconciles boundaries and slices (`segment_exercises`). The regex
+    segmenter (`chunk_pages`) still runs to record a boundary-count disagreement
+    and to catch a classifier that under-segments. Regex is used instead when:
+      * no classify_fn is injected (degrade),
+      * the per-page classifier ultimately fails, or
+      * the LLM found 0 boundaries while regex found some.
+    A genuinely label-less document (both find nothing) keeps the LLM's whole-doc
+    single exercise (rule 0). An LLM failure never fails the document. Returns
+    (segments, seg_report) with `segmenter` / `boundary_disagreements` /
+    `dropped_invalid_lines`.
     """
-    segments = chunk_pages(pages, doc_type)
-    labeled = [c for c in segments if c.section]
+    regex_labeled = [c for c in chunk_pages(pages, doc_type) if c.section]
 
-    anomaly = detect_numbering_anomaly([c.section for c in labeled])
-    suspect = not labeled or anomaly == "duplicate_numbers"
-    if not (suspect and resegment_fn is not None):
-        return labeled, False
+    if classify_fn is None:
+        return regex_labeled, {
+            "segmenter": "regex",
+            "boundary_disagreements": 0,
+            "dropped_invalid_lines": 0,
+        }
 
     try:
-        rejudged = await resegment_with_llm(pages, resegment_fn)
+        llm_segments, rep = await segment_exercises(pages, classify_fn)
     except Exception as exc:
         logger.warning(
-            "LLM re-segmentation failed for document %s (%s); keeping the "
-            "regex segmentation.", document_id, repr(exc),
+            "LLM segmentation failed for document %s (%s); falling back to regex.",
+            document_id, repr(exc),
         )
-        return labeled, False
-    if not rejudged:
-        return labeled, False
-    return rejudged, True
+        return regex_labeled, {
+            "segmenter": "regex_fallback",
+            "boundary_disagreements": len(regex_labeled),
+            "dropped_invalid_lines": 0,
+        }
+
+    disagreements = abs(rep["boundary_count"] - len(regex_labeled))
+    if rep["boundary_count"] == 0 and regex_labeled:
+        return regex_labeled, {
+            "segmenter": "regex_fallback",
+            "boundary_disagreements": disagreements,
+            "dropped_invalid_lines": rep["dropped_invalid_lines"],
+        }
+    return llm_segments, {
+        "segmenter": "llm",
+        "boundary_disagreements": disagreements,
+        "dropped_invalid_lines": rep["dropped_invalid_lines"],
+    }
 
 
 def _find_gaps(numbers: list[int]) -> list[int]:
@@ -191,7 +218,7 @@ async def ingest_document(
     embed_fn: EmbedFn,
     context_fn: ContextFn | None = None,
     parse_fn: ParseFn | None = None,
-    resegment_fn: ResegmentFn | None = None,
+    classify_fn: ClassifyLinesFn | None = None,
 ) -> None:
     """Parse → gate → clean → segment → [CM: chunks | TD/TP: exercises]."""
     doc = await db.get(Document, document_id)
@@ -290,11 +317,11 @@ async def ingest_document(
             # [v7.3] Deterministic build: number = the segmentation-captured
             # label, statement = the segment body. No LLM on the happy path;
             # hints are teacher-triggered later, never generated at ingest.
-            segments, resegmented = await _segment_exercises_checked(
-                pages, doc_type, resegment_fn, doc.id,
+            segments, seg_report = await _segment_exercises_checked(
+                pages, doc_type, classify_fn, doc.id,
             )
             for segment in segments:
-                norm = normalize_exercise_number(segment.section)
+                norm = normalize_heading_number(segment.section)
                 snap = exercise_snaps.pop(norm, None)
                 db.add(Exercise(
                     id=uuid.uuid4(),
@@ -331,14 +358,16 @@ async def ingest_document(
             # the whole document.
             labels = [s.section for s in segments]
             numbers = [
-                n for n in (normalize_exercise_number(l) for l in labels)
+                n for n in (normalize_heading_number(l) for l in labels)
                 if n is not None
             ]
             doc.ingest_report = {
                 "anomaly": detect_numbering_anomaly(labels),
                 "gaps": _find_gaps(numbers),
                 "collisions": await _lab_collisions(db, doc, numbers),
-                "resegmented": resegmented,
+                "segmenter": seg_report["segmenter"],
+                "boundary_disagreements": seg_report["boundary_disagreements"],
+                "dropped_invalid_lines": seg_report["dropped_invalid_lines"],
                 "exercise_count": len(segments),
             }
 
@@ -348,13 +377,18 @@ async def ingest_document(
             # store one Answer row per number. answer_form (classified) and
             # exercise_id (paired) are filled later, at hint generation. This is
             # worker-only code — the student path never touches the Answers table
-            # (guarded by test_answers_isolation).
-            for segment in (c for c in chunk_pages(pages, doc_type) if c.section):
+            # (guarded by test_answers_isolation). [v8.0 Step 5] Answers use the
+            # SAME LLM-primary segmenter as the TD/TP so a corrigé and its problem
+            # set derive number_normalized identically (else pairing mis-aligns).
+            answer_segments, _ = await _segment_exercises_checked(
+                pages, doc_type, classify_fn, doc.id,
+            )
+            for segment in (c for c in answer_segments if c.section):
                 db.add(Answer(
                     id=uuid.uuid4(),
                     document_id=doc.id,
                     number_raw=segment.section,
-                    number_normalized=normalize_exercise_number(segment.section),
+                    number_normalized=normalize_heading_number(segment.section),
                     answer_text=segment.content,
                 ))
 

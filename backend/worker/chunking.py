@@ -14,7 +14,10 @@ import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from backend.app.agent.exercise_number import normalize_exercise_number
+from backend.app.agent.exercise_number import (
+    normalize_exercise_number,
+    normalize_heading_number,
+)
 from backend.app.models import DocType
 
 # [v8.0] The per-page line classifier: (line-numbered page text, rolling context)
@@ -434,8 +437,10 @@ def detect_numbering_anomaly(labels: list[str | None]) -> str | None:
       * "number_gap"        — a boundary was likely missed; report-only,
       * None                — numbering looks sane (or nothing to judge).
     """
+    # Labels are heading LINES — read the ordinal token, not a digit in the title
+    # (so "III - Base 2 et base 16" is 3, not a false duplicate at 2).
     numbers = [
-        n for n in (normalize_exercise_number(label) for label in labels if label)
+        n for n in (normalize_heading_number(label) for label in labels if label)
         if n is not None
     ]
     if len(numbers) < 2:
@@ -482,31 +487,3 @@ def chunk_pages(
             for piece in _split_oversized(unit, max_chars):
                 chunks.append(Chunk(content=piece, page_no=page_no, section=None))
     return chunks
-
-
-async def resegment_with_llm(pages: list[str], llm_fn) -> list[Chunk]:
-    """[v7.3] LLM re-judges exercise boundaries after a numbering anomaly.
-
-    The LLM's only job is to name the TRUE boundary heading lines (verbatim);
-    splitting stays deterministic. Hallucinated anchors (not found in the text)
-    are ignored. An empty result means "no better segmentation" — the caller
-    keeps the regex segmentation.
-    """
-    kept = [(i + 1, text) for i, text in enumerate(pages) if not _is_toc(text)]
-    if not kept:
-        return []
-    joined, page_at = _join_pages(kept)
-
-    anchors = await llm_fn(joined)
-    boundaries: list[tuple[int, str]] = []
-    for anchor in anchors:
-        anchor = (anchor or "").strip()
-        if not anchor:
-            continue
-        offset = joined.find(anchor)
-        if offset == -1:
-            continue  # hallucinated anchor — ignore
-        boundaries.append((offset, anchor))
-
-    boundaries.sort()
-    return _split_at(joined, page_at, boundaries)

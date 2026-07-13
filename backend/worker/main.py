@@ -21,7 +21,8 @@ from typing import Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import IngestionJob, JobStatus, JobType
-from backend.worker.ingest import ContextFn, EmbedFn, ResegmentFn, ingest_document
+from backend.worker.chunking import ClassifyLinesFn
+from backend.worker.ingest import ContextFn, EmbedFn, ingest_document
 from backend.worker.queue import claim_next_job
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ async def process_one(
     *,
     embed_fn: EmbedFn,
     context_fn: ContextFn | None = None,
-    resegment_fn: ResegmentFn | None = None,
+    classify_fn: ClassifyLinesFn | None = None,
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
 ) -> bool:
     """
@@ -76,7 +77,7 @@ async def process_one(
         else:
             await ingest_document(
                 db, job.document_id,
-                embed_fn=embed_fn, context_fn=context_fn, resegment_fn=resegment_fn,
+                embed_fn=embed_fn, context_fn=context_fn, classify_fn=classify_fn,
             )
         await _mark_job(db, job_id, JobStatus.done)
     except Exception as exc:  # ingest/hint already recorded the failure on its row
@@ -93,7 +94,7 @@ async def run_tick(
     *,
     embed_fn: EmbedFn,
     context_fn: ContextFn | None = None,
-    resegment_fn: ResegmentFn | None = None,
+    classify_fn: ClassifyLinesFn | None = None,
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
     idle_seconds: float = IDLE_SLEEP_SECONDS,
     gate_seconds: float = GATE_SLEEP_SECONDS,
@@ -128,7 +129,7 @@ async def run_tick(
         return False
 
     processed = await process_one(
-        db, embed_fn=embed_fn, context_fn=context_fn, resegment_fn=resegment_fn,
+        db, embed_fn=embed_fn, context_fn=context_fn, classify_fn=classify_fn,
         run_hint_job=run_hint_job,
     )
     if not processed:
@@ -142,7 +143,7 @@ async def run_forever(
     *,
     embed_fn: EmbedFn,
     context_fn: ContextFn | None = None,
-    resegment_fn: ResegmentFn | None = None,
+    classify_fn: ClassifyLinesFn | None = None,
     chat_gate=None,
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
@@ -151,7 +152,7 @@ async def run_forever(
     while True:
         await run_tick(
             db, gate, embed_fn=embed_fn, context_fn=context_fn,
-            resegment_fn=resegment_fn,
+            classify_fn=classify_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
             run_hint_job=run_hint_job,
         )
@@ -161,18 +162,51 @@ async def run_forever(
 # Production glue (not unit-tested: hits the engine / GPU / DB)
 # ---------------------------------------------------------------------------
 
-# [v7.3] Schema the re-segmentation call is constrained to: the LLM's only job
-# is to name the verbatim heading lines that START each true exercise.
-_ANCHOR_SCHEMA = {
+# [v8.0] Schema the per-page line classifier is constrained to: for each
+# structural line, its number (code-owned), a verbatim prefix, and its role.
+# The model NEVER emits an exercise number — only which line carries the label.
+_CLASSIFY_SCHEMA = {
     "type": "object",
     "properties": {
-        "anchors": {
+        "lines": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+                "type": "object",
+                "properties": {
+                    "line_no": {"type": "integer"},
+                    "prefix": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "exercise_heading",
+                            "section_heading",
+                            "subquestion",
+                            "toc_entry",
+                        ],
+                    },
+                },
+                "required": ["line_no", "prefix", "kind"],
+            },
         }
     },
-    "required": ["anchors"],
+    "required": ["lines"],
 }
+
+_CLASSIFY_SYSTEM = (
+    "You segment a French/English programming problem sheet. Each input line is "
+    "prefixed with its line number ('12| ...'). Return, for every STRUCTURAL line, "
+    "an object {line_no, prefix, kind} where prefix is the first few words of that "
+    "line copied verbatim and kind is one of:\n"
+    "- exercise_heading: a top-level exercise title ('Exercice 3', 'Problème 2', 'Q4').\n"
+    "- section_heading: a part title ('I - Codage', 'Partie 2').\n"
+    "- subquestion: a sub-item inside an exercise ('(1).', 'a)', '1.a').\n"
+    "- toc_entry: a table-of-contents / 'Contenu' / 'Sommaire' line.\n"
+    "Classify every candidate structural line; leave ordinary prose out. Never "
+    "invent an exercise number — only report which line holds a printed label. "
+    "The rolling context tells you which exercise/section is currently open, so a "
+    "line opening a page is a subquestion, not a new heading, when it continues one. "
+    "Respond with JSON only, matching the provided schema."
+)
 
 
 def _make_real_embed_fn(client, model: str) -> EmbedFn:  # pragma: no cover
@@ -187,13 +221,15 @@ def _make_real_embed_fn(client, model: str) -> EmbedFn:  # pragma: no cover
     return embed
 
 
-def _parse_anchors(content: str | None) -> list[str]:
-    """Parse the re-segmentation response into a list of anchor strings.
+def _parse_classified_lines(content: str | None) -> list[dict]:
+    """Parse the per-page classifier response into a list of {line_no, prefix,
+    kind} dicts.
 
     Robust to engines that don't *guarantee* structured output: empty /
     whitespace, code-fenced JSON, or JSON wrapped in prose all degrade to ``[]``
-    (= "no better segmentation") rather than crashing the worker. Non-string
-    items are dropped.
+    rather than crashing the worker (an empty page result → that page found no
+    structural lines). Non-dict items are dropped; per-field validation happens
+    downstream in `validate_page_classification`.
     """
     if not content or not content.strip():
         return []
@@ -214,41 +250,39 @@ def _parse_anchors(content: str | None) -> list[str]:
     try:
         data = json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        logger.warning("Re-segmentation returned non-JSON output; keeping regex result.")
+        logger.warning("Line classifier returned non-JSON output; treating page as empty.")
         return []
     if not isinstance(data, dict):
         return []
-    anchors = data.get("anchors", [])
-    if not isinstance(anchors, list):
+    lines = data.get("lines", [])
+    if not isinstance(lines, list):
         return []
-    return [a for a in anchors if isinstance(a, str)]
+    return [item for item in lines if isinstance(item, dict)]
 
 
-def _make_real_resegment_fn(client, model: str) -> ResegmentFn:  # pragma: no cover
-    """[v7.3] The anomaly-triggered boundary re-judge: given the document text,
-    the LLM names the verbatim heading lines that start each TRUE exercise
-    (sub-questions inside an exercise are not boundaries). Splitting itself
-    stays deterministic in `resegment_with_llm`."""
+def _make_real_classify_fn(client, model: str) -> ClassifyLinesFn:  # pragma: no cover
+    """[v8.0] The per-page line classifier: given a line-numbered page and the
+    rolling context, the LLM labels each structural line's role by line number
+    (it never emits an exercise number). Boundary reconciliation, slicing, and
+    numbering all stay deterministic downstream."""
 
-    async def resegment(text: str) -> list[str]:
+    async def classify(numbered_page: str, context: str) -> list[dict]:
+        user = (f"Rolling context:\n{context}\n\n" if context else "") + (
+            "Classify the structural lines of this page:\n" + numbered_page
+        )
         resp = await client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content":
-                    "The document below is a problem sheet whose automatic "
-                    "segmentation looks wrong. List the heading lines that start "
-                    "each TOP-LEVEL exercise, copied verbatim from the text. "
-                    "Sub-questions inside an exercise are NOT boundaries. "
-                    "Respond with JSON only, matching the provided schema."},
-                {"role": "user", "content": text},
+                {"role": "system", "content": _CLASSIFY_SYSTEM},
+                {"role": "user", "content": user},
             ],
             response_format={
                 "type": "json_schema",
-                "json_schema": {"name": "anchors", "schema": _ANCHOR_SCHEMA},
+                "json_schema": {"name": "lines", "schema": _CLASSIFY_SCHEMA},
             },
         )
-        return _parse_anchors(resp.choices[0].message.content)
-    return resegment
+        return _parse_classified_lines(resp.choices[0].message.content)
+    return classify
 
 
 def _make_real_context_fn(client, model: str) -> ContextFn:  # pragma: no cover
@@ -366,7 +400,7 @@ async def main() -> None:  # pragma: no cover - entrypoint
             api_key=cfg["embedding_api_key"], base_url=cfg["embedding_base_url"]
         )
         embed_fn = _make_real_embed_fn(embed_client, cfg["embedding_model"])
-        resegment_fn = _make_real_resegment_fn(ingest_client, cfg["model"])
+        classify_fn = _make_real_classify_fn(ingest_client, cfg["model"])
         context_fn = _make_real_context_fn(ingest_client, cfg["model"])
 
         # Hint generation (teacher-triggered) runs on the big model, off-peak.
@@ -390,7 +424,7 @@ async def main() -> None:  # pragma: no cover - entrypoint
         gate = GpuGate(util_fn=_pynvml_util)
         await run_forever(
             db, gate, embed_fn=embed_fn, context_fn=context_fn,
-            resegment_fn=resegment_fn,
+            classify_fn=classify_fn,
             chat_gate=chat_gate, chat_load_fn=_recent_chat_count,
             run_hint_job=run_hint_job,
         )

@@ -276,74 +276,107 @@ async def test_ingest_denormalizes_audience_onto_exercise(db_session, tmp_path):
     assert ex.audience == Audience.teacher
 
 
-# --- [v7.3] anomaly → LLM re-segmentation -------------------------------------
+# --- [v8.0] LLM-primary segmentation (Step 4 + 5) ----------------------------
+# The per-page line classifier is the primary segmenter; regex is a log-only
+# cross-check and a fallback. Fakes classify by a per-line rule (no live model).
 
-_OVERSPLIT_BODY = (
-    "Exercice 1\n"
-    "Calculer :\n"
-    "1. la somme\n"
-    "2. le produit\n"
-)
+import re as _re
 
 
-@pytest.mark.asyncio
-async def test_duplicate_numbering_triggers_llm_resegmentation(db_session, tmp_path):
-    """Sub-questions mistaken for exercises give numbers [1, 1, 2] — the LLM
-    names the true boundary and sub-items fold into the parent exercise."""
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
-                               body=_OVERSPLIT_BODY)
+def _heading_classifier(kind_of):
+    """Build a fake ClassifyLinesFn: classify each numbered line by `kind_of`."""
+    async def classify(numbered_page, context):
+        items = []
+        for line in numbered_page.splitlines():
+            m = _re.match(r"(\d+)\| (.*)", line)
+            if not m:
+                continue
+            line_no, text = int(m.group(1)), m.group(2)
+            kind = kind_of(text)
+            if kind:
+                items.append({"line_no": line_no, "prefix": text[:15], "kind": kind})
+        return items
+    return classify
 
-    async def llm_picks_parent(text):
-        return ["Exercice 1"]
 
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
-                          resegment_fn=llm_picks_parent)
-
-    exercises = await _exercises_of(db_session, doc)
-    assert len(exercises) == 1
-    assert exercises[0].number == "Exercice 1"
-    assert "le produit" in exercises[0].statement
+_EXERCISE_LINE = _re.compile(r"(?i)^(exercice|exercise|probl[eè]me)\b")
 
 
 @pytest.mark.asyncio
-async def test_resegment_failure_keeps_regex_segmentation(db_session, tmp_path):
-    """A failing re-segmentation LLM must never fail the document — the regex
-    segmentation is kept and the document still indexes."""
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
-                               body=_OVERSPLIT_BODY)
+async def test_classify_fn_drives_llm_segmentation(db_session, tmp_path):
+    """With a classify_fn, boundaries come from the LLM line classifier and the
+    report marks segmenter=llm (regex is only a cross-check)."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nSum two numbers.\n\nExercice 2\nSort a list.\n",
+    )
+    classify = _heading_classifier(
+        lambda t: "exercise_heading" if _EXERCISE_LINE.match(t) else None
+    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=classify)
 
-    async def boom_resegment(text):
-        raise ValueError("router model down")
+    exercises = sorted(await _exercises_of(db_session, doc),
+                       key=lambda e: e.number_normalized)
+    assert [e.number for e in exercises] == ["Exercice 1", "Exercice 2"]
+    assert [e.number_normalized for e in exercises] == [1, 2]
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmenter"] == "llm"
+    assert doc.ingest_report["dropped_invalid_lines"] == 0
 
+
+@pytest.mark.asyncio
+async def test_llm_zero_boundaries_falls_back_to_regex(db_session, tmp_path):
+    """The classifier under-segments (finds nothing) but regex sees boundaries →
+    keep the regex segmentation, mark segmenter=regex_fallback."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nSum.\n\nExercice 2\nSort.\n",
+    )
     await ingest_document(db_session, doc.id, embed_fn=fake_embed,
-                          resegment_fn=boom_resegment)
+                          classify_fn=_heading_classifier(lambda t: None))
+
+    assert len(await _exercises_of(db_session, doc)) == 2  # regex boundaries kept
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmenter"] == "regex_fallback"
+
+
+@pytest.mark.asyncio
+async def test_llm_classifier_failure_falls_back_to_regex(db_session, tmp_path):
+    """A classify_fn that raises must never fail the document — regex is kept and
+    the document still indexes."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nSum.\n\nExercice 2\nSort.\n",
+    )
+
+    async def boom(numbered_page, context):
+        raise ValueError("ingest model down")
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=boom)
 
     await db_session.refresh(doc)
     assert doc.status == DocumentStatus.indexed
-    exercises = await _exercises_of(db_session, doc)
-    assert len(exercises) == 3  # regex over-split kept — teacher fixes via report
+    assert len(await _exercises_of(db_session, doc)) == 2
+    assert doc.ingest_report["segmenter"] == "regex_fallback"
 
 
 @pytest.mark.asyncio
-async def test_zero_boundaries_asks_llm_then_degrades_to_no_exercises(db_session, tmp_path):
-    """A TD whose headings the regex cannot see triggers the LLM fallback; if
-    the LLM finds nothing either, the document indexes with 0 exercises."""
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
-                               body="Du texte sans aucune structure de numerotation.")
+async def test_roman_section_promotion_numbers_via_heading_token(db_session, tmp_path):
+    """[Step 3.5] Roman section headings promoted to boundaries take the ordinal
+    token, not a digit in the title: 'III - Base 2 et base 16' → 3, not 2."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="I - Codage\nintro.\n\nII - Numeration\nplus.\n\n"
+             "III - Base 2 et base 16\nfin.\n",
+    )
+    classify = _heading_classifier(
+        lambda t: "section_heading" if _re.match(r"^(I|II|III)\b", t) else None
+    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=classify)
 
-    asked: list[str] = []
-
-    async def llm_finds_nothing(text):
-        asked.append(text)
-        return []
-
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
-                          resegment_fn=llm_finds_nothing)
-
-    await db_session.refresh(doc)
-    assert doc.status == DocumentStatus.indexed
-    assert asked, "zero regex boundaries must trigger the LLM fallback"
-    assert await _exercises_of(db_session, doc) == []
+    exercises = sorted(await _exercises_of(db_session, doc),
+                       key=lambda e: (e.number_normalized or 0))
+    assert [e.number_normalized for e in exercises] == [1, 2, 3]
 
 
 # --- [v7.3] reconciliation report (ingest_report) ------------------------------
@@ -380,7 +413,8 @@ async def test_ingest_report_clean_doc_has_no_warnings(db_session, tmp_path):
     assert report["anomaly"] is None
     assert report["gaps"] == []
     assert report["collisions"] == []
-    assert report["resegmented"] is False
+    assert report["segmenter"] == "regex"          # no classify_fn → regex path
+    assert report["dropped_invalid_lines"] == 0
     assert report["exercise_count"] == 2
 
 
@@ -407,19 +441,21 @@ async def test_ingest_report_flags_lab_number_collision(db_session, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ingest_report_marks_llm_resegmentation(db_session, tmp_path):
-    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
-                               body=_OVERSPLIT_BODY)
-
-    async def llm_picks_parent(text):
-        return ["Exercice 1"]
-
-    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
-                          resegment_fn=llm_picks_parent)
+async def test_ingest_report_marks_llm_segmenter(db_session, tmp_path):
+    """When the LLM classifier drives segmentation, the report records
+    segmenter=llm so the teacher knows the primary path ran."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nA.\n\nExercice 2\nB.\n",
+    )
+    classify = _heading_classifier(
+        lambda t: "exercise_heading" if _EXERCISE_LINE.match(t) else None
+    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=classify)
 
     await db_session.refresh(doc)
-    assert doc.ingest_report["resegmented"] is True
-    assert doc.ingest_report["exercise_count"] == 1
+    assert doc.ingest_report["segmenter"] == "llm"
+    assert doc.ingest_report["exercise_count"] == 2
 
 
 # --- [v7.3] teacher edits survive re-ingestion ---------------------------------
