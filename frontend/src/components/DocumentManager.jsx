@@ -132,6 +132,21 @@ export default function DocumentManager({ labId }) {
     }
   };
 
+  const deleteDocument = async (doc, e) => {
+    e.stopPropagation();
+    if (!window.confirm(
+      `Delete "${doc.filename}" and everything extracted from it (exercises, answers, chunks)? This cannot be undone.`
+    )) return;
+    try {
+      await api.delete(`/api/teacher/documents/${doc.id}`);
+      toast.success('Document deleted');
+      if (selected?.id === doc.id) setSelected(null);
+      await loadDocuments();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   if (!labId) {
     return <p className="text-sm text-cream-muted">Select a lab to manage its documents.</p>;
   }
@@ -205,11 +220,11 @@ export default function DocumentManager({ labId }) {
       ) : (
         <ul className="divide-y divide-border-subtle rounded-lg border border-border-default">
           {documents.map((doc) => (
-            <li key={doc.id}>
+            <li key={doc.id} className="flex items-stretch hover:bg-ink-hover">
               <button
                 type="button"
                 onClick={() => setSelected(doc)}
-                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-ink-hover"
+                className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-left"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
@@ -224,6 +239,15 @@ export default function DocumentManager({ labId }) {
                   <StatusBadge status={doc.status} />
                   <SummaryChips doc={doc} />
                 </span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => deleteDocument(doc, e)}
+                title="Delete document"
+                aria-label={`Delete ${doc.filename}`}
+                className="shrink-0 px-3 text-cream-muted hover:text-danger"
+              >
+                🗑
               </button>
             </li>
           ))}

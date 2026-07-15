@@ -10,12 +10,12 @@ import uuid
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.exercise_number import normalize_heading_number
 from backend.app.models import (
-    Audience, Class, DocChunk, Document, DocType, Exercise, HintStatus,
+    Answer, Audience, Class, DocChunk, Document, DocType, Exercise, HintStatus,
     IngestionJob, JobType,
 )
 
@@ -332,3 +332,57 @@ async def delete_exercise(db: AsyncSession, exercise: Exercise) -> None:
     """[v8.0 §10] Remove a phantom exercise (e.g. a TOC line mis-extracted)."""
     await db.delete(exercise)
     await db.flush()
+
+
+async def get_answer_in_document(
+    db: AsyncSession, document_id: uuid.UUID, answer_id: uuid.UUID
+) -> Answer | None:
+    """An answer row, scoped to the document it was ingested from (ownership is
+    checked on the document by the caller)."""
+    stmt = select(Answer).where(
+        Answer.id == answer_id, Answer.document_id == document_id
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def delete_answer(db: AsyncSession, answer: Answer) -> None:
+    """[v8.0] Remove one uploaded answer (a mis-segmented or duplicate row)."""
+    await db.delete(answer)
+    await db.flush()
+
+
+async def delete_document(db: AsyncSession, document: Document) -> str:
+    """[v8.0] Delete a document and every artifact derived from it — chunks,
+    exercises, the answers paired to those exercises (with the exercise gone the
+    answer has nothing to answer), any answers ingested from this document, and
+    its ingestion jobs — then the row itself. A corrigé that pinned this document
+    as its answer target has its pin nulled (the corrigé document survives, minus
+    the answer rows that were paired here). Children are removed explicitly (not
+    left to DB cascade) so the behaviour is identical on SQLite and Postgres.
+
+    Returns the `storage_path` so the caller can remove the stored file after the
+    transaction commits (filesystem side effects stay in the router)."""
+    storage_path = document.storage_path
+    doc_id = document.id
+    await db.execute(delete(DocChunk).where(DocChunk.document_id == doc_id))
+    # Answers paired to this document's exercises (a corrigé's rows included) go
+    # too: with the exercise gone, the answer has nothing to answer. Done
+    # explicitly so SQLite matches the Answer.exercise_id CASCADE on Postgres.
+    await db.execute(
+        delete(Answer).where(Answer.exercise_id.in_(
+            select(Exercise.id).where(Exercise.document_id == doc_id)
+        ))
+    )
+    await db.execute(delete(Exercise).where(Exercise.document_id == doc_id))
+    # Answers that were ingested FROM this document (a corrigé, or a has_answers
+    # TD/TP) go with it.
+    await db.execute(delete(Answer).where(Answer.document_id == doc_id))
+    await db.execute(delete(IngestionJob).where(IngestionJob.document_id == doc_id))
+    await db.execute(
+        update(Document)
+        .where(Document.answers_for_document_id == doc_id)
+        .values(answers_for_document_id=None)
+    )
+    await db.delete(document)
+    await db.flush()
+    return storage_path

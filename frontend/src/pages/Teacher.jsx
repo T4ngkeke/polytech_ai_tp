@@ -20,7 +20,7 @@ const MessageContent = lazy(() => import('../components/MessageContent'));
 
 const TABS_CLASS = ['Rules', 'Analytics'];
 // New tabs appended last so existing tab indices stay stable.
-const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive'];
+const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive', 'Answers'];
 
 export default function Teacher() {
   // ── Tree state ──
@@ -331,6 +331,7 @@ export default function Teacher() {
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
               {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} />}
+              {level === 'lab' && activeTab === 7 && <AnswersPanel labId={selectedLab.id} />}
             </div>
           </>
         )}
@@ -494,6 +495,69 @@ function LabSettingsPanel({ lab, onToggle }) {
     </div>
   );
 }
+
+// [v8.0] Uploaded answers — every answer extracted from a corrigé / answer-
+// bearing sheet in this lab, with its pairing state, so a teacher can review and
+// remove a mis-segmented or duplicate row. Teacher-only (decision B); the student
+// path never reads Answers. Delete is scoped to the answer's source document.
+function AnswersPanel({ labId }) {
+  const [answers, setAnswers] = useState(null);
+
+  const load = useCallback(() => {
+    api.get(`/api/teacher/labs/${labId}/answers`)
+      .then(setAnswers)
+      .catch(() => setAnswers([]));
+  }, [labId]);
+  useEffect(() => { load(); }, [load]);
+
+  const remove = async (a) => {
+    if (!window.confirm(`Delete the answer for "${a.number_raw}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/api/teacher/documents/${a.document_id}/answers/${a.id}`);
+      toast.success('Answer deleted');
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  if (answers === null) return null;
+  return (
+    <div className="p-5 rounded-xl bg-ink-raised border border-border-subtle">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-cream">Uploaded answers</p>
+        <button onClick={load} className="text-xs text-cream-muted hover:text-cyan">Refresh</button>
+      </div>
+      <p className="mt-1 text-xs text-cream-muted">
+        Extracted from corrigés / answer-bearing sheets. “Unpaired” = no exercise matched its number yet.
+      </p>
+      {answers.length === 0 ? (
+        <p className="mt-3 text-sm text-cream-muted">No answers uploaded yet.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-border-subtle rounded-lg border border-border-default">
+          {answers.map((a) => (
+            <li key={a.id} className="flex items-start gap-3 px-3 py-2">
+              <span className="w-12 shrink-0 text-sm font-medium text-cream">{a.number_raw}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-cream-secondary">{a.answer_text}</span>
+                <span className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] ${
+                  a.exercise_id ? 'bg-emerald-500/15 text-emerald-300' : 'bg-gold-muted text-gold'}`}>
+                  {a.exercise_id ? 'paired' : 'unpaired'}
+                </span>
+              </span>
+              <button type="button" onClick={() => remove(a)} title="Delete answer"
+                aria-label={`Delete answer ${a.number_raw}`}
+                className="shrink-0 text-cream-muted hover:text-danger">
+                🗑
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 
 // [v8.0 §11C] Teaching hotspots — the lab's most-asked exercises (test-drives
 // excluded), so a teacher sees where students get stuck.

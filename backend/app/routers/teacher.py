@@ -25,6 +25,8 @@ PUT    /api/teacher/documents/{document_id}/exercises/{exercise_id} [v7.2] edit
 GET    /api/teacher/analytics/classes/{class_id}
 """
 
+import contextlib
+import os
 import uuid
 from datetime import date
 
@@ -502,6 +504,28 @@ async def delete_document_exercise(
     await db.commit()
 
 
+@router.delete(
+    "/documents/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_document(
+    document_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """[v8.0] Delete an uploaded document (CM / TD / TP / corrigé) and every
+    artifact derived from it — chunks, exercises, own answers, ingestion jobs —
+    plus the stored file. Answers a corrigé contributed to OTHER documents are
+    unpaired, not deleted. Ownership-checked."""
+    doc = await _owned_document_or_404(db, document_id, teacher)
+    storage_path = await document_service.delete_document(db, doc)
+    await db.commit()
+    # Best-effort file cleanup after the row is gone (never fail the request for a
+    # missing/already-removed file).
+    with contextlib.suppress(OSError):
+        os.remove(storage_path)
+
+
 @router.get("/labs/{lab_id}/answers", response_model=list[AnswerResponse])
 async def list_lab_answers(
     lab_id: uuid.UUID,
@@ -515,6 +539,26 @@ async def list_lab_answers(
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
     answers = await answer_service.list_lab_answers(db, lab_id)
     return [AnswerResponse.model_validate(a) for a in answers]
+
+
+@router.delete(
+    "/documents/{document_id}/answers/{answer_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_document_answer(
+    document_id: uuid.UUID,
+    answer_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """[v8.0] Remove one uploaded answer (a mis-segmented or duplicate row) from
+    the document it was ingested from. Ownership-checked via the document."""
+    await _owned_document_or_404(db, document_id, teacher)
+    answer = await document_service.get_answer_in_document(db, document_id, answer_id)
+    if answer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Answer not found")
+    await document_service.delete_answer(db, answer)
+    await db.commit()
 
 
 @router.post(

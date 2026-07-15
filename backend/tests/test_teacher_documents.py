@@ -13,7 +13,8 @@ from sqlalchemy import select
 
 from backend.app.main import app
 from backend.app.models import (
-    Audience, Class, Document, DocumentStatus, DocType, Lab, UserRole,
+    Answer, Audience, Class, DocChunk, Document, DocumentStatus, DocType,
+    Exercise, IngestionJob, JobType, Lab, UserRole,
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.tests.conftest import make_client, make_user
@@ -198,3 +199,80 @@ async def test_teacher_cannot_upload_to_foreign_lab(db_session, tmp_path):
     assert resp.status_code == 403
     docs = (await db_session.execute(select(Document))).scalars().all()
     assert docs == []
+
+
+@pytest.mark.asyncio
+async def test_delete_document_removes_it_and_all_artifacts(db_session, tmp_path):
+    """[v8.0] DELETE a document → the row, its chunks/exercises/jobs, the answers
+    paired to its exercises, and the stored file are gone; a corrigé that pinned
+    it has its pin nulled (the corrigé document survives). One endpoint serves
+    CM / TD / TP / corrigé."""
+    teacher, cls, lab = await _teacher_with_lab(db_session)
+    stored = tmp_path / "cm.pdf"
+    stored.write_bytes(b"lecture")
+    doc = Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="cm.pdf",
+                   storage_path=str(stored), content_hash=uuid.uuid4().hex,
+                   uploaded_by=teacher.id, doc_type=DocType.TD)
+    corrige = Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="c.pdf",
+                       storage_path="/y", content_hash=uuid.uuid4().hex,
+                       uploaded_by=teacher.id, doc_type=DocType.corrige)
+    db_session.add_all([doc, corrige])
+    await db_session.flush()
+    corrige.answers_for_document_id = doc.id
+    ex = Exercise(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                  number="1", number_normalized=1, statement="s")
+    db_session.add(ex)
+    await db_session.flush()
+    db_session.add_all([
+        DocChunk(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
+                 doc_type=DocType.TD, audience=Audience.student, chunk_index=0,
+                 content="c", context="ctx", embedding=[0.1, 0.2, 0.3]),
+        Answer(id=uuid.uuid4(), document_id=corrige.id, number_raw="1",
+               number_normalized=1, answer_text="42", exercise_id=ex.id),
+        IngestionJob(id=uuid.uuid4(), document_id=doc.id, job_type=JobType.ingest),
+    ])
+    await db_session.commit()
+
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.delete(f"/api/teacher/documents/{doc.id}")
+    finally:
+        await client.aclose()
+
+    assert resp.status_code == 204
+    assert (await db_session.get(Document, doc.id)) is None
+    assert (await db_session.execute(
+        select(Exercise).where(Exercise.document_id == doc.id))).scalars().all() == []
+    assert (await db_session.execute(
+        select(DocChunk).where(DocChunk.document_id == doc.id))).scalars().all() == []
+    assert (await db_session.execute(
+        select(IngestionJob).where(IngestionJob.document_id == doc.id))).scalars().all() == []
+    # The answer was paired to the deleted exercise — with the exercise gone it
+    # has nothing to answer, so it goes too (even though it came from the corrigé).
+    assert (await db_session.execute(select(Answer))).scalars().all() == []
+    # The corrigé document itself survives, with its pin nulled.
+    surviving = await db_session.get(Document, corrige.id)
+    assert surviving is not None
+    assert surviving.answers_for_document_id is None
+    assert not stored.exists()  # stored file removed
+
+
+@pytest.mark.asyncio
+async def test_delete_document_rejects_foreign_teacher(db_session, tmp_path):
+    teacher, cls, lab = await _teacher_with_lab(db_session)
+    doc = Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="cm.pdf",
+                   storage_path="/x", content_hash=uuid.uuid4().hex,
+                   uploaded_by=teacher.id, doc_type=DocType.CM)
+    db_session.add(doc)
+    intruder = make_user(role=UserRole.teacher)
+    db_session.add(intruder)
+    await db_session.commit()
+
+    client = await make_client(db_session, intruder)
+    try:
+        resp = await client.delete(f"/api/teacher/documents/{doc.id}")
+    finally:
+        await client.aclose()
+
+    assert resp.status_code == 404
+    assert (await db_session.get(Document, doc.id)) is not None  # untouched

@@ -10,6 +10,7 @@ is the teacher/decision-B surface; the student path never touches Answers
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from backend.app.models import (
     Answer, Class, Document, DocType, Exercise, Lab, UserRole,
@@ -82,3 +83,65 @@ async def test_list_lab_answers_rejects_foreign_lab(db_session):
         await client.aclose()
 
     assert resp.status_code == 403
+
+
+async def _seed_corrige_with_answers(session):
+    teacher, cls, lab = await _seed_lab(session)
+    corrige = Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="c.pdf",
+                       storage_path="/y", content_hash=uuid.uuid4().hex,
+                       uploaded_by=teacher.id, doc_type=DocType.corrige)
+    session.add(corrige)
+    await session.flush()
+    a1 = Answer(id=uuid.uuid4(), document_id=corrige.id, number_raw="1",
+                number_normalized=1, answer_text="42")
+    a2 = Answer(id=uuid.uuid4(), document_id=corrige.id, number_raw="2",
+                number_normalized=2, answer_text="merge sort")
+    session.add_all([a1, a2])
+    await session.commit()
+    return teacher, corrige, a1, a2
+
+
+@pytest.mark.asyncio
+async def test_delete_answer_removes_only_that_row(db_session):
+    """[v8.0] DELETE one wrongly-segmented/duplicate answer; the rest survive."""
+    teacher, corrige, a1, a2 = await _seed_corrige_with_answers(db_session)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.delete(
+            f"/api/teacher/documents/{corrige.id}/answers/{a1.id}")
+    finally:
+        await client.aclose()
+
+    assert resp.status_code == 204
+    remaining = (await db_session.execute(select(Answer))).scalars().all()
+    assert [a.id for a in remaining] == [a2.id]
+
+
+@pytest.mark.asyncio
+async def test_delete_answer_rejects_foreign_teacher(db_session):
+    teacher, corrige, a1, _ = await _seed_corrige_with_answers(db_session)
+    intruder = make_user(role=UserRole.teacher)
+    db_session.add(intruder)
+    await db_session.commit()
+    client = await make_client(db_session, intruder)
+    try:
+        resp = await client.delete(
+            f"/api/teacher/documents/{corrige.id}/answers/{a1.id}")
+    finally:
+        await client.aclose()
+
+    assert resp.status_code == 404
+    assert (await db_session.get(Answer, a1.id)) is not None  # untouched
+
+
+@pytest.mark.asyncio
+async def test_delete_answer_404_when_not_in_document(db_session):
+    teacher, corrige, a1, _ = await _seed_corrige_with_answers(db_session)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.delete(
+            f"/api/teacher/documents/{corrige.id}/answers/{uuid.uuid4()}")
+    finally:
+        await client.aclose()
+
+    assert resp.status_code == 404
