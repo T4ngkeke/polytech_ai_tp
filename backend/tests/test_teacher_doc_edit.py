@@ -112,6 +112,29 @@ async def test_teacher_edits_exercise_renormalizes_number(db_session):
 
 
 @pytest.mark.asyncio
+async def test_teacher_edit_uses_heading_normalizer_like_ingest(db_session):
+    """[v8.0] A teacher edit must re-derive number_normalized with the SAME
+    normalizer ingest/answers use (`normalize_heading_number`): read the leading
+    ordinal token, not the first digit anywhere. A heading with a title digit
+    ("III - Base 2 et base 16") is exercise 3 (roman), not 2 — otherwise the
+    edit silently breaks corrigé answer pairing (paired by number_normalized)."""
+    teacher, doc, _, ex = await _seed_doc_with_artifacts(db_session)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.put(
+            f"/api/teacher/documents/{doc.id}/exercises/{ex.id}",
+            json={"number": "III - Base 2 et base 16", "statement": "s"},
+        )
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    await db_session.refresh(ex)
+    assert ex.number_normalized == 3  # heading semantics (roman III), not 2
+
+
+@pytest.mark.asyncio
 async def test_chunk_edit_rejected_for_foreign_teacher(db_session):
     _, doc, chunk, _ = await _seed_doc_with_artifacts(db_session)
     intruder = make_user(role=UserRole.teacher)

@@ -16,6 +16,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
+import { interpretStreamEvent } from '../lib/streamEvents';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 // Lazy: the markdown/highlight/KaTeX stack is heavy and only needed once the
 // student opens a chat — code-split it out of the initial bundle. We warm this
@@ -209,33 +210,35 @@ export default function Chat() {
         body: JSON.stringify({ session_id: currentSessionId, message: text }),
         signal: ctrl.signal,
         onmessage(ev) {
-          if (ev.event === 'done') { setIsStreaming(false); loadUsage(); return; }
-          if (ev.event === 'error') {
-            // Server-side mid-stream failure: stop the spinner and surface it,
-            // never append the error payload as if it were model output.
-            setIsStreaming(false);
-            let detail = 'Generation failed';
-            try { detail = JSON.parse(ev.data).detail || detail; } catch { /* keep default */ }
-            toast.error(detail);
-            return;
-          }
-          if (ev.event === 'citations') {
-            let cites = [];
-            try { cites = JSON.parse(ev.data); } catch { /* ignore malformed */ }
-            setMessages((prev) => prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, citations: cites } : m
-            ));
-            return;
-          }
-          if (ev.data) {
-            // Content tokens are JSON-encoded so embedded newlines survive SSE
-            // framing (otherwise multi-line code collapses to one line). Fall
-            // back to the raw string for safety if a token isn't valid JSON.
-            let chunk = ev.data;
-            try { chunk = JSON.parse(ev.data); } catch { /* keep raw */ }
-            setMessages((prev) => prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: m.content + chunk } : m
-            ));
+          // Named events (status/done/error/citations) are matched before the
+          // content-token branch, so the opening `status` frame is never appended
+          // as text (which would render "[object Object]" atop the reply).
+          const action = interpretStreamEvent(ev);
+          switch (action.type) {
+            case 'status':
+              return; // handshake only — the spinner already shows "working…"
+            case 'done':
+              setIsStreaming(false);
+              loadUsage();
+              return;
+            case 'error':
+              // Server-side mid-stream failure: stop the spinner and surface it,
+              // never append the error payload as if it were model output.
+              setIsStreaming(false);
+              toast.error(action.detail);
+              return;
+            case 'citations':
+              setMessages((prev) => prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, citations: action.citations } : m
+              ));
+              return;
+            case 'token':
+              setMessages((prev) => prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, content: m.content + action.text } : m
+              ));
+              return;
+            default:
+              return;
           }
         },
         onerror(err) { throw err; },

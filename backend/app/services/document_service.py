@@ -13,7 +13,7 @@ from typing import Awaitable, Callable
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agent.exercise_number import normalize_exercise_number
+from backend.app.agent.exercise_number import normalize_heading_number
 from backend.app.models import (
     Audience, Class, DocChunk, Document, DocType, Exercise, HintStatus,
     IngestionJob, JobType,
@@ -272,10 +272,12 @@ async def update_exercise(
     hints: list[str] | None = None,
 ) -> Exercise:
     """Update an exercise's fields. Changing the label re-derives the canonical
-    `number_normalized` via the same normalizer used at ingest + query time."""
+    `number_normalized` via `normalize_heading_number` — the SAME normalizer
+    ingest and answer pairing use, so a hand-edited label (e.g. a roman heading
+    "III - Base 2 ...") stays paired with its corrigé answer."""
     if number is not None:
         exercise.number = number
-        exercise.number_normalized = normalize_exercise_number(number)
+        exercise.number_normalized = normalize_heading_number(number)
     if statement is not None:
         exercise.statement = statement
     if hints is not None:
@@ -314,7 +316,7 @@ async def add_exercise(
         lab_id=document.lab_id,
         audience=document.audience,
         number=number,
-        number_normalized=normalize_exercise_number(number),
+        number_normalized=normalize_heading_number(number),
         statement=statement,
         hints=hints,
         hint_status=HintStatus.approved if hints else HintStatus.none,

@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
+import { interpretStreamEvent } from '../lib/streamEvents';
 import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
@@ -596,24 +597,27 @@ function TestDrivePanel({ labId, labName }) {
         body: JSON.stringify({ session_id: sessionId, message: text }),
         signal: ctrl.signal,
         onmessage(ev) {
-          if (ev.event === 'done') { setIsStreaming(false); return; }
-          if (ev.event === 'error') {
-            setIsStreaming(false);
-            let detail = 'Generation failed';
-            try { detail = JSON.parse(ev.data).detail || detail; } catch { /* keep default */ }
-            toast.error(detail);
-            return;
-          }
-          if (ev.event === 'citations') {
-            let cites = [];
-            try { cites = JSON.parse(ev.data); } catch { /* ignore malformed */ }
-            setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, citations: cites } : m));
-            return;
-          }
-          if (ev.data) {
-            let chunk = ev.data;
-            try { chunk = JSON.parse(ev.data); } catch { /* keep raw */ }
-            setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, content: m.content + chunk } : m));
+          // Shares the student stream interpreter so the opening `status` frame
+          // is handled, not appended as "[object Object]" to the reply.
+          const action = interpretStreamEvent(ev);
+          switch (action.type) {
+            case 'status':
+              return;
+            case 'done':
+              setIsStreaming(false);
+              return;
+            case 'error':
+              setIsStreaming(false);
+              toast.error(action.detail);
+              return;
+            case 'citations':
+              setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, citations: action.citations } : m));
+              return;
+            case 'token':
+              setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, content: m.content + action.text } : m));
+              return;
+            default:
+              return;
           }
         },
         onerror(err) { throw err; },

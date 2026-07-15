@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
+import { ingestReportWarnings } from '../lib/ingestReport';
 
 // [v7.2] TD and TP are behaviourally identical (both extract exercises), so the
 // teacher only picks between course slides and exercises. The combined option is
@@ -252,13 +253,7 @@ function SummaryChips({ doc }) {
 }
 
 function IngestReport({ report }) {
-  if (!report) return null;
-  const warnings = [];
-  if (report.anomaly) warnings.push(`Numbering anomaly: ${report.anomaly}`);
-  if (report.gaps?.length) warnings.push(`Missing numbers: ${report.gaps.join(', ')}`);
-  if (report.collisions?.length) warnings.push(`In-lab number collisions: ${report.collisions.join(', ')}`);
-  if (report.resegmented) warnings.push('Boundaries re-judged by the LLM (numbering looked off)');
-  if (report.over_budget) warnings.push(`Ingest token budget exceeded (~${report.ingest_tokens_est} est. > ${report.token_budget})`);
+  const warnings = ingestReportWarnings(report);
   if (warnings.length === 0) return null;
   return (
     <ul className="mt-2 space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
