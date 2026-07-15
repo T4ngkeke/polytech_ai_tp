@@ -34,6 +34,9 @@ const DOC_TYPE_OPTIONS = [
   { value: 'corrigé', label: 'Answers (corrigé)' },
 ];
 const AUDIENCES = ['student', 'teacher'];
+// [v8.0 §12] Document language selects the BM25 tsvector config; ingest and query
+// sides must match. fr is the backend default.
+const LANGUAGES = [{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }];
 
 const docTypeLabel = (t) => (t === 'CM' ? 'CM' : 'TD/TP');
 
@@ -72,6 +75,7 @@ export default function DocumentManager({ labId }) {
   const [audience, setAudience] = useState('student');
   const [shared, setShared] = useState(false);            // CM class-wide
   const [answersFor, setAnswersFor] = useState('');        // corrigé → target TD
+  const [language, setLanguage] = useState('fr');          // BM25 tsvector config
 
   const loadDocuments = useCallback(async () => {
     if (!labId) return [];
@@ -110,6 +114,7 @@ export default function DocumentManager({ labId }) {
     form.append('file', file);
     form.append('doc_type', docType);
     form.append('audience', audience);
+    form.append('language', language);
     if (docType === 'CM' && shared) form.append('shared', 'true');
     if (docType === 'corrigé' && answersFor) form.append('answers_for_document_id', answersFor);
 
@@ -156,6 +161,12 @@ export default function DocumentManager({ labId }) {
           <label className="text-xs font-medium text-cream-muted">Audience</label>
           <select value={audience} onChange={(e) => setAudience(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none">
             {AUDIENCES.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-cream-muted">Language</label>
+          <select value={language} onChange={(e) => setLanguage(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none">
+            {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
         </div>
         {docType === 'CM' && (
