@@ -55,6 +55,14 @@ CONTEXT_CONCURRENCY = 4
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 ContextFn = Callable[[str, str], Awaitable[str]]
+
+
+def _estimate_tokens(*texts: str) -> int:
+    """Rough token estimate (≈4 chars/token) for the ingest-budget observation.
+    We don't have real usage from the injected context_fn, so this is an honest
+    approximation — enough to spot a pathologically expensive document, never a
+    billing figure."""
+    return sum(max(1, len(t) // 4) for t in texts if t)
 ParseFn = Callable[[str], tuple[list[str], GateResult]]
 
 
@@ -271,6 +279,7 @@ async def ingest_document(
     context_fn: ContextFn | None = None,
     parse_fn: ParseFn | None = None,
     classify_fn: ClassifyLinesFn | None = None,
+    token_budget: int | None = None,
 ) -> None:
     """Parse → gate → clean → segment → [CM: chunks | TD/TP: exercises]."""
     doc = await db.get(Document, document_id)
@@ -307,17 +316,24 @@ async def ingest_document(
             # concurrently (bounded) — off-peak, but a long doc shouldn't take
             # chunk-count × latency.
             scope_by_key = _scope_texts(chunks)
+            tokens_est = 0
             if plan.contextual_retrieval and context_fn is not None:
                 semaphore = asyncio.Semaphore(CONTEXT_CONCURRENCY)
 
                 async def _one_context(chunk):
                     async with semaphore:
                         scope = scope_by_key.get(_scope_key(chunk)) or chunk.content
-                        return await context_fn(scope, chunk.content)
+                        result = await context_fn(scope, chunk.content)
+                        # [v8.0 §9] Observation only: estimate what this call cost
+                        # (prompt = scope + chunk, completion = the context).
+                        est = _estimate_tokens(scope, chunk.content, result)
+                        return result, est
 
-                contexts = list(await asyncio.gather(
+                pairs = list(await asyncio.gather(
                     *(_one_context(chunk) for chunk in chunks)
                 ))
+                contexts = [c for c, _ in pairs]
+                tokens_est = sum(e for _, e in pairs)
             else:
                 contexts = [None] * len(chunks)
 
@@ -364,6 +380,16 @@ async def ingest_document(
                     tsv=_tsv_value(db, aug, doc.language),
                     page_no=chunk.page_no,
                 ))
+
+            # [v8.0 §9] Budget observation (decision C): record the estimated
+            # Contextual-Retrieval spend and flag over-budget for the teacher —
+            # never block; an over-budget document still indexes fully.
+            doc.ingest_report = {
+                "chunk_count": len(chunks),
+                "ingest_tokens_est": tokens_est,
+                "token_budget": token_budget,
+                "over_budget": token_budget is not None and tokens_est > token_budget,
+            }
 
         if plan.extract_exercises:
             # [v7.3] Deterministic build: number = the segmentation-captured

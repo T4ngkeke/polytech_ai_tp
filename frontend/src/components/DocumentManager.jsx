@@ -258,6 +258,7 @@ function IngestReport({ report }) {
   if (report.gaps?.length) warnings.push(`Missing numbers: ${report.gaps.join(', ')}`);
   if (report.collisions?.length) warnings.push(`In-lab number collisions: ${report.collisions.join(', ')}`);
   if (report.resegmented) warnings.push('Boundaries re-judged by the LLM (numbering looked off)');
+  if (report.over_budget) warnings.push(`Ingest token budget exceeded (~${report.ingest_tokens_est} est. > ${report.token_budget})`);
   if (warnings.length === 0) return null;
   return (
     <ul className="mt-2 space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">

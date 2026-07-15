@@ -53,6 +53,7 @@ async def process_one(
     context_fn: ContextFn | None = None,
     classify_fn: ClassifyLinesFn | None = None,
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
+    token_budget: int | None = None,
 ) -> bool:
     """
     Claim and process one queued job.
@@ -79,6 +80,7 @@ async def process_one(
             await ingest_document(
                 db, job.document_id,
                 embed_fn=embed_fn, context_fn=context_fn, classify_fn=classify_fn,
+                token_budget=token_budget,
             )
         await _mark_job(db, job_id, JobStatus.done)
     except Exception as exc:  # ingest/hint already recorded the failure on its row
@@ -102,6 +104,7 @@ async def run_tick(
     chat_gate=None,
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
+    token_budget: int | None = None,
 ) -> bool:
     """
     One iteration of the worker loop.
@@ -135,7 +138,7 @@ async def run_tick(
 
     processed = await process_one(
         db, embed_fn=embed_fn, context_fn=context_fn, classify_fn=classify_fn,
-        run_hint_job=run_hint_job,
+        run_hint_job=run_hint_job, token_budget=token_budget,
     )
     if not processed:
         await sleep_fn(idle_seconds)
@@ -150,6 +153,7 @@ class WorkerFns:
     context_fn: ContextFn | None
     classify_fn: ClassifyLinesFn | None
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None
+    token_budget: int | None = None
 
 
 def make_fn_builder(load_config=None, build_fns=None):
@@ -192,7 +196,7 @@ async def run_forever(
             db, gate, embed_fn=fns.embed_fn, context_fn=fns.context_fn,
             classify_fn=fns.classify_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
-            run_hint_job=fns.run_hint_job,
+            run_hint_job=fns.run_hint_job, token_budget=fns.token_budget,
         )
 
 
@@ -414,6 +418,8 @@ async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
         "hint_base_url": routing.hint.base_url,
         "hint_api_key": routing.hint.api_key,
         "hint_model": routing.hint.model,
+        # Per-document ingest budget (observation only — logged in ingest_report).
+        "ingest_token_budget": routing.ingest_token_budget,
     }
 
 
@@ -462,6 +468,7 @@ def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
     return WorkerFns(
         embed_fn=embed_fn, context_fn=context_fn,
         classify_fn=classify_fn, run_hint_job=run_hint_job,
+        token_budget=cfg.get("ingest_token_budget"),
     )
 
 

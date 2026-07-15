@@ -204,6 +204,60 @@ async def test_cm_ingest_writes_chunks_with_routing_metadata_no_exercises(db_ses
     assert await _exercises_of(db_session, doc) == []
 
 
+@pytest.mark.asyncio
+async def test_cm_ingest_records_estimated_token_spend_in_report(db_session, tmp_path):
+    """[v8.0 §9] Contextual-Retrieval token spend is estimated per document and
+    surfaced in ingest_report — observation only (decision C): an over-budget
+    document still indexes fully, the flag is just a signal for the teacher."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM,
+                               body=f"{_PARA_ONE}\n\n{_PARA_TWO}")
+
+    calls = {"n": 0}
+
+    async def context_fn(scope, chunk):
+        calls["n"] += 1
+        return "This chunk is about the topic."
+
+    # Budget deliberately tiny so the estimate exceeds it.
+    await ingest_document(
+        db_session, doc.id, embed_fn=fake_embed, context_fn=context_fn,
+        token_budget=1,
+    )
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.indexed          # never blocked
+    assert calls["n"] == 2                               # every chunk got context
+
+    report = doc.ingest_report
+    assert report["chunk_count"] == 2
+    assert report["ingest_tokens_est"] > 0               # counted
+    assert report["token_budget"] == 1
+    assert report["over_budget"] is True                 # observed, not enforced
+
+    # Context still written for every chunk despite being "over budget".
+    chunks = await _chunks_of(db_session, doc)
+    assert chunks and all(c.context for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_cm_ingest_token_report_not_over_budget_without_budget(db_session, tmp_path):
+    """No configured budget → the estimate is still recorded but over_budget is
+    never falsely raised."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.CM,
+                               body=f"{_PARA_ONE}\n\n{_PARA_TWO}")
+
+    async def context_fn(scope, chunk):
+        return "ctx"
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, context_fn=context_fn)
+
+    await db_session.refresh(doc)
+    report = doc.ingest_report
+    assert report["ingest_tokens_est"] > 0
+    assert report["token_budget"] is None
+    assert report["over_budget"] is False
+
+
 # --- TD/TP path: deterministic exercises, zero chunks -------------------------
 
 @pytest.mark.asyncio
