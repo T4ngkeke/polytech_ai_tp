@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models import IngestionJob, JobStatus, JobType
 from backend.worker.chunking import ClassifyLinesFn
 from backend.worker.ingest import ContextFn, EmbedFn, ingest_document
-from backend.worker.queue import claim_next_job
+from backend.worker.queue import claim_next_job, has_urgent_job
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +119,14 @@ async def run_tick(
     behaviour).
     """
     # Primary: back off while chat is busy (works for local and remote engines).
+    # Exception: an urgent job (teacher-triggered hint, priority=0) bypasses the
+    # chat-load gate so "generate hints now" runs immediately during class instead
+    # of waiting for a quiet window. The GPU gate below still applies.
     if chat_gate is not None and chat_load_fn is not None:
-        if not chat_gate.observe(await chat_load_fn(db)):
-            await sleep_fn(gate_seconds)
-            return False
+        if not await has_urgent_job(db):
+            if not chat_gate.observe(await chat_load_fn(db)):
+                await sleep_fn(gate_seconds)
+                return False
 
     # Optional: GPU idle gate.
     if not gate.should_run():
