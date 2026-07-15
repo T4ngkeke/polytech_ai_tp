@@ -4,16 +4,22 @@
  * Selected node determines right panel: Class (students/rules) | Lab (rules/analytics/audit).
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
+import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
 import SkillPresetManager from '../components/SkillPresetManager';
 
+// Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
+// it in when a test-drive is actually opened.
+const MessageContent = lazy(() => import('../components/MessageContent'));
+
 const TABS_CLASS = ['Rules', 'Analytics'];
-// 'Documents' appended last so existing tab indices (0–4) stay stable.
-const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents'];
+// New tabs appended last so existing tab indices stay stable.
+const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive'];
 
 export default function Teacher() {
   // ── Tree state ──
@@ -323,6 +329,7 @@ export default function Teacher() {
               {level === 'lab' && activeTab === 3 && <AuditPanel sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
+              {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} />}
             </div>
           </>
         )}
@@ -521,6 +528,170 @@ function HotspotPanel({ labId }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// [v8.0 §11A/§12] Teacher test-drive — opens an is_test session on the lab and
+// chats through the real agent as a preview. Draft (pending_review) hints are
+// visible here; the server excludes these writes from analytics/LearnerProfile,
+// and the token cost is charged to the teacher, not a student.
+function TestDrivePanel({ labId, labName }) {
+  const { token } = useAuthStore();
+  const [sessionId, setSessionId] = useState(null);
+  const [starting, setStarting] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const abortRef = useRef(null);
+  const scrollRef = useRef(null);
+
+  // Reset (and abort any in-flight stream) when the selected lab changes.
+  useEffect(() => {
+    setSessionId(null);
+    setMessages([]);
+    setInput('');
+    setIsStreaming(false);
+    return () => abortRef.current?.abort();
+  }, [labId]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages]);
+
+  const start = useCallback(async () => {
+    setStarting(true);
+    try {
+      const { session_id } = await api.post(`/api/teacher/labs/${labId}/test-session`);
+      setSessionId(session_id);
+      setMessages([]);
+    } catch {
+      toast.error('Could not start test drive');
+    } finally {
+      setStarting(false);
+    }
+  }, [labId]);
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    if (!text || isStreaming || !sessionId) return;
+
+    const assistantMsgId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), sender: 'user', content: text },
+      { id: assistantMsgId, sender: 'llm', content: '' },
+    ]);
+    setInput('');
+    setIsStreaming(true);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      // Same agent endpoint the students hit — the server bypasses the membership
+      // check for an owning teacher's is_test session and surfaces draft hints.
+      await fetchEventSource('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session_id: sessionId, message: text }),
+        signal: ctrl.signal,
+        onmessage(ev) {
+          if (ev.event === 'done') { setIsStreaming(false); return; }
+          if (ev.event === 'error') {
+            setIsStreaming(false);
+            let detail = 'Generation failed';
+            try { detail = JSON.parse(ev.data).detail || detail; } catch { /* keep default */ }
+            toast.error(detail);
+            return;
+          }
+          if (ev.event === 'citations') {
+            let cites = [];
+            try { cites = JSON.parse(ev.data); } catch { /* ignore malformed */ }
+            setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, citations: cites } : m));
+            return;
+          }
+          if (ev.data) {
+            let chunk = ev.data;
+            try { chunk = JSON.parse(ev.data); } catch { /* keep raw */ }
+            setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, content: m.content + chunk } : m));
+          }
+        },
+        onerror(err) { throw err; },
+      });
+    } catch (err) {
+      if (!ctrl.signal.aborted) toast.error('Stream interrupted');
+    } finally {
+      setIsStreaming(false);
+    }
+  }, [input, isStreaming, sessionId, token]);
+
+  if (!sessionId) {
+    return (
+      <div className="p-5 rounded-xl bg-ink-raised border border-border-subtle">
+        <p className="text-sm font-semibold text-cream">Test drive</p>
+        <p className="mt-1 text-xs text-cream-muted">
+          Chat through the real tutor as a preview of <span className="text-cream-secondary">{labName}</span>.
+          Draft (pending review) hints are visible here, and these messages are excluded
+          from analytics and student profiles.
+        </p>
+        <button
+          onClick={start}
+          disabled={starting}
+          className="mt-4 px-4 py-2 rounded-lg gradient-cyan text-ink-deep text-sm font-medium disabled:opacity-50"
+        >
+          {starting ? 'Starting…' : 'Start test drive'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full min-h-[24rem] rounded-xl bg-ink-raised border border-border-subtle overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
+        <span className="text-sm font-semibold text-cream">Test drive · {labName}</span>
+        <button onClick={start} className="text-xs text-cream-muted hover:text-cyan">Restart</button>
+      </div>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.length === 0 && (
+          <p className="text-sm text-cream-muted">Ask as if you were a student — e.g. “comment faire l'exercice 3 ?”.</p>
+        )}
+        {messages.map((m) => (
+          <div key={m.id} className={m.sender === 'user' ? 'text-right' : ''}>
+            <div className={`inline-block max-w-[85%] text-left px-3 py-2 rounded-lg text-sm ${
+              m.sender === 'user' ? 'bg-cyan/15 text-cream' : 'bg-ink-deep text-cream-secondary'
+            }`}>
+              {m.sender === 'llm'
+                ? <Suspense fallback={<span className="text-cream-muted">…</span>}><MessageContent content={m.content} streaming={isStreaming} /></Suspense>
+                : m.content}
+              {m.sender === 'llm' && m.citations?.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {m.citations.map((c, i) => (
+                    <span key={i} className="px-1.5 py-0.5 rounded bg-ink-raised text-[10px] text-cream-muted">
+                      {c.filename}{c.page_no ? ` p.${c.page_no}` : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2 p-3 border-t border-border-subtle">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Message the tutor…"
+          className="flex-1 px-3 py-2 rounded-lg bg-ink-deep border border-border-subtle text-sm text-cream placeholder:text-cream-muted focus:outline-none focus:border-cyan"
+        />
+        <button
+          onClick={send}
+          disabled={isStreaming || !input.trim()}
+          className="px-4 py-2 rounded-lg gradient-cyan text-ink-deep text-sm font-medium disabled:opacity-50"
+        >
+          Send
+        </button>
+      </div>
     </div>
   );
 }
