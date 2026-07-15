@@ -25,10 +25,7 @@ from typing import Awaitable, Callable
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agent.exercise_number import (
-    normalize_exercise_number,
-    normalize_heading_number,
-)
+from backend.app.agent.exercise_number import normalize_heading_number
 from backend.app.models import (
     Answer, DocChunk, Document, DocumentStatus, DocType, Exercise,
 )

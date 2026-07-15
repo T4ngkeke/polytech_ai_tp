@@ -323,7 +323,8 @@ class AnswerResponse(BaseModel):
 
 
 class GenerateHintsRequest(BaseModel):
-    """[v8.0 §10] `urgent` skips the chat-load queue gate (priority=0)."""
+    """[v8.0 §10] `urgent` (priority=0) makes the job run now — bypassing both the
+    chat-load gate and the GPU idle gate — competing with students for compute."""
     urgent: bool = False
 
 

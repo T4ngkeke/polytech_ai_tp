@@ -200,7 +200,7 @@ polytech_ai_tp/
 │   │   │   ├── router_service.py    # [v8.0] log every routing decision (RouterQueryLog v2); exercise hotspots
 │   │   │   ├── trace_service.py     # [v8.0] TraceBuilder (per-message AgentTraceLog) + health degradation counts
 │   │   │   ├── learner_service.py   # [v7] prompt-literacy effort profiles (per student, lab)
-│   │   │   ├── llm_service.py       # [v7.1] OpenAI-compatible clients from SystemConfigs (generate / embed / rerank / ingest / router / hint)
+│   │   │   ├── model_routing.py     # [v7.1] OpenAI-compatible clients from SystemConfigs (generate / embed / rerank / ingest / router / hint)
 │   │   │   ├── retrieval_service.py # [v7.1] hybrid (vector+BM25) + rerank, tenant/audience-filtered in SQL ([v8.0] approved-hint gate, class-wide CM scope)
 │   │   │   ├── skill_preset_service.py # [v7.2] teacher skill-preset library CRUD + snapshot-copy into class rule
 │   │   │   └── billing.py           # [v7.2] weighted billed-token helper (prompt·α + completion·β)
@@ -208,7 +208,7 @@ polytech_ai_tp/
 │   │   │   ├── __init__.py
 │   │   │   ├── graph.py             # [v8.0] router → [exercise → tutor | rag | direct | clarify] → Synthesize → SSE
 │   │   │   ├── router.py            # [v8.0] one-call LLM router: classify() + resolve_number() (three-tier dialogue state)
-│   │   │   ├── exercise_number.py   # [v7.2] shared normalize_exercise_number() (Roman/Arabic/3.1 → canonical int)
+│   │   │   ├── exercise_number.py   # [v8.0] shared number normalizers (normalize_heading_number / normalize_exercise_number; Roman/Arabic/3.1 → canonical int)
 │   │   │   ├── selfeval.py          # [v7.1] cheap gate + guided good/partial/bad verdict + bounded re-retrieval
 │   │   │   └── prompt.py            # Prompt Controller (skill.md → 3-tier rules → context/hints → history → question)
 │   │   │                            # ([v8.0] effort.py/lazy.py deleted — folded into the router's effort/answer_seeking output)
@@ -230,6 +230,7 @@ polytech_ai_tp/
 │   │   ├── parsing.py               # [v7.1] PDF text extraction (pymupdf) + character-yield gate
 │   │   ├── chunking.py              # [v7.3] single-source segmentation (boundaries, anomaly detection, size control, code blocks)
 │   │   └── gpu_gate.py              # chat-load gate (+ optional pynvml GPU signal); off-peak scheduling
+│   ├── seed.py                      # Dev DB bootstrap: schema + SystemConfigs defaults
 │   ├── .env                         # DATABASE_URL, JWT_SECRET (LLM configs live in DB)
 │   ├── requirements.txt
 │   └── Dockerfile                   # Python 3.12-slim — shared by backend & worker (entrypoint differs)
@@ -250,8 +251,7 @@ polytech_ai_tp/
 │   │   │   ├── SkillPresetManager.jsx   # [v7.2] Teacher skill-preset library CRUD + apply-to-class
 │   │   │   ├── MessageContent.jsx       # [v7.2] markdown + syntax-highlighted code (copy) + KaTeX, stream-safe
 │   │   │   ├── MainLayout.jsx
-│   │   │   ├── ProtectedRoute.jsx
-│   │   │   └── UserHeader.jsx
+│   │   │   └── ProtectedRoute.jsx
 │   │   ├── lib/
 │   │   │   └── api.js               # Centralized API client
 │   │   └── store/                   # Zustand stores (Auth, etc.)
@@ -260,7 +260,8 @@ polytech_ai_tp/
 │   ├── nginx.conf                   # Nginx reverse proxy config for prod
 │   └── Dockerfile                   # Node builder + Nginx multi-stage build
 ├── scripts/
-│   └── router_accuracy.py           # [v7.2] router eval harness (kNN vs LLM classification)
+│   ├── router_accuracy.py           # [v8.0] router eval harness (classify() accuracy over labelled conversations)
+│   └── retrieval_golden.py          # [v8.0] retrieval golden-set harness (hit@k + false-grounding + threshold sweep)
 └── docker-compose.yml               # Postgres(pgvector) + Backend + Worker + Frontend + named volumes
 ```
 

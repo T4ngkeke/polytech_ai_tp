@@ -16,7 +16,6 @@ from typing import Awaitable, Callable
 
 from backend.app.agent.exercise_number import (
     is_document_label,
-    normalize_exercise_number,
     normalize_heading_number,
 )
 from backend.app.models import DocType

@@ -35,8 +35,9 @@ async def has_urgent_job(
     """Whether a runnable job at/below the urgent priority is currently queued.
 
     The worker loop uses this to let a teacher's urgent hint job (priority=0)
-    bypass the chat-load gate — so "generate hints now" runs immediately during
-    class instead of waiting for a quiet window. Read-only (no claim)."""
+    bypass BOTH the chat-load gate and the GPU idle gate — so "generate hints
+    now" runs immediately during class instead of waiting for a quiet window.
+    Read-only (no claim)."""
     result = await db.execute(_HAS_URGENT_SQL, {"urgent": urgent_priority})
     return result.first() is not None
 

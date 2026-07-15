@@ -121,18 +121,20 @@ async def run_tick(
     When `chat_gate`/`chat_load_fn` are omitted, only the GPU gate applies (v7
     behaviour).
     """
+    # An urgent job (teacher-triggered hint, priority=0) bypasses BOTH gates so
+    # "generate hints now" runs immediately during class — the teacher already
+    # accepted competing with students for compute (the UI confirms this). Every
+    # other tick still waits for a quiet chat window AND an idle GPU.
+    urgent = await has_urgent_job(db)
+
     # Primary: back off while chat is busy (works for local and remote engines).
-    # Exception: an urgent job (teacher-triggered hint, priority=0) bypasses the
-    # chat-load gate so "generate hints now" runs immediately during class instead
-    # of waiting for a quiet window. The GPU gate below still applies.
-    if chat_gate is not None and chat_load_fn is not None:
-        if not await has_urgent_job(db):
-            if not chat_gate.observe(await chat_load_fn(db)):
-                await sleep_fn(gate_seconds)
-                return False
+    if not urgent and chat_gate is not None and chat_load_fn is not None:
+        if not chat_gate.observe(await chat_load_fn(db)):
+            await sleep_fn(gate_seconds)
+            return False
 
     # Optional: GPU idle gate.
-    if not gate.should_run():
+    if not urgent and not gate.should_run():
         await sleep_fn(gate_seconds)
         return False
 
