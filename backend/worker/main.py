@@ -445,7 +445,7 @@ def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
     from openai import AsyncOpenAI
 
     from backend.worker.hint_jobs import run_hint_job as _run_hint_job
-    from backend.worker.hints import generate_hints_for_exercise
+    from backend.worker.hints import generate_hints_for_exercise, verify_pairing
 
     ingest_client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
     embed_client = AsyncOpenAI(
@@ -464,8 +464,12 @@ def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
             classify_fn=hint_fn, generate_fn=hint_fn, judge_fn=hint_fn,
         )
 
+    # [v8.1] Semantic pairing re-check before generation, on the same hint model.
+    async def verify_fn(statement: str, answer_text: str) -> bool:
+        return await verify_pairing(statement, answer_text, hint_fn)
+
     async def run_hint_job(db_, job):
-        await _run_hint_job(db_, job, generate_fn=generate_fn)
+        await _run_hint_job(db_, job, generate_fn=generate_fn, verify_fn=verify_fn)
 
     return WorkerFns(
         embed_fn=embed_fn, context_fn=context_fn,

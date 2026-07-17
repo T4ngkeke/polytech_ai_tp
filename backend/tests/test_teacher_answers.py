@@ -51,7 +51,8 @@ async def test_list_lab_answers_returns_text_and_pairing(db_session):
         Answer(id=uuid.uuid4(), document_id=corrige.id, number_raw="1",
                number_normalized=1, answer_text="42", exercise_id=ex.id),   # paired
         Answer(id=uuid.uuid4(), document_id=corrige.id, number_raw="2",
-               number_normalized=2, answer_text="merge sort"),             # unpaired
+               number_normalized=2, answer_text="merge sort",              # unpaired +
+               pairing_suspect=True),               # [v8.1] flagged by the re-check
     ])
     await db_session.commit()
 
@@ -68,6 +69,9 @@ async def test_list_lab_answers_returns_text_and_pairing(db_session):
     assert body[0]["exercise_id"] == str(ex.id)   # paired
     assert body[1]["answer_text"] == "merge sort"
     assert body[1]["exercise_id"] is None          # unpaired ambiguity is visible
+    # [v8.1] the pairing re-check flag is teacher-visible.
+    assert body[0]["pairing_suspect"] is False
+    assert body[1]["pairing_suspect"] is True
 
 
 @pytest.mark.asyncio

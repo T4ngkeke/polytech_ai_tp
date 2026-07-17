@@ -26,13 +26,22 @@ from backend.worker.hints import HintResult
 # calls (classify/generate/judge) — injected so the runner needs no live model.
 GenerateFn = Callable[[str, str], Awaitable[HintResult]]
 
+# [v8.1] Pairing re-check: does this answer actually answer this statement?
+# Number-based pairing can mis-link (collisions, numbering drift in a re-export).
+VerifyFn = Callable[[str, str], Awaitable[bool]]
+
 
 async def run_hint_job(
     db: AsyncSession, job: IngestionJob, *, generate_fn: GenerateFn,
+    verify_fn: VerifyFn | None = None,
 ) -> None:
     """Generate hints for the exercises named in the job payload. Pairs answers
     first (at generation time), then fills each targeted exercise; an exercise
-    with no paired answer fails (blind-solve from scratch is deferred)."""
+    with no paired answer fails (blind-solve from scratch is deferred).
+
+    [v8.1] With a `verify_fn`, each pairing is semantically re-checked before
+    generation: a mismatch skips generation (failed) and flags the Answer
+    `pairing_suspect` for the teacher; a pass clears a stale flag."""
     payload = job.payload or {}
     ex_ids = [uuid.UUID(x) for x in (payload.get("exercise_ids") or [])]
     if not ex_ids:
@@ -57,6 +66,12 @@ async def run_hint_job(
         if answer is None:
             exercise.hint_status = HintStatus.failed
             continue
+        if verify_fn is not None:
+            matched = await verify_fn(exercise.statement, answer.answer_text)
+            answer.pairing_suspect = not matched
+            if not matched:
+                exercise.hint_status = HintStatus.failed
+                continue
         result = await generate_fn(exercise.statement, answer.answer_text)
         exercise.hints = result.hints
         exercise.hint_status = result.status

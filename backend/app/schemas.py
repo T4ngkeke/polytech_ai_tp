@@ -320,6 +320,8 @@ class AnswerResponse(BaseModel):
     answer_form: str | None
     exercise_id: uuid.UUID | None    # None = unpaired (ambiguity is visible)
     document_id: uuid.UUID
+    # [v8.1] the hint runner's pairing re-check judged this answer a mismatch.
+    pairing_suspect: bool
 
 
 class GenerateHintsRequest(BaseModel):

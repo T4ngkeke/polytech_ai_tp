@@ -807,6 +807,10 @@ class Answer(Base):
     # A verified derivation (final_only path) — stored so regeneration reuses it.
     derivation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # [v8.1] Set by the hint runner's pairing re-check: the LLM judged that this
+    # answer does not answer its paired exercise (number collision / drift).
+    # Surfaced to the teacher; cleared when a later re-check passes.
+    pairing_suspect: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

@@ -116,3 +116,68 @@ async def test_run_hint_job_fails_exercise_with_no_answer(db_session):
     await db_session.refresh(ex)
     assert ex.hint_status == HintStatus.failed
     assert ex.hints is None
+
+
+async def _seed_paired_exercise(db_session, *, suspect: bool = False):
+    """One TD exercise + one corrigé answer that pairs to it by number."""
+    teacher, cls, lab = await _seed_lab(db_session)
+    td = _doc(cls, lab, teacher, doc_type=DocType.TD)
+    corrige = _doc(cls, lab, teacher, doc_type=DocType.corrige)
+    db_session.add_all([td, corrige])
+    await db_session.flush()
+    ex = Exercise(id=uuid.uuid4(), document_id=td.id, class_id=cls.id, lab_id=lab.id,
+                  number="1", number_normalized=1, statement="Sum two numbers.",
+                  hint_status=HintStatus.generating)
+    ans = Answer(id=uuid.uuid4(), document_id=corrige.id, number_raw="1",
+                 number_normalized=1, answer_text="The capital of France is Paris.",
+                 pairing_suspect=suspect)
+    db_session.add_all([ex, ans])
+    await db_session.commit()
+    job = IngestionJob(id=uuid.uuid4(), document_id=td.id, job_type=JobType.hint_generate,
+                       payload={"exercise_ids": [str(ex.id)]})
+    db_session.add(job)
+    await db_session.flush()
+    return ex, ans, job
+
+
+@pytest.mark.asyncio
+async def test_run_hint_job_mismatch_skips_generation_and_flags_answer(db_session):
+    """[v8.1] verify_fn says the answer does not answer the statement → no
+    generation (failed), and the Answer row is flagged pairing_suspect."""
+    ex, ans, job = await _seed_paired_exercise(db_session)
+
+    async def fake_generate(statement, answer_text):  # must not be called
+        raise AssertionError("generate_fn called despite a pairing mismatch")
+
+    async def fake_verify(statement, answer_text):
+        return False
+
+    await run_hint_job(db_session, job, generate_fn=fake_generate, verify_fn=fake_verify)
+
+    await db_session.refresh(ex)
+    await db_session.refresh(ans)
+    assert ex.hint_status == HintStatus.failed
+    assert ex.hints is None
+    assert ans.pairing_suspect is True
+
+
+@pytest.mark.asyncio
+async def test_run_hint_job_verify_pass_generates_and_clears_flag(db_session):
+    """[v8.1] verify_fn approves the pairing → generation proceeds and a stale
+    suspect flag (from an earlier mismatch) is cleared."""
+    ex, ans, job = await _seed_paired_exercise(db_session, suspect=True)
+
+    async def fake_generate(statement, answer_text):
+        return HintResult(status=HintStatus.pending_review, hint_source=HintSource.worked,
+                          hints=["nudge", "method", "close"])
+
+    async def fake_verify(statement, answer_text):
+        return True
+
+    await run_hint_job(db_session, job, generate_fn=fake_generate, verify_fn=fake_verify)
+
+    await db_session.refresh(ex)
+    await db_session.refresh(ans)
+    assert ex.hint_status == HintStatus.pending_review
+    assert ex.hints == ["nudge", "method", "close"]
+    assert ans.pairing_suspect is False

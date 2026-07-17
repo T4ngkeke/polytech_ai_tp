@@ -110,6 +110,20 @@ async def judge_hints(statement: str, tiers: list[str], llm_fn: HintLLMFn) -> bo
     return _norm(await llm_fn(prompt)).startswith("good")
 
 
+async def verify_pairing(statement: str, answer_text: str, llm_fn: HintLLMFn) -> bool:
+    """[v8.1] 1-token verdict: does this answer actually answer this exercise?
+
+    Number-based pairing can mis-link (in-lab collisions, numbering drift in a
+    re-export); this semantic re-check runs before hint generation. Fail-closed:
+    only an explicit "yes" passes (same convention as ``judge_hints``)."""
+    prompt = (
+        "Does this answer actually answer this exercise? Judge the match, not the "
+        "correctness. Answer with one word: yes or no.\n\n"
+        f"Exercise:\n{statement}\n\nAnswer:\n{answer_text}"
+    )
+    return _norm(await llm_fn(prompt)).startswith("yes")
+
+
 async def generate_hints_for_exercise(
     statement: str,
     answer: str,

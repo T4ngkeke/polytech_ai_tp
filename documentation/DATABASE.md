@@ -277,6 +277,7 @@ the document's old chunks/exercises, then rebuilds (consistent after a strategy 
 | answer_text | Text | The answer body (may be "restated exercise + answer") |
 | derivation_text | Text | A verified derivation (reused on regeneration), nullable |
 | verified | Boolean | Whether the derivation was checked |
+| pairing_suspect | Boolean | **[v8.1]** default False. The hint runner's semantic re-check (`verify_pairing`, hint model) judged that this answer does not answer its paired exercise — generation is skipped (`failed`) and the flag is teacher-visible; a later passing re-check clears it |
 | created_at / updated_at | Timestamp | Timezone-aware (UTC) |
 
 > **🔴 red line.** This table exists so the **offline** hint workflow (and the teacher's

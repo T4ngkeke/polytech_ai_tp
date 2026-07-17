@@ -17,6 +17,7 @@ from backend.worker.hints import (
     generate_hint_tiers,
     judge_hints,
     leak_lint,
+    verify_pairing,
 )
 
 
@@ -115,3 +116,33 @@ async def test_orchestrator_proof_source_is_blind():
     )
     assert result.hint_source == HintSource.blind
     assert result.status == HintStatus.pending_review
+
+
+# [v8.1] Pairing re-check: a 1-word yes/no verdict on whether the paired answer
+# actually answers the statement. Fail-closed: only an explicit "yes" passes
+# (same convention as judge_hints' "good").
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply,expected", [
+    ("yes", True),
+    ("Yes.", True),
+    ("  YES", True),
+    ("no", False),
+    ("No — this answers a different exercise", False),
+    ("", False),
+    ("maybe", False),
+])
+async def test_verify_pairing_parses_verdict(reply, expected):
+    assert await verify_pairing("Sum two numbers.", "42", _fake(reply)) is expected
+
+
+@pytest.mark.asyncio
+async def test_verify_pairing_prompt_carries_statement_and_answer():
+    seen = {}
+
+    async def capture(prompt: str) -> str:
+        seen["prompt"] = prompt
+        return "yes"
+
+    await verify_pairing("Trier une liste.", "On utilise le tri fusion.", capture)
+    assert "Trier une liste." in seen["prompt"]
+    assert "On utilise le tri fusion." in seen["prompt"]
