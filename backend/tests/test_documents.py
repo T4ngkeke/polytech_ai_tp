@@ -165,3 +165,44 @@ async def test_exercise_concept_is_optional(db_session):
     await db_session.refresh(ex)
 
     assert ex.concept is None
+
+
+# ---------------------------------------------------------------------------
+# [v8.1] Markdown ingestion: _default_parse splits an .md file into heading
+# pseudo-pages and still runs the character-yield gate (a renamed junk file
+# must not slip through). Other non-PDF suffixes keep the single-page test
+# fallback untouched.
+# ---------------------------------------------------------------------------
+
+def test_default_parse_md_splits_headings_and_gates(tmp_path):
+    from backend.worker.ingest import _default_parse
+
+    md = tmp_path / "td.md"
+    md.write_text(
+        "# Exercice 1\n" + ("Écrire une fonction qui additionne. " * 5)
+        + "\n# Exercice 2\n" + ("Trier une liste avec le tri fusion. " * 5),
+        encoding="utf-8",
+    )
+    pages, gate = _default_parse(str(md))
+    assert len(pages) == 2
+    assert pages[0].startswith("# Exercice 1")
+    assert gate.ok
+
+
+def test_default_parse_md_garbage_rejected_by_gate(tmp_path):
+    from backend.worker.ingest import _default_parse
+
+    junk = tmp_path / "junk.md"
+    junk.write_text("��� " * 200, encoding="utf-8")  # no word chars
+    pages, gate = _default_parse(str(junk))
+    assert not gate.ok
+
+
+def test_default_parse_other_suffix_keeps_single_page_fallback(tmp_path):
+    from backend.worker.ingest import _default_parse
+
+    txt = tmp_path / "notes.txt"
+    txt.write_text("# looks like a heading\nbody", encoding="utf-8")
+    pages, gate = _default_parse(str(txt))
+    assert len(pages) == 1
+    assert gate.ok

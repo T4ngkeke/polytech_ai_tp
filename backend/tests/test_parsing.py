@@ -14,6 +14,7 @@ import pytest
 from backend.worker.parsing import (
     character_yield_gate,
     extract_pdf_text,
+    split_markdown_pages,
     strip_repeated_lines,
 )
 
@@ -141,3 +142,57 @@ def test_strip_repeated_lines_still_removes_header_after_sort():
     assert any(header in p for p in pages)                 # present before
     stripped = strip_repeated_lines(pages)
     assert all(header not in p for p in stripped)          # gone after
+
+
+# ---------------------------------------------------------------------------
+# [v8.1] Markdown "pages": split on the shallowest heading level present, so a
+# doc using only "##" still splits; heading-like lines inside ``` fences (e.g.
+# Python comments) never split; no headings → one page.
+# ---------------------------------------------------------------------------
+
+def test_split_markdown_pages_on_top_level_headings():
+    text = (
+        "# Chapitre 1\ncontenu un\n\n"
+        "## sous-section\nplus\n\n"
+        "# Chapitre 2\ncontenu deux\n"
+    )
+    pages = split_markdown_pages(text)
+    assert len(pages) == 2
+    assert pages[0].startswith("# Chapitre 1")
+    assert "sous-section" in pages[0]          # deeper headings don't split
+    assert pages[1].startswith("# Chapitre 2")
+
+
+def test_split_markdown_pages_uses_shallowest_level_present():
+    text = "## A\nun\n\n## B\ndeux\n"          # no "#" at all → "##" splits
+    pages = split_markdown_pages(text)
+    assert len(pages) == 2
+    assert pages[0].startswith("## A")
+    assert pages[1].startswith("## B")
+
+
+def test_split_markdown_pages_preamble_is_own_page():
+    text = "intro avant tout titre\n\n# Un\ncorps\n"
+    pages = split_markdown_pages(text)
+    assert len(pages) == 2
+    assert pages[0].startswith("intro")
+    assert pages[1].startswith("# Un")
+
+
+def test_split_markdown_pages_ignores_hashes_inside_code_fences():
+    text = (
+        "# Exercice 1\n"
+        "```python\n"
+        "# ceci est un commentaire, pas un titre\n"
+        "x = 1\n"
+        "```\n"
+        "# Exercice 2\nsuite\n"
+    )
+    pages = split_markdown_pages(text)
+    assert len(pages) == 2
+    assert "commentaire" in pages[0]
+
+
+def test_split_markdown_pages_no_headings_single_page():
+    text = "juste du texte\nsur deux lignes\n"
+    assert split_markdown_pages(text) == [text.strip()]

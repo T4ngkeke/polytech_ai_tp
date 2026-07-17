@@ -41,6 +41,7 @@ from backend.worker.parsing import (
     GateResult,
     character_yield_gate,
     extract_pdf_text,
+    split_markdown_pages,
     strip_repeated_lines,
 )
 from backend.worker.routing import plan_for
@@ -66,12 +67,17 @@ ParseFn = Callable[[str], tuple[list[str], GateResult]]
 def _default_parse(storage_path: str) -> tuple[list[str], GateResult]:
     """Parse a stored file into pages + a gate verdict.
 
-    PDFs go through pymupdf + the character-yield gate. Non-PDF files (test inputs)
-    are read as a single page and skip the gate.
+    PDFs go through pymupdf + the character-yield gate. [v8.1] Markdown is read
+    as text and split into heading pseudo-pages; the gate still runs so a junk
+    file renamed .md is rejected like a garbled PDF. Other suffixes (test
+    inputs) are read as a single page and skip the gate.
     """
     path = Path(storage_path)
     if path.suffix.lower() == ".pdf":
         pages = extract_pdf_text(path)
+        return pages, character_yield_gate(pages)
+    if path.suffix.lower() == ".md":
+        pages = split_markdown_pages(path.read_text(encoding="utf-8"))
         return pages, character_yield_gate(pages)
     return [path.read_text()], GateResult(ok=True)
 

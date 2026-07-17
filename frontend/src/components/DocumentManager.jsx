@@ -165,7 +165,7 @@ export default function DocumentManager({ labId }) {
       <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3 rounded-lg border border-border-default bg-ink-deep/30 p-3">
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-cream-muted">PDF file</label>
-          <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="text-sm text-cream-secondary file:mr-2 file:rounded file:border-0 file:bg-ink-surface file:px-2 file:py-1 file:text-cream-secondary" />
+          <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/markdown,.md" className="text-sm text-cream-secondary file:mr-2 file:rounded file:border-0 file:bg-ink-surface file:px-2 file:py-1 file:text-cream-secondary" />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-cream-muted">Type</label>

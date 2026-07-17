@@ -114,6 +114,52 @@ def strip_repeated_lines(pages: list[str], min_repeat: int = 3) -> list[str]:
     ]
 
 
+# [v8.1] Markdown "pages". PDF pages are the unit every downstream step works
+# on (per-page classifier context, page_no citations); a markdown file has no
+# pages, so we synthesize them from its heading tree: split at the SHALLOWEST
+# heading level present (a doc using only "##" still splits). Hash lines inside
+# ``` / ~~~ fences (e.g. Python comments) are code, never headings.
+_MD_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+_MD_HEADING_RE = re.compile(r"^(#{1,6})\s+\S")
+
+
+def split_markdown_pages(text: str) -> list[str]:
+    """Split markdown into pseudo-pages at its shallowest heading level.
+
+    Content before the first heading becomes its own leading page; a doc with
+    no headings at all is a single page. Empty input → no pages."""
+    lines = text.splitlines()
+    in_fence = False
+    headings: list[tuple[int, int]] = []  # (line index, heading level)
+    for i, line in enumerate(lines):
+        if _MD_FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = _MD_HEADING_RE.match(line)
+        if m:
+            headings.append((i, len(m.group(1))))
+
+    if not headings:
+        stripped = text.strip()
+        return [stripped] if stripped else []
+
+    min_level = min(level for _, level in headings)
+    starts = [i for i, level in headings if level == min_level]
+
+    pages: list[str] = []
+    preamble = "\n".join(lines[: starts[0]]).strip()
+    if preamble:
+        pages.append(preamble)
+    for j, start in enumerate(starts):
+        end = starts[j + 1] if j + 1 < len(starts) else len(lines)
+        body = "\n".join(lines[start:end]).strip()
+        if body:
+            pages.append(body)
+    return pages
+
+
 def _word_char_ratio(text: str) -> float:
     """Fraction of non-whitespace chars that are letters or digits (any script)."""
     non_ws = [c for c in text if not c.isspace()]

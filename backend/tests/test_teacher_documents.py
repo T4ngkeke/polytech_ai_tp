@@ -276,3 +276,23 @@ async def test_delete_document_rejects_foreign_teacher(db_session, tmp_path):
 
     assert resp.status_code == 404
     assert (await db_session.get(Document, doc.id)) is not None  # untouched
+
+
+@pytest.mark.asyncio
+async def test_upload_accepts_markdown(db_session, tmp_path):
+    """[v8.1] .md is a first-class upload format (any doc_type), enqueued like a PDF."""
+    teacher, cls, lab = await _teacher_with_lab(db_session)
+    app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.post(
+            f"/api/teacher/labs/{lab.id}/documents",
+            files={"file": ("td3.md", b"# Exercice 1\ncorps", "text/markdown")},
+            data={"doc_type": "TD", "audience": "student"},
+        )
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    assert resp.json()["filename"] == "td3.md"
