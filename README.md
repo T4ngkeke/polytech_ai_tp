@@ -322,6 +322,10 @@ The application is fully containerized using Docker, allowing for a single-comma
     a warning — a bad reranker never breaks a student's chat.
 - `pgvector`-enabled PostgreSQL image (e.g. `pgvector/pgvector:pg16`). v7.1 also uses Postgres
   full-text (`tsvector` / GIN) for BM25 — no extra extension needed.
+- **[v8.1] OOM protection — two layers.** The app caps each message's chat-history size
+  (`CONTEXT_MAX_TOKENS`, default 8000 estimated tokens; oldest turns silently forgotten).
+  **Also set an engine-side maximum context length** (vLLM `--max-model-len` / SGLang
+  `--context-length`) as the final backstop — the app cap must stay below it.
 
 > **v7.1 testing note:** hybrid retrieval (pgvector ANN + `tsvector` BM25 + rerank) cannot run
 > on SQLite. The retrieval test suite runs against a live pgvector Postgres via the `pg_session`

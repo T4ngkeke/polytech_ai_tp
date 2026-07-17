@@ -145,6 +145,8 @@ class LLMConfigRequest(BaseModel):
     rerank_score_threshold: str | None = None
     hint_max_samples: str | None = None
     ingest_token_budget: str | None = None
+    # [v8.1] estimated-token budget for chat history (OOM protection).
+    context_max_tokens: str | None = None
     token_alpha: float | None = None
     token_beta: float | None = None
 
@@ -175,6 +177,8 @@ class LLMConfigResponse(BaseModel):
     rerank_score_threshold: str = ""
     hint_max_samples: str = ""
     ingest_token_budget: str = ""
+    # [v8.1] estimated-token budget for chat history (OOM protection).
+    context_max_tokens: str = ""
     token_alpha: float = 0.2
     token_beta: float = 1.0
 

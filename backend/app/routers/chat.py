@@ -45,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.router import _ROUTER_SCHEMA
 from backend.app.agent.graph import build_agent
+from backend.app.agent.history import trim_history
 from backend.app.auth import get_current_user
 from backend.app.database import AsyncSessionLocal, get_db
 from backend.app.models import (
@@ -109,6 +110,8 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "router_api_key": routing.router.api_key,
         "router_model": routing.router.model,
         "rag_max_retries": configs.get("RAG_MAX_RETRIES", "1"),
+        # [v8.1] estimated-token budget for chat history (OOM protection).
+        "context_max_tokens": configs.get("CONTEXT_MAX_TOKENS", "8000"),
         "token_alpha": str(routing.token_alpha),
         "token_beta": str(routing.token_beta),
     }
@@ -485,6 +488,12 @@ async def chat_stream(
         {"role": "user" if m.sender == SenderType.user else "assistant", "content": m.content}
         for m in last_messages
     ]
+    # [v8.1] Cap the history's estimated token size (the 20-message cap bounds
+    # count, not size) — oldest turns are silently forgotten so a marathon
+    # conversation can never grow the prompt until the local engine OOMs.
+    history = trim_history(
+        history, max_tokens=int(llm_config["context_max_tokens"] or 8000)
+    )
 
     rule_texts = await rule_service.get_active_rule_texts(db, class_id, lab_id, current_user.id)
 

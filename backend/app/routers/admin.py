@@ -257,6 +257,8 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "rerank_score_threshold": "RERANK_SCORE_THRESHOLD",
     "hint_max_samples": "HINT_MAX_SAMPLES",
     "ingest_token_budget": "INGEST_TOKEN_BUDGET",
+    # [v8.1] estimated-token budget for chat history (OOM protection).
+    "context_max_tokens": "CONTEXT_MAX_TOKENS",
 }
 
 

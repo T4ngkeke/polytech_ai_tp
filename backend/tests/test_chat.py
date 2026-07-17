@@ -578,3 +578,42 @@ class TestStreamingAndBackgroundTask:
                 async for chunk in resp.aiter_text():
                     chunks.append(chunk)
                 assert "Bonjour" in "".join(chunks)
+
+
+# ===================================================================
+# [v8.1] Per-turn context cap (OOM protection)
+# ===================================================================
+
+
+class TestContextCap:
+    async def test_history_over_budget_is_trimmed_oldest_first(
+        self, client1, seed_chat, db_session, mock_openai
+    ):
+        """CONTEXT_MAX_TOKENS bounds the history sent to the LLM: two huge old
+        messages are dropped, the recent short pair survives, and the current
+        question is always present."""
+        sess = seed_chat["sess1"]
+        db_session.add_all([
+            Message(session_id=sess.id, sender=SenderType.user, content="A" * 3000),
+            Message(session_id=sess.id, sender=SenderType.llm, content="B" * 3000),
+            Message(session_id=sess.id, sender=SenderType.user, content="question récente"),
+            Message(session_id=sess.id, sender=SenderType.llm, content="réponse récente"),
+            SystemConfig(key="CONTEXT_MAX_TOKENS", value="60"),
+        ])
+        await db_session.commit()
+
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+            async with client1.stream("POST", "/api/chat/stream", json={
+                "session_id": str(sess.id), "message": "et maintenant ?",
+            }) as resp:
+                assert resp.status_code == 200
+                async for _ in resp.aiter_text():
+                    pass
+
+        sent = mock_openai.return_value._captured_create_kwargs["messages"]
+        contents = [m["content"] for m in sent]
+        assert not any("AAAA" in c for c in contents)      # oldest huge msg dropped
+        assert not any("BBBB" in c for c in contents)
+        assert any("question récente" in c for c in contents)  # recent pair kept
+        assert contents[-1] == "et maintenant ?"           # current question intact

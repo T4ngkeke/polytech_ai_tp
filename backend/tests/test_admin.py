@@ -347,6 +347,17 @@ class TestLLMConfig:
         })
         got = (await admin_client.get("/api/admin/llm/config")).json()
         assert got["hint_model"] == ""
+
+    async def test_v81_context_max_tokens_roundtrip(self, admin_client):
+        """[v8.1] The per-turn history token budget (OOM protection) is
+        admin-configurable and survives a GET after PUT."""
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "context_max_tokens": "12000",
+        })
+        assert resp.status_code == 200
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["context_max_tokens"] == "12000"
         assert got["rerank_score_threshold"] == ""  # gate ships OFF
 
     # --- [v7.2] full model-routing table ---------------------------------

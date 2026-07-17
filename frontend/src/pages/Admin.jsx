@@ -727,6 +727,13 @@ function LLMConfigTab() {
               onChange={set('ingest_token_budget')} placeholder="200000" />
           </ConfigSection>
 
+          {/* [v8.1] Context cap — OOM protection for the local engine */}
+          <ConfigSection title="Chat history context cap"
+            desc="Estimated-token budget for the history sent per message (oldest turns are silently forgotten). Protects a local engine from OOM on marathon conversations. Keep it below the engine's max context length.">
+            <Field label="Max history tokens (estimated)" value={config.context_max_tokens}
+              onChange={set('context_max_tokens')} placeholder="8000" />
+          </ConfigSection>
+
           {/* Token cost weights */}
           <ConfigSection title="Token quota weights (billed = prompt·α + completion·β)">
             <Field label="α — prefill weight" value={config.token_alpha} onChange={set('token_alpha')}

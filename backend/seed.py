@@ -69,6 +69,8 @@ DEFAULT_SYSTEM_CONFIGS = [
     {"key": "HINT_API_KEY", "value": ""},
     # [v7.3] context-injection gate: empty = OFF until calibrated on the golden set.
     {"key": "RERANK_SCORE_THRESHOLD", "value": ""},
+    # [v8.1] estimated-token budget for chat history (OOM protection; chars//3).
+    {"key": "CONTEXT_MAX_TOKENS", "value": "8000"},
     # [v7.3] worker budgets: per-exercise derivation samples / per-document tokens.
     {"key": "HINT_MAX_SAMPLES", "value": "4"},
     {"key": "INGEST_TOKEN_BUDGET", "value": "200000"},
