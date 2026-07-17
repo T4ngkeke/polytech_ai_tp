@@ -131,6 +131,8 @@ async def _segment_exercises_checked(
             "segmenter": "regex",
             "boundary_disagreements": 0,
             "dropped_invalid_lines": 0,
+            "disagreement": False,
+            "alternate": None,
         }
 
     try:
@@ -144,6 +146,8 @@ async def _segment_exercises_checked(
             "segmenter": "regex_fallback",
             "boundary_disagreements": len(regex_labeled),
             "dropped_invalid_lines": 0,
+            "disagreement": False,   # no usable LLM candidate to compare/offer
+            "alternate": None,
         }
 
     disagreements = abs(rep["boundary_count"] - len(regex_labeled))
@@ -152,12 +156,27 @@ async def _segment_exercises_checked(
             "segmenter": "regex_fallback",
             "boundary_disagreements": disagreements,
             "dropped_invalid_lines": rep["dropped_invalid_lines"],
+            "disagreement": False,   # the LLM offered nothing worth choosing
+            "alternate": None,
         }
+
+    # [v8.1] Content-level comparison (count equality is NOT agreement): when
+    # the two boundary SETS differ, keep the regex candidate as the alternate so
+    # a teacher can compare both splits side by side and switch (human confirm).
+    disagreement = _boundary_labels(llm_segments) != _boundary_labels(regex_labeled)
     return llm_segments, {
         "segmenter": "llm",
         "boundary_disagreements": disagreements,
         "dropped_invalid_lines": rep["dropped_invalid_lines"],
+        "disagreement": disagreement,
+        "alternate": regex_labeled if disagreement else None,
     }
+
+
+def _boundary_labels(segments: list[Chunk]) -> list[str]:
+    """[v8.1] Whitespace-folded, case-insensitive boundary labels — the identity
+    two segmentations are compared on."""
+    return [" ".join((c.section or "").split()).casefold() for c in segments]
 
 
 def _segments_to_cache(segments: list[Chunk]) -> list[dict]:
@@ -190,6 +209,10 @@ async def _segment_with_cache(
             "segmenter": "cache",
             "boundary_disagreements": cache.get("boundary_disagreements", 0),
             "dropped_invalid_lines": cache.get("dropped_invalid_lines", 0),
+            # [v8.1] a cache hit keeps the stored disagreement state (and the
+            # alternate stays available in the cache for the teacher UI).
+            "disagreement": cache.get("disagreement", False),
+            "alternate": None,
         }
 
     segments, report = await _segment_exercises_checked(
@@ -201,12 +224,20 @@ async def _segment_with_cache(
     # document until its content or the extractor_version changes. Leave it uncached
     # so the next ingest retries the classifier.
     if report["segmenter"] in ("llm", "regex"):
+        alternate = report.get("alternate")
         doc.segmentation_cache = {
             "extractor_version": EXTRACTOR_VERSION,
             "content_hash": doc.content_hash,
             "boundary_disagreements": report["boundary_disagreements"],
             "dropped_invalid_lines": report["dropped_invalid_lines"],
             "segments": _segments_to_cache(segments),
+            # [v8.1] human-confirm state: which candidate is live, and the other
+            # candidate kept for side-by-side compare + switch (None = agreed).
+            "chosen": report["segmenter"],
+            "disagreement": report.get("disagreement", False),
+            "alternate_segments": (
+                _segments_to_cache(alternate) if alternate else None
+            ),
         }
     return segments, report
 
@@ -449,6 +480,9 @@ async def ingest_document(
                 "segmenter": seg_report["segmenter"],
                 "boundary_disagreements": seg_report["boundary_disagreements"],
                 "dropped_invalid_lines": seg_report["dropped_invalid_lines"],
+                # [v8.1] regex/LLM boundary sets differ → both candidates kept;
+                # the teacher compares them side by side and confirms one.
+                "segmentation_disagreement": seg_report.get("disagreement", False),
                 "exercise_count": len(segments),
             }
 

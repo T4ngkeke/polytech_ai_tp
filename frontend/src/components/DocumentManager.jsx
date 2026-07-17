@@ -234,6 +234,13 @@ export default function DocumentManager({ labId }) {
                   {(doc.status === 'needs_review' || doc.status === 'failed') && (
                     <span title={doc.error_message || ''} className="text-gold">⚠</span>
                   )}
+                  {doc.ingest_report?.segmentation_disagreement
+                    && !doc.ingest_report?.segmentation_confirmed && (
+                    <span title="The two segmentation methods disagree — open to review"
+                      className="rounded bg-gold-muted px-1.5 py-0.5 text-xs font-medium text-gold">
+                      split?
+                    </span>
+                  )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
                   <StatusBadge status={doc.status} />
@@ -292,24 +299,60 @@ function DocumentDetail({ document: doc, onBack }) {
   const [loading, setLoading] = useState(true);
 
   const [genBusy, setGenBusy] = useState(false);
+  // [v8.1] Segmentation human-confirm: both candidates, when they disagreed.
+  const [seg, setSeg] = useState(null);
+  const [segBusy, setSegBusy] = useState(false);
+  const needsSegReview = Boolean(
+    doc.ingest_report?.segmentation_disagreement
+    && !doc.ingest_report?.segmentation_confirmed
+  );
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    // Fetch chunks + exercises in parallel — no waterfall.
+    // Fetch chunks + exercises (+ segmentation candidates when the two
+    // segmenters disagreed) in parallel — no waterfall.
     Promise.all([
       api.get(`/api/teacher/documents/${doc.id}/chunks`),
       api.get(`/api/teacher/documents/${doc.id}/exercises`),
+      needsSegReview
+        ? api.get(`/api/teacher/documents/${doc.id}/segmentation`)
+        : Promise.resolve(null),
     ])
-      .then(([c, e]) => {
+      .then(([c, e, s]) => {
         if (!alive) return;
         setChunks(c);
         setExercises(e);
+        setSeg(s);
       })
       .catch((err) => toast.error(err.message))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [doc.id]);
+  }, [doc.id, needsSegReview]);
+
+  const chooseSegmentation = async (which) => {
+    const switching = which !== seg?.chosen;
+    if (switching && !window.confirm(
+      'Switch to the other split? Exercises are rebuilt: your hand-edited ones are kept, '
+      + 'carried hints go back to review.'
+    )) return;
+    setSegBusy(true);
+    try {
+      const updated = await api.post(
+        `/api/teacher/documents/${doc.id}/segmentation/choose`, { which });
+      setSeg(updated);
+      if (switching) {
+        setExercises(await api.get(`/api/teacher/documents/${doc.id}/exercises`));
+        toast.success('Split applied — exercises rebuilt');
+      } else {
+        toast.success('Split confirmed');
+      }
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSegBusy(false);
+    }
+  };
 
   // [v8.0] While any exercise is generating, poll exercises so the badges settle
   // to pending_review/failed once the worker finishes.
@@ -364,6 +407,10 @@ function DocumentDetail({ document: doc, onBack }) {
         <p className="text-sm text-cream-muted">Loading processing report…</p>
       ) : (
         <>
+          {seg != null && !seg.confirmed && seg.alternate != null ? (
+            <SegmentationReview seg={seg} busy={segBusy} onChoose={chooseSegmentation} />
+          ) : null}
+
           {exercises.length > 0 && (
             <section>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -421,6 +468,75 @@ function DocumentDetail({ document: doc, onBack }) {
         </>
       )}
     </div>
+  );
+}
+
+// [v8.1] Human-confirm for a segmentation disagreement: the two candidate
+// splits side by side; the teacher keeps the live one or switches. Switching
+// rebuilds exercises (hand-edits kept; carried hints demoted back to review).
+const SEGMENTER_LABEL = { llm: 'AI reading', regex: 'Pattern matching' };
+
+function SegmentationCandidate({ title, live, segments, action, busy, onPick }) {
+  return (
+    <div className={`flex flex-col rounded-lg border p-2 ${
+      live ? 'border-cyan/40 bg-cyan-muted/20' : 'border-border-default'}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-cream-secondary">
+          {title} · {segments.length} exercise{segments.length === 1 ? '' : 's'}
+        </p>
+        {live ? (
+          <span className="rounded bg-cyan-muted px-1.5 py-0.5 text-xs text-cyan">live</span>
+        ) : null}
+      </div>
+      <ol className="mb-2 flex-1 space-y-1.5">
+        {segments.map((s, i) => (
+          <li key={i} className="rounded bg-ink-deep/60 p-1.5">
+            <p className="text-xs font-medium text-cream">{s.section || '(no label)'}</p>
+            <p className="truncate text-xs text-cream-muted">
+              {(s.content || '').replace(/\s+/g, ' ').slice(0, 120)}
+            </p>
+          </li>
+        ))}
+      </ol>
+      <button type="button" onClick={onPick} disabled={busy}
+        className={`rounded px-2.5 py-1 text-xs font-medium disabled:opacity-50 ${
+          live
+            ? 'border border-border-default text-cream-secondary hover:bg-ink-hover'
+            : 'gradient-cyan text-cream hover:brightness-110'}`}>
+        {action}
+      </button>
+    </div>
+  );
+}
+
+function SegmentationReview({ seg, busy, onChoose }) {
+  const other = seg.chosen === 'llm' ? 'regex' : 'llm';
+  return (
+    <section className="rounded-lg border border-gold/40 bg-gold-muted/20 p-3">
+      <h4 className="text-sm font-semibold text-gold">Which split is right?</h4>
+      <p className="mb-3 mt-1 text-xs text-cream-muted">
+        The two segmentation methods disagree on the exercise boundaries.
+        Students currently see the “live” split — compare and confirm the right one.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <SegmentationCandidate
+          title={SEGMENTER_LABEL[seg.chosen] || seg.chosen}
+          live
+          segments={seg.current}
+          action="Keep this split"
+          busy={busy}
+          onPick={() => onChoose(seg.chosen)}
+        />
+        <SegmentationCandidate
+          title={SEGMENTER_LABEL[other] || other}
+          live={false}
+          segments={seg.alternate}
+          action="Use this split instead"
+          busy={busy}
+          onPick={() => onChoose(other)}
+        />
+      </div>
+    </section>
   );
 }
 

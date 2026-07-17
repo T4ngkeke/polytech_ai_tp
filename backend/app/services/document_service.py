@@ -386,3 +386,128 @@ async def delete_document(db: AsyncSession, document: Document) -> str:
     await db.delete(document)
     await db.flush()
     return storage_path
+
+
+# ===================================================================
+# [v8.1] Segmentation human-confirm (regex/LLM disagreement)
+# ===================================================================
+
+
+def get_segmentation(document: Document) -> dict:
+    """Both candidate segmentations for the compare UI. `current` is the live
+    split; `alternate` is the other candidate (None when the two agreed)."""
+    cache = document.segmentation_cache or {}
+    report = document.ingest_report or {}
+    return {
+        "chosen": cache.get("chosen"),
+        "disagreement": bool(cache.get("disagreement", False)),
+        "confirmed": bool(report.get("segmentation_confirmed", False)),
+        "current": cache.get("segments") or [],
+        "alternate": cache.get("alternate_segments"),
+    }
+
+
+async def choose_segmentation(
+    db: AsyncSession, document: Document, which: str
+) -> None:
+    """Teacher confirms which candidate segmentation is right.
+
+    Confirming the live one records the confirmation (the warning clears) and
+    touches nothing else. Switching rebuilds the document's exercises
+    deterministically from the stored alternate — no LLM, no re-ingest:
+    teacher-edited exercises survive verbatim (unmatched ones re-added, never
+    dropped), other hints are carried by number with `approved` demoted to
+    `pending_review` (the statement changed → must be re-reviewed). The cache
+    swaps so idempotent re-ingestion respects the choice.
+    """
+    cache = document.segmentation_cache or {}
+    if not cache.get("segments"):
+        raise ValueError("No stored segmentation to choose from.")
+    if which == cache.get("chosen"):
+        document.ingest_report = {
+            **(document.ingest_report or {}), "segmentation_confirmed": True,
+        }
+        await db.flush()
+        return
+    alternate = cache.get("alternate_segments")
+    if not alternate:
+        raise ValueError("No alternate segmentation stored for this document.")
+    if document.doc_type not in (DocType.TD, DocType.TP):
+        raise ValueError("Only TD/TP segmentations can be switched.")
+
+    # Snapshot BEFORE the delete: edited rows verbatim; hints carried by number.
+    rows = (await db.execute(
+        select(Exercise).where(Exercise.document_id == document.id)
+    )).scalars().all()
+    edited = {
+        e.number_normalized: {
+            "number": e.number, "statement": e.statement, "hints": e.hints,
+            "hint_status": e.hint_status, "hint_source": e.hint_source,
+            "concept": e.concept,
+        }
+        for e in rows if e.edited_by_teacher
+    }
+    carried = {
+        e.number_normalized: {
+            "hints": e.hints,
+            "hint_status": (
+                HintStatus.pending_review
+                if e.hint_status == HintStatus.approved else e.hint_status
+            ),
+            "hint_source": e.hint_source,
+        }
+        for e in rows if e.hints and not e.edited_by_teacher
+    }
+    await db.execute(delete(Exercise).where(Exercise.document_id == document.id))
+
+    for seg in alternate:
+        norm = normalize_heading_number(seg.get("section"))
+        snap = edited.pop(norm, None)
+        if snap:
+            db.add(Exercise(
+                id=uuid.uuid4(), document_id=document.id,
+                class_id=document.class_id, lab_id=document.lab_id,
+                audience=document.audience,
+                number=snap["number"], number_normalized=norm,
+                statement=snap["statement"], hints=snap["hints"],
+                hint_status=snap["hint_status"], hint_source=snap["hint_source"],
+                concept=snap["concept"], edited_by_teacher=True,
+            ))
+            continue
+        carry = carried.get(norm) or {}
+        db.add(Exercise(
+            id=uuid.uuid4(), document_id=document.id,
+            class_id=document.class_id, lab_id=document.lab_id,
+            audience=document.audience,
+            number=seg.get("section"), number_normalized=norm,
+            statement=seg.get("content") or "",
+            hints=carry.get("hints"),
+            hint_status=carry.get("hint_status") or HintStatus.none,
+            hint_source=carry.get("hint_source"),
+            edited_by_teacher=False,
+        ))
+
+    # Edited exercises whose number vanished from the chosen split: kept.
+    for norm, snap in edited.items():
+        db.add(Exercise(
+            id=uuid.uuid4(), document_id=document.id,
+            class_id=document.class_id, lab_id=document.lab_id,
+            audience=document.audience,
+            number=snap["number"], number_normalized=norm,
+            statement=snap["statement"], hints=snap["hints"],
+            hint_status=snap["hint_status"], hint_source=snap["hint_source"],
+            concept=snap["concept"], edited_by_teacher=True,
+        ))
+
+    document.segmentation_cache = {
+        **cache,
+        "segments": alternate,
+        "alternate_segments": cache["segments"],
+        "chosen": which,
+    }
+    document.ingest_report = {
+        **(document.ingest_report or {}),
+        "segmentation_confirmed": True,
+        "exercise_count": len(alternate),
+    }
+    await db.flush()

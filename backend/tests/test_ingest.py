@@ -854,3 +854,73 @@ async def test_duplicate_chunks_within_document_are_deduped(db_session, tmp_path
     chunks = await _chunks_of(db_session, doc)
     notice_chunks = [c for c in chunks if notice in c.content]
     assert len(notice_chunks) == 1
+
+
+# --- [v8.1] Segmentation disagreement → stored candidates (human confirm) ----
+# When the regex cross-check and the LLM disagree on the boundary SET (content,
+# not just count), BOTH candidate segmentations are kept: the doc still goes
+# live on the LLM split, but the report flags the disagreement and the cache
+# holds the alternate so a teacher can compare and switch without re-ingesting.
+
+
+@pytest.mark.asyncio
+async def test_boundary_disagreement_stores_alternate_and_flags_report(
+    db_session, tmp_path
+):
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nSum.\n\nExercice 2\nSort.\n\nExercice 3\nProve.\n",
+    )
+    # The classifier misses "Exercice 2" → LLM has 2 boundaries, regex has 3.
+    classify = _heading_classifier(
+        lambda t: "exercise_heading"
+        if _EXERCISE_LINE.match(t) and "2" not in t else None
+    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=classify)
+
+    assert len(await _exercises_of(db_session, doc)) == 2   # live on the LLM split
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmentation_disagreement"] is True
+    alt = doc.segmentation_cache["alternate_segments"]
+    assert [a["section"] for a in alt] == ["Exercice 1", "Exercice 2", "Exercice 3"]
+    assert doc.segmentation_cache["chosen"] == "llm"
+
+
+@pytest.mark.asyncio
+async def test_no_disagreement_stores_no_alternate(db_session, tmp_path):
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nSum.\n\nExercice 2\nSort.\n",
+    )
+    classify = _heading_classifier(
+        lambda t: "exercise_heading" if _EXERCISE_LINE.match(t) else None
+    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=classify)
+
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmentation_disagreement"] is False
+    assert doc.segmentation_cache.get("alternate_segments") is None
+
+
+@pytest.mark.asyncio
+async def test_same_count_different_boundaries_is_a_disagreement(
+    db_session, tmp_path
+):
+    """Count-equality is not agreement: 2 vs 2 with different boundary LINES
+    still stores the alternate (the old abs(count) diff missed this)."""
+    doc = await _seed_document(
+        db_session, tmp_path, doc_type=DocType.TD,
+        body="Exercice 1\nSum.\n\nExercice 2\nSort.\n",
+    )
+    # Classifier labels "Exercice 1" and (absurdly) "Sort." → same count as
+    # regex (2) but a different boundary set.
+    classify = _heading_classifier(
+        lambda t: "exercise_heading"
+        if _EXERCISE_LINE.match(t) and "1" in t or t.startswith("Sort")
+        else None
+    )
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, classify_fn=classify)
+
+    await db_session.refresh(doc)
+    assert doc.ingest_report["segmentation_disagreement"] is True
+    assert doc.segmentation_cache["alternate_segments"] is not None

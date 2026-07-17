@@ -62,6 +62,8 @@ from backend.app.schemas import (
     ExerciseUpdateRequest,
     GenerateHintsRequest,
     GenerateHintsResponse,
+    SegmentationResponse,
+    ChooseSegmentationRequest,
     DocumentResponse,
     DocumentSummaryResponse,
     ApplySkillRequest,
@@ -361,6 +363,39 @@ async def get_document_exercises(
     await _owned_document_or_404(db, document_id, teacher)
     exercises = await document_service.get_document_exercises(db, document_id)
     return [DocExerciseResponse.model_validate(e) for e in exercises]
+
+
+@router.get("/documents/{document_id}/segmentation", response_model=SegmentationResponse)
+async def get_document_segmentation(
+    document_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> SegmentationResponse:
+    """[v8.1] Both candidate segmentations (live + alternate) for the compare UI."""
+    doc = await _owned_document_or_404(db, document_id, teacher)
+    return SegmentationResponse(**document_service.get_segmentation(doc))
+
+
+@router.post("/documents/{document_id}/segmentation/choose",
+             response_model=SegmentationResponse)
+async def choose_document_segmentation(
+    document_id: uuid.UUID,
+    body: ChooseSegmentationRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> SegmentationResponse:
+    """[v8.1] Confirm which candidate segmentation is right (human confirm).
+
+    Switching rebuilds the exercises deterministically from the stored
+    alternate: teacher edits survive, hints carry by number with approved
+    demoted to pending_review."""
+    doc = await _owned_document_or_404(db, document_id, teacher)
+    try:
+        await document_service.choose_segmentation(db, doc, body.which)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    await db.commit()
+    return SegmentationResponse(**document_service.get_segmentation(doc))
 
 
 @router.put("/documents/{document_id}/chunks/{chunk_id}", response_model=ChunkResponse)

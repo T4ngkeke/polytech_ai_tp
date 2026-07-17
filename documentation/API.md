@@ -77,6 +77,8 @@
 | GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | [v7.1] List documents + status + summary + `ingest_report`. |
 | GET | `/api/teacher/documents/{document_id}/chunks` | require_teacher | [v7.1] Paginated chunk text + `page_no` (+ generated `context`). |
 | GET | `/api/teacher/documents/{document_id}/exercises` | require_teacher | [v7.1] Extracted exercises. **[v8.0]** each carries the tiered `hints` array + `hint_status` / `hint_source`. No solution exists. |
+| GET | `/api/teacher/documents/{document_id}/segmentation` | require_teacher | **[v8.1]** Both candidate segmentations (live + alternate) when regex/LLM disagreed — for the side-by-side compare UI. |
+| POST | `/api/teacher/documents/{document_id}/segmentation/choose` | require_teacher | **[v8.1]** Human confirm: body `{which: llm\|regex}`. Confirming the live split just records it; switching **rebuilds exercises deterministically** from the stored alternate (teacher edits survive; hints carry by number, `approved` demoted to `pending_review`). |
 | PUT | `/api/teacher/documents/{document_id}/chunks/{chunk_id}` | require_teacher | **[v7.2]** Correct a chunk's text; re-embeds + rebuilds BM25 `tsv`; sets `edited_by_teacher`. |
 | PUT | `/api/teacher/documents/{document_id}/exercises/{exercise_id}` | require_teacher | **[v7.2]** Correct an exercise (number/statement); re-derives `number_normalized`; sets `edited_by_teacher`. **[v8.0]** accepts a tiered `hints` array — a hand-edit sets `hint_status=approved` (trusted). |
 | POST | `/api/teacher/documents/{document_id}/exercises` | require_teacher | **[v8.0]** Hand-add an exercise the extractor missed (`edited_by_teacher`). |

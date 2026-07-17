@@ -9,7 +9,7 @@ All schemas use UUIDs for IDs and datetime with timezone info (UTC).
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -326,6 +326,27 @@ class AnswerResponse(BaseModel):
     document_id: uuid.UUID
     # [v8.1] the hint runner's pairing re-check judged this answer a mismatch.
     pairing_suspect: bool
+
+
+class SegmentItem(BaseModel):
+    """[v8.1] One candidate exercise segment (boundary label + body preview)."""
+    section: str | None = None
+    content: str
+    page_no: int | None = None
+
+
+class SegmentationResponse(BaseModel):
+    """[v8.1] Both candidate segmentations for the human-confirm compare UI."""
+    chosen: str | None
+    disagreement: bool
+    confirmed: bool
+    current: list[SegmentItem]
+    alternate: list[SegmentItem] | None
+
+
+class ChooseSegmentationRequest(BaseModel):
+    """[v8.1] Teacher's pick: which candidate segmentation is right."""
+    which: Literal["llm", "regex"]
 
 
 class GenerateHintsRequest(BaseModel):

@@ -28,5 +28,10 @@ export function ingestReportWarnings(report) {
   if (report.over_budget) {
     warnings.push(`Ingest token budget exceeded (~${report.ingest_tokens_est} est. > ${report.token_budget})`);
   }
+  // [v8.1] The two segmenters disagreed on the exercise boundaries; both
+  // candidates are stored — the teacher compares and confirms one below.
+  if (report.segmentation_disagreement && !report.segmentation_confirmed) {
+    warnings.push('The two segmentation methods split the exercises differently — review and confirm the right split below.');
+  }
   return warnings;
 }
