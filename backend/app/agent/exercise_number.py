@@ -2,7 +2,7 @@
 exercise_number.py — [v7.2] shared exercise-number normalization.
 
 The printed exercise label is unstable across documents (Arabic, Roman, "3.1",
-FR/EN keywords, Chinese), which makes regex-only matching brittle. Both the
+FR/EN keywords), which makes regex-only matching brittle. Both the
 ingest-side extraction and the query-side router run this ONE deterministic
 function so a label and a student's reference collapse to the same canonical
 integer.
@@ -25,11 +25,6 @@ _ROMAN_TOKEN_RE = re.compile(r"(?i)\b([ivx]+)\b")
 _ROMAN_VALID_RE = re.compile(r"(?i)^(X{0,3})(IX|IV|V?I{0,3})$")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
 
-_CJK_DIGITS = {
-    "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-    "六": 6, "七": 7, "八": 8, "九": 9,
-}
-
 
 def _roman_to_int(token: str) -> int:
     total = 0
@@ -44,27 +39,12 @@ def _roman_to_int(token: str) -> int:
     return total
 
 
-def _cjk_to_int(text: str) -> int | None:
-    """Parse a small Chinese numeral (covers 一..九, 十, and 十X / X十 / X十Y)."""
-    chars = [c for c in text if c in _CJK_DIGITS or c == "十"]
-    if not chars:
-        return None
-    if chars == ["十"]:
-        return 10
-    if "十" not in chars:
-        # Single digit only (multi-digit CJK without 十 is not standard).
-        return _CJK_DIGITS.get(chars[0]) if len(chars) == 1 else None
-    idx = chars.index("十")
-    tens = _CJK_DIGITS.get(chars[idx - 1], 1) if idx > 0 else 1
-    units = _CJK_DIGITS.get(chars[idx + 1], 0) if idx + 1 < len(chars) else 0
-    return tens * 10 + units
-
-
 def normalize_exercise_number(raw: str | None) -> int | None:
     """Map an exercise label to its canonical integer, or ``None`` if absent.
 
-    Precedence: Arabic digits (``"3.1"`` → ``3``) → Roman numerals → Chinese
-    numerals. Keyword prefixes (exercise/exercice/problème/…) are ignored.
+    Precedence: Arabic digits (``"3.1"`` → ``3``) → Roman numerals. Keyword
+    prefixes (exercise/exercice/problème/…) are ignored. Course documents are
+    FR/EN only — non-Latin numerals are not parsed.
     """
     if not raw:
         return None
@@ -80,8 +60,7 @@ def normalize_exercise_number(raw: str | None) -> int | None:
         if _ROMAN_VALID_RE.match(token):
             return _roman_to_int(token)
 
-    # 3. Chinese numeral.
-    return _cjk_to_int(text)
+    return None
 
 
 # [v8.0 §3.5] A leading structural keyword on a heading line (before the ordinal).

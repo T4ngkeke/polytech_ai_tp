@@ -2,7 +2,7 @@
 test_exercise_number.py — [v7.2] harness for the shared exercise-number
 normalization.
 
-The printed exercise label is unstable (Arabic / Roman / "3.1" / FR / ZH), so
+The printed exercise label is unstable (Arabic / Roman / "3.1" / FR / EN), so
 both ingest-side extraction and query-side matching run the SAME deterministic
 `normalize_exercise_number()` to map a label to one canonical integer. This
 fixture set is the regression harness the user asked for.
@@ -60,11 +60,6 @@ def test_is_document_label(text, expected):
     ("Exercise III", 3),
     ("Exercice IX", 9),
     ("VII", 7),
-    # Chinese
-    ("第一题", 1),
-    ("练习三", 3),
-    ("习题十", 10),
-    ("第12题", 12),
     # Surrounding whitespace
     ("  Exercise 2  ", 2),
 ])
@@ -85,6 +80,10 @@ def test_normalizes_to_canonical_int(raw, expected):
     "m",            # was → 1000
     "mix",          # was → 1009
     "civil",        # contains c/i/v/l
+    # [v8.1] CJK numerals are no longer parsed — course documents are FR/EN only.
+    "第一题",        # was → 1
+    "练习三",        # was → 3
+    "习题十",        # was → 10
 ])
 def test_returns_none_when_no_number(raw):
     assert normalize_exercise_number(raw) is None
