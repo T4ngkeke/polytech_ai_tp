@@ -259,6 +259,10 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "ingest_token_budget": "INGEST_TOKEN_BUDGET",
     # [v8.1] estimated-token budget for chat history (OOM protection).
     "context_max_tokens": "CONTEXT_MAX_TOKENS",
+    # [v8.1] VLM slot (garbled-formula transcription; empty model = off).
+    "vlm_base_url": "VLM_BASE_URL",
+    "vlm_api_key": "VLM_API_KEY",
+    "vlm_model": "VLM_MODEL",
 }
 
 

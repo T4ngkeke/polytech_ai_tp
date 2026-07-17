@@ -71,6 +71,10 @@ DEFAULT_SYSTEM_CONFIGS = [
     {"key": "RERANK_SCORE_THRESHOLD", "value": ""},
     # [v8.1] estimated-token budget for chat history (OOM protection; chars//3).
     {"key": "CONTEXT_MAX_TOKENS", "value": "8000"},
+    # [v8.1] VLM slot — garbled-formula transcription (empty model = off).
+    {"key": "VLM_BASE_URL", "value": ""},
+    {"key": "VLM_API_KEY", "value": ""},
+    {"key": "VLM_MODEL", "value": ""},
     # [v7.3] worker budgets: per-exercise derivation samples / per-document tokens.
     {"key": "HINT_MAX_SAMPLES", "value": "4"},
     {"key": "INGEST_TOKEN_BUDGET", "value": "200000"},

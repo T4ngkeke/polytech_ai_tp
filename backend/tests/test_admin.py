@@ -348,6 +348,20 @@ class TestLLMConfig:
         got = (await admin_client.get("/api/admin/llm/config")).json()
         assert got["hint_model"] == ""
 
+    async def test_v81_vlm_slot_roundtrip(self, admin_client):
+        """[v8.1] The VLM slot (garbled-formula transcription, off-peak worker;
+        empty = feature off) is admin-configurable and survives a GET after PUT."""
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "vlm_base_url": "http://vision/v1",
+            "vlm_api_key": "v-key",
+            "vlm_model": "qwen3.5-122b-a10b",
+        })
+        assert resp.status_code == 200
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["vlm_model"] == "qwen3.5-122b-a10b"
+        assert got["vlm_base_url"] == "http://vision/v1"
+
     async def test_v81_context_max_tokens_roundtrip(self, admin_client):
         """[v8.1] The per-turn history token budget (OOM protection) is
         admin-configurable and survives a GET after PUT."""

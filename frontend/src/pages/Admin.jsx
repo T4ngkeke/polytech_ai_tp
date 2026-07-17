@@ -610,36 +610,227 @@ function AnalyticsTab() {
   );
 }
 
-/* ═══════════════════════════ LLM CONFIG TAB ══════════════════════════════ */
+/* ═══════════════════ LLM CONFIG TAB — system map [v8.1] ══════════════════ */
+// The model-routing table drawn as the system it configures: grey source
+// nodes (students / worker) call the model slots; an empty slot either
+// inherits the main LLM (dashed gold return edge) or is simply off. Click a
+// node to edit just that slot — each panel saves independently (the backend
+// PUT is a partial upsert).
+
+const MAP_SOURCES = [
+  { id: 'students', x: 10, y: 26, label: 'Students', sub: 'live chat' },
+  { id: 'worker', x: 10, y: 79, label: 'Worker', sub: 'off-peak jobs' },
+];
+
+// status(config): 'live' (the main LLM itself) · 'set' (own model/endpoint) ·
+// 'inherits' (falls back to the main LLM) · 'off' (feature disabled).
+const MAP_NODES = [
+  {
+    id: 'chat', x: 37, y: 13, icon: '💬', name: 'Chat LLM', source: 'students',
+    tag: 'The big model students talk to. Also carries the billing weights and the history OOM cap.',
+    status: () => 'live',
+    fields: [
+      { key: 'model', label: 'Model Name', placeholder: 'qwen3' },
+      { key: 'base_url', label: 'Base URL', placeholder: 'http://localhost:11434/v1' },
+      { key: 'api_key', label: 'API Key', placeholder: "sk-… or 'ollama'", secret: true },
+      { key: 'context_max_tokens', label: 'Max history tokens (OOM cap)', placeholder: '8000' },
+      { key: 'token_alpha', label: 'α — prefill weight', placeholder: '0.2', numeric: true },
+      { key: 'token_beta', label: 'β — decode weight', placeholder: '1.0', numeric: true },
+    ],
+  },
+  {
+    id: 'aux', x: 67, y: 13, icon: '🧭', name: 'Auxiliary', source: 'students',
+    tag: 'Router · self-eval · rewrite — every live auxiliary call. Point it at a small fast model (e.g. a 9B).',
+    status: (c) => (c.router_model ? 'set' : 'inherits'),
+    warnEmpty: 'Empty — auxiliary calls run on the big chat model and compete with students for its capacity.',
+    fields: [
+      { key: 'router_model', label: 'Model Name', placeholder: 'inherits main LLM — e.g. ministral-8b' },
+      { key: 'router_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
+      { key: 'router_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
+    ],
+  },
+  {
+    id: 'embedding', x: 37, y: 46, icon: '🧲', name: 'Embedding', source: 'students',
+    tag: 'bge-m3 — RAG vectors. Indexing and querying must use the same model.',
+    status: (c) => (c.embedding_url ? 'set' : 'inherits'),
+    fields: [
+      { key: 'embedding_model', label: 'Model Name', placeholder: 'BAAI/bge-m3' },
+      { key: 'embedding_url', label: 'Base URL', placeholder: 'inherits main LLM' },
+      { key: 'embedding_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
+    ],
+  },
+  {
+    id: 'rerank', x: 67, y: 46, icon: '⚖️', name: 'Reranker', source: 'students',
+    tag: 'bge-reranker behind a real /rerank endpoint — not the chat base URL. Empty URL = disabled (fusion order only).',
+    status: (c) => (c.rerank_url ? 'set' : 'off'),
+    fields: [
+      { key: 'rerank_model', label: 'Model Name', placeholder: 'bge-reranker-v2-m3' },
+      { key: 'rerank_url', label: 'Rerank URL', placeholder: 'https://…/v1/rerank (empty = off)' },
+      { key: 'rerank_api_key', label: 'API Key', placeholder: '', secret: true },
+      { key: 'rerank_score_threshold', label: 'Score threshold (empty = gate off)', placeholder: 'e.g. 0.35 once calibrated' },
+    ],
+  },
+  {
+    id: 'ingest', x: 37, y: 79, icon: '📥', name: 'Ingest model', source: 'worker',
+    tag: 'Contextual Retrieval + line classification — a small cheap model, off-peak only.',
+    status: (c) => (c.ingest_model ? 'set' : 'inherits'),
+    fields: [
+      { key: 'ingest_model', label: 'Model Name', placeholder: 'inherits main LLM — e.g. qwen3:30b' },
+      { key: 'ingest_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
+      { key: 'ingest_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
+    ],
+  },
+  {
+    id: 'hint', x: 67, y: 79, icon: '💡', name: 'Hint generator', source: 'worker',
+    tag: 'Answer → tiered hints + pairing re-check. The BIG model, off-peak — quality over latency.',
+    status: (c) => (c.hint_model ? 'set' : 'inherits'),
+    fields: [
+      { key: 'hint_model', label: 'Model Name', placeholder: 'inherits main LLM' },
+      { key: 'hint_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
+      { key: 'hint_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
+      { key: 'hint_max_samples', label: 'Max derivation samples / exercise', placeholder: '4' },
+      { key: 'ingest_token_budget', label: 'Token budget / document', placeholder: '200000' },
+    ],
+  },
+  {
+    id: 'vlm', x: 90, y: 79, icon: '👁️', name: 'VLM', source: 'worker',
+    tag: 'Garbled-formula transcription from page images (vision). Empty model = off — vision is opt-in, it never falls back.',
+    status: (c) => (c.vlm_model ? 'set' : 'off'),
+    fields: [
+      { key: 'vlm_model', label: 'Model Name', placeholder: 'empty = off — e.g. qwen3.5-122b-a10b' },
+      { key: 'vlm_base_url', label: 'Base URL', placeholder: 'inherits main LLM URL' },
+      { key: 'vlm_api_key', label: 'API Key', placeholder: 'inherits main LLM key', secret: true },
+    ],
+  },
+];
+
+const NODE_STATUS_META = {
+  live: { chip: 'main', cls: 'bg-cyan-muted text-cyan' },
+  set: { chip: 'own model', cls: 'bg-emerald-500/15 text-emerald-300' },
+  inherits: { chip: 'inherits', cls: 'bg-gold-muted text-gold' },
+  off: { chip: 'off', cls: 'bg-ink-surface text-cream-muted' },
+};
+
+function MapEdges({ config }) {
+  const chat = MAP_NODES[0];
+  const byId = Object.fromEntries(MAP_SOURCES.map((s) => [s.id, s]));
+  return (
+    <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100"
+      preserveAspectRatio="none" aria-hidden="true">
+      {MAP_NODES.map((n) => {
+        const s = byId[n.source];
+        const st = n.status(config);
+        return (
+          <line key={`call-${n.id}`} x1={s.x} y1={s.y} x2={n.x} y2={n.y}
+            stroke={st === 'off' ? 'rgba(148,148,140,0.18)' : 'rgba(34,211,238,0.35)'}
+            strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        );
+      })}
+      {MAP_NODES.filter((n) => n.status(config) === 'inherits').map((n) => (
+        <line key={`fb-${n.id}`} x1={n.x} y1={n.y} x2={chat.x} y2={chat.y}
+          stroke={n.warnEmpty ? 'rgba(248,113,113,0.7)' : 'rgba(212,175,55,0.55)'}
+          strokeWidth="1.5" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+      ))}
+    </svg>
+  );
+}
+
+function MapNode({ node, config, selected, onSelect }) {
+  const st = node.status(config);
+  const meta = NODE_STATUS_META[st];
+  const model = config[node.fields[0].key];
+  return (
+    <button type="button" onClick={onSelect}
+      style={{ left: `${node.x}%`, top: `${node.y}%` }}
+      className={`absolute w-36 -translate-x-1/2 -translate-y-1/2 rounded-xl border p-2 text-left transition-all cursor-pointer bg-ink-raised hover:border-cyan/50 ${selected
+        ? 'border-cyan ring-2 ring-cyan/30 shadow-[0_0_24px_rgba(34,211,238,0.25)]'
+        : 'border-border-default'}`}>
+      <div className="flex items-center justify-between gap-1">
+        <span className="text-sm">{node.icon} <span className="text-xs font-semibold text-cream">{node.name}</span></span>
+        {node.warnEmpty && st === 'inherits' ? (
+          <span className="text-danger" title={node.warnEmpty}>⚠</span>
+        ) : null}
+      </div>
+      <p className="mt-1 truncate font-mono text-[10px] text-cream-muted">
+        {model || (st === 'off' ? '—' : 'main LLM')}
+      </p>
+      <span className={`mt-1 inline-block rounded px-1 py-px text-[9px] font-medium ${meta.cls}`}>
+        {meta.chip}
+      </span>
+    </button>
+  );
+}
+
+function MapSource({ source }) {
+  return (
+    <div style={{ left: `${source.x}%`, top: `${source.y}%` }}
+      className="absolute w-28 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-dashed border-border-subtle bg-ink-deep/60 p-2 text-center">
+      <p className="text-xs font-semibold text-cream-secondary">{source.label}</p>
+      <p className="text-[10px] text-cream-muted">{source.sub}</p>
+    </div>
+  );
+}
+
+function NodePanel({ node, config, set, onSave, saving }) {
+  const st = node.status(config);
+  return (
+    <div className="space-y-3 rounded-xl border border-border-default bg-ink-deep/30 p-4">
+      <div>
+        <h3 className="text-sm font-semibold text-cream">{node.icon} {node.name}</h3>
+        <p className="mt-1 text-xs leading-relaxed text-cream-muted">{node.tag}</p>
+      </div>
+      {node.fields.map((f) => (
+        f.secret
+          ? <SecretField key={f.key} label={f.label} value={config[f.key]}
+              onChange={set(f.key)} placeholder={f.placeholder} />
+          : <Field key={f.key} label={f.label} value={config[f.key]}
+              onChange={set(f.key)} placeholder={f.placeholder} />
+      ))}
+      {node.warnEmpty && st === 'inherits' ? (
+        <p className="text-xs text-amber-400">⚠ {node.warnEmpty}</p>
+      ) : null}
+      <button type="button" onClick={onSave} disabled={saving}
+        className="w-full rounded-lg gradient-cyan py-2 text-sm font-semibold text-cream transition-all hover:brightness-110 disabled:opacity-40">
+        {saving ? 'Saving…' : `Save ${node.name}`}
+      </button>
+    </div>
+  );
+}
+
 function LLMConfigTab() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [selectedId, setSelectedId] = useState('chat');
 
   useEffect(() => {
     api.get('/api/admin/llm/config').then(setConfig).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const set = (k) => (v) => setConfig((p) => ({ ...p, [k]: v }));
+  const selected = MAP_NODES.find((n) => n.id === selectedId);
 
-  const handleSave = async () => {
+  const saveNode = async (node) => {
     setSaving(true);
     try {
-      // token weights are numeric in the API contract. An empty/invalid field
-      // sends null (not 0) so a blank input never silently zeroes a cost weight —
-      // the backend's partial update keeps the existing value instead.
+      // Per-node partial save: only this slot's keys (+ the base trio the
+      // request contract expects). Token weights are numeric in the API
+      // contract; an empty/invalid field sends null so a blank input never
+      // silently zeroes a cost weight — the backend's partial upsert keeps
+      // the existing value instead.
       const numOrNull = (v) => {
         const n = Number(v);
         return v === '' || v === null || Number.isNaN(n) ? null : n;
       };
       const payload = {
-        ...config,
-        token_alpha: numOrNull(config.token_alpha),
-        token_beta: numOrNull(config.token_beta),
+        base_url: config.base_url, api_key: config.api_key, model: config.model,
       };
+      for (const f of node.fields) {
+        payload[f.key] = f.numeric ? numOrNull(config[f.key]) : config[f.key];
+      }
       const updated = await api.put('/api/admin/llm/config', payload);
       setConfig(updated);
-      toast.success('LLM config saved');
+      toast.success(`${node.name} saved`);
     } catch (err) { toast.error(err.message); } finally { setSaving(false); }
   };
 
@@ -647,120 +838,29 @@ function LLMConfigTab() {
 
   return (
     <div className="p-8 overflow-y-auto h-full">
-      <div className="max-w-4xl mx-auto">
-        <PageHeader title="LLM Configuration"
+      <div className="max-w-6xl mx-auto">
+        <PageHeader title="Model Routing Map"
           subtitle="Changes take effect immediately — no server restart required." />
-        <p className="text-xs text-cream-muted mb-6">
-          Empty endpoint/model fields in the split sections <span className="text-cyan">inherit the main LLM</span>.
+        <p className="text-xs text-cream-muted mb-4">
+          <span className="text-cyan">━━</span> calls ·{' '}
+          <span className="text-gold">╌╌</span> empty slot inherits the main LLM ·
+          click a node to configure it.
         </p>
 
-        <div className="grid xl:grid-cols-2 gap-5">
-          {/* Main generation engine */}
-          <ConfigSection title="Main LLM (generation)">
-            <Field label="Model Name" value={config.model} onChange={set('model')} placeholder="qwen3" />
-            <Field label="Base URL" value={config.base_url} onChange={set('base_url')}
-              placeholder="http://localhost:11434/v1" />
-            <SecretField label="API Key" value={config.api_key} onChange={set('api_key')}
-              placeholder="sk-… or 'ollama'" />
-          </ConfigSection>
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="relative h-[430px] overflow-hidden rounded-xl border border-border-default bg-ink-deep/40">
+            <MapEdges config={config} />
+            {MAP_SOURCES.map((s) => <MapSource key={s.id} source={s} />)}
+            {MAP_NODES.map((n) => (
+              <MapNode key={n.id} node={n} config={config}
+                selected={n.id === selectedId} onSelect={() => setSelectedId(n.id)} />
+            ))}
+          </div>
 
-          {/* Embedding */}
-          <ConfigSection title="Embedding (RAG + router kNN)">
-            <Field label="Model Name" value={config.embedding_model} onChange={set('embedding_model')}
-              placeholder="BAAI/bge-m3" />
-            <Field label="Base URL" value={config.embedding_url} onChange={set('embedding_url')}
-              placeholder="inherits main LLM" />
-            <SecretField label="API Key" value={config.embedding_api_key} onChange={set('embedding_api_key')}
-              placeholder="inherits main LLM" />
-          </ConfigSection>
-
-          {/* Rerank */}
-          <ConfigSection title="Reranker (empty URL = disabled)"
-            desc="Base URL must be a real rerank endpoint that accepts {query, documents} — e.g. …/v1/rerank, not the chat …/v1 base (that 404s). If empty or failing, retrieval safely falls back to fusion-only ordering.">
-            <Field label="Model Name" value={config.rerank_model} onChange={set('rerank_model')}
-              placeholder="BAAI/bge-reranker-v2-m3" />
-            <Field label="Base URL" value={config.rerank_url} onChange={set('rerank_url')}
-              placeholder="https://…/v1/rerank" />
-            <SecretField label="API Key" value={config.rerank_api_key} onChange={set('rerank_api_key')}
-              placeholder="inherits main LLM" />
-          </ConfigSection>
-
-          {/* Ingestion (off-peak worker) */}
-          <ConfigSection title="Ingestion model (off-peak worker)">
-            <Field label="Model Name" value={config.ingest_model} onChange={set('ingest_model')}
-              placeholder="inherits main LLM — e.g. qwen3:30b" />
-            <Field label="Base URL" value={config.ingest_base_url} onChange={set('ingest_base_url')}
-              placeholder="inherits main LLM" />
-            <SecretField label="API Key" value={config.ingest_api_key} onChange={set('ingest_api_key')}
-              placeholder="inherits main LLM" />
-          </ConfigSection>
-
-          {/* Router = ALL live auxiliary calls (router / self-eval / rewrite) */}
-          <ConfigSection title="Auxiliary model (router · self-eval · rewrite)"
-            desc="All live auxiliary calls share this slot. Point it at a small fast model (e.g. a 9B).">
-            <Field label="Model Name" value={config.router_model} onChange={set('router_model')}
-              placeholder="inherits main LLM — e.g. ministral-8b" />
-            <Field label="Base URL" value={config.router_base_url} onChange={set('router_base_url')}
-              placeholder="inherits main LLM" />
-            <SecretField label="API Key" value={config.router_api_key} onChange={set('router_api_key')}
-              placeholder="inherits main LLM" />
-            {!config.router_model && (
-              <p className="text-xs text-amber-400 mt-1">
-                ⚠ Empty — auxiliary calls run on the main (big) chat model and compete
-                with students for its capacity.
-              </p>
-            )}
-          </ConfigSection>
-
-          {/* [v7.3] Hint generator (answer → tiered hints, off-peak) */}
-          <ConfigSection title="Hint generator (answer → tiered hints, off-peak)"
-            desc="Runs off-peak on the worker — point it at the BIG model (quality over latency).">
-            <Field label="Model Name" value={config.hint_model} onChange={set('hint_model')}
-              placeholder="inherits main LLM" />
-            <Field label="Base URL" value={config.hint_base_url} onChange={set('hint_base_url')}
-              placeholder="inherits main LLM" />
-            <SecretField label="API Key" value={config.hint_api_key} onChange={set('hint_api_key')}
-              placeholder="inherits main LLM" />
-            <Field label="Max derivation samples / exercise" value={config.hint_max_samples}
-              onChange={set('hint_max_samples')} placeholder="4" />
-            <Field label="Token budget / document" value={config.ingest_token_budget}
-              onChange={set('ingest_token_budget')} placeholder="200000" />
-          </ConfigSection>
-
-          {/* [v8.1] Context cap — OOM protection for the local engine */}
-          <ConfigSection title="Chat history context cap"
-            desc="Estimated-token budget for the history sent per message (oldest turns are silently forgotten). Protects a local engine from OOM on marathon conversations. Keep it below the engine's max context length.">
-            <Field label="Max history tokens (estimated)" value={config.context_max_tokens}
-              onChange={set('context_max_tokens')} placeholder="8000" />
-          </ConfigSection>
-
-          {/* Token cost weights */}
-          <ConfigSection title="Token quota weights (billed = prompt·α + completion·β)">
-            <Field label="α — prefill weight" value={config.token_alpha} onChange={set('token_alpha')}
-              placeholder="0.2" />
-            <Field label="β — decode weight" value={config.token_beta} onChange={set('token_beta')}
-              placeholder="1.0" />
-            <Field label="Rerank score threshold (empty = gate off)"
-              value={config.rerank_score_threshold} onChange={set('rerank_score_threshold')}
-              placeholder="empty until calibrated — e.g. 0.35" />
-          </ConfigSection>
+          <NodePanel node={selected} config={config} set={set}
+            onSave={() => saveNode(selected)} saving={saving} />
         </div>
-
-        <button onClick={handleSave} disabled={saving}
-          className="mt-6 w-full max-w-sm py-3 rounded-lg gradient-cyan text-cream text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40">
-          {saving ? 'Saving…' : 'Save Configuration'}
-        </button>
       </div>
-    </div>
-  );
-}
-
-function ConfigSection({ title, desc, children }) {
-  return (
-    <div className="space-y-4 border border-border-default rounded-xl p-4 bg-ink-deep/30">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-cyan/80">{title}</h3>
-      {desc && <p className="text-xs text-cream-muted -mt-2 leading-relaxed">{desc}</p>}
-      {children}
     </div>
   );
 }

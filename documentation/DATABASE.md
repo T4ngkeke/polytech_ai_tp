@@ -60,10 +60,15 @@ class-lab structure, token tracking, and (v7.1) hybrid retrieval over course doc
 > verdict, rewrite); the admin UI warns when the slot is empty (auxiliary load would silently
 > land on the big chat model). `ROUTER_KNN_THRESHOLD` is removed in v8.0 with the kNN router.
 >
-> **v8.1 key.** `CONTEXT_MAX_TOKENS` (default `8000`) — estimated-token budget (chars÷3,
+> **v8.1 keys.** `CONTEXT_MAX_TOKENS` (default `8000`) — estimated-token budget (chars÷3,
 > deliberately conservative) for the chat history sent per message; oldest turns are
 > silently dropped, whole user/assistant pairs at a time. OOM protection for the local
 > engine — keep it below the engine's own max context length (the final backstop).
+> `VLM_MODEL` / `VLM_BASE_URL` / `VLM_API_KEY` — the vision slot for garbled-formula
+> transcription (off-peak worker). **Empty model = feature off** — vision is opt-in and
+> never falls back to the main LLM. The admin UI is now a **model-routing map**: the
+> slots drawn as a system diagram (sources → models, dashed edges = inherits main LLM),
+> click a node to edit that slot; each panel saves independently (partial PUT).
 
 > **v7.1 — all model calls are config-driven HTTP.** Generation, embeddings (`bge-m3`), and
 > reranking (`bge-reranker-v2-m3`) all hit OpenAI-compatible endpoints read from this table at

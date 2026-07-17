@@ -147,6 +147,11 @@ class LLMConfigRequest(BaseModel):
     ingest_token_budget: str | None = None
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str | None = None
+    # [v8.1] VLM slot — garbled-formula transcription (off-peak worker).
+    # Empty model = feature off (never falls back — vision is opt-in).
+    vlm_base_url: str | None = None
+    vlm_api_key: str | None = None
+    vlm_model: str | None = None
     token_alpha: float | None = None
     token_beta: float | None = None
 
@@ -179,6 +184,10 @@ class LLMConfigResponse(BaseModel):
     ingest_token_budget: str = ""
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str = ""
+    # [v8.1] VLM slot — empty model = garbled-formula transcription off.
+    vlm_base_url: str = ""
+    vlm_api_key: str = ""
+    vlm_model: str = ""
     token_alpha: float = 0.2
     token_beta: float = 1.0
 
