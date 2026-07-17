@@ -206,3 +206,21 @@ def test_default_parse_other_suffix_keeps_single_page_fallback(tmp_path):
     pages, gate = _default_parse(str(txt))
     assert len(pages) == 1
     assert gate.ok
+
+
+def test_default_parse_html_converts_and_pages(tmp_path):
+    """[v8.1] .html goes through html_to_markdown then heading paging + gate."""
+    from backend.worker.ingest import _default_parse
+
+    page = tmp_path / "td.html"
+    page.write_text(
+        "<nav>menu</nav>"
+        "<h1>Exercice 1</h1><p>" + ("Écrire une fonction. " * 10) + "</p>"
+        "<h1>Exercice 2</h1><p>" + ("Trier une liste. " * 10) + "</p>",
+        encoding="utf-8",
+    )
+    pages, gate = _default_parse(str(page))
+    assert len(pages) == 2
+    assert pages[0].startswith("# Exercice 1")
+    assert all("menu" not in p for p in pages)
+    assert gate.ok

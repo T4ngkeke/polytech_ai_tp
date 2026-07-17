@@ -41,6 +41,7 @@ from backend.worker.parsing import (
     GateResult,
     character_yield_gate,
     extract_pdf_text,
+    html_to_markdown,
     split_markdown_pages,
     strip_repeated_lines,
 )
@@ -78,6 +79,11 @@ def _default_parse(storage_path: str) -> tuple[list[str], GateResult]:
         return pages, character_yield_gate(pages)
     if path.suffix.lower() == ".md":
         pages = split_markdown_pages(path.read_text(encoding="utf-8"))
+        return pages, character_yield_gate(pages)
+    if path.suffix.lower() in (".html", ".htm"):
+        # [v8.1] clean HTML → markdown-ish (headings, fences, recovered LaTeX),
+        # then the same heading paging + gate as .md.
+        pages = split_markdown_pages(html_to_markdown(path.read_text(encoding="utf-8")))
         return pages, character_yield_gate(pages)
     return [path.read_text()], GateResult(ok=True)
 

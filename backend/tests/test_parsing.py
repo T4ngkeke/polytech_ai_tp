@@ -14,6 +14,7 @@ import pytest
 from backend.worker.parsing import (
     character_yield_gate,
     extract_pdf_text,
+    html_to_markdown,
     split_markdown_pages,
     strip_repeated_lines,
 )
@@ -196,3 +197,71 @@ def test_split_markdown_pages_ignores_hashes_inside_code_fences():
 def test_split_markdown_pages_no_headings_single_page():
     text = "juste du texte\nsur deux lignes\n"
     assert split_markdown_pages(text) == [text.strip()]
+
+
+# ---------------------------------------------------------------------------
+# [v8.1] HTML → markdown-ish text. Teachers' HTML (when they have it) is clean;
+# the converter turns headings into #-lines (so split_markdown_pages pages it),
+# strips chrome (script/style/nav/header/footer/aside), recovers the ORIGINAL
+# LaTeX that KaTeX/MathJax embed in their rendered output (the whole reason
+# HTML beats a printed PDF), and fences <pre> so code never fakes a heading.
+# ---------------------------------------------------------------------------
+
+def test_html_headings_become_md_headings():
+    html = "<h1>Chapitre 1</h1><p>intro</p><h2>Section</h2><p>corps</p>"
+    text = html_to_markdown(html)
+    lines = [l for l in text.splitlines() if l.strip()]
+    assert "# Chapitre 1" in lines
+    assert "## Section" in lines
+    assert any("intro" in l for l in lines)
+
+
+def test_html_chrome_is_stripped():
+    html = (
+        "<nav>menu menu</nav><header>site banner</header>"
+        "<script>var x=1;</script><style>.a{}</style>"
+        "<main><p>le vrai contenu</p></main>"
+        "<footer>copyright</footer><aside>pub</aside>"
+    )
+    text = html_to_markdown(html)
+    assert "le vrai contenu" in text
+    for junk in ("menu", "banner", "var x=1", "copyright", "pub", ".a{}"):
+        assert junk not in text
+
+
+def test_html_katex_annotation_recovers_latex():
+    # KaTeX rendering: visible span soup + the original LaTeX hidden in MathML.
+    html = (
+        "<p>Einstein : <span class=\"katex\">"
+        "<span class=\"katex-html\">E=mc<sup>2</sup></span>"
+        "<math><semantics><mrow></mrow>"
+        "<annotation encoding=\"application/x-tex\">E=mc^2</annotation>"
+        "</semantics></math></span> voilà.</p>"
+    )
+    text = html_to_markdown(html)
+    assert "$E=mc^2$" in text           # the original LaTeX, recovered
+    assert "katex" not in text
+    assert text.count("E=mc") == 1      # rendered duplicate removed
+
+
+def test_html_mathjax_v2_script_recovers_latex():
+    html = "<p>Soit <script type=\"math/tex\">x^2 + 1</script> un polynôme.</p>"
+    text = html_to_markdown(html)
+    assert "$x^2 + 1$" in text
+    assert "un polynôme" in text
+
+
+def test_html_pre_is_fenced_and_never_a_heading():
+    html = "<h1>Exercice 1</h1><pre># un commentaire python\nx = 1</pre><h1>Exercice 2</h1><p>suite</p>"
+    text = html_to_markdown(html)
+    assert "```" in text
+    # The fenced hash line must not page-split: 2 pages, comment stays in page 1.
+    pages = split_markdown_pages(text)
+    assert len(pages) == 2
+    assert "commentaire" in pages[0]
+
+
+def test_html_paragraphs_get_blank_lines():
+    html = "<p>premier paragraphe</p><p>deuxième paragraphe</p>"
+    text = html_to_markdown(html)
+    assert "premier paragraphe\n\ndeuxième paragraphe" in text.replace("\n\n\n", "\n\n")

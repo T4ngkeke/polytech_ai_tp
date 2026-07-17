@@ -114,6 +114,59 @@ def strip_repeated_lines(pages: list[str], min_repeat: int = 3) -> list[str]:
     ]
 
 
+# [v8.1] HTML → markdown-ish text. Teachers' HTML (when they have it) is clean
+# tool output, and it beats a printed PDF for one big reason: KaTeX / MathJax
+# keep the ORIGINAL LaTeX inside their rendered markup, so formulas that come
+# out mangled from a PDF are recovered intact here. Headings become #-lines so
+# `split_markdown_pages` pages the result; <pre> is fenced so code comments
+# never fake a heading; page chrome is stripped.
+_MATHJAX_SCRIPT_TYPE_RE = re.compile(r"math/tex")
+_CHROME_TAGS = ["script", "style", "nav", "header", "footer", "aside"]
+_BLOCK_TAGS = ["p", "li", "tr", "blockquote", "table", "ul", "ol", "div"]
+
+
+def html_to_markdown(html: str) -> str:
+    """Convert clean course HTML to markdown-ish text (headings, fences, LaTeX)."""
+    from bs4 import BeautifulSoup  # lazy import — keeps the gate import-light
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # 1. MathJax v2 keeps the source LaTeX in <script type="math/tex"> —
+    #    recover it BEFORE chrome stripping deletes every script.
+    for tag in soup.find_all("script", type=_MATHJAX_SCRIPT_TYPE_RE):
+        tag.replace_with(f"${tag.get_text()}$")
+
+    # 2. KaTeX / MathJax v3 embed it in a MathML <annotation>; replace the whole
+    #    rendered widget so the visible span soup is not duplicated.
+    for ann in soup.find_all("annotation"):
+        if "application/x-tex" not in (ann.get("encoding") or ""):
+            continue
+        latex = ann.get_text()
+        target = ann.find_parent(class_="katex") or ann.find_parent("math") or ann
+        target.replace_with(f"${latex}$")
+
+    # 3. Strip page chrome (menus, banners, styling, leftover scripts).
+    for tag in soup.find_all(_CHROME_TAGS):
+        tag.decompose()
+
+    # 4. Structure → markdown markers, as self-contained text nodes.
+    for level in range(1, 7):
+        for tag in soup.find_all(f"h{level}"):
+            tag.replace_with(f"\n\n{'#' * level} {tag.get_text(' ', strip=True)}\n\n")
+    for tag in soup.find_all("pre"):
+        tag.replace_with(f"\n\n```\n{tag.get_text()}\n```\n\n")
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.append("\n\n")
+
+    # No artificial separators: HTML without whitespace between nodes renders
+    # glued, so faithful extraction glues too. Whitespace-only lines (source
+    # pretty-printing) become blank lines; code indentation inside fences is
+    # untouched.
+    text = soup.get_text("")
+    lines = [line if line.strip() else "" for line in text.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 # [v8.1] Markdown "pages". PDF pages are the unit every downstream step works
 # on (per-page classifier context, page_no citations); a markdown file has no
 # pages, so we synthesize them from its heading tree: split at the SHALLOWEST

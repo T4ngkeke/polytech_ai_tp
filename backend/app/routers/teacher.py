@@ -271,11 +271,11 @@ async def upload_document(
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
 
-    # PDF (slides exported to PDF) or [v8.1] Markdown — no other formats.
-    if not (file.filename or "").lower().endswith((".pdf", ".md")):
+    # PDF (slides exported to PDF) or [v8.1] Markdown / HTML — no other formats.
+    if not (file.filename or "").lower().endswith((".pdf", ".md", ".html", ".htm")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF or Markdown uploads are supported. Export slides to PDF first.",
+            detail="Only PDF, Markdown or HTML uploads are supported. Export slides to PDF first.",
         )
 
     # [v8.0] Only CM may be shared class-wide (lab_id NULL → reachable from every

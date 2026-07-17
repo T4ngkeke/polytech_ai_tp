@@ -106,10 +106,14 @@ A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live
 - **`worker` service** (in docker-compose): shares the backend image/code/DB; the only
   difference is the entrypoint — a polling loop instead of uvicorn. It reuses the same
   DB-as-queue pattern already used for rate limiting.
-- **Input = PDF or [v8.1] Markdown.** Instructors export slides (`.ppt/.pptx`) to PDF
+- **Input = PDF, [v8.1] Markdown or HTML.** Instructors export slides (`.ppt/.pptx`) to PDF
   themselves before upload (1 slide = 1 page). An `.md` file is read as text and split
   into **heading pseudo-pages** (shallowest heading level present; ``` fences never
-  split), then runs the same character-yield gate and downstream pipeline.
+  split), then runs the same character-yield gate and downstream pipeline. An
+  `.html/.htm` file is first converted to markdown-ish text (`html_to_markdown`):
+  headings → `#`-lines, `<pre>` fenced, page chrome stripped, and — the payoff — the
+  **original LaTeX recovered** from KaTeX/MathJax markup (`annotation x-tex` /
+  `script math/tex`), so formulas that mangle in a printed PDF arrive intact.
 - **Per-job pipeline (concurrency = 1, `FOR UPDATE SKIP LOCKED`):**
   1. **Parse + input gate** (`parsing.py`): pymupdf text extraction; a cheap **character-yield
      gate** (chars/page below threshold, or high garbage / non-word ratio) marks the document
