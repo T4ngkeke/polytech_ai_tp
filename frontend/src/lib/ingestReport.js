@@ -33,5 +33,13 @@ export function ingestReportWarnings(report) {
   if (report.segmentation_disagreement && !report.segmentation_confirmed) {
     warnings.push('The two segmentation methods split the exercises differently — review and confirm the right split below.');
   }
+  // [v8.1] Garbled formulas were transcribed by the vision model — the ONLY
+  // place model-generated text enters a statement, so the teacher reviews it.
+  if (report.vlm_repairs?.length) {
+    const n = report.vlm_repairs.filter((r) => r.status === 'replaced').length;
+    const issues = report.vlm_repairs.length - n;
+    if (n) warnings.push(`${n} garbled formula region(s) transcribed by the vision model — verify them against the PDF.`);
+    if (issues) warnings.push(`${issues} garbled region(s) could not be repaired (unreadable / refused / failed) — original text kept.`);
+  }
   return warnings;
 }

@@ -54,6 +54,7 @@ async def process_one(
     classify_fn: ClassifyLinesFn | None = None,
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
     token_budget: int | None = None,
+    repair_fn=None,
 ) -> bool:
     """
     Claim and process one queued job.
@@ -80,7 +81,7 @@ async def process_one(
             await ingest_document(
                 db, job.document_id,
                 embed_fn=embed_fn, context_fn=context_fn, classify_fn=classify_fn,
-                token_budget=token_budget,
+                token_budget=token_budget, repair_fn=repair_fn,
             )
         await _mark_job(db, job_id, JobStatus.done)
     except Exception as exc:  # ingest/hint already recorded the failure on its row
@@ -105,6 +106,7 @@ async def run_tick(
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None = None,
     token_budget: int | None = None,
+    repair_fn=None,
 ) -> bool:
     """
     One iteration of the worker loop.
@@ -140,7 +142,7 @@ async def run_tick(
 
     processed = await process_one(
         db, embed_fn=embed_fn, context_fn=context_fn, classify_fn=classify_fn,
-        run_hint_job=run_hint_job, token_budget=token_budget,
+        run_hint_job=run_hint_job, token_budget=token_budget, repair_fn=repair_fn,
     )
     if not processed:
         await sleep_fn(idle_seconds)
@@ -156,6 +158,8 @@ class WorkerFns:
     classify_fn: ClassifyLinesFn | None
     run_hint_job: Callable[[AsyncSession, IngestionJob], Awaitable[None]] | None
     token_budget: int | None = None
+    # [v8.1] VLM garbled-formula repair — None unless VLM_MODEL is configured.
+    repair_fn=None
 
 
 def make_fn_builder(load_config=None, build_fns=None):
@@ -199,6 +203,7 @@ async def run_forever(
             classify_fn=fns.classify_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
             run_hint_job=fns.run_hint_job, token_budget=fns.token_budget,
+            repair_fn=fns.repair_fn,
         )
 
 
@@ -422,6 +427,10 @@ async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
         "hint_model": routing.hint.model,
         # Per-document ingest budget (observation only — logged in ingest_report).
         "ingest_token_budget": routing.ingest_token_budget,
+        # [v8.1] VLM slot — empty model = garbled-formula repair off.
+        "vlm_base_url": routing.vlm.base_url,
+        "vlm_api_key": routing.vlm.api_key,
+        "vlm_model": routing.vlm.model,
     }
 
 
@@ -471,10 +480,31 @@ def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
     async def run_hint_job(db_, job):
         await _run_hint_job(db_, job, generate_fn=generate_fn, verify_fn=verify_fn)
 
+    # [v8.1] VLM garbled-formula repair — wired only when VLM_MODEL is set
+    # (vision is opt-in; an empty slot never falls back to a text model).
+    repair_fn = None
+    if cfg.get("vlm_model"):
+        from functools import partial
+
+        from backend.worker.vlm import make_transcribe_fn, render_region, repair_pages
+
+        vlm_client = AsyncOpenAI(
+            api_key=cfg["vlm_api_key"], base_url=cfg["vlm_base_url"]
+        )
+        transcribe_fn = make_transcribe_fn(vlm_client, cfg["vlm_model"])
+
+        async def repair_fn(pages, storage_path):
+            return await repair_pages(
+                pages,
+                render_fn=partial(render_region, storage_path),
+                transcribe_fn=transcribe_fn,
+            )
+
     return WorkerFns(
         embed_fn=embed_fn, context_fn=context_fn,
         classify_fn=classify_fn, run_hint_job=run_hint_job,
         token_budget=cfg.get("ingest_token_budget"),
+        repair_fn=repair_fn,
     )
 
 

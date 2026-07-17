@@ -64,6 +64,10 @@ def _estimate_tokens(*texts: str) -> int:
     return sum(max(1, len(t) // 4) for t in texts if t)
 ParseFn = Callable[[str], tuple[list[str], GateResult]]
 
+# [v8.1] VLM garbled-formula repair: (pages, storage_path) → (repaired pages,
+# audit entries). Wired by the worker only when VLM_MODEL is configured.
+RepairFn = Callable[[list[str], str], Awaitable[tuple[list[str], list[dict]]]]
+
 
 def _default_parse(storage_path: str) -> tuple[list[str], GateResult]:
     """Parse a stored file into pages + a gate verdict.
@@ -320,8 +324,9 @@ async def ingest_document(
     parse_fn: ParseFn | None = None,
     classify_fn: ClassifyLinesFn | None = None,
     token_budget: int | None = None,
+    repair_fn: RepairFn | None = None,
 ) -> None:
-    """Parse → gate → clean → segment → [CM: chunks | TD/TP: exercises]."""
+    """Parse → gate → clean → [v8.1: VLM repair] → segment → [chunks | exercises]."""
     doc = await db.get(Document, document_id)
     pages, gate = (parse_fn or _default_parse)(doc.storage_path)
 
@@ -347,6 +352,13 @@ async def ingest_document(
         # [v7.3] Clean once, upstream: repeated headers/footers pollute chunks
         # and exercise segments alike. Every downstream step sees cleaned pages.
         pages = strip_repeated_lines(pages)
+
+        # [v8.1] VLM garbled-formula repair — PDFs only (md/html have nothing
+        # to render) and only when the worker wired a repair_fn (VLM_MODEL
+        # configured). Transcribe-only; audit entries land in ingest_report.
+        vlm_entries: list[dict] = []
+        if repair_fn is not None and doc.storage_path.lower().endswith(".pdf"):
+            pages, vlm_entries = await repair_fn(pages, doc.storage_path)
 
         if plan.produce_chunks:
             chunks = _dedup_chunks(chunk_pages(pages, doc_type))
@@ -512,6 +524,11 @@ async def ingest_document(
                     number_normalized=normalize_heading_number(segment.section),
                     answer_text=segment.content,
                 ))
+
+        # [v8.1] The VLM audit trail rides on whichever report the branch wrote.
+        if vlm_entries:
+            doc.ingest_report = {**(doc.ingest_report or {}),
+                                 "vlm_repairs": vlm_entries}
 
         doc.status = DocumentStatus.indexed
         doc.page_count = len(pages)

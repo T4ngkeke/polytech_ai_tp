@@ -114,6 +114,15 @@ A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live
   headings → `#`-lines, `<pre>` fenced, page chrome stripped, and — the payoff — the
   **original LaTeX recovered** from KaTeX/MathJax markup (`annotation x-tex` /
   `script math/tex`), so formulas that mangle in a printed PDF arrive intact.
+- **[v8.1] VLM garbled-formula repair** (`vlm.py`, PDFs only, opt-in via `VLM_MODEL`):
+  HTML-printed PDFs mangle math (`2^15` flattens to `215`). Detection is **deterministic**
+  (spike-validated per-line rules: word-char ratio, math-symbol density, mojibake — code
+  lines and dot-leaders exempt); adjacent hits merge into a region, whose **bbox is cropped
+  from the PDF page** (pymupdf) and sent to the vision model with a **transcribe-only**
+  prompt (LaTeX for math, `[illisible]` for unreadable, never invent). Red lines: a
+  transcription that introduces a **new exercise boundary is refused**; every region lands
+  in `ingest_report.vlm_repairs` (before/after) for teacher review; no failure ever breaks
+  ingestion. Empty `VLM_MODEL` = feature off — it never falls back to a text model.
 - **Per-job pipeline (concurrency = 1, `FOR UPDATE SKIP LOCKED`):**
   1. **Parse + input gate** (`parsing.py`): pymupdf text extraction; a cheap **character-yield
      gate** (chars/page below threshold, or high garbage / non-word ratio) marks the document

@@ -170,3 +170,27 @@ def test_worker_budgets_have_defaults_and_parse():
     })
     assert routing.hint_max_samples == 8
     assert routing.ingest_token_budget == 50_000
+
+
+# --- [v8.1] VLM slot (garbled-formula transcription; opt-in, never falls back) ---
+
+
+def test_vlm_model_empty_means_off_not_fallback():
+    """Vision is opt-in: an empty VLM_MODEL stays empty (feature off) — it must
+    NEVER silently fall back to the main chat model. URL/key do inherit."""
+    routing = resolve_model_routing(_BASE)
+    assert routing.vlm.model == ""
+    assert routing.vlm.base_url == "http://main/v1"
+    assert routing.vlm.api_key == "main-key"
+
+
+def test_vlm_uses_its_own_endpoint_when_set():
+    routing = resolve_model_routing({
+        **_BASE,
+        "VLM_BASE_URL": "http://vision/v1",
+        "VLM_API_KEY": "v-key",
+        "VLM_MODEL": "qwen3.5-122b-a10b",
+    })
+    assert routing.vlm.base_url == "http://vision/v1"
+    assert routing.vlm.api_key == "v-key"
+    assert routing.vlm.model == "qwen3.5-122b-a10b"

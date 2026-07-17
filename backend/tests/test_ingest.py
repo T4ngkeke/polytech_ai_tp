@@ -924,3 +924,59 @@ async def test_same_count_different_boundaries_is_a_disagreement(
     await db_session.refresh(doc)
     assert doc.ingest_report["segmentation_disagreement"] is True
     assert doc.segmentation_cache["alternate_segments"] is not None
+
+
+# --- [v8.1 item 8] VLM garbled-formula repair wiring ------------------------
+# The worker injects `repair_fn` only when VLM_MODEL is configured; ingest
+# applies it to PDFs only, and the audit entries land in ingest_report.
+
+
+@pytest.mark.asyncio
+async def test_vlm_repair_runs_for_pdf_and_lands_in_report(db_session, tmp_path):
+    teacher = make_user(role=UserRole.teacher)
+    db_session.add(teacher)
+    await db_session.flush()
+    cls = Class(id=uuid.uuid4(), name="Algo", teacher_id=teacher.id,
+                invite_code=uuid.uuid4().hex[:6])
+    db_session.add(cls)
+    await db_session.flush()
+    lab = Lab(id=uuid.uuid4(), class_id=cls.id, name="Lab 1")
+    db_session.add(lab)
+    await db_session.flush()
+    doc = await create_document(
+        db_session, class_id=cls.id, lab_id=lab.id, filename="td.pdf",
+        content=b"%PDF-fake", uploaded_by=teacher.id, storage_root=tmp_path,
+        doc_type=DocType.TD, audience=Audience.student,
+    )
+
+    def parse(_path):
+        return (["Exercice 1\nN = (e -1)215 + (d -1)211\nConvertir."],
+                GateResult(ok=True))
+
+    async def repair(pages, storage_path):
+        assert storage_path.lower().endswith(".pdf")
+        fixed = [pages[0].replace("215", "2^{15}").replace("211", "2^{11}")]
+        return fixed, [{"page": 1, "line_start": 2, "line_end": 2,
+                        "status": "replaced", "before": "…215…", "after": "…2^{15}…"}]
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed,
+                          parse_fn=parse, repair_fn=repair)
+
+    ex = (await _exercises_of(db_session, doc))[0]
+    assert "2^{15}" in ex.statement
+    await db_session.refresh(doc)
+    assert doc.ingest_report["vlm_repairs"][0]["status"] == "replaced"
+    assert doc.ingest_report["exercise_count"] == 1   # regular report intact
+
+
+@pytest.mark.asyncio
+async def test_vlm_repair_skipped_for_non_pdf(db_session, tmp_path):
+    """md/html have nothing to render — repair_fn must not run for them."""
+    doc = await _seed_document(db_session, tmp_path, doc_type=DocType.TD,
+                               body="Exercice 1\nDo it.\n")
+
+    async def repair(pages, storage_path):  # must not be called
+        raise AssertionError("repair_fn called for a non-PDF document")
+
+    await ingest_document(db_session, doc.id, embed_fn=fake_embed, repair_fn=repair)
+    assert len(await _exercises_of(db_session, doc)) == 1

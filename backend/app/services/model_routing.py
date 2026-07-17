@@ -47,6 +47,9 @@ class ModelRouting:
     # [v7.3] The answer→tiered-hints generator (off-peak; point it at the BIG
     # model — quality over latency, the GPU gate keeps it off student time).
     hint: Endpoint
+    # [v8.1] Vision slot — garbled-formula transcription (off-peak worker).
+    # model == "" means the feature is OFF; it never falls back.
+    vlm: Endpoint
     token_alpha: float
     token_beta: float
     # [v7.3] Absolute relevance floor for context injection. None = gate off
@@ -117,6 +120,16 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         model=_get(configs, "HINT_MODEL", main_model),
     )
 
+    # [v8.1] Vision slot for garbled-formula transcription. Opt-in: an empty
+    # model means OFF and never falls back to the main chat model (sending
+    # images to a text model would fail or hallucinate). URL/key do inherit,
+    # for the common case where the main engine itself is multimodal.
+    vlm = Endpoint(
+        base_url=_get(configs, "VLM_BASE_URL", main_base),
+        api_key=_get(configs, "VLM_API_KEY", main_key),
+        model=_get(configs, "VLM_MODEL", ""),
+    )
+
     raw_threshold = _get(configs, "RERANK_SCORE_THRESHOLD", "")
     try:
         threshold: float | None = float(raw_threshold) if raw_threshold else None
@@ -130,6 +143,7 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         ingest=ingest,
         router=router,
         hint=hint,
+        vlm=vlm,
         token_alpha=_to_float(_get(configs, "TOKEN_ALPHA", ""), _DEFAULT_TOKEN_ALPHA),
         token_beta=_to_float(_get(configs, "TOKEN_BETA", ""), _DEFAULT_TOKEN_BETA),
         rerank_score_threshold=threshold,
