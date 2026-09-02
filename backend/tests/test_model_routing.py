@@ -117,26 +117,28 @@ def test_token_weights_parse_admin_overrides():
     assert routing.token_beta == 0.9
 
 
-# --- [v7.3] hint slot (answer→tiered-hints generator, off-peak big model) ---
+# --- agent slot (the reasoning model that drives the retrieval loop) ---------
+# Formerly the hint slot. Hint generation is gone; the tier it named — big model,
+# quality over latency — is what the agent loop wants, so the slot was reused.
 
 
-def test_hint_falls_back_to_main_llm_when_unset():
+def test_agent_falls_back_to_main_llm_when_unset():
     routing = resolve_model_routing(_BASE)
-    assert routing.hint.base_url == "http://main/v1"
-    assert routing.hint.api_key == "main-key"
-    assert routing.hint.model == "qwen3-120b"
+    assert routing.agent.base_url == "http://main/v1"
+    assert routing.agent.api_key == "main-key"
+    assert routing.agent.model == "qwen3-120b"
 
 
-def test_hint_uses_its_own_endpoint_when_set():
+def test_agent_uses_its_own_endpoint_when_set():
     routing = resolve_model_routing({
         **_BASE,
-        "HINT_BASE_URL": "http://big/v1",
-        "HINT_API_KEY": "big-key",
-        "HINT_MODEL": "qwen3-235b",
+        "AGENT_BASE_URL": "http://big/v1",
+        "AGENT_API_KEY": "big-key",
+        "AGENT_MODEL": "qwen3-235b",
     })
-    assert routing.hint.base_url == "http://big/v1"
-    assert routing.hint.api_key == "big-key"
-    assert routing.hint.model == "qwen3-235b"
+    assert routing.agent.base_url == "http://big/v1"
+    assert routing.agent.api_key == "big-key"
+    assert routing.agent.model == "qwen3-235b"
 
 
 # --- [v7.3] rerank score threshold (ships OFF until calibrated) --------------
@@ -160,16 +162,17 @@ def test_rerank_score_threshold_garbage_means_off():
 # --- [v7.3] worker budgets ----------------------------------------------------
 
 
-def test_worker_budgets_have_defaults_and_parse():
+def test_worker_budget_has_a_default_and_parses():
     routing = resolve_model_routing(_BASE)
-    assert routing.hint_max_samples == 4
     assert routing.ingest_token_budget == 200_000
 
-    routing = resolve_model_routing({
-        **_BASE, "HINT_MAX_SAMPLES": "8", "INGEST_TOKEN_BUDGET": "50000",
-    })
-    assert routing.hint_max_samples == 8
+    routing = resolve_model_routing({**_BASE, "INGEST_TOKEN_BUDGET": "50000"})
     assert routing.ingest_token_budget == 50_000
+
+
+def test_hint_sampling_budget_is_gone():
+    routing = resolve_model_routing(_BASE)
+    assert not hasattr(routing, "hint_max_samples")
 
 
 # --- [v8.1] VLM slot (garbled-formula transcription; opt-in, never falls back) ---

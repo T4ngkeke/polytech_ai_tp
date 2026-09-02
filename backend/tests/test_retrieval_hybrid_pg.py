@@ -2,7 +2,7 @@
 test_retrieval_hybrid_pg.py — [v7.1] hybrid retrieval against live pgvector.
 
 Exercises the real SQL: vector ANN + BM25 (tsvector) recall, RRF fusion, and the
-tenant + audience filter enforced in the WHERE clause. Skips unless a pgvector
+tenant filter enforced in the WHERE clause. Skips unless a pgvector
 Postgres is reachable (TEST_PG_URL). Model calls are faked; the reranker is faked.
 """
 
@@ -12,11 +12,9 @@ import pytest
 from sqlalchemy import func
 
 from backend.app.models import (
-    Audience,
     Class,
     DocChunk,
     Document,
-    DocType,
     EMBEDDING_DIM,
     Lab,
     UserRole,
@@ -45,18 +43,17 @@ async def _seed_lab(session):
     doc = Document(
         id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="d.pdf",
         storage_path="/data/d.pdf", content_hash=uuid.uuid4().hex,
-        doc_type=DocType.CM, audience=Audience.student, uploaded_by=teacher.id,
+        uploaded_by=teacher.id,
     )
     session.add(doc)
     await session.flush()
     return cls, lab, doc
 
 
-def _chunk(doc, cls, lab, *, idx, content, emb, audience=Audience.student,
-           ts_config="french"):
+def _chunk(doc, cls, lab, *, idx, content, emb, ts_config="french"):
     return DocChunk(
         id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
-        doc_type=DocType.CM, audience=audience, chunk_index=idx,
+        chunk_index=idx,
         content=content, embedding=emb, page_no=idx + 1,
         tsv=func.to_tsvector(ts_config, content),
     )
@@ -74,31 +71,11 @@ async def test_hybrid_search_returns_lab_scoped_relevant_chunk(pg_session):
 
     hits, _all_filtered = await hybrid_search(
         pg_session, query_text="threads", query_embedding=_unit(1),
-        lab_id=lab.id, audience=Audience.student, top_k=2,
+        lab_id=lab.id, top_k=2,
     )
 
     assert hits[0].content == "about threads and concurrency"
     assert all(h.document_id == doc.id for h in hits)
-
-
-@pytest.mark.asyncio
-async def test_hybrid_search_excludes_teacher_audience_for_student(pg_session):
-    cls, lab, doc = await _seed_lab(pg_session)
-    pg_session.add_all([
-        _chunk(doc, cls, lab, idx=0, content="student-visible threads notes", emb=_unit(1)),
-        _chunk(doc, cls, lab, idx=1, content="teacher-only threads answer key",
-               emb=_unit(1), audience=Audience.teacher),
-    ])
-    await pg_session.commit()
-
-    hits, _all_filtered = await hybrid_search(
-        pg_session, query_text="threads", query_embedding=_unit(1),
-        lab_id=lab.id, audience=Audience.student, top_k=5,
-    )
-
-    contents = [h.content for h in hits]
-    assert "student-visible threads notes" in contents
-    assert "teacher-only threads answer key" not in contents
 
 
 @pytest.mark.asyncio
@@ -110,7 +87,7 @@ async def test_hybrid_search_does_not_leak_across_labs(pg_session):
     doc_b = Document(
         id=uuid.uuid4(), class_id=cls.id, lab_id=lab_b.id, filename="b.pdf",
         storage_path="/data/b.pdf", content_hash=uuid.uuid4().hex,
-        doc_type=DocType.CM, audience=Audience.student, uploaded_by=doc_a.uploaded_by,
+        uploaded_by=doc_a.uploaded_by,
     )
     pg_session.add(doc_b)
     await pg_session.flush()
@@ -122,7 +99,7 @@ async def test_hybrid_search_does_not_leak_across_labs(pg_session):
 
     hits, _all_filtered = await hybrid_search(
         pg_session, query_text="threads", query_embedding=_unit(1),
-        lab_id=lab_a.id, audience=Audience.student, top_k=5,
+        lab_id=lab_a.id, top_k=5,
     )
 
     assert [h.content for h in hits] == ["lab A threads"]
@@ -146,7 +123,7 @@ async def test_bm25_or_matches_despite_extra_query_words(pg_session):
     # 'informatique' does not appear in the chunk — AND semantics returns nothing.
     hits = await bm25_search(
         pg_session, "Qu'est-ce que la recursivite en informatique ?",
-        lab.id, audience=Audience.student, language="fr",
+        lab.id, language="fr",
     )
 
     assert len(hits) == 1
@@ -166,7 +143,7 @@ async def test_bm25_french_stemming_matches_inflections(pg_session):
     # Singular query vs plural document — French stemming bridges the gap.
     hits = await bm25_search(
         pg_session, "fonction recursive",
-        lab.id, audience=Audience.student, language="fr",
+        lab.id, language="fr",
     )
 
     assert len(hits) == 1
@@ -179,7 +156,7 @@ async def test_bm25_stopword_only_query_returns_empty(pg_session):
     await pg_session.commit()
 
     hits = await bm25_search(
-        pg_session, "de la les", lab.id, audience=Audience.student, language="fr",
+        pg_session, "de la les", lab.id, language="fr",
     )
     assert hits == []
 
@@ -199,7 +176,7 @@ async def test_hybrid_search_applies_reranker(pg_session):
 
     hits, _all_filtered = await hybrid_search(
         pg_session, query_text="threads", query_embedding=_unit(1),
-        lab_id=lab.id, audience=Audience.student, rerank_fn=fake_rerank, top_k=1,
+        lab_id=lab.id, rerank_fn=fake_rerank, top_k=1,
     )
 
     assert len(hits) == 1

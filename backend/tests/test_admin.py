@@ -320,33 +320,37 @@ class TestLLMConfig:
         })
         assert resp.status_code == 403
 
-    async def test_v73_hint_and_threshold_keys_roundtrip(self, admin_client):
-        """[v7.3] The hint slot (answer→hints big model) and the rerank score
-        threshold are admin-configurable and survive a GET after PUT."""
+    async def test_agent_and_threshold_keys_roundtrip(self, admin_client):
+        """The agent slot (the reasoning model behind the retrieval loop) and the
+        rerank score threshold are admin-configurable and survive a GET after PUT."""
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",
-            "hint_base_url": "http://big/v1",
-            "hint_api_key": "big-key",
-            "hint_model": "qwen3-235b",
+            "agent_base_url": "http://big/v1",
+            "agent_api_key": "big-key",
+            "agent_model": "qwen3-235b",
             "rerank_score_threshold": "0.35",
-            "hint_max_samples": "8",
             "ingest_token_budget": "50000",
         })
         assert resp.status_code == 200
 
         got = (await admin_client.get("/api/admin/llm/config")).json()
-        assert got["hint_model"] == "qwen3-235b"
-        assert got["hint_base_url"] == "http://big/v1"
+        assert got["agent_model"] == "qwen3-235b"
+        assert got["agent_base_url"] == "http://big/v1"
         assert got["rerank_score_threshold"] == "0.35"
-        assert got["hint_max_samples"] == "8"
         assert got["ingest_token_budget"] == "50000"
 
-    async def test_v73_fields_default_empty(self, admin_client):
+    async def test_agent_fields_default_empty(self, admin_client):
         await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",
         })
         got = (await admin_client.get("/api/admin/llm/config")).json()
-        assert got["hint_model"] == ""
+        assert got["agent_model"] == ""
+
+    async def test_hint_keys_are_rejected(self, admin_client):
+        """The hint slot is gone, not aliased — a stale client must not silently
+        write a key nothing reads."""
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert not [k for k in got if k.startswith("hint_")]
 
     async def test_v81_vlm_slot_roundtrip(self, admin_client):
         """[v8.1] The VLM slot (garbled-formula transcription, off-peak worker;

@@ -3,7 +3,7 @@ test_retrieval_hybrid.py — [v7.1] hybrid-retrieval pure logic.
 
 Reciprocal-rank fusion (vector + BM25) and reranker application are pure functions
 (no DB), so they are unit-tested directly. The SQL recall paths (vector ANN, BM25
-tsvector, tenant/audience filter) are exercised separately against live pgvector.
+tsvector, tenant filter) are exercised separately against live pgvector.
 """
 
 import pytest

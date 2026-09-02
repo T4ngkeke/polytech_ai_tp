@@ -1,15 +1,18 @@
 """
-test_integration_rag.py — [v7.1] Phase 5 ship gate (end-to-end + red lines).
+test_integration_rag.py — end-to-end ship gate.
 
 Runs the WHOLE chain on live pgvector with fake model functions:
-  ingest_document (parse → chunk → contextual → embed → tsv → extract)
+  ingest_document (parse → chunk → contextual → embed → tsv)
     → hybrid_search (vector + BM25 over the tsv the worker wrote)
     → agent (route → retrieve → synthesize).
 
-Plus the red-line regression that must hold before ship:
-  * cross-tenant isolation (lab filter in SQL),
-  * students never retrieve teacher-audience material (audience filter in SQL),
-  * no corrigé is ingested — there is no `solution` column / field anywhere.
+Plus the red line that must hold before ship: cross-tenant isolation, enforced
+in the SQL WHERE clause rather than in a prompt.
+
+The audience red line is gone with the `audience` column — every uploaded file is
+public course material now, so there is no teacher-only chunk for a student to be
+kept away from. The tenant filter is what remains, and it carries the whole
+boundary.
 """
 
 import uuid
@@ -17,9 +20,7 @@ import uuid
 import pytest
 
 from backend.app.agent.graph import build_agent
-from backend.app.models import (
-    Audience, Class, DocChunk, DocType, EMBEDDING_DIM, Exercise, Lab, UserRole,
-)
+from backend.app.models import Class, EMBEDDING_DIM, Lab, UserRole
 from backend.app.services.document_service import create_document
 from backend.worker.ingest import ingest_document
 from backend.tests.conftest import make_user
@@ -42,9 +43,7 @@ def _rag_router():
     import json
 
     async def llm_fn(messages):
-        return json.dumps({"route": "rag", "exercise_number": None,
-                           "number_source": "none", "search_terms": [],
-                           "sticky_matches": False})
+        return json.dumps({"route": "rag", "search_terms": []})
     return llm_fn
 
 
@@ -67,13 +66,10 @@ async def test_e2e_ingest_then_agent_retrieves_context(pg_session, tmp_path):
     teacher, cls, lab = await _seed_lab(pg_session)
     student = make_user(role=UserRole.student)
     pg_session.add(student)
-    # [v7.3] strict split: concept RAG is fed by CM material only (a TD would
-    # produce Exercises, never chunks).
     body = "Parity and error detection in binary coding.\n"
     doc = await create_document(
         pg_session, class_id=cls.id, lab_id=lab.id, filename="cm.txt",
         content=body.encode(), uploaded_by=teacher.id, storage_root=tmp_path,
-        doc_type=DocType.CM, audience=Audience.student,
     )
 
     # Worker ingests: writes DocChunks (with tsv via to_tsvector).
@@ -94,7 +90,7 @@ async def test_e2e_ingest_then_agent_retrieves_context(pg_session, tmp_path):
 
 @pytest.mark.asyncio
 async def test_ingest_builds_french_tsv_matching_inflected_queries(pg_session, tmp_path):
-    """[v7.3] The worker writes the tsvector with the document's language config
+    """The worker writes the tsvector with the document's language config
     (default fr), so a singular query matches the plural document via stemming.
     Ingest and query sides sharing the config is what keeps BM25 alive."""
     from backend.app.services.retrieval_service import bm25_search
@@ -104,29 +100,24 @@ async def test_ingest_builds_french_tsv_matching_inflected_queries(pg_session, t
     doc = await create_document(
         pg_session, class_id=cls.id, lab_id=lab.id, filename="cm.txt",
         content=body.encode(), uploaded_by=teacher.id, storage_root=tmp_path,
-        doc_type=DocType.CM, audience=Audience.student,
     )
     await ingest_document(pg_session, doc.id, embed_fn=_fixed_embed)
 
-    hits = await bm25_search(
-        pg_session, "fonction recursive", lab.id,
-        audience=Audience.student, language="fr",
-    )
+    hits = await bm25_search(pg_session, "fonction recursive", lab.id, language="fr")
     assert len(hits) == 1
     assert "fonctions recursives" in hits[0].content
 
 
 @pytest.mark.asyncio
-async def test_redline_cross_tenant_and_audience_and_no_solution(pg_session, tmp_path):
+async def test_redline_cross_tenant_isolation(pg_session, tmp_path):
     teacher, cls, lab_a = await _seed_lab(pg_session, "Lab A")
     student = make_user(role=UserRole.student)
     pg_session.add(student)
 
-    # Lab A: a student-visible chunk.
     doc_a = await create_document(
         pg_session, class_id=cls.id, lab_id=lab_a.id, filename="a.txt",
-        content=b"Exercice 1\nthreads in lab A\n", uploaded_by=teacher.id,
-        storage_root=tmp_path, doc_type=DocType.TD, audience=Audience.student,
+        content=b"threads in lab A\n", uploaded_by=teacher.id,
+        storage_root=tmp_path,
     )
     await ingest_document(pg_session, doc_a.id, embed_fn=_fixed_embed)
 
@@ -137,16 +128,9 @@ async def test_redline_cross_tenant_and_audience_and_no_solution(pg_session, tmp
     doc_b = await create_document(
         pg_session, class_id=cls.id, lab_id=lab_b.id, filename="b.txt",
         content=b"threads in lab B\n", uploaded_by=teacher.id,
-        storage_root=tmp_path, doc_type=DocType.CM, audience=Audience.student,
+        storage_root=tmp_path,
     )
     await ingest_document(pg_session, doc_b.id, embed_fn=_fixed_embed)
-
-    # A teacher-only chunk inside lab A (audience bait).
-    pg_session.add(DocChunk(
-        id=uuid.uuid4(), document_id=doc_a.id, class_id=cls.id, lab_id=lab_a.id,
-        doc_type=DocType.TD, audience=Audience.teacher, chunk_index=99,
-        content="teacher-only threads key", embedding=_unit(1), page_no=1,
-    ))
     await pg_session.commit()
 
     agent = build_agent(pg_session, embed_fn=_fixed_embed, router_llm_fn=_rag_router())
@@ -156,15 +140,5 @@ async def test_redline_cross_tenant_and_audience_and_no_solution(pg_session, tmp
     })
 
     context = " ".join(result.get("context_blocks", []))
-    # Red line 1: cross-tenant — lab B never appears.
+    assert "lab A" in context
     assert "lab B" not in context
-    # Red line 2: audience — the teacher-only chunk never appears for a student.
-    assert "teacher-only" not in context
-
-    # Red line 3: no corrigé is ingested — the column does not exist, and stored
-    # exercises expose only statements.
-    assert "solution" not in Exercise.__table__.columns
-    exercises = (await pg_session.execute(
-        Exercise.__table__.select().where(Exercise.lab_id == lab_a.id)
-    )).all()
-    assert exercises and all(not hasattr(e, "solution") for e in exercises)

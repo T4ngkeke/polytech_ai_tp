@@ -16,7 +16,6 @@ from backend.app.models import (
     EMBEDDING_DIM,
     IngestionJob,
     JobStatus,
-    JobType,
     Lab,
     UserRole,
 )
@@ -126,37 +125,6 @@ async def test_run_tick_processes_when_gate_open(pg_session, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_tick_forwards_run_hint_job(pg_session, tmp_path):
-    """[v8.0 §10] run_tick threads run_hint_job through to process_one, so a
-    hint_generate job actually runs in production (not just in a direct
-    process_one call)."""
-    doc = await _seed_job(pg_session, tmp_path)  # also an ingest job (priority 100)
-    hint_job = IngestionJob(
-        id=uuid.uuid4(), document_id=doc.id, job_type=JobType.hint_generate,
-        payload={"exercise_ids": []}, priority=0,  # claimed ahead of ingest
-    )
-    pg_session.add(hint_job)
-    await pg_session.commit()
-
-    gate = FakeGate(is_open=True)
-    seen = {}
-
-    async def fake_run_hint_job(db, job):
-        seen["job_id"] = job.id
-
-    async def fake_sleep(seconds):
-        pass
-
-    processed = await run_tick(
-        pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
-        run_hint_job=fake_run_hint_job,
-    )
-
-    assert processed is True
-    assert seen["job_id"] == hint_job.id
-
-
-@pytest.mark.asyncio
 async def test_run_tick_skips_when_chat_busy_even_if_gpu_idle(pg_session, tmp_path):
     """Primary gate: a busy chat pauses ingestion even when the GPU gate is open."""
     doc = await _seed_job(pg_session, tmp_path)
@@ -185,21 +153,23 @@ async def test_run_tick_skips_when_chat_busy_even_if_gpu_idle(pg_session, tmp_pa
 
 @pytest.mark.asyncio
 async def test_run_tick_urgent_job_skips_chat_busy_gate(pg_session, tmp_path):
-    """[v8.0 §10] A teacher's urgent hint job (priority=0) is processed NOW even
-    while students are chatting — it bypasses the chat-load gate so the teacher
-    isn't blocked waiting for a class-quiet window to review draft hints."""
+    """An urgent job (priority=0) is processed NOW even while students are
+    chatting — it bypasses the chat-load gate, so a teacher who needs a document
+    re-indexed before class isn't blocked waiting for a quiet window."""
     doc = await _seed_job(pg_session, tmp_path)  # ingest job, priority 100
-    urgent = IngestionJob(
-        id=uuid.uuid4(), document_id=doc.id, job_type=JobType.hint_generate,
-        payload={"exercise_ids": []}, priority=0,  # urgent
+    urgent_doc = await _seed_job(pg_session, tmp_path)
+    urgent = (await pg_session.execute(
+        IngestionJob.__table__.select().where(IngestionJob.document_id == urgent_doc.id)
+    )).first()
+    await pg_session.execute(
+        IngestionJob.__table__.update()
+        .where(IngestionJob.id == urgent.id).values(priority=0)
     )
-    pg_session.add(urgent)
     await pg_session.commit()
 
     gate = FakeGate(is_open=True)  # GPU idle
     chat_gate = ChatLoadGate(window=1)
     sleeps: list[float] = []
-    seen = {}
 
     async def fake_sleep(seconds):
         sleeps.append(seconds)
@@ -207,51 +177,47 @@ async def test_run_tick_urgent_job_skips_chat_busy_gate(pg_session, tmp_path):
     async def busy_chat_load(_db):
         return 50.0  # class is actively chatting → chat gate would normally close
 
-    async def fake_run_hint_job(db, job):
-        seen["job_id"] = job.id
-
     processed = await run_tick(
         pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
         chat_gate=chat_gate, chat_load_fn=busy_chat_load,
-        run_hint_job=fake_run_hint_job,
     )
 
     assert processed is True             # urgent bypassed the busy-chat gate
-    assert seen["job_id"] == urgent.id   # the priority-0 hint job ran first
+    await pg_session.refresh(urgent_doc)
+    assert urgent_doc.status == DocumentStatus.indexed   # the priority-0 job ran first
     assert sleeps == []                  # did work, no back-off sleep
 
 
 @pytest.mark.asyncio
 async def test_run_tick_urgent_job_skips_gpu_gate(pg_session, tmp_path):
-    """[v8.0] "Generate now" must run immediately even when the GPU is busy
-    serving chat: an urgent hint job (priority=0) bypasses the GPU idle gate too,
-    not just the chat-load gate — the teacher already accepted competing for
-    compute. Without this, "Now" would silently wait for a GPU-idle window."""
+    """"Do it now" must run immediately even when the GPU is busy serving chat:
+    an urgent job (priority=0) bypasses the GPU idle gate too, not just the
+    chat-load gate — whoever asked already accepted competing for compute.
+    Without this, "now" would silently wait for a GPU-idle window."""
     doc = await _seed_job(pg_session, tmp_path)  # ingest job, priority 100
-    urgent = IngestionJob(
-        id=uuid.uuid4(), document_id=doc.id, job_type=JobType.hint_generate,
-        payload={"exercise_ids": []}, priority=0,  # urgent
+    urgent_doc = await _seed_job(pg_session, tmp_path)
+    urgent = (await pg_session.execute(
+        IngestionJob.__table__.select().where(IngestionJob.document_id == urgent_doc.id)
+    )).first()
+    await pg_session.execute(
+        IngestionJob.__table__.update()
+        .where(IngestionJob.id == urgent.id).values(priority=0)
     )
-    pg_session.add(urgent)
     await pg_session.commit()
 
     gate = FakeGate(is_open=False)  # GPU busy → would normally close the gate
     sleeps: list[float] = []
-    seen = {}
 
     async def fake_sleep(seconds):
         sleeps.append(seconds)
 
-    async def fake_run_hint_job(db, job):
-        seen["job_id"] = job.id
-
     processed = await run_tick(
         pg_session, gate, embed_fn=fake_embed, sleep_fn=fake_sleep,
-        run_hint_job=fake_run_hint_job,
     )
 
     assert processed is True             # urgent bypassed the GPU idle gate
-    assert seen["job_id"] == urgent.id   # the priority-0 hint job ran
+    await pg_session.refresh(urgent_doc)
+    assert urgent_doc.status == DocumentStatus.indexed   # the priority-0 job ran
     assert sleeps == []                  # ran now, no back-off sleep
 
 

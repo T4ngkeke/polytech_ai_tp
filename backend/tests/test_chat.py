@@ -521,24 +521,6 @@ class TestStreamingAndBackgroundTask:
         assert "event: status\n" in full_text
         assert full_text.index("event: status") < full_text.index('data: "Bonjour')
 
-    async def test_stream_updates_session_last_route(
-        self, client1, seed_chat, db_session, mock_openai
-    ):
-        """[v8.0] The session remembers its route so the clarify anti-loop can see a
-        previous clarify turn (here: mock router → direct)."""
-        sess = seed_chat["sess1"]
-        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
-
-        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
-            async with client1.stream("POST", "/api/chat/stream", json={
-                "session_id": str(sess.id), "message": "hi there",
-            }) as resp:
-                assert resp.status_code == 200
-                _ = "".join([c async for c in resp.aiter_text()])
-
-        await db_session.refresh(sess)
-        assert sess.last_route == "direct"
-
     async def test_stream_writes_agent_trace_row(
         self, client1, seed_chat, db_session, mock_openai
     ):

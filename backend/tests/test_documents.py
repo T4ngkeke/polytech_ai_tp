@@ -13,7 +13,6 @@ from backend.app.models import (
     DocChunk,
     Document,
     DocumentStatus,
-    Exercise,
     IngestionJob,
     JobStatus,
     Lab,
@@ -136,35 +135,6 @@ async def test_docchunk_stores_embedding_and_lab_scope(db_session):
 
     assert chunk.lab_id == lab.id
     assert list(chunk.embedding) == [0.1, 0.2, 0.3]
-
-
-@pytest.mark.asyncio
-async def test_exercise_concept_is_optional(db_session):
-    teacher, cls = await _make_teacher_and_class(db_session)
-    doc = Document(
-        id=uuid.uuid4(),
-        class_id=cls.id,
-        filename="td3.pdf",
-        storage_path="/data/documents/td3.pdf",
-        content_hash="deadbeef",
-        uploaded_by=teacher.id,
-    )
-    db_session.add(doc)
-    await db_session.flush()
-
-    ex = Exercise(
-        id=uuid.uuid4(),
-        document_id=doc.id,
-        class_id=cls.id,
-        number="Exercise 2",
-        statement="Implement a thread-safe counter.",
-        hints=["Think about locks."],
-    )
-    db_session.add(ex)
-    await db_session.flush()
-    await db_session.refresh(ex)
-
-    assert ex.concept is None
 
 
 # ---------------------------------------------------------------------------
