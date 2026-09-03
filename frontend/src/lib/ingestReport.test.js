@@ -8,34 +8,15 @@ test('no report → no warnings', () => {
   assert.deepEqual(ingestReportWarnings(undefined), []);
 });
 
-test('a clean llm segmentation produces no warnings', () => {
+test('a clean run produces no warnings', () => {
   const w = ingestReportWarnings({
-    segmenter: 'llm', boundary_disagreements: 0, dropped_invalid_lines: 0,
-    anomaly: null, gaps: [], collisions: [], exercise_count: 5,
+    chunk_count: 12, ingest_tokens_est: 400, token_budget: 200000,
+    over_budget: false,
   });
   assert.deepEqual(w, []);
 });
 
-// The backend renamed the old `resegmented` flag to `segmenter`; a classifier
-// outage now surfaces as segmenter === 'regex_fallback'. That degradation must
-// be visible to the teacher (it silently disappeared after the rename).
-test('regex_fallback (classifier failed) surfaces a degradation warning', () => {
-  const w = ingestReportWarnings({ segmenter: 'regex_fallback', gaps: [], collisions: [] });
-  assert.equal(w.length, 1);
-  assert.match(w[0], /regex|classifier|fell back/i);
-});
-
-test('anomaly, gaps and collisions each surface a warning', () => {
-  const w = ingestReportWarnings({
-    segmenter: 'llm', anomaly: 'duplicate_numbers', gaps: [4, 7], collisions: ['3'],
-  });
-  assert.equal(w.length, 3);
-  assert.ok(w.some((x) => /duplicate_numbers/.test(x)));
-  assert.ok(w.some((x) => /4, 7/.test(x)));
-  assert.ok(w.some((x) => /3/.test(x)));
-});
-
-test('a CM over-budget report surfaces the estimate', () => {
+test('an over-budget report surfaces the estimate and the budget', () => {
   const w = ingestReportWarnings({
     chunk_count: 10, ingest_tokens_est: 5000, token_budget: 1000, over_budget: true,
   });
@@ -44,9 +25,42 @@ test('a CM over-budget report surfaces the estimate', () => {
   assert.match(w[0], /1000/);
 });
 
-test('the removed `resegmented` key no longer drives a warning', () => {
-  // A stale backend that still emitted `resegmented` would not, but the current
-  // shape never sets it; a report with only resegmented=true stays quiet.
-  const w = ingestReportWarnings({ resegmented: true, gaps: [], collisions: [] });
+test('repaired formula regions ask the teacher to check them', () => {
+  const w = ingestReportWarnings({
+    chunk_count: 3,
+    vlm_repairs: [
+      { status: 'replaced', before: '215', after: '2^{15}' },
+      { status: 'replaced', before: '211', after: '2^{11}' },
+    ],
+  });
+  assert.equal(w.length, 1);
+  assert.match(w[0], /2 /);
+  assert.match(w[0], /vision model|verify/i);
+});
+
+test('regions that could not be repaired are reported separately', () => {
+  const w = ingestReportWarnings({
+    vlm_repairs: [
+      { status: 'replaced' },
+      { status: 'unreadable' },
+      { status: 'refused_invented_text' },
+    ],
+  });
+  assert.equal(w.length, 2);
+  assert.ok(w.some((x) => /could not be repaired/i.test(x)));
+});
+
+// The segmentation half of the report is gone with the Exercises table. A stale
+// backend still emitting those keys must not resurrect warnings about numbering
+// that no longer means anything.
+test('leftover segmentation keys drive no warnings', () => {
+  const w = ingestReportWarnings({
+    segmenter: 'regex_fallback',
+    anomaly: 'duplicate_numbers',
+    gaps: [4, 7],
+    collisions: ['3'],
+    segmentation_disagreement: true,
+    exercise_count: 5,
+  });
   assert.deepEqual(w, []);
 });

@@ -5,12 +5,12 @@ import { interpretStreamEvent } from './streamEvents.js';
 
 // The chat SSE stream opens with `event: status\ndata: {"route": ...}` before any
 // token. It must be recognised as a status event, NEVER appended as a content
-// token — otherwise `content + JSON.parse('{"route":"exercise"}')` renders the
+// token — otherwise `content + JSON.parse('{"route":"rag"}')` renders the
 // literal string "[object Object]" at the head of every assistant reply.
 test('a status event is classified as status, not a token', () => {
-  const action = interpretStreamEvent({ event: 'status', data: '{"route": "exercise"}' });
+  const action = interpretStreamEvent({ event: 'status', data: '{"route": "rag"}' });
   assert.equal(action.type, 'status');
-  assert.equal(action.route, 'exercise');
+  assert.equal(action.route, 'rag');
 });
 
 test('status with a null route does not become a token', () => {

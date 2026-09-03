@@ -672,7 +672,7 @@ const MAP_NODES = [
   },
   {
     id: 'ingest', x: 37, y: 79, icon: '📥', name: 'Ingest model', source: 'worker',
-    tag: 'Contextual Retrieval + line classification — a small cheap model, off-peak only.',
+    tag: 'Contextual Retrieval — a small cheap model, off-peak only.',
     status: (c) => (c.ingest_model ? 'set' : 'inherits'),
     fields: [
       { key: 'ingest_model', label: 'Model Name', placeholder: 'inherits main LLM — e.g. qwen3:30b' },
@@ -681,14 +681,13 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'hint', x: 67, y: 79, icon: '💡', name: 'Hint generator', source: 'worker',
-    tag: 'Answer → tiered hints + pairing re-check. The BIG model, off-peak — quality over latency.',
-    status: (c) => (c.hint_model ? 'set' : 'inherits'),
+    id: 'agent', x: 67, y: 79, icon: '🧠', name: 'Agent', source: 'chat',
+    tag: 'The reasoning behind retrieval. The BIG model — quality over latency.',
+    status: (c) => (c.agent_model ? 'set' : 'inherits'),
     fields: [
-      { key: 'hint_model', label: 'Model Name', placeholder: 'inherits main LLM' },
-      { key: 'hint_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
-      { key: 'hint_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
-      { key: 'hint_max_samples', label: 'Max derivation samples / exercise', placeholder: '4' },
+      { key: 'agent_model', label: 'Model Name', placeholder: 'inherits main LLM' },
+      { key: 'agent_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
+      { key: 'agent_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
       { key: 'ingest_token_budget', label: 'Token budget / document', placeholder: '200000' },
     ],
   },

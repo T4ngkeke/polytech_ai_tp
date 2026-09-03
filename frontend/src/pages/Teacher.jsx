@@ -20,7 +20,7 @@ const MessageContent = lazy(() => import('../components/MessageContent'));
 
 const TABS_CLASS = ['Rules', 'Analytics'];
 // New tabs appended last so existing tab indices stay stable.
-const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive', 'Answers'];
+const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive'];
 
 export default function Teacher() {
   // ── Tree state ──
@@ -321,17 +321,11 @@ export default function Teacher() {
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
-              {level === 'lab' && activeTab === 2 && (
-                <div className="space-y-6">
-                  <HotspotPanel labId={selectedLab.id} />
-                  <AnalyticsPanel analytics={analytics} filterLabId={selectedLab.id} />
-                </div>
-              )}
+              {level === 'lab' && activeTab === 2 && <AnalyticsPanel analytics={analytics} filterLabId={selectedLab.id} />}
               {level === 'lab' && activeTab === 3 && <AuditPanel sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
               {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} />}
-              {level === 'lab' && activeTab === 7 && <AnswersPanel labId={selectedLab.id} />}
             </div>
           </>
         )}
@@ -496,111 +490,10 @@ function LabSettingsPanel({ lab, onToggle }) {
   );
 }
 
-// [v8.0] Uploaded answers — every answer extracted from a corrigé / answer-
-// bearing sheet in this lab, with its pairing state, so a teacher can review and
-// remove a mis-segmented or duplicate row. Teacher-only (decision B); the student
-// path never reads Answers. Delete is scoped to the answer's source document.
-function AnswersPanel({ labId }) {
-  const [answers, setAnswers] = useState(null);
-
-  const load = useCallback(() => {
-    api.get(`/api/teacher/labs/${labId}/answers`)
-      .then(setAnswers)
-      .catch(() => setAnswers([]));
-  }, [labId]);
-  useEffect(() => { load(); }, [load]);
-
-  const remove = async (a) => {
-    if (!window.confirm(`Delete the answer for "${a.number_raw}"? This cannot be undone.`)) return;
-    try {
-      await api.delete(`/api/teacher/documents/${a.document_id}/answers/${a.id}`);
-      toast.success('Answer deleted');
-      load();
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
-
-  if (answers === null) return null;
-  return (
-    <div className="p-5 rounded-xl bg-ink-raised border border-border-subtle">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-cream">Uploaded answers</p>
-        <button onClick={load} className="text-xs text-cream-muted hover:text-cyan">Refresh</button>
-      </div>
-      <p className="mt-1 text-xs text-cream-muted">
-        Extracted from corrigés / answer-bearing sheets. “Unpaired” = no exercise matched its number yet.
-      </p>
-      {answers.length === 0 ? (
-        <p className="mt-3 text-sm text-cream-muted">No answers uploaded yet.</p>
-      ) : (
-        <ul className="mt-3 divide-y divide-border-subtle rounded-lg border border-border-default">
-          {answers.map((a) => (
-            <li key={a.id} className="flex items-start gap-3 px-3 py-2">
-              <span className="w-12 shrink-0 text-sm font-medium text-cream">{a.number_raw}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-cream-secondary">{a.answer_text}</span>
-                <span className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] ${
-                  a.exercise_id ? 'bg-emerald-500/15 text-emerald-300' : 'bg-gold-muted text-gold'}`}>
-                  {a.exercise_id ? 'paired' : 'unpaired'}
-                </span>
-              </span>
-              <button type="button" onClick={() => remove(a)} title="Delete answer"
-                aria-label={`Delete answer ${a.number_raw}`}
-                className="shrink-0 text-cream-muted hover:text-danger">
-                🗑
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-
-// [v8.0 §11C] Teaching hotspots — the lab's most-asked exercises (test-drives
-// excluded), so a teacher sees where students get stuck.
-function HotspotPanel({ labId }) {
-  const [rows, setRows] = useState(null);
-
-  useEffect(() => {
-    let alive = true;
-    api.get(`/api/teacher/labs/${labId}/hotspots`)
-      .then((r) => { if (alive) setRows(r); })
-      .catch(() => { if (alive) setRows([]); });
-    return () => { alive = false; };
-  }, [labId]);
-
-  if (rows === null) return null;
-  const max = rows.reduce((m, r) => Math.max(m, r.count), 0) || 1;
-  return (
-    <div className="p-5 rounded-xl bg-ink-raised border border-border-subtle">
-      <p className="text-sm font-semibold text-cream">Teaching hotspots</p>
-      <p className="mt-1 text-xs text-cream-muted">Most-asked exercises in this lab (test-drives excluded).</p>
-      {rows.length === 0 ? (
-        <p className="mt-3 text-sm text-cream-muted">No exercise questions yet.</p>
-      ) : (
-        <ul className="mt-3 space-y-2">
-          {rows.map((r) => (
-            <li key={r.exercise_number} className="flex items-center gap-3">
-              <span className="w-14 shrink-0 text-sm text-cream-secondary">Ex. {r.exercise_number}</span>
-              <span className="h-2 flex-1 rounded-full bg-ink-deep overflow-hidden">
-                <span className="block h-full gradient-cyan" style={{ width: `${(r.count / max) * 100}%` }} />
-              </span>
-              <span className="w-8 shrink-0 text-right font-mono text-xs text-cyan">{r.count}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-// [v8.0 §11A/§12] Teacher test-drive — opens an is_test session on the lab and
-// chats through the real agent as a preview. Draft (pending_review) hints are
-// visible here; the server excludes these writes from analytics/LearnerProfile,
-// and the token cost is charged to the teacher, not a student.
+// Teacher test-drive — opens an is_test session on the lab and chats through
+// the real agent as a preview. The server excludes these writes from analytics
+// and LearnerProfile, and the token cost is charged to the teacher, not a
+// student.
 function TestDrivePanel({ labId, labName }) {
   const { token } = useAuthStore();
   const [sessionId, setSessionId] = useState(null);
@@ -653,8 +546,8 @@ function TestDrivePanel({ labId, labName }) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
-      // Same agent endpoint the students hit — the server bypasses the membership
-      // check for an owning teacher's is_test session and surfaces draft hints.
+      // Same agent endpoint the students hit — the server bypasses the
+      // membership check for an owning teacher's is_test session.
       await fetchEventSource('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -699,8 +592,7 @@ function TestDrivePanel({ labId, labName }) {
         <p className="text-sm font-semibold text-cream">Test drive</p>
         <p className="mt-1 text-xs text-cream-muted">
           Chat through the real tutor as a preview of <span className="text-cream-secondary">{labName}</span>.
-          Draft (pending review) hints are visible here, and these messages are excluded
-          from analytics and student profiles.
+          These messages are excluded from analytics and student profiles.
         </p>
         <button
           onClick={start}

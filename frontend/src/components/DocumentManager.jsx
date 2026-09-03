@@ -1,24 +1,27 @@
 /**
- * DocumentManager.jsx — [v7.1] Teacher ingestion visibility (Phase 6).
+ * DocumentManager.jsx — Teacher ingestion visibility.
  *
  * The document author is the ground-truth oracle for "was this processed well?",
  * so this surface lets a teacher:
- *   - upload a PDF with its type (Course=CM / Exercises=TD/TP) + audience,
- *   - see each document's ingestion status + summary (pages / chunks / exercises),
- *   - open a document to read the indexed chunks (the inspector) + exercises,
- *   - [v7.2] edit a chunk (re-embeds + re-indexes) or an exercise to fix
- *     chunking / extraction mistakes.
+ *   - upload course material (PDF / Markdown / HTML),
+ *   - see each document's ingestion status + summary (pages / chunks),
+ *   - open a document to read the indexed chunks (the inspector),
+ *   - edit a chunk (re-embeds + re-indexes) to fix a chunking mistake.
+ *
+ * The upload form used to ask for a type (CM / TD-TP / corrigé) and an audience.
+ * Both are gone: everything a teacher uploads is course material the whole class
+ * can read. So are the exercise editor, the hint review lifecycle and the
+ * segmentation compare-and-confirm panel — there are no exercise rows to review.
  *
  * Props:
  *   labId: string — the lab whose documents are shown (required)
  *
  * Backed by:
- *   GET  /api/teacher/labs/{labId}/documents
- *   POST /api/teacher/labs/{labId}/documents     (multipart: file, doc_type, audience)
- *   GET  /api/teacher/documents/{id}/chunks
- *   GET  /api/teacher/documents/{id}/exercises
- *   PUT  /api/teacher/documents/{id}/chunks/{chunkId}        (edit + re-index)
- *   PUT  /api/teacher/documents/{id}/exercises/{exerciseId}  (edit)
+ *   GET    /api/teacher/labs/{labId}/documents
+ *   POST   /api/teacher/labs/{labId}/documents     (multipart: file, language, shared)
+ *   GET    /api/teacher/documents/{id}/chunks
+ *   PUT    /api/teacher/documents/{id}/chunks/{chunkId}   (edit + re-index)
+ *   DELETE /api/teacher/documents/{id}
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,20 +29,9 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { ingestReportWarnings } from '../lib/ingestReport';
 
-// [v7.2] TD and TP are behaviourally identical (both extract exercises), so the
-// teacher only picks between course slides and exercises. The combined option is
-// stored as `TD` on the backend; existing `TP` docs still display as "TD/TP".
-const DOC_TYPE_OPTIONS = [
-  { value: 'CM', label: 'Course (CM)' },
-  { value: 'TD', label: 'Exercises (TD/TP)' },
-  { value: 'corrigé', label: 'Answers (corrigé)' },
-];
-const AUDIENCES = ['student', 'teacher'];
-// [v8.0 §12] Document language selects the BM25 tsvector config; ingest and query
-// sides must match. fr is the backend default.
+// Document language selects the BM25 tsvector config; ingest and query sides
+// must match. fr is the backend default.
 const LANGUAGES = [{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }];
-
-const docTypeLabel = (t) => (t === 'CM' ? 'CM' : 'TD/TP');
 
 // Status → badge classes. Coloured chips read fine on the dark panel.
 const STATUS_BADGE = {
@@ -52,19 +44,6 @@ const STATUS_BADGE = {
 
 const IN_PROGRESS = new Set(['pending', 'processing']);
 
-// [v8.0] Hint review lifecycle: none → generating → pending_review → approved/failed.
-const HINT_STATUS_BADGE = {
-  none: 'bg-ink-surface text-cream-muted',
-  generating: 'bg-cyan-muted text-cyan animate-pulse',
-  pending_review: 'bg-gold-muted text-gold',
-  approved: 'bg-emerald-500/15 text-emerald-300',
-  failed: 'bg-danger-muted text-danger',
-};
-const HINT_STATUS_LABEL = {
-  none: 'no hints', generating: 'generating…', pending_review: 'review',
-  approved: 'approved', failed: 'failed',
-};
-
 export default function DocumentManager({ labId }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -72,10 +51,7 @@ export default function DocumentManager({ labId }) {
   const [uploading, setUploading] = useState(false);
 
   const fileRef = useRef(null);
-  const [docType, setDocType] = useState('CM');
-  const [audience, setAudience] = useState('student');
-  const [shared, setShared] = useState(false);            // CM class-wide
-  const [answersFor, setAnswersFor] = useState('');        // corrigé → target TD
+  const [shared, setShared] = useState(false);             // class-wide material
   const [language, setLanguage] = useState('fr');          // BM25 tsvector config
 
   const loadDocuments = useCallback(async () => {
@@ -108,16 +84,13 @@ export default function DocumentManager({ labId }) {
     e.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) {
-      toast.error('Choose a PDF first.');
+      toast.error('Choose a file first.');
       return;
     }
     const form = new FormData();
     form.append('file', file);
-    form.append('doc_type', docType);
-    form.append('audience', audience);
     form.append('language', language);
-    if (docType === 'CM' && shared) form.append('shared', 'true');
-    if (docType === 'corrigé' && answersFor) form.append('answers_for_document_id', answersFor);
+    if (shared) form.append('shared', 'true');
 
     setUploading(true);
     try {
@@ -135,7 +108,7 @@ export default function DocumentManager({ labId }) {
   const deleteDocument = async (doc, e) => {
     e.stopPropagation();
     if (!window.confirm(
-      `Delete "${doc.filename}" and everything extracted from it (exercises, answers, chunks)? This cannot be undone.`
+      `Delete "${doc.filename}" and everything indexed from it? This cannot be undone.`
     )) return;
     try {
       await api.delete(`/api/teacher/documents/${doc.id}`);
@@ -164,20 +137,8 @@ export default function DocumentManager({ labId }) {
     <div className="space-y-4">
       <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3 rounded-lg border border-border-default bg-ink-deep/30 p-3">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-cream-muted">PDF file</label>
+          <label className="text-xs font-medium text-cream-muted">Course material</label>
           <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/markdown,.md,text/html,.html,.htm" className="text-sm text-cream-secondary file:mr-2 file:rounded file:border-0 file:bg-ink-surface file:px-2 file:py-1 file:text-cream-secondary" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-cream-muted">Type</label>
-          <select value={docType} onChange={(e) => setDocType(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none">
-            {DOC_TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-cream-muted">Audience</label>
-          <select value={audience} onChange={(e) => setAudience(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none">
-            {AUDIENCES.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-cream-muted">Language</label>
@@ -185,25 +146,11 @@ export default function DocumentManager({ labId }) {
             {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
         </div>
-        {docType === 'CM' && (
-          <label className="flex items-center gap-1.5 pb-1.5 text-xs text-cream-muted">
-            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)}
-              className="accent-cyan" />
-            Share class-wide
-          </label>
-        )}
-        {docType === 'corrigé' && (
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-cream-muted">Answers for</label>
-            <select value={answersFor} onChange={(e) => setAnswersFor(e.target.value)}
-              className="rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none">
-              <option value="">whole lab (by number)</option>
-              {documents.filter((d) => d.doc_type === 'TD' || d.doc_type === 'TP').map((d) => (
-                <option key={d.id} value={d.id}>{d.filename}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <label className="flex items-center gap-1.5 pb-1.5 text-xs text-cream-muted">
+          <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)}
+            className="accent-cyan" />
+          Share class-wide
+        </label>
         <button
           type="submit"
           disabled={uploading}
@@ -216,7 +163,7 @@ export default function DocumentManager({ labId }) {
       {loading ? (
         <p className="text-sm text-cream-muted">Loading documents…</p>
       ) : documents.length === 0 ? (
-        <p className="text-sm text-cream-muted">No documents yet. Upload a PDF above.</p>
+        <p className="text-sm text-cream-muted">No documents yet. Upload course material above.</p>
       ) : (
         <ul className="divide-y divide-border-subtle rounded-lg border border-border-default">
           {documents.map((doc) => (
@@ -228,18 +175,8 @@ export default function DocumentManager({ labId }) {
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
-                  {doc.doc_type && (
-                    <span className="rounded bg-cyan-muted px-1.5 py-0.5 text-xs text-cyan border border-cyan/20">{docTypeLabel(doc.doc_type)}</span>
-                  )}
                   {(doc.status === 'needs_review' || doc.status === 'failed') && (
                     <span title={doc.error_message || ''} className="text-gold">⚠</span>
-                  )}
-                  {doc.ingest_report?.segmentation_disagreement
-                    && !doc.ingest_report?.segmentation_confirmed && (
-                    <span title="The two segmentation methods disagree — open to review"
-                      className="rounded bg-gold-muted px-1.5 py-0.5 text-xs font-medium text-gold">
-                      split?
-                    </span>
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
@@ -278,7 +215,6 @@ function SummaryChips({ doc }) {
     <span className="hidden gap-1 text-xs text-cream-muted sm:flex">
       <span title="pages">📄 {doc.page_count ?? '–'}</span>
       <span title="chunks">🧩 {doc.chunk_count}</span>
-      <span title="exercises">✎ {doc.exercise_count}</span>
     </span>
   );
 }
@@ -295,92 +231,17 @@ function IngestReport({ report }) {
 
 function DocumentDetail({ document: doc, onBack }) {
   const [chunks, setChunks] = useState([]);
-  const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  const [genBusy, setGenBusy] = useState(false);
-  // [v8.1] Segmentation human-confirm: both candidates, when they disagreed.
-  const [seg, setSeg] = useState(null);
-  const [segBusy, setSegBusy] = useState(false);
-  const needsSegReview = Boolean(
-    doc.ingest_report?.segmentation_disagreement
-    && !doc.ingest_report?.segmentation_confirmed
-  );
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    // Fetch chunks + exercises (+ segmentation candidates when the two
-    // segmenters disagreed) in parallel — no waterfall.
-    Promise.all([
-      api.get(`/api/teacher/documents/${doc.id}/chunks`),
-      api.get(`/api/teacher/documents/${doc.id}/exercises`),
-      needsSegReview
-        ? api.get(`/api/teacher/documents/${doc.id}/segmentation`)
-        : Promise.resolve(null),
-    ])
-      .then(([c, e, s]) => {
-        if (!alive) return;
-        setChunks(c);
-        setExercises(e);
-        setSeg(s);
-      })
+    api.get(`/api/teacher/documents/${doc.id}/chunks`)
+      .then((c) => { if (alive) setChunks(c); })
       .catch((err) => toast.error(err.message))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [doc.id, needsSegReview]);
-
-  const chooseSegmentation = async (which) => {
-    const switching = which !== seg?.chosen;
-    if (switching && !window.confirm(
-      'Switch to the other split? Exercises are rebuilt: your hand-edited ones are kept, '
-      + 'carried hints go back to review.'
-    )) return;
-    setSegBusy(true);
-    try {
-      const updated = await api.post(
-        `/api/teacher/documents/${doc.id}/segmentation/choose`, { which });
-      setSeg(updated);
-      if (switching) {
-        setExercises(await api.get(`/api/teacher/documents/${doc.id}/exercises`));
-        toast.success('Split applied — exercises rebuilt');
-      } else {
-        toast.success('Split confirmed');
-      }
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSegBusy(false);
-    }
-  };
-
-  // [v8.0] While any exercise is generating, poll exercises so the badges settle
-  // to pending_review/failed once the worker finishes.
-  const anyGenerating = exercises.some((e) => e.hint_status === 'generating');
-  useEffect(() => {
-    if (!anyGenerating) return;
-    const id = setInterval(async () => {
-      try { setExercises(await api.get(`/api/teacher/documents/${doc.id}/exercises`)); } catch {}
-    }, 4000);
-    return () => clearInterval(id);
-  }, [anyGenerating, doc.id]);
-
-  const generateAll = async (urgent) => {
-    if (urgent && !window.confirm(
-      'Process now? Generation will compete with students for compute. Continue?')) return;
-    setGenBusy(true);
-    try {
-      const { queued } = await api.post(
-        `/api/teacher/documents/${doc.id}/generate-hints`, { urgent });
-      if (queued === 0) toast('All exercises already have hints (nothing queued).');
-      else toast.success(`Queued hint generation for ${queued} exercise${queued > 1 ? 's' : ''}`);
-      setExercises(await api.get(`/api/teacher/documents/${doc.id}/exercises`));
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setGenBusy(false);
-    }
-  };
+  }, [doc.id]);
 
   return (
     <div className="space-y-4">
@@ -394,8 +255,7 @@ function DocumentDetail({ document: doc, onBack }) {
           <StatusBadge status={doc.status} />
         </div>
         <p className="mt-1 text-xs text-cream-muted">
-          {docTypeLabel(doc.doc_type)} · {doc.audience} · {doc.page_count ?? '–'} pages ·
-          {' '}{doc.chunk_count} chunks · {doc.exercise_count} exercises
+          {doc.page_count ?? '–'} pages · {doc.chunk_count} chunks
         </p>
         {doc.error_message && (
           <p className="mt-2 rounded bg-gold-muted p-2 text-xs text-gold">{doc.error_message}</p>
@@ -406,137 +266,28 @@ function DocumentDetail({ document: doc, onBack }) {
       {loading ? (
         <p className="text-sm text-cream-muted">Loading processing report…</p>
       ) : (
-        <>
-          {seg != null && !seg.confirmed && seg.alternate != null ? (
-            <SegmentationReview seg={seg} busy={segBusy} onChoose={chooseSegmentation} />
-          ) : null}
-
-          {exercises.length > 0 && (
-            <section>
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-sm font-semibold text-cream-secondary">Extracted exercises</h4>
-                <div className="flex items-center gap-2">
-                  {anyGenerating && <span className="text-xs text-cyan">generating…</span>}
-                  <button type="button" onClick={() => generateAll(false)} disabled={genBusy}
-                    className="rounded gradient-cyan px-2.5 py-1 text-xs font-medium text-cream hover:brightness-110 disabled:opacity-50">
-                    {genBusy ? 'Queueing…' : 'Generate hints'}
-                  </button>
-                  <button type="button" onClick={() => generateAll(true)} disabled={genBusy}
-                    title="Skip the queue and process now"
-                    className="rounded border border-border-default px-2.5 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
-                    Now
-                  </button>
-                </div>
-              </div>
-              <p className="mb-2 text-xs text-cream-muted">
-                Batch only fills exercises with no hints; students see a hint only after you approve it.
-              </p>
-              <ul className="space-y-2">
-                {exercises.map((ex) => (
-                  <EditableExercise
-                    key={ex.id}
-                    docId={doc.id}
-                    exercise={ex}
-                    onSaved={(updated) => setExercises((prev) =>
-                      prev.map((e) => (e.id === updated.id ? updated : e)))}
-                  />
-                ))}
-              </ul>
-            </section>
+        <section>
+          <h4 className="mb-2 text-sm font-semibold text-cream-secondary">
+            Chunk inspector ({chunks.length})
+          </h4>
+          {chunks.length === 0 ? (
+            <p className="text-sm text-cream-muted">No chunks indexed for this document.</p>
+          ) : (
+            <ul className="space-y-2">
+              {chunks.map((c) => (
+                <EditableChunk
+                  key={c.id}
+                  docId={doc.id}
+                  chunk={c}
+                  onSaved={(updated) => setChunks((prev) =>
+                    prev.map((x) => (x.id === updated.id ? updated : x)))}
+                />
+              ))}
+            </ul>
           )}
-
-          <section>
-            <h4 className="mb-2 text-sm font-semibold text-cream-secondary">
-              Chunk inspector ({chunks.length})
-            </h4>
-            {chunks.length === 0 ? (
-              <p className="text-sm text-cream-muted">No chunks indexed for this document.</p>
-            ) : (
-              <ul className="space-y-2">
-                {chunks.map((c) => (
-                  <EditableChunk
-                    key={c.id}
-                    docId={doc.id}
-                    chunk={c}
-                    onSaved={(updated) => setChunks((prev) =>
-                      prev.map((x) => (x.id === updated.id ? updated : x)))}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
-        </>
+        </section>
       )}
     </div>
-  );
-}
-
-// [v8.1] Human-confirm for a segmentation disagreement: the two candidate
-// splits side by side; the teacher keeps the live one or switches. Switching
-// rebuilds exercises (hand-edits kept; carried hints demoted back to review).
-const SEGMENTER_LABEL = { llm: 'AI reading', regex: 'Pattern matching' };
-
-function SegmentationCandidate({ title, live, segments, action, busy, onPick }) {
-  return (
-    <div className={`flex flex-col rounded-lg border p-2 ${
-      live ? 'border-cyan/40 bg-cyan-muted/20' : 'border-border-default'}`}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-cream-secondary">
-          {title} · {segments.length} exercise{segments.length === 1 ? '' : 's'}
-        </p>
-        {live ? (
-          <span className="rounded bg-cyan-muted px-1.5 py-0.5 text-xs text-cyan">live</span>
-        ) : null}
-      </div>
-      <ol className="mb-2 flex-1 space-y-1.5">
-        {segments.map((s, i) => (
-          <li key={i} className="rounded bg-ink-deep/60 p-1.5">
-            <p className="text-xs font-medium text-cream">{s.section || '(no label)'}</p>
-            <p className="truncate text-xs text-cream-muted">
-              {(s.content || '').replace(/\s+/g, ' ').slice(0, 120)}
-            </p>
-          </li>
-        ))}
-      </ol>
-      <button type="button" onClick={onPick} disabled={busy}
-        className={`rounded px-2.5 py-1 text-xs font-medium disabled:opacity-50 ${
-          live
-            ? 'border border-border-default text-cream-secondary hover:bg-ink-hover'
-            : 'gradient-cyan text-cream hover:brightness-110'}`}>
-        {action}
-      </button>
-    </div>
-  );
-}
-
-function SegmentationReview({ seg, busy, onChoose }) {
-  const other = seg.chosen === 'llm' ? 'regex' : 'llm';
-  return (
-    <section className="rounded-lg border border-gold/40 bg-gold-muted/20 p-3">
-      <h4 className="text-sm font-semibold text-gold">Which split is right?</h4>
-      <p className="mb-3 mt-1 text-xs text-cream-muted">
-        The two segmentation methods disagree on the exercise boundaries.
-        Students currently see the “live” split — compare and confirm the right one.
-      </p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <SegmentationCandidate
-          title={SEGMENTER_LABEL[seg.chosen] || seg.chosen}
-          live
-          segments={seg.current}
-          action="Keep this split"
-          busy={busy}
-          onPick={() => onChoose(seg.chosen)}
-        />
-        <SegmentationCandidate
-          title={SEGMENTER_LABEL[other] || other}
-          live={false}
-          segments={seg.alternate}
-          action="Use this split instead"
-          busy={busy}
-          onPick={() => onChoose(other)}
-        />
-      </div>
-    </section>
   );
 }
 
@@ -601,165 +352,11 @@ function EditableChunk({ docId, chunk, onSaved }) {
           </div>
         </div>
       ) : (
-        /* <pre> preserves code-block whitespace from TP documents. */
+        /* <pre> preserves code-block whitespace in the original material. */
         <pre className="whitespace-pre-wrap break-words font-sans text-sm text-cream-secondary">
           {chunk.content}
         </pre>
       )}
-    </li>
-  );
-}
-
-function EditableExercise({ docId, exercise, onSaved }) {
-  const [editing, setEditing] = useState(false);
-  const [number, setNumber] = useState(exercise.number);
-  const [statement, setStatement] = useState(exercise.statement);
-  // [v8.0] hints is a tiered array; edit one tier per line.
-  const [hintText, setHintText] = useState((exercise.hints || []).join('\n'));
-  const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState(false); // generate/approve in flight
-
-  const status = exercise.hint_status || 'none';
-  const isBlind = exercise.hint_source === 'blind';
-
-  const save = async () => {
-    if (!number.trim() || !statement.trim()) { toast.error('Number and statement are required.'); return; }
-    setSaving(true);
-    try {
-      // A hand-edited tiered array; the backend marks it approved (trusted).
-      const tiers = hintText.split('\n').map((s) => s.trim()).filter(Boolean);
-      const updated = await api.put(`/api/teacher/documents/${docId}/exercises/${exercise.id}`, {
-        number, statement, hints: tiers.length ? tiers : null,
-      });
-      onSaved(updated);
-      setEditing(false);
-      toast.success('Exercise updated');
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const cancel = () => {
-    setNumber(exercise.number);
-    setStatement(exercise.statement);
-    setHintText((exercise.hints || []).join('\n'));
-    setEditing(false);
-  };
-
-  const regenerate = async () => {
-    setBusy(true);
-    try {
-      await api.post(`/api/teacher/documents/${docId}/exercises/${exercise.id}/generate-hints`, {});
-      onSaved({ ...exercise, hint_status: 'generating' });
-      toast.success('Queued — generating hints');
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const approve = async () => {
-    setBusy(true);
-    try {
-      const updated = await api.put(
-        `/api/teacher/documents/${docId}/exercises/${exercise.id}/hints/approve`, {});
-      onSaved(updated);
-      toast.success('Approved — students can now see these hints');
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (editing) {
-    return (
-      <li className="space-y-2 rounded border border-border-default p-2">
-        <input
-          value={number}
-          onChange={(e) => setNumber(e.target.value)}
-          placeholder="Number (e.g. Exercice 1)"
-          className="w-full rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none"
-        />
-        <textarea
-          value={statement}
-          onChange={(e) => setStatement(e.target.value)}
-          rows={Math.min(12, Math.max(2, statement.split('\n').length + 1))}
-          placeholder="Statement"
-          className="w-full resize-y rounded border border-border-default bg-ink-deep p-2 text-sm text-cream focus:border-cyan/40 focus:outline-none"
-        />
-        <label className="block text-xs text-cream-muted">Hints — one tier per line (L1 → L3). Saving marks them approved.</label>
-        <textarea
-          value={hintText}
-          onChange={(e) => setHintText(e.target.value)}
-          rows={Math.min(8, Math.max(3, hintText.split('\n').length + 1))}
-          placeholder={'A gentle nudge\nThe method\nClose, but stop short of the answer'}
-          className="w-full resize-y rounded border border-border-default bg-ink-deep p-2 text-sm text-cream focus:border-cyan/40 focus:outline-none"
-        />
-        <div className="flex gap-2">
-          <button type="button" onClick={save} disabled={saving}
-            className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-cream hover:brightness-110 disabled:opacity-50">
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button type="button" onClick={cancel} disabled={saving}
-            className="rounded border border-border-default px-3 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
-            Cancel
-          </button>
-        </div>
-      </li>
-    );
-  }
-
-  const tiers = exercise.hints || [];
-  return (
-    <li className="rounded border border-border-default p-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <p className="truncate text-sm font-medium text-cream">{exercise.number}</p>
-          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${HINT_STATUS_BADGE[status]}`}>
-            {HINT_STATUS_LABEL[status]}
-          </span>
-          {isBlind && (
-            <span title="Solved without an answer key — audit before approving"
-              className="rounded bg-danger-muted px-1.5 py-0.5 text-xs font-medium text-danger">⚠ blind</span>
-          )}
-        </div>
-        <button type="button" onClick={() => setEditing(true)} className="shrink-0 text-xs text-cyan hover:underline">
-          Edit
-        </button>
-      </div>
-      <p className="mt-1 whitespace-pre-wrap text-sm text-cream-secondary">{exercise.statement}</p>
-
-      {tiers.length > 0 && (
-        <ol className="mt-2 space-y-1 border-l-2 border-border-subtle pl-3">
-          {tiers.map((t, i) => (
-            <li key={i} className="text-xs text-cream-muted">
-              <span className="mr-1 font-semibold text-cyan">L{i + 1}</span>{t}
-            </li>
-          ))}
-        </ol>
-      )}
-      {exercise.hint_reason && status === 'failed' && (
-        <p className="mt-1 text-xs text-danger">Reason: {exercise.hint_reason}</p>
-      )}
-
-      <div className="mt-2 flex flex-wrap gap-2">
-        {status === 'pending_review' && (
-          <button type="button" onClick={approve} disabled={busy}
-            className="rounded bg-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-50">
-            Approve
-          </button>
-        )}
-        {status !== 'generating' && (
-          <button type="button" onClick={regenerate} disabled={busy}
-            className="rounded border border-border-default px-2.5 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
-            {status === 'none' ? 'Generate hints' : 'Regenerate'}
-          </button>
-        )}
-      </div>
     </li>
   );
 }
