@@ -1,6 +1,6 @@
 > Part of the Edu-LLM documentation. Back to [README](../README.md).
 
-## 6. POST `/api/chat/stream` — Agent Logic Spec (v8.0)
+## 6. POST `/api/chat/stream` — Agent Logic Spec
 
 **Payload:**
 
@@ -14,68 +14,67 @@
 **Step-by-step Logic (LangGraph agent):**
 
 1. **Security & Context Resolution**
-   * Fetch Session to find `lab_id`. Verify `session.user_id == current_user.id`.
-   * Verify the user has joined the Class that owns this Lab — **[v8.0]** unless it is the
-     owning teacher's `is_test` **test-drive** session, which bypasses the membership check.
-   * Verify the Lab `is_active == True` (reject if locked). Resolve `class_id` — the tenant
-     filter passed into every retrieval call.
-   * **[v8.0] Load dialogue state**: read `session.current_exercise_id` → a sticky exercise
-     number + a ~100-char statement excerpt, and `last_route` (for the clarify anti-loop).
+   * Fetch the Session to find `lab_id`. Verify `session.user_id == current_user.id`.
+   * Verify the user has joined the Class that owns this Lab — unless it is the
+     owning teacher's `is_test` **test-drive** session, which bypasses the check.
+   * Verify the Lab `is_active == True` (reject if locked). Resolve `class_id` —
+     the tenant filter passed into every retrieval call.
 
-2. **Rate Limit** — DB-based daily quota check; `429` if over (billed tokens; router calls
-   are **not** charged to the student).
+2. **Rate Limit** — DB-based daily quota check; `429` if over (billed tokens; the
+   router call is **not** charged to the student).
 
-3. **LangGraph Graph Execution (v8.0)**
+3. **LangGraph Graph Execution**
    ```
-   Router — ONE ROUTER_MODEL (9B) call, json_schema output:
-     {route: exercise|rag|direct, exercise_number, number_source: explicit|context|none,
-      search_terms, sticky_matches, effort, answer_seeking}
-     inputs: message (delimited as data) + last 1–2 turns + sticky number + sticky excerpt
-     timeout 1–2s / failure → route=rag + degraded (routing never drags down chat)
+   Router — ONE ROUTER_MODEL call, json_schema output:
+     {route: rag|direct, search_terms, effort, answer_seeking}
+     inputs: the message (delimited as data) + the last 1-2 turns
+     timeout 1-2s / failure → route=rag + degraded (routing never drags down chat)
      every decision → RouterQueryLog
         │
-        ├─ exercise → number arbitration (pure fn): explicit(DB) > context(DB) > sticky(+matches) > clarify
-        │     ├─ resolvable → search_exercise(n) (statement + APPROVED hints only)
-        │     │                → update session.current_exercise_id
-        │     │                → supplement CM context (hybrid_search on statement [+search_terms])
-        │     │                → tutor (effort/answer_seeking → coaching, EXERCISE leg only) → Synthesize + citations
-        │     └─ unresolvable (3 triggers) → clarify: ask "which exercise?" + lab number list
-        │            anti-loop: prev turn already clarify + still unresolved → fall through to rag
-        ├─ rag  → embed (fail → BM25-only) → hybrid vector+BM25 → RRF → rerank(augmented) → threshold gate
-        │            ├─ ≥1 survive → context injection ("possibly relevant; ignore if not") → Synthesize + citations
-        │            └─ all filtered → disclaimer-direct ("not covered by the material"; no injection, no citations)
+        ├─ rag  → embed (fail → BM25-only) → hybrid vector+BM25 → RRF
+        │            → rerank(augmented) → threshold gate
+        │            ├─ ≥1 survive → context injection ("possibly relevant; ignore
+        │            │               if not") → Synthesize + citations
+        │            └─ all filtered → disclaimer-direct ("not covered by the
+        │                              material"; no injection, no citations)
         └─ direct → Synthesize
                        ↓
-   Self-eval (observation window): deterministic gate kept; LLM verdict/rewrite run on the 9B
-     aux slot, recorded to AgentTraceLog (bad-rate / retry-flip / false-grounding) — two-week keep/drop
+   Tutor — folds `effort` into the per-(student, lab) EMA and derives a coaching
+     strategy. Runs on BOTH legs; skipped entirely for `is_test` sessions.
                        ↓
-   Synthesize (skill.md → 3-tier rules → [statement + approved hints (lazy → L1/L2 only) | context + citations] → history → question)
+   Self-eval (observation window): deterministic gate kept; the LLM verdict and
+     rewrite run on the ROUTER_* slot, recorded to AgentTraceLog.
+                       ↓
+   Synthesize (skill.md → 3-tier rules → context + citations → history → question)
    ```
-   * **Dialogue-state iron rule**: the sticky exercise only **fills a blank** number — it never
-     picks the route (routing is always decided from content + history). Priority: explicit >
-     context > sticky(+content match) > clarify. **Guessing wrong is worse than asking** — an
-     unresolvable number produces a clarifying question, never a wrong-exercise tutoring turn.
-   * **Citation iron rule**: any retrieval-touched path (including the exercise leg's CM
-     supplement) **must** cite; the zero-injection disclaimer branch must **not**.
-   * **Tenant + audience filter is mandatory and in SQL**: every `exercise` / `rag` query filters
-     `lab_id` / `class_id` (and `audience='student'` for students) **in the WHERE clause**. **[v8.0]**
-     CM may be class-wide shared (`class_id AND (lab_id=X OR lab_id IS NULL)`); TD/TP stay lab-scoped.
-   * **Hints only when approved**: `search_exercise` is the single injection gate — a hit's hints
-     are populated only when `hint_status == approved` (or `pending_review` for a teacher
-     test-drive). Statements are always available; the answer is never stored on the exercise.
-   * **Coaching is exercise-only**: the router emits `effort`/`answer_seeking` only on the
-     exercise route; the tutor node folds effort into the per-(student, lab) EMA and derives a
-     coaching strategy — skipped entirely for `is_test` sessions.
-   * **Degradation matrix**: the only hard dependencies are the **main LLM** and the **main DB**;
-     router→rag, embedding→BM25-only, rerank→fusion order, self-eval→skipped — each flagged in
-     `AgentTraceLog` (surfaced by the admin health panel).
-   * **No solution anywhere on the student path**: no `solution` field exists; uploaded answers
-     live in the teacher/worker-only `Answers` table, never imported by chat/agent/prompt/retrieval.
+   * **Two routes, not four.** `exercise` and `clarify` existed to serve the
+     Exercises table: one looked a numbered exercise up, the other asked which
+     number the student meant. Both are gone. A model that still emits either
+     falls outside the route enum and degrades to `rag`, so a stale prompt or a
+     stale fine-tune cannot smuggle them back in.
+   * **Per-exercise guidance is a prompt, not a table.** A teacher who wants
+     something specific said about an exercise writes it into their class or lab
+     rules. Keep it short: rules are resident text, paid for on every message.
+   * **Citation iron rule**: any retrieval-touched path **must** cite; the
+     zero-injection disclaimer branch must **not**.
+   * **The tenant filter is mandatory and in SQL**: every `rag` query filters
+     `lab_id` / `class_id` **in the WHERE clause**. Material may be class-wide
+     shared (`class_id AND (lab_id=X OR lab_id IS NULL)`). There is no audience
+     filter any more — every uploaded file is course material the whole class can
+     read, so tenant scoping carries the boundary alone.
+   * **Coaching follows the student, not the route.** `effort` and
+     `answer_seeking` used to be emitted only for the exercise lane. A student
+     can offload on a concept question just as easily, so both signals now ride
+     on whatever route the message took.
+   * **Degradation matrix**: the only hard dependencies are the **main LLM** and
+     the **main DB**; router→rag, embedding→BM25-only, rerank→fusion order,
+     self-eval→skipped — each flagged in `AgentTraceLog` and surfaced by the
+     admin health panel.
 
 4. **Dynamic LLM Config (Zero-Downtime)**
-   * Fetch active `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, and (v7.1)
-     `RERANK_URL` / `RERANK_MODEL` / `RAG_MAX_RETRIES` / `ROUTER_KNN_THRESHOLD` from
-     `SystemConfigs`. Nothing is hardcoded — generation, embeddings, and reranking are all
+   * Fetch active `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`,
+     `RERANK_URL` / `RERANK_MODEL` / `RAG_MAX_RETRIES` / `RERANK_SCORE_THRESHOLD`
+     from `SystemConfigs`. Nothing is hardcoded — generation, embeddings, and reranking are all
      config-driven HTTP. Swapping a model or threshold is a config change, not a code change.
 
 5. **SSE Streaming & Safe Async Write**
@@ -84,9 +83,9 @@
      event (the client uses `done` to stop streaming and refresh quota). *(An optional throttled
      `tip` event for prompt-literacy coaching is deferred to v7.2.)*
    * Use `BackgroundTasks` to insert User message, LLM message (with tokens), and Upsert
-     `usage_stats`. **Token accounting sums the Synthesize node's usage** plus any extra LLM
-     calls made during Contextual routing / self-eval.
-   * **[v7.2] Cost-aware quota.** Raw `prompt_tokens` / `completion_tokens` are still recorded
+     `usage_stats`. **Token accounting sums the Synthesize node's usage** plus any
+     extra LLM calls made during routing / self-eval.
+   * **Cost-aware quota.** Raw `prompt_tokens` / `completion_tokens` are still recorded
      per message, but the quota is charged on **billed tokens** =
      `prompt·TOKEN_ALPHA + completion·TOKEN_BETA` (admin-set, default `0.2`/`1.0`). The daily
      quota check (`429`) compares accumulated **billed** tokens against `daily_token_quota`, and
@@ -98,143 +97,128 @@
 
 ---
 
-## 7. Ingestion Pipeline (v7.1, hardened v7.3)
+## 7. Ingestion Pipeline
 
-A deferred, GPU-aware, **PDF-only structured** pipeline that never preempts live students.
-**No Airflow, no k8s, no OCR, no LibreOffice.**
+A deferred, load-aware pipeline that never preempts live students.
+**No Airflow, no k8s, no LibreOffice.**
 
-- **`worker` service** (in docker-compose): shares the backend image/code/DB; the only
-  difference is the entrypoint — a polling loop instead of uvicorn. It reuses the same
-  DB-as-queue pattern already used for rate limiting.
-- **Input = PDF, [v8.1] Markdown or HTML.** Instructors export slides (`.ppt/.pptx`) to PDF
-  themselves before upload (1 slide = 1 page). An `.md` file is read as text and split
-  into **heading pseudo-pages** (shallowest heading level present; ``` fences never
-  split), then runs the same character-yield gate and downstream pipeline. An
-  `.html/.htm` file is first converted to markdown-ish text (`html_to_markdown`):
-  headings → `#`-lines, `<pre>` fenced, page chrome stripped, and — the payoff — the
-  **original LaTeX recovered** from KaTeX/MathJax markup (`annotation x-tex` /
-  `script math/tex`), so formulas that mangle in a printed PDF arrive intact.
-- **[v8.1] VLM garbled-formula repair** (`vlm.py`, PDFs only, opt-in via `VLM_MODEL`):
-  HTML-printed PDFs mangle math (`2^15` flattens to `215`). Detection is **deterministic**
-  (spike-validated per-line rules: word-char ratio, math-symbol density, mojibake — code
-  lines and dot-leaders exempt); adjacent hits merge into a region, whose **bbox is cropped
-  from the PDF page** (pymupdf) and sent to the vision model with a **transcribe-only**
-  prompt (LaTeX for math, `[illisible]` for unreadable, never invent). Red lines: a
-  transcription that introduces a **new exercise boundary is refused**; every region lands
-  in `ingest_report.vlm_repairs` (before/after) for teacher review; no failure ever breaks
-  ingestion. Empty `VLM_MODEL` = feature off — it never falls back to a text model.
+Every document takes the same path. There is no type to declare and nothing to
+branch on: an upload becomes chunks, and that is all it becomes.
+
+- **`worker` service** (in docker-compose): shares the backend image/code/DB; the
+  only difference is the entrypoint — a polling loop instead of uvicorn. It
+  reuses the same DB-as-queue pattern already used for rate limiting.
+- **Input = PDF, Markdown or HTML.** Instructors export slides (`.ppt/.pptx`) to
+  PDF themselves before upload (1 slide = 1 page). An `.md` file is read as text
+  and split into **heading pseudo-pages** (shallowest heading level present;
+  ``` fences never split), then runs the same character-yield gate and downstream
+  pipeline. An `.html/.htm` file is first converted to markdown-ish text
+  (`html_to_markdown`): headings → `#`-lines, `<pre>` fenced, page chrome
+  stripped, and the **original LaTeX recovered** from KaTeX/MathJax markup
+  (`annotation x-tex` / `script math/tex`), so formulas that mangle in a printed
+  PDF arrive intact.
+- **VLM garbled-formula repair** (`vlm.py`, PDFs only, opt-in via `VLM_MODEL`):
+  HTML-printed PDFs mangle math (`2^15` flattens to `215`). Detection is
+  **deterministic** (spike-validated per-line rules: word-char ratio, math-symbol
+  density, mojibake — code lines and dot-leaders exempt); adjacent hits merge
+  into a region, whose **bbox is cropped from the PDF page** (pymupdf) and sent
+  to the vision model with a **transcribe-only** prompt (LaTeX for math,
+  `[illisible]` for unreadable, never invent).
+
+  The safety check is that the model **reads, it never writes**: a transcription
+  carrying prose the region never had is refused and the original kept. LaTeX
+  commands are ignored when judging this, since a real repair introduces them by
+  definition. Every region lands in `ingest_report.vlm_repairs` (before/after)
+  for teacher review, and no failure ever breaks ingestion. Empty `VLM_MODEL` =
+  feature off — it never falls back to a text model.
 - **Per-job pipeline (concurrency = 1, `FOR UPDATE SKIP LOCKED`):**
-  1. **Parse + input gate** (`parsing.py`): pymupdf text extraction; a cheap **character-yield
-     gate** (chars/page below threshold, or high garbage / non-word ratio) marks the document
-     `needs_review` and rejects it back to the teacher — **never silently ingest garbage**.
-  2. **Type + audience routing**: deterministic, from the upload metadata (`doc_type`,
-     `audience`) — decides chunk-path vs exercise-path and whether Contextual Retrieval applies.
-     No structure guessing.
-  3. **Structure-aware chunking** (`chunking.py`): split on heading / paragraph / exercise
-     boundaries; **never cut an exercise or a code block in half**; **detect and drop the TOC**
-     (table des matières) so it doesn't match every query.
-  4. **Contextual Retrieval**: per chunk, the worker LLM generates the chunk's in-document
-     context and prepends it; the **augmented** text (`context + content`) is embedded and
-     BM25-indexed, while the original `content` is stored for citation. Load-bearing for
-     context-poor CM slides. **[v7.2]** the context is generated from the chunk's **own local
-     scope** — its `section` when the chunker found one (TD/TP), otherwise its **page/slide**
-     (CM = 1 page per slide) — not `full_text[:8000]`, so a long document never gets a context
-     hallucinated from its opening pages, and the call fits any small model. No hard length gate
-     — long docs just degrade to per-section/per-slide context. Generation uses `INGEST_MODEL`
-     (defaults to `LLM_MODEL`), so a cheap off-peak model can do this without touching the chat
-     model.
-  5. **Exercise extraction — statements only**: extract `number / statement / hints` via
-     **structured decoding**. **[v7.2]** uses the OpenAI-standard
-     `response_format: {"type":"json_schema", …}` (enforced by vLLM/SGLang guided decoding,
-     supported natively by gateways like Albert) — **not** the vLLM-only `guided_json` extra_body,
-     which other engines silently ignore. Parsing is defensive (empty / fenced / prose output →
-     `0 exercises`), and extraction is **decoupled from chunk indexing**: if it yields nothing the
-     document still reaches `indexed` (chunks/RAG work) rather than `failed`. **No `solution` is
-     extracted or stored** (the column does not exist).
-  6. **Build the BM25 column** (`tsvector`, **[v7.3]** config selected by the document's
-     `language`) and enrich metadata (`doc_type` / `audience` / `section` / `page_no`).
-- **[v7.3] Pipeline hardening + the answers path:**
-  1. **Clean once, upstream**: repeated header/footer lines stripped; TOC pages removed once —
-     every downstream step (chunking *and* extraction) sees only cleaned pages.
-  2. **Segmentation is the single source of truth**: expanded deterministic boundaries
-     (Arabic / Roman / `Question n` / bare-numbered headings). The exercise `number` comes
-     from the captured label — never from an LLM reading the whole document.
-  3. **Deterministic exercise build + LLM only on anomaly**: exercises are written straight
-     from the segments (number = label, statement = segment body, hints = NULL) with **zero
-     LLM calls on the happy path**. A numbering anomaly — duplicate normalized numbers
-     (sub-questions mistaken for exercises: `1,1,2,3`) or zero boundaries — triggers **one**
-     `resegment_fn` call (`INGEST_MODEL`): the LLM names the true boundary heading lines
-     verbatim, splitting stays deterministic, hallucinated anchors are ignored, and its
-     failure keeps the regex result (never fails the document).
-  4. **Strict split** (`IngestionPlan.produce_chunks`): TD/TP skip the chunk/embed/tsv stage
-     entirely; CM skips exercise building. **CM size control**: tiny paragraphs merged,
-     oversized ones sentence-split at 1600 chars, code blocks kept intact (blank lines inside
-     indented blocks don't split), document-level paragraph dedup.
-  5. **Reconciliation report** (`ingest_report`): numbering anomaly, gaps, in-lab number
-     collisions, LLM re-segmentation flag, exercise count — the teacher audits a warning
-     list, not the whole document. Teacher-edited rows (`edited_by_teacher`) survive
-     re-ingestion (matched back by chunk_index / number_normalized; an edited exercise whose
-     number vanished is kept as an extra row).
-- **[v8.0] Answers + teacher-driven hint lifecycle** (`IngestionPlan.produce_answers`):
-  1. **Answer extraction**: a `corrigé` (the standalone answer file — the real workflow always
-     keeps answers separate from the pure question TD) is segmented by number like a TD and
-     written to the `Answers` table (one row per number; `answer_form` classified later). It
-     produces **no** chunks and **no** exercises — the exercises come from the pure TD, so nothing
-     answer-shaped ever lands in a student-visible `statement`.
-  2. **Ingestion never generates hints.** A teacher triggers generation (`generate-hints`);
-     the worker dispatches the `hint_generate` job (`worker/hint_jobs.py`): it **pairs** answers
-     to exercises by number (a `corrigé` may pin its target TD via `answers_for_document_id`),
-     then for each exercise runs the hint workflow (`worker/hints.py`, plain Python, `HINT_MODEL`):
-     classify answer form → single-shot tiered generation (never revealing the final result) →
-     deterministic leak-lint + a 1-token LLM judge → bounded retry → `pending_review` / `failed`.
-  3. **Review gate**: the teacher approves per-exercise (`hint_status → approved`) — only then do
-     hints reach students. Batch generation is idempotent (only `none` exercises); single-exercise
-     generation is the sole override for an already-reviewed one.
-- **Config-driven engine, optionally split:** embeddings and Contextual-Retrieval generation
-  are read from `SystemConfigs` — nothing hardcoded, no torch. **[v7.2]** by default they still
-  fall back to the one chat engine, but an admin can point `INGEST_MODEL` / `INGEST_BASE_URL`
-  at a separate cheap model (e.g. local 30B) so ingestion doesn't share the chat model's RPM
-  pool. Per-chunk Contextual-Retrieval calls run entirely on the **off-peak worker** and never
-  preempt students.
-- **"When to run" lives in the worker's Python** (`gpu_gate.py`): the **primary signal is
-  live chat load** — the worker counts recent `Messages` in the DB and pauses ingestion while
-  students are actively chatting (sliding window + hysteresis to avoid flapping). **GPU
-  utilization is an optional additional condition**: on a local engine the worker also requires
-  the GPU idle via `pynvml`; with a remote API there is no local GPU, so `pynvml` reads idle and
-  that condition no-ops. The same gate therefore works for both local-GPU and remote-API
-  engines. At night / no-class windows it may pull freely. No external cron.
-- **Crash recovery & idempotency:** stale `processing` jobs past a timeout are re-claimed; a
-  re-run deletes the document's old chunks/exercises before rebuilding (consistent after a
-  strategy change).
+  1. **Parse + input gate** (`parsing.py`): pymupdf text extraction; a cheap
+     **character-yield gate** (chars/page below threshold, or a high garbage /
+     non-word ratio) marks the document `needs_review` and hands it back to the
+     teacher — never silently ingest garbage.
+  2. **Clean once, upstream**: repeated header/footer lines stripped (two narrow
+     rules — byte-identical repeats and pure pagination lines); TOC pages dropped
+     (they otherwise match every query). Everything downstream sees clean pages.
+  3. **Chunking** (`chunking.py`): code-aware paragraph split (a blank line
+     inside an indented block is not a break), document-level paragraph dedup,
+     then size control — merge below 120 chars, sentence-split above 1600.
+  4. **Contextual Retrieval**: per chunk, the worker LLM generates the chunk's
+     in-document context and prepends it; the **augmented** text
+     (`context + content`) is embedded and BM25-indexed, while the original
+     `content` is stored for citation. This is what makes a context-poor slide
+     findable. The context is generated from the chunk's **own local scope** —
+     its section when there is one, otherwise its page (1 slide = 1 page) — so a
+     long document never gets a context hallucinated from its opening. Generation
+     uses `INGEST_MODEL` (defaults to `LLM_MODEL`), so a cheap off-peak model can
+     do this without touching the chat model. Calls run concurrently, bounded.
+  5. **Build the BM25 column** (`tsvector`, config selected by the document's
+     `language`) and record page numbers for citation.
+  6. **Report** (`ingest_report`): chunk count, estimated token spend, whether it
+     went over the configured budget, and any VLM repairs. The budget is
+     **observed, never enforced** — an over-budget document still indexes fully.
+- **Teacher-edit protection**: a chunk the teacher corrected (`edited_by_teacher`)
+  survives the idempotent rebuild instead of being wiped, matched back by
+  `chunk_index`.
+- **What used to be here.** The pipeline also built structured `Exercises` rows
+  and, from a `corrigé`, `Answers` rows — via an LLM-primary segmenter (a
+  per-page line classifier with a regex cross-check), numbering-anomaly
+  detection, a content-hash boundary cache and a teacher compare-and-confirm
+  step. All of it existed because a row was a hard claim the system then served
+  with confidence. With no rows to build, none of it has a job.
+- **Config-driven engine, optionally split:** embeddings and Contextual-Retrieval
+  generation are read from `SystemConfigs` — nothing hardcoded, no torch. By
+  default they fall back to the one chat engine, but an admin can point
+  `INGEST_MODEL` / `INGEST_BASE_URL` at a separate cheap model so ingestion
+  doesn't share the chat model's RPM pool. These calls run entirely on the
+  **off-peak worker** and never preempt students.
+- **"When to run" lives in the worker's Python** (`gpu_gate.py`): the **primary
+  signal is live chat load** — the worker counts recent `Messages` in the DB and
+  pauses ingestion while students are actively chatting (sliding window +
+  hysteresis to avoid flapping). **GPU utilization is an optional additional
+  condition**: on a local engine the worker also requires the GPU idle via
+  `pynvml`; with a remote API there is no local GPU, so `pynvml` reads idle and
+  that condition no-ops. The same gate therefore works for both. At night or in a
+  no-class window it may pull freely. No external cron.
+- **Urgent jobs bypass both gates.** A job at `priority=0` is claimed first and
+  skips the chat-load and GPU gates — "do it now" runs during class instead of
+  waiting for a quiet window.
+- **Crash recovery & idempotency:** stale `processing` jobs past a timeout are
+  re-claimed; a re-run deletes the document's old chunks before rebuilding, so
+  the result is consistent after a strategy change.
 
 ---
 
-## 8. Adaptive Tutoring — Prompt-Literacy Coaching (v7.1)
+## 8. Adaptive Tutoring — Prompt-Literacy Coaching
 
-> **Teaching goal:** teach students **how to ask GenAI** — a learnable skill. We judge the
-> *most observable signal — how the student asks* — not their mastery, using **cheap,
-> rules-first heuristics** (no LLM), mirroring the `router` and `GpuGate` patterns. The heavy
-> Learner-Model / BKT-DKT / LLM-judge / per-concept stack is intentionally dropped.
+> **Teaching goal:** teach students **how to ask** — a learnable skill. We judge
+> the most observable signal, *how the student asks*, not their mastery. The
+> heavy Learner-Model / BKT-DKT / per-concept stack is intentionally dropped.
 
-Two layers:
+Both signals come from the one router call, so coaching costs no extra request.
+They apply on whatever route the message took: a student can offload on a concept
+question as easily as on an exercise.
 
-- **(a) Effort / clarity — windowed, formative.** A per-message heuristic score (code-dump vs.
-  explanation; "what I tried"; a concrete error; an exercise reference) feeds a **smoothed
-  sliding window** (EMA) per *(student, lab)*. The trend sets a *coaching level* that adjusts
-  the tutor's scaffolding. **Never gates, always answers.** When the window stays low, a
-  **throttled** tip nudges better questioning. A low-skill ("stupid") question is **never
-  limited** — only encouraged toward more thinking, less copy-paste.
+- **(a) Effort / clarity — windowed, formative.** The router scores each message
+  `low` / `mid` / `high` (a bare demand with no attempt; some context but little
+  reasoning; a real attempt with reasoning or a specific error). That feeds a
+  **smoothed sliding window** (EMA) per *(student, lab)*, and the trend sets a
+  *coaching level* that adjusts the tutor's scaffolding. **It never gates, it
+  always answers.** A poorly-formed question is never refused — only nudged
+  toward more thinking and less copy-paste.
 
-- **(b) Lazy / answer-seeking — per-message guardrail.** Detects offloading ("just give me the
-  answer to Q2"). Forces a **strict Socratic response** (guiding questions/hints only, never
-  the final answer). It **still responds** — "limit" means *don't hand over the answer*.
-  Distinguished from a thinking question ("I think the answer is X because Y, right?"), which
-  is answered normally. Keys on **absence of the student's own attempt**, not on mentioning an
-  answer/exercise.
+- **(b) Answer-seeking — per-message guardrail.** The router flags a message that
+  demands the answer and shows no sign of the student's own attempt. That forces
+  a **strict Socratic response**: guiding questions only, never the final answer.
+  It **still responds** — the limit is on handing over the answer, not on
+  replying. A genuine "I think it is X because Y, right?" is not flagged; the
+  signal keys on the **absence of an attempt**, not on the word "answer".
 
-- **Governance:** store **structured score + controlled-vocabulary strategy** only — never
-  insulting free text. Profiles are **teacher-visible, teacher-overridable, transparent to the
-  student.** Complements the data-layer red line (no solution is stored anywhere).
+- **Governance:** store **structured score + controlled-vocabulary strategy**
+  only — never insulting free text. Profiles are teacher-visible,
+  teacher-overridable and transparent to the student.
+
+- **Test-drive sessions are excluded.** A teacher previewing their own lab never
+  writes to a student's profile.
 
 ---
 
