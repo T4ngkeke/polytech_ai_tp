@@ -15,7 +15,7 @@ from backend.app.models import IngestionJob
 # Reclaim a `processing` job whose lock is older than this many seconds.
 DEFAULT_STALE_AFTER_SECONDS = 600
 
-# Jobs at or below this priority are "urgent" (teacher-triggered hint generation
+# Jobs at or below this priority are "urgent" (a teacher asking for a document
 # enqueues at priority=0) and bypass the chat-load gate so they run immediately.
 URGENT_PRIORITY = 0
 
@@ -34,9 +34,9 @@ async def has_urgent_job(
 ) -> bool:
     """Whether a runnable job at/below the urgent priority is currently queued.
 
-    The worker loop uses this to let a teacher's urgent hint job (priority=0)
-    bypass BOTH the chat-load gate and the GPU idle gate — so "generate hints
-    now" runs immediately during class instead of waiting for a quiet window.
+    The worker loop uses this to let an urgent job (priority=0) bypass BOTH the
+    chat-load gate and the GPU idle gate — so "do it now" runs immediately
+    during class instead of waiting for a quiet window.
     Read-only (no claim)."""
     result = await db.execute(_HAS_URGENT_SQL, {"urgent": urgent_priority})
     return result.first() is not None

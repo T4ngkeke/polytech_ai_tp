@@ -53,8 +53,6 @@ from backend.app.models import (
     ClassStudent,
     Document,
     Lab,
-    Audience,
-    Exercise,
     Message,
     MessageFeedback,
     SenderType,
@@ -105,7 +103,7 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         # [v7.3/v8.0] absolute relevance floor for context injection; empty = off
         # (ships disabled until calibrated). Drives the zero-context disclaimer.
         "rerank_score_threshold": configs.get("RERANK_SCORE_THRESHOLD", ""),
-        # [v7.2] router model for the live exercise-number LLM fallback.
+        # The router model (a small fast model when configured).
         "router_base_url": routing.router.base_url,
         "router_api_key": routing.router.api_key,
         "router_model": routing.router.model,
@@ -400,20 +398,6 @@ async def chat_stream(
     class_id = None
     lab_id = session.lab_id
 
-    # [v8.0] Clarify anti-loop: if the previous turn already asked "which exercise?",
-    # a still-unresolved turn falls through to rag instead of clarifying again.
-    prev_was_clarify = session.last_route == "clarify"
-
-    # [v8.0] Sticky exercise → the router's dialogue-state inputs (number + a short
-    # statement excerpt). It only fills a blank number; it never picks the route.
-    sticky_number = None
-    sticky_excerpt = None
-    if session.current_exercise_id is not None:
-        sticky_ex = await db.get(Exercise, session.current_exercise_id)
-        if sticky_ex is not None:
-            sticky_number = sticky_ex.number_normalized
-            sticky_excerpt = (sticky_ex.statement or "")[:100]
-
     if lab_id:
         # [v7.2] The lab must exist, be active, and not be soft-deleted — a locked
         # or deleted lab is read-only and must reject chat (README §6 step 1).
@@ -524,40 +508,12 @@ async def chat_stream(
         "lab_id": lab_id,
         "user_id": current_user.id,
         "history": history,
-        "sticky_number": sticky_number,
-        "sticky_excerpt": sticky_excerpt,
-        "prev_was_clarify": prev_was_clarify,
         "is_test": session.is_test,
         **rule_texts,
     })
     messages_payload = agent_result["messages_payload"]
     trace.set("recall_count", len(agent_result.get("citations", [])))
     trace.set("all_filtered", bool(agent_result.get("no_material")))
-
-    # [v8.0] Remember this turn's route for the next turn's clarify anti-loop.
-    session.last_route = agent_result["route"]
-    await db.flush()
-
-    # [v8.0] Sticky write-back: on an exercise hit, remember it on the session so a
-    # later numberless follow-up ("and the next part?") reconnects seamlessly.
-    if (
-        agent_result.get("route") == "exercise"
-        and agent_result.get("exercise_number") is not None
-        and lab_id
-    ):
-        matched = await db.execute(
-            select(Exercise.id)
-            .where(
-                Exercise.lab_id == lab_id,
-                Exercise.number_normalized == agent_result["exercise_number"],
-                Exercise.audience == Audience.student,
-            )
-            .limit(1)
-        )
-        ex_id = matched.scalar_one_or_none()
-        if ex_id is not None:
-            session.current_exercise_id = ex_id
-            await db.flush()
 
     # Resolve citations now, while the request DB session is still open (the
     # streaming generator runs after the request returns and cannot use `db`).

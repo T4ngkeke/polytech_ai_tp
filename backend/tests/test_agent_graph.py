@@ -23,10 +23,12 @@ from sqlalchemy import select
 from backend.app.agent.graph import build_agent
 from backend.app.models import (
     Class,
+    CoachingLevel,
     DocChunk,
     Document,
     EMBEDDING_DIM,
     Lab,
+    LearnerProfile,
     RouterQueryLog,
     UserRole,
 )
@@ -287,21 +289,34 @@ async def test_answer_seeking_guardrail_applies_on_rag(db_session):
 
 
 @pytest.mark.asyncio
-async def test_effort_coaching_applies_on_rag(db_session):
-    """Effort feeds the per-(student, lab) window on any route now."""
+async def test_effort_coaching_applies_off_the_old_exercise_leg(db_session):
+    """Effort feeds the per-(student, lab) window on any route now. Uses the
+    `direct` leg so this runs on SQLite — the rag leg needs real pgvector, and
+    test_agent_tutor covers it there.
+
+    The profile is pinned rather than earned: one low sample does not move the
+    smoothed window far enough to change the level, and what is under test here
+    is the wiring (coaching reaches the prompt off the old exercise leg), not
+    the EMA."""
     cls, lab, student = await _seed_lab_with_chunk(db_session, "note", at=1)
+    db_session.add(LearnerProfile(
+        id=uuid.uuid4(), user_id=student.id, lab_id=lab.id,
+        effort_ema=0.1, samples=5, coaching_level=CoachingLevel.low,
+        teacher_override=True,
+    ))
+    await db_session.commit()
 
     async def fake_embed(texts):
         return [_unit(1) for _ in texts]
 
     agent = build_agent(db_session, embed_fn=fake_embed,
-                        router_llm_fn=_fake_router(route="rag", effort="low"))
+                        router_llm_fn=_fake_router(route="direct", effort="low"))
     result = await agent.ainvoke({
         "message": "dunno", "class_id": cls.id, "lab_id": lab.id,
         "user_id": student.id, "history": [],
     })
 
-    assert result["route"] == "rag"
+    assert result["route"] == "direct"
     assert "[COACHING]" in result["messages_payload"][0]["content"]
 
 

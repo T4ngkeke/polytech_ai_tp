@@ -41,12 +41,10 @@ from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    Audience, Class, ClassStudent, DocType, Lab, RuleLevel, Session,
+    Class, ClassStudent, Lab, RuleLevel, Session,
     SystemConfig, UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
-    AnswerResponse,
-    ExerciseHotspot,
     ClassAnalyticsResponse,
     ClassCreate,
     ClassResponse,
@@ -57,13 +55,6 @@ from backend.app.schemas import (
     LabUpdateRequest,
     ChunkResponse,
     ChunkUpdateRequest,
-    DocExerciseResponse,
-    ExerciseCreateRequest,
-    ExerciseUpdateRequest,
-    GenerateHintsRequest,
-    GenerateHintsResponse,
-    SegmentationResponse,
-    ChooseSegmentationRequest,
     DocumentResponse,
     DocumentSummaryResponse,
     ApplySkillRequest,
@@ -76,7 +67,6 @@ from backend.app.schemas import (
     TestSessionResponse,
 )
 from backend.app.services import (
-    answer_service,
     class_service,
     document_service,
     lab_service,
@@ -253,34 +243,32 @@ async def list_labs(
 async def upload_document(
     lab_id: uuid.UUID,
     file: UploadFile = File(...),
-    doc_type: DocType = Form(...),
-    audience: Audience = Form(...),
     language: str = Form("fr"),
     shared: bool = Form(False),
-    answers_for_document_id: uuid.UUID | None = Form(None),
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
     storage_root: str = Depends(get_storage_root),
 ) -> DocumentResponse:
-    """Upload a course document (PDF or [v8.1] Markdown) to a lab the teacher
+    """Upload a course document (PDF, Markdown or HTML) to a lab the teacher
     owns; enqueues ingestion.
 
-    `doc_type` (CM/TD/TP) and `audience` (student/teacher) are required — they are the
-    deterministic ingestion routing signal and the student-retrieval audience filter.
+    The form asks for the file and nothing else that matters: `language` selects
+    the BM25 text-search config and `shared` makes the document class-wide.
+    There is no type to declare and no audience to pick — everything uploaded is
+    course material the whole class can read.
     """
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
 
-    # PDF (slides exported to PDF) or [v8.1] Markdown / HTML — no other formats.
+    # PDF (slides exported to PDF), Markdown or HTML — no other formats.
     if not (file.filename or "").lower().endswith((".pdf", ".md", ".html", ".htm")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF, Markdown or HTML uploads are supported. Export slides to PDF first.",
         )
 
-    # [v8.0] Only CM may be shared class-wide (lab_id NULL → reachable from every
-    # lab of the class); TD/TP stay strictly lab-scoped (exercises are lab-level).
-    doc_lab_id = None if (shared and doc_type == DocType.CM) else lab.id
+    # Shared → lab_id NULL, reachable from every lab of the class.
+    doc_lab_id = None if shared else lab.id
 
     content = await file.read()
     doc = await document_service.create_document(
@@ -291,16 +279,13 @@ async def upload_document(
         content=content,
         uploaded_by=teacher.id,
         storage_root=storage_root,
-        doc_type=doc_type,
-        audience=audience,
         language=language,
-        answers_for_document_id=answers_for_document_id,
     )
     return DocumentResponse.model_validate(doc)
 
 
 # ===================================================================
-# [v7.1] Phase 6 — teacher ingestion visibility
+# Teacher ingestion visibility
 # ===================================================================
 
 
@@ -318,13 +303,10 @@ async def list_lab_documents(
         DocumentSummaryResponse(
             id=r["doc"].id,
             filename=r["doc"].filename,
-            doc_type=r["doc"].doc_type.value if r["doc"].doc_type else None,
-            audience=r["doc"].audience.value if r["doc"].audience else None,
             status=r["doc"].status.value,
             page_count=r["doc"].page_count,
             error_message=r["doc"].error_message,
             chunk_count=r["chunk_count"],
-            exercise_count=r["exercise_count"],
         )
         for r in rows
     ]
@@ -353,51 +335,6 @@ async def get_document_chunks(
     return [ChunkResponse.model_validate(c) for c in chunks]
 
 
-@router.get("/documents/{document_id}/exercises", response_model=list[DocExerciseResponse])
-async def get_document_exercises(
-    document_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> list[DocExerciseResponse]:
-    """Extracted exercises (statements only) for a document the teacher owns."""
-    await _owned_document_or_404(db, document_id, teacher)
-    exercises = await document_service.get_document_exercises(db, document_id)
-    return [DocExerciseResponse.model_validate(e) for e in exercises]
-
-
-@router.get("/documents/{document_id}/segmentation", response_model=SegmentationResponse)
-async def get_document_segmentation(
-    document_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> SegmentationResponse:
-    """[v8.1] Both candidate segmentations (live + alternate) for the compare UI."""
-    doc = await _owned_document_or_404(db, document_id, teacher)
-    return SegmentationResponse(**document_service.get_segmentation(doc))
-
-
-@router.post("/documents/{document_id}/segmentation/choose",
-             response_model=SegmentationResponse)
-async def choose_document_segmentation(
-    document_id: uuid.UUID,
-    body: ChooseSegmentationRequest,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> SegmentationResponse:
-    """[v8.1] Confirm which candidate segmentation is right (human confirm).
-
-    Switching rebuilds the exercises deterministically from the stored
-    alternate: teacher edits survive, hints carry by number with approved
-    demoted to pending_review."""
-    doc = await _owned_document_or_404(db, document_id, teacher)
-    try:
-        await document_service.choose_segmentation(db, doc, body.which)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    await db.commit()
-    return SegmentationResponse(**document_service.get_segmentation(doc))
-
-
 @router.put("/documents/{document_id}/chunks/{chunk_id}", response_model=ChunkResponse)
 async def update_document_chunk(
     document_id: uuid.UUID,
@@ -417,129 +354,6 @@ async def update_document_chunk(
     return ChunkResponse.model_validate(chunk)
 
 
-@router.put(
-    "/documents/{document_id}/exercises/{exercise_id}", response_model=DocExerciseResponse
-)
-async def update_document_exercise(
-    document_id: uuid.UUID,
-    exercise_id: uuid.UUID,
-    body: ExerciseUpdateRequest,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> DocExerciseResponse:
-    """[v7.2] Correct an extracted exercise (number/statement/hints). No solution
-    field exists. Ownership enforced via the document."""
-    await _owned_document_or_404(db, document_id, teacher)
-    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
-    if exercise is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
-    exercise = await document_service.update_exercise(
-        db, exercise, number=body.number, statement=body.statement, hints=body.hints
-    )
-    return DocExerciseResponse.model_validate(exercise)
-
-
-@router.post(
-    "/documents/{document_id}/generate-hints", response_model=GenerateHintsResponse
-)
-async def generate_document_hints(
-    document_id: uuid.UUID,
-    body: GenerateHintsRequest = GenerateHintsRequest(),
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> GenerateHintsResponse:
-    """[v8.0 §10] Batch-generate hints for a document: queues a hint job for every
-    exercise still missing hints (idempotent — skips reviewed/edited ones)."""
-    document = await _owned_document_or_404(db, document_id, teacher)
-    queued, job_id = await document_service.start_batch_hint_generation(
-        db, document, urgent=body.urgent
-    )
-    await db.commit()
-    return GenerateHintsResponse(queued=queued, job_id=job_id)
-
-
-@router.post(
-    "/documents/{document_id}/exercises/{exercise_id}/generate-hints",
-    response_model=GenerateHintsResponse,
-)
-async def generate_exercise_hints(
-    document_id: uuid.UUID,
-    exercise_id: uuid.UUID,
-    body: GenerateHintsRequest = GenerateHintsRequest(),
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> GenerateHintsResponse:
-    """[v8.0 §10] Regenerate hints for one exercise — the only entry that
-    overwrites an already-reviewed or hand-edited exercise."""
-    document = await _owned_document_or_404(db, document_id, teacher)
-    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
-    if exercise is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
-    job_id = await document_service.start_single_hint_generation(
-        db, document, exercise, urgent=body.urgent
-    )
-    await db.commit()
-    return GenerateHintsResponse(queued=1, job_id=job_id)
-
-
-@router.put(
-    "/documents/{document_id}/exercises/{exercise_id}/hints/approve",
-    response_model=DocExerciseResponse,
-)
-async def approve_exercise_hints(
-    document_id: uuid.UUID,
-    exercise_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> DocExerciseResponse:
-    """[v8.0 §10] Approve a reviewed draft → students can now see the hints."""
-    await _owned_document_or_404(db, document_id, teacher)
-    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
-    if exercise is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
-    exercise = await document_service.approve_exercise_hints(db, exercise)
-    await db.commit()
-    return DocExerciseResponse.model_validate(exercise)
-
-
-@router.post(
-    "/documents/{document_id}/exercises", response_model=DocExerciseResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def add_document_exercise(
-    document_id: uuid.UUID,
-    body: ExerciseCreateRequest,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> DocExerciseResponse:
-    """[v8.0 §10] Hand-add an exercise the extractor missed."""
-    document = await _owned_document_or_404(db, document_id, teacher)
-    exercise = await document_service.add_exercise(
-        db, document, number=body.number, statement=body.statement, hints=body.hints
-    )
-    await db.commit()
-    return DocExerciseResponse.model_validate(exercise)
-
-
-@router.delete(
-    "/documents/{document_id}/exercises/{exercise_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_document_exercise(
-    document_id: uuid.UUID,
-    exercise_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """[v8.0 §10] Remove a phantom exercise."""
-    await _owned_document_or_404(db, document_id, teacher)
-    exercise = await document_service.get_exercise_in_document(db, document_id, exercise_id)
-    if exercise is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
-    await document_service.delete_exercise(db, exercise)
-    await db.commit()
-
-
 @router.delete(
     "/documents/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -549,10 +363,8 @@ async def delete_document(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """[v8.0] Delete an uploaded document (CM / TD / TP / corrigé) and every
-    artifact derived from it — chunks, exercises, own answers, ingestion jobs —
-    plus the stored file. Answers a corrigé contributed to OTHER documents are
-    unpaired, not deleted. Ownership-checked."""
+    """Delete an uploaded document and everything derived from it — its chunks
+    and ingestion jobs — plus the stored file. Ownership-checked."""
     doc = await _owned_document_or_404(db, document_id, teacher)
     storage_path = await document_service.delete_document(db, doc)
     await db.commit()
@@ -560,41 +372,6 @@ async def delete_document(
     # missing/already-removed file).
     with contextlib.suppress(OSError):
         os.remove(storage_path)
-
-
-@router.get("/labs/{lab_id}/answers", response_model=list[AnswerResponse])
-async def list_lab_answers(
-    lab_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> list[AnswerResponse]:
-    """[v8.0 §10] Read uploaded answers + their pairing state (decision B). An
-    unpaired answer (exercise_id null) surfaces a numbering/collision ambiguity
-    for the teacher to resolve."""
-    lab = await lab_service.get_lab_by_id(db, lab_id)
-    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
-    answers = await answer_service.list_lab_answers(db, lab_id)
-    return [AnswerResponse.model_validate(a) for a in answers]
-
-
-@router.delete(
-    "/documents/{document_id}/answers/{answer_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_document_answer(
-    document_id: uuid.UUID,
-    answer_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """[v8.0] Remove one uploaded answer (a mis-segmented or duplicate row) from
-    the document it was ingested from. Ownership-checked via the document."""
-    await _owned_document_or_404(db, document_id, teacher)
-    answer = await document_service.get_answer_in_document(db, document_id, answer_id)
-    if answer is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Answer not found")
-    await document_service.delete_answer(db, answer)
-    await db.commit()
 
 
 @router.post(
@@ -606,7 +383,7 @@ async def create_test_session(
     db: AsyncSession = Depends(get_db),
 ) -> TestSessionResponse:
     """[v8.0 §11A] Open a test-drive session on a lab the teacher owns — chat as a
-    preview (membership bypassed, draft hints visible, writes excluded from
+    preview (membership bypassed, writes excluded from
     analytics/LearnerProfile)."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
@@ -615,25 +392,6 @@ async def create_test_session(
     )
     await db.commit()
     return TestSessionResponse(session_id=session.id)
-
-
-@router.get("/labs/{lab_id}/hotspots", response_model=list[ExerciseHotspot])
-async def lab_hotspots(
-    lab_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> list[ExerciseHotspot]:
-    """[v8.0 §11C] The lab's most-asked exercises (teacher test-drives excluded) —
-    shows where students are getting stuck."""
-    lab = await lab_service.get_lab_by_id(db, lab_id)
-    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
-    rows = await router_service.lab_exercise_hotspots(db, lab_id)
-    return [ExerciseHotspot(exercise_number=n, count=c) for n, c in rows]
-
-
-# ===================================================================
-# PUT /api/teacher/rules
-# ===================================================================
 
 
 @router.put("/rules", response_model=RuleResponse)

@@ -138,12 +138,12 @@ class LLMConfigRequest(BaseModel):
     router_api_key: str | None = None
     router_model: str | None = None
     rag_max_retries: str | None = None
-    # [v7.3] hint slot (answer→tiered-hints big model) + injection gate + budgets.
-    hint_base_url: str | None = None
-    hint_api_key: str | None = None
-    hint_model: str | None = None
+    # Agent slot (the reasoning model behind the retrieval loop) + injection gate
+    # + the per-document ingest budget.
+    agent_base_url: str | None = None
+    agent_api_key: str | None = None
+    agent_model: str | None = None
     rerank_score_threshold: str | None = None
-    hint_max_samples: str | None = None
     ingest_token_budget: str | None = None
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str | None = None
@@ -174,13 +174,12 @@ class LLMConfigResponse(BaseModel):
     router_api_key: str = ""
     router_model: str = ""
     rag_max_retries: str = ""
-    # [v7.3] raw stored values — hint slot empty = inherits main LLM;
+    # Raw stored values — agent slot empty = inherits main LLM;
     # threshold empty = injection gate OFF (until calibrated).
-    hint_base_url: str = ""
-    hint_api_key: str = ""
-    hint_model: str = ""
+    agent_base_url: str = ""
+    agent_api_key: str = ""
+    agent_model: str = ""
     rerank_score_threshold: str = ""
-    hint_max_samples: str = ""
     ingest_token_budget: str = ""
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str = ""
@@ -247,16 +246,13 @@ class DocumentResponse(BaseModel):
 
 
 class DocumentSummaryResponse(BaseModel):
-    """[v7.1] A document with its processing status + summary for the teacher list."""
+    """A document with its processing status + summary for the teacher list."""
     id: uuid.UUID
     filename: str
-    doc_type: str | None
-    audience: str | None
     status: str
     page_count: int | None
     error_message: str | None
     chunk_count: int
-    exercise_count: int
 
 
 class ChunkResponse(BaseModel):
@@ -276,34 +272,6 @@ class ChunkUpdateRequest(BaseModel):
     content: str = Field(..., min_length=1)
 
 
-class DocExerciseResponse(BaseModel):
-    """[v7.1] An extracted exercise. Deliberately has no `solution`."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    number: str
-    statement: str
-    hints: list[str] | None
-    # [v8.0] the review lifecycle the DocumentManager renders (badge + blind flag).
-    hint_status: str | None = None
-    hint_source: str | None = None
-
-
-class ExerciseUpdateRequest(BaseModel):
-    """[v7.2] Teacher correction of an extracted exercise (statements only).
-    [v8.0 §10] hints is a tiered L1/L2/L3 array; a teacher hand-edit is trusted."""
-    number: str | None = Field(None, min_length=1, max_length=255)
-    statement: str | None = Field(None, min_length=1)
-    hints: list[str] | None = None
-
-
-class ExerciseCreateRequest(BaseModel):
-    """[v8.0 §10] Hand-add an exercise the extractor missed."""
-    number: str = Field(..., min_length=1, max_length=255)
-    statement: str = Field(..., min_length=1)
-    hints: list[str] | None = None
-
-
 class TestSessionResponse(BaseModel):
     """[v8.0 §11A] The id of a freshly created teacher test-drive session."""
     session_id: uuid.UUID
@@ -313,62 +281,6 @@ class HealthDegradationsResponse(BaseModel):
     """[v8.0 §11D] Admin health panel: per-fallback counts over a recent window."""
     window_minutes: int
     degradations: dict[str, int]
-
-
-class ExerciseHotspot(BaseModel):
-    """[v8.0 §11C] One row of the teaching-hotspot panel."""
-    exercise_number: int
-    count: int
-
-
-class AnswerResponse(BaseModel):
-    """[v8.0 §10] An uploaded answer with its pairing state. Teacher-only surface
-    (decision B); the student path never reads Answers."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    number_raw: str
-    number_normalized: int | None
-    answer_text: str
-    answer_form: str | None
-    exercise_id: uuid.UUID | None    # None = unpaired (ambiguity is visible)
-    document_id: uuid.UUID
-    # [v8.1] the hint runner's pairing re-check judged this answer a mismatch.
-    pairing_suspect: bool
-
-
-class SegmentItem(BaseModel):
-    """[v8.1] One candidate exercise segment (boundary label + body preview)."""
-    section: str | None = None
-    content: str
-    page_no: int | None = None
-
-
-class SegmentationResponse(BaseModel):
-    """[v8.1] Both candidate segmentations for the human-confirm compare UI."""
-    chosen: str | None
-    disagreement: bool
-    confirmed: bool
-    current: list[SegmentItem]
-    alternate: list[SegmentItem] | None
-
-
-class ChooseSegmentationRequest(BaseModel):
-    """[v8.1] Teacher's pick: which candidate segmentation is right."""
-    which: Literal["llm", "regex"]
-
-
-class GenerateHintsRequest(BaseModel):
-    """[v8.0 §10] `urgent` (priority=0) makes the job run now — bypassing both the
-    chat-load gate and the GPU idle gate — competing with students for compute."""
-    urgent: bool = False
-
-
-class GenerateHintsResponse(BaseModel):
-    """[v8.0 §10] How many exercises were queued, and the job (None if nothing
-    needed generating)."""
-    queued: int
-    job_id: uuid.UUID | None
 
 
 class LabUpdateRequest(BaseModel):

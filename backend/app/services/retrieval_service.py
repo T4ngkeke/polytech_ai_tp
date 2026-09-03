@@ -1,14 +1,16 @@
 """
-retrieval_service.py — [v7] lab-scoped retrieval for the chat agent.
+retrieval_service.py — lab-scoped retrieval for the chat agent.
 
-Two retrieval paths feed the LangGraph agent:
-  * search_exercises — structured "agentic search" over Exercises.
-  * (rag vector search — added next.)
+Hybrid search over course-material chunks: vector ANN + Postgres full-text
+(BM25), fused with RRF and reranked.
 
-Two invariants enforced here, not by callers:
-  * Tenant isolation: every query is filtered by lab_id (security boundary).
-  * No solution exists: v7.1 drops the `Exercise.solution` column entirely — only
-    student-safe statements are stored, so there is nothing solution-shaped to leak.
+One invariant is enforced here rather than by callers: tenant isolation. Every
+query is filtered by lab (and class, for shared material) in the SQL WHERE
+clause, so no prompt can widen it.
+
+Structured exercise search used to live here too, alongside a hint-approval gate
+that decided which hints a student was allowed to see. Both went with the
+Exercises table.
 """
 
 import logging
@@ -20,7 +22,7 @@ from typing import Awaitable, Callable, Hashable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Audience, DocChunk, Exercise, HintStatus
+from backend.app.models import DocChunk
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +38,6 @@ _WORD_RE = re.compile(r"\w+", re.UNICODE)
 def ts_config_for(language: str | None) -> str:
     """Map a document/query language code to a text-search config."""
     return _TS_CONFIGS.get((language or "").lower(), "simple")
-
-
-@dataclass(frozen=True)
-class ExerciseHit:
-    """A retrieval result for an exercise. Deliberately has no `solution`."""
-    number: str
-    statement: str
-    hints: list[str] | None
 
 
 @dataclass(frozen=True)
@@ -119,88 +113,17 @@ async def apply_rerank(
     return [hits[i] for i in order[:top_k]], False
 
 
-async def search_exercises(
-    db: AsyncSession,
-    lab_id: uuid.UUID,
-    limit: int = 10,
-    number: int | None = None,
-    audience: Audience | None = None,
-    include_draft_hints: bool = False,
-) -> list[ExerciseHit]:
-    """Return exercises for a lab as solution-free hits.
+def _scope(stmt, lab_id: uuid.UUID, class_id: uuid.UUID | None = None):
+    """Apply the mandatory tenant filter in SQL.
 
-    [v7.2] When ``number`` is given (the canonical exercise number resolved by the
-    router), results are filtered to ``number_normalized == number`` so a "how do
-    I do exercise II?" query surfaces only that exercise, not the whole lab. When
-    ``audience`` is given (``student`` for chat), teacher-audience exercises are
-    excluded in the WHERE clause — students never retrieve teacher material.
-
-    [v8.0 §10] Red line: hints reach students ONLY after approval. This is the
-    single injection gate — a hit's ``hints`` is populated only when the
-    exercise is ``approved`` (or ``pending_review`` when ``include_draft_hints``
-    is set, which only the teacher's test-drive session does). Statements are
-    always surfaced; the answer is never stored here to begin with.
-    """
-    stmt = select(
-        Exercise.number, Exercise.statement, Exercise.hints, Exercise.hint_status,
-    ).where(Exercise.lab_id == lab_id)
-    if number is not None:
-        stmt = stmt.where(Exercise.number_normalized == number)
-    if audience is not None:
-        stmt = stmt.where(Exercise.audience == audience)
-    stmt = stmt.order_by(Exercise.number).limit(limit)
-    rows = (await db.execute(stmt)).all()
-
-    visible = {HintStatus.approved}
-    if include_draft_hints:
-        visible.add(HintStatus.pending_review)
-    return [
-        ExerciseHit(
-            number=r.number,
-            statement=r.statement,
-            hints=r.hints if r.hint_status in visible else None,
-        )
-        for r in rows
-    ]
-
-
-async def list_exercise_numbers(
-    db: AsyncSession,
-    lab_id: uuid.UUID,
-    *,
-    audience: Audience | None = None,
-) -> list[tuple[str, int | None]]:
-    """Every exercise number in a lab as ``(number_raw, number_normalized)``,
-    ordered by the normalized number. [v8.0] One cheap SELECT powering three
-    call sites: the clarify question's number list, "what comes after 3.3"
-    navigation, and router DB validation (does the resolved number exist?).
-    Audience-scoped in SQL — students never see teacher-audience numbers."""
-    stmt = select(Exercise.number, Exercise.number_normalized).where(
-        Exercise.lab_id == lab_id
-    )
-    if audience is not None:
-        stmt = stmt.where(Exercise.audience == audience)
-    stmt = stmt.order_by(Exercise.number_normalized)
-    rows = (await db.execute(stmt)).all()
-    return [(r.number, r.number_normalized) for r in rows]
-
-
-def _scope(stmt, lab_id: uuid.UUID, audience: Audience | None,
-           class_id: uuid.UUID | None = None):
-    """Apply the mandatory tenant filter (+ student audience filter) in SQL.
-
-    [v8.0] With `class_id`, the scope is 'this lab OR class-wide shared
-    (lab_id NULL)' bounded to the class — shared CM is reachable from every lab
-    of the class and never leaks across classes. Without it (legacy callers) it
-    stays strict lab-only."""
+    With `class_id`, the scope is 'this lab OR class-wide shared (lab_id NULL)'
+    bounded to the class — shared material is reachable from every lab of the
+    class and never leaks across classes. Without it, strict lab-only."""
     if class_id is not None:
         stmt = stmt.where(DocChunk.class_id == class_id)
         stmt = stmt.where((DocChunk.lab_id == lab_id) | (DocChunk.lab_id.is_(None)))
     else:
         stmt = stmt.where(DocChunk.lab_id == lab_id)
-    if audience is not None:
-        # Students never retrieve teacher-audience material — enforced in WHERE.
-        stmt = stmt.where(DocChunk.audience == audience)
     return stmt
 
 
@@ -209,16 +132,15 @@ async def vector_search(
     query_embedding: list[float],
     lab_id: uuid.UUID,
     *,
-    audience: Audience | None = None,
     k: int = 20,
     class_id: uuid.UUID | None = None,
 ) -> list[ChunkHit]:
-    """Vector ANN recall (cosine), scoped to a lab (+ audience, + class-wide CM)."""
+    """Vector ANN recall (cosine), scoped to a lab (+ class-wide material)."""
     distance = DocChunk.embedding.cosine_distance(query_embedding)
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context),
-        lab_id, audience, class_id,
+        lab_id, class_id,
     ).order_by(distance).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
@@ -233,7 +155,6 @@ async def bm25_search(
     query_text: str,
     lab_id: uuid.UUID,
     *,
-    audience: Audience | None = None,
     k: int = 20,
     language: str = "fr",
     class_id: uuid.UUID | None = None,
@@ -255,7 +176,7 @@ async def bm25_search(
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context),
-        lab_id, audience, class_id,
+        lab_id, class_id,
     ).where(DocChunk.tsv.op("@@")(tsquery)).order_by(rank.desc()).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
@@ -271,7 +192,6 @@ async def hybrid_search(
     query_embedding: list[float] | None,
     lab_id: uuid.UUID,
     *,
-    audience: Audience | None = None,
     rerank_fn: RerankFn | None = None,
     recall_k: int = 20,
     top_k: int = 5,
@@ -283,17 +203,17 @@ async def hybrid_search(
 
     Returns ``(hits, all_filtered)`` — the flag signals that the [v7.3] score
     threshold rejected everything (→ zero-context disclaimer branch).
-    Tenant + audience isolation is enforced in the SQL WHERE of each recall, so it
+    Tenant isolation is enforced in the SQL WHERE of each recall, so it
     holds regardless of fusion/rerank order — never a prompt rule.
     """
     # [v8.0] query_embedding None = embedding endpoint degraded → BM25-only recall.
     vector_hits = (
-        await vector_search(db, query_embedding, lab_id, audience=audience,
+        await vector_search(db, query_embedding, lab_id,
                             k=recall_k, class_id=class_id)
         if query_embedding is not None else []
     )
     bm25_hits = await bm25_search(
-        db, query_text, lab_id, audience=audience, k=recall_k, language=language,
+        db, query_text, lab_id, k=recall_k, language=language,
         class_id=class_id,
     )
 

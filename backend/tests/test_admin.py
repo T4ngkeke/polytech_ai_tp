@@ -615,7 +615,7 @@ class TestAdminPrune:
 
         old = datetime.now(timezone.utc) - timedelta(days=60)
         db_session.add(RouterQueryLog(id=uuid.uuid4(), message="old", route="rag",
-                                      number_source="none", degraded=False, created_at=old))
+                                      degraded=False, created_at=old))
         db_session.add(AgentTraceLog(id=uuid.uuid4(), route="rag", created_at=old))
         await db_session.commit()
 

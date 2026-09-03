@@ -3,10 +3,10 @@ test_vlm.py — [v8.1 item 8 stage 2] VLM garbled-formula repair.
 
 Detection is deterministic (spike-validated rules + the spike's two
 false-positive fixes: code lines and dot-leader junk are never flagged).
-Repair is transcribe-only with a hard safety check: a transcription that
-introduces a NEW exercise boundary is refused (the VLM must never invent
-structure). Every region lands in an audit trail (before/after) and no
-failure ever breaks ingestion. render/transcribe are injected fakes here.
+Repair is transcribe-only with a hard safety check: a transcription that adds
+prose the original region did not have is refused (the VLM reads, it never
+writes). Every region lands in an audit trail (before/after) and no failure ever
+breaks ingestion. render/transcribe are injected fakes here.
 """
 
 from pathlib import Path
@@ -91,18 +91,34 @@ async def test_repair_replaces_lines_and_audits():
 
 
 @pytest.mark.asyncio
-async def test_repair_refuses_a_transcription_that_invents_a_boundary():
-    """Red line: the VLM transcribes, it never invents structure. Output that
-    introduces a NEW exercise heading is refused — original text kept."""
+async def test_repair_refuses_a_transcription_that_invents_prose():
+    """The VLM transcribes, it never writes. Output carrying a sentence's worth
+    of words the region never had is refused — original text kept."""
     pages = [f"Exercice 1\n{GARBLED}\nfin."]
 
     async def transcribe(png):
-        return "Exercice 9\nN = 2^{15}"
+        return ("N = 2^{15}\n"
+                "Cette formule permet de convertir rapidement chaque nombre decimal.")
 
     repaired, entries = await repair_pages(
         pages, render_fn=_fake_render, transcribe_fn=transcribe)
     assert repaired[0] == pages[0]              # untouched
-    assert entries[0]["status"] == "refused_new_boundary"
+    assert entries[0]["status"] == "refused_invented_text"
+
+
+@pytest.mark.asyncio
+async def test_repair_allows_latex_commands_in_the_transcription():
+    """A repair legitimately introduces LaTeX the garbled original never had —
+    that is the whole point, and it must not read as invention."""
+    pages = [f"intro\n{GARBLED}\nfin."]
+
+    async def transcribe(png):
+        return r"N = (e-1)\times 2^{15} + \frac{d-1}{2^{11}}"
+
+    repaired, entries = await repair_pages(
+        pages, render_fn=_fake_render, transcribe_fn=transcribe)
+    assert entries[0]["status"] == "replaced"
+    assert "2^{15}" in repaired[0]
 
 
 @pytest.mark.asyncio

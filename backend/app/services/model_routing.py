@@ -44,9 +44,9 @@ class ModelRouting:
     # [v7.3] The live auxiliary model: router classification, self-eval verdict
     # and query rewrite all share this slot (same latency/cost profile).
     router: Endpoint
-    # [v7.3] The answer→tiered-hints generator (off-peak; point it at the BIG
-    # model — quality over latency, the GPU gate keeps it off student time).
-    hint: Endpoint
+    # The agent's reasoning model — the retrieval loop's planner. Point it at
+    # the BIG model: quality over latency.
+    agent: Endpoint
     # [v8.1] Vision slot — garbled-formula transcription (off-peak worker).
     # model == "" means the feature is OFF; it never falls back.
     vlm: Endpoint
@@ -55,8 +55,7 @@ class ModelRouting:
     # [v7.3] Absolute relevance floor for context injection. None = gate off
     # (ships disabled until calibrated on the golden set).
     rerank_score_threshold: float | None
-    # [v7.3] Worker budgets: per-exercise derivation samples / per-document tokens.
-    hint_max_samples: int
+    # Worker budget: estimated tokens per document (observed, never enforced).
     ingest_token_budget: int
 
 
@@ -114,10 +113,10 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         model=_get(configs, "ROUTER_MODEL", main_model),
     )
 
-    hint = Endpoint(
-        base_url=_get(configs, "HINT_BASE_URL", main_base),
-        api_key=_get(configs, "HINT_API_KEY", main_key),
-        model=_get(configs, "HINT_MODEL", main_model),
+    agent = Endpoint(
+        base_url=_get(configs, "AGENT_BASE_URL", main_base),
+        api_key=_get(configs, "AGENT_API_KEY", main_key),
+        model=_get(configs, "AGENT_MODEL", main_model),
     )
 
     # [v8.1] Vision slot for garbled-formula transcription. Opt-in: an empty
@@ -142,11 +141,10 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         rerank=rerank,
         ingest=ingest,
         router=router,
-        hint=hint,
+        agent=agent,
         vlm=vlm,
         token_alpha=_to_float(_get(configs, "TOKEN_ALPHA", ""), _DEFAULT_TOKEN_ALPHA),
         token_beta=_to_float(_get(configs, "TOKEN_BETA", ""), _DEFAULT_TOKEN_BETA),
         rerank_score_threshold=threshold,
-        hint_max_samples=_to_int(_get(configs, "HINT_MAX_SAMPLES", ""), 4),
         ingest_token_budget=_to_int(_get(configs, "INGEST_TOKEN_BUDGET", ""), 200_000),
     )

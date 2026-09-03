@@ -62,11 +62,11 @@ DEFAULT_SYSTEM_CONFIGS = [
     # [v7.2] weighted-token quota: billed = prompt*alpha + completion*beta.
     {"key": "TOKEN_ALPHA", "value": "0.2"},       # prefill is cheaper than decode
     {"key": "TOKEN_BETA", "value": "1.0"},
-    # [v7.3] answer→tiered-hints generator: point at the BIG model (off-peak,
-    # quality over latency — the GPU gate keeps it off student time). Empty → main LLM.
-    {"key": "HINT_MODEL", "value": ""},
-    {"key": "HINT_BASE_URL", "value": ""},
-    {"key": "HINT_API_KEY", "value": ""},
+    # The agent's reasoning model: point at the BIG model — quality over
+    # latency. Empty → main LLM.
+    {"key": "AGENT_MODEL", "value": ""},
+    {"key": "AGENT_BASE_URL", "value": ""},
+    {"key": "AGENT_API_KEY", "value": ""},
     # [v7.3] context-injection gate: empty = OFF until calibrated on the golden set.
     {"key": "RERANK_SCORE_THRESHOLD", "value": ""},
     # [v8.1] estimated-token budget for chat history (OOM protection; chars//3).
@@ -75,8 +75,7 @@ DEFAULT_SYSTEM_CONFIGS = [
     {"key": "VLM_BASE_URL", "value": ""},
     {"key": "VLM_API_KEY", "value": ""},
     {"key": "VLM_MODEL", "value": ""},
-    # [v7.3] worker budgets: per-exercise derivation samples / per-document tokens.
-    {"key": "HINT_MAX_SAMPLES", "value": "4"},
+    # Worker budget: estimated tokens per document (observed, never enforced).
     {"key": "INGEST_TOKEN_BUDGET", "value": "200000"},
 ]
 

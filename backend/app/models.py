@@ -158,21 +158,6 @@ class DocumentStatus(str, enum.Enum):
     needs_review = "needs_review"
 
 
-class DocType(str, enum.Enum):
-    """[v7.1] Course-document type — the deterministic routing signal, set at upload."""
-    CM = "CM"   # cours magistral (lecture: slides or book) → chunk path
-    TD = "TD"   # travaux dirigés (problem set) → exercise path
-    TP = "TP"   # travaux pratiques (lab: exercises + code) → exercise path
-    # [v8.0] standalone answer key → Answers only (no chunks, no exercises).
-    corrige = "corrigé"
-
-
-class Audience(str, enum.Enum):
-    """[v7.1] Who a document is for. Students never retrieve `teacher`-audience docs."""
-    student = "student"
-    teacher = "teacher"
-
-
 class JobStatus(str, enum.Enum):
     """Lifecycle of an ingestion job in the DB-as-queue."""
     queued = "queued"
@@ -188,35 +173,10 @@ class CoachingLevel(str, enum.Enum):
     high = "high"
 
 
-class HintStatus(str, enum.Enum):
-    """[v8.0] Teacher-reviewed hint lifecycle. Only `approved` reaches students."""
-    none = "none"
-    generating = "generating"
-    pending_review = "pending_review"
-    approved = "approved"
-    failed = "failed"
-
-
-class HintSource(str, enum.Enum):
-    """[v8.0] How the hint was grounded (orthogonal to hint_status). `blind` = solved
-    with no answer key → red-flagged, review-mandatory."""
-    worked = "worked"
-    derived = "derived"
-    blind = "blind"
-    none = "none"
-
-
-class AnswerForm(str, enum.Enum):
-    """[v8.0] Reliability tier of an uploaded answer — decides the derivation path."""
-    worked = "worked"                    # full worked solution
-    final_only = "final_only"            # result only → anchored derivation
-    proof_no_process = "proof_no_process"  # proof with no steps → blind solve
-
-
 class JobType(str, enum.Enum):
-    """[v8.0] Ingestion-queue job kind (worker dispatches on it)."""
+    """Ingestion-queue job kind. Only one kind survives, but the column stays so
+    the worker's dispatch point is still there if a second one is ever added."""
     ingest = "ingest"
-    hint_generate = "hint_generate"
 
 
 class MessageFeedback(str, enum.Enum):
@@ -494,20 +454,10 @@ class Session(Base):
         index=True,
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # [v8.0] Dialogue state: the exercise this session is currently discussing,
-    # so follow-ups ("et la question 2 ?") can omit the number. Updated on every
-    # agentic-search hit; ON DELETE SET NULL so re-ingestion (which deletes and
-    # rebuilds exercises) self-clears a stale pointer instead of dangling.
-    current_exercise_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("exercises.id", ondelete="SET NULL"), nullable=True
-    )
-    # [v8.0] Teacher test-drive session: the owning teacher chats against their
-    # own lab to preview the tutor. Excluded from analytics / router-training /
-    # learner-profile writes; may preview pending_review hint drafts.
+    # Teacher test-drive session: the owning teacher chats against their own lab
+    # to preview the tutor. Excluded from analytics / router-training /
+    # learner-profile writes.
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # [v8.0] The previous turn's route — powers the clarify anti-loop: a second
-    # consecutive unresolved turn falls through to rag instead of clarifying again.
-    last_route: Mapped[str | None] = mapped_column(String(16), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -571,7 +521,7 @@ class Message(Base):
 
 
 # ---------------------------------------------------------------------------
-# 10. Document — [v7] uploaded course material with ingestion state machine
+# 10. Document — uploaded course material with ingestion state machine
 # ---------------------------------------------------------------------------
 
 
@@ -593,25 +543,10 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    # [v7.1] Deterministic routing metadata, set at upload (the API enforces presence;
-    # the column is nullable so historical rows / fixtures remain valid).
-    doc_type: Mapped[DocType | None] = mapped_column(
-        Enum(DocType, name="doctype"), nullable=True
-    )
-    audience: Mapped[Audience | None] = mapped_column(
-        Enum(Audience, name="audience"), nullable=True
-    )
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, name="documentstatus"),
         nullable=False,
         default=DocumentStatus.pending,
-    )
-    # [v8.0] This doc carries answers (TD/TP+answers mixed, or a standalone corrigé).
-    has_answers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # [v8.0] For a standalone corrigé: which exercise document its answers pair to
-    # (pins pairing to one doc in a multi-file lab). NULL → pair lab-wide by number.
-    answers_for_document_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
     )
     # [v7.1] Populated on `failed` and carries the `needs_review` rejection reason.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -620,16 +555,9 @@ class Document(Base):
     language: Mapped[str] = mapped_column(String(8), nullable=False, default="fr")
     # [v7.1] Parsed page count — Phase 6 summary. Nullable until processed.
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # [v7.3] Reconciliation report written at ingest: numbering anomaly, gaps,
-    # in-lab number collisions, whether the LLM re-segmented, and counts. The
-    # teacher audits a warning list instead of re-reading the document.
+    # Summary of the ingest run (chunk count, estimated token spend, any VLM
+    # repairs) — the teacher audits this instead of re-reading the document.
     ingest_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # [v8.0 Step 6] Cached exercise segmentation (final boundary segments +
-    # extractor_version + content_hash). On re-ingest, an unchanged document
-    # (same hash + version) reuses these boundaries — 0 LLM classifier calls and
-    # teacher edits reattach by number_normalized 100% stably. A version bump or a
-    # content change invalidates it (re-classify).
-    segmentation_cache: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -639,7 +567,7 @@ class Document(Base):
 
 
 # ---------------------------------------------------------------------------
-# 11. IngestionJob — [v7] DB-as-queue row polled by the ingestion worker
+# 11. IngestionJob — DB-as-queue row polled by the ingestion worker
 # ---------------------------------------------------------------------------
 
 
@@ -655,8 +583,8 @@ class IngestionJob(Base):
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus, name="jobstatus"), nullable=False, default=JobStatus.queued
     )
-    # [v8.0] Job kind (worker dispatches on it) + free-form payload (e.g. a hint job's
-    # exercise ids / urgent flag). Urgent jobs use priority=0 (claimed ORDER BY priority).
+    # Job kind (the worker's dispatch point) + free-form payload. Urgent jobs use
+    # priority=0 (claimed ORDER BY priority).
     job_type: Mapped[JobType] = mapped_column(
         Enum(JobType, name="jobtype"), nullable=False, default=JobType.ingest
     )
@@ -679,7 +607,7 @@ class IngestionJob(Base):
 
 
 # ---------------------------------------------------------------------------
-# 12. DocChunk — [v7] embedded text chunk for RAG retrieval (pgvector)
+# 12. DocChunk — embedded text chunk for RAG retrieval (pgvector)
 # ---------------------------------------------------------------------------
 
 
@@ -695,13 +623,6 @@ class DocChunk(Base):
     # Denormalized tenant scope — filter-without-JOIN security boundary.
     class_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False, index=True)
     lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
-    # [v7.1] Denormalized from Document for query-time routing + the audience filter.
-    doc_type: Mapped[DocType | None] = mapped_column(
-        Enum(DocType, name="doctype"), nullable=True
-    )
-    audience: Mapped[Audience | None] = mapped_column(
-        Enum(Audience, name="audience"), nullable=True, index=True
-    )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     # The ORIGINAL chunk text — what citations and the teacher chunk-inspector show.
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -725,105 +646,7 @@ class DocChunk(Base):
 
 
 # ---------------------------------------------------------------------------
-# 13. Exercise — [v7] LLM-extracted structured exercise (agentic search target)
-# ---------------------------------------------------------------------------
-
-
-class Exercise(Base):
-    __tablename__ = "exercises"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), primary_key=True, default=uuid.uuid4
-    )
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    class_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False, index=True)
-    lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
-    # [v7.2] Denormalized from the source Document: students never retrieve
-    # teacher-audience exercises (enforced in the search WHERE clause).
-    audience: Mapped[Audience] = mapped_column(
-        Enum(Audience, name="audience"), nullable=False, default=Audience.student, index=True
-    )
-    number: Mapped[str] = mapped_column(String(64), nullable=False)
-    # [v7.2] Canonical integer derived from `number` (Roman/Arabic/3.1 → one int)
-    # via normalize_exercise_number. Decouples matching from the unstable label.
-    number_normalized: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    statement: Mapped[str] = mapped_column(Text, nullable=False)
-    # [v7.3] hints stay NULL at ingest. [v8.0 §10] tiered L1/L2/L3 JSON array,
-    # written by the generation workflow (and teacher edits); only surfaced to
-    # students once hint_status == approved (retrieval_service gates it).
-    hints: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    # [v8.0] Teacher-reviewed hint lifecycle. `hint_status` = review pipeline position
-    # (only `approved` is injected for students); `hint_source` = how it was grounded.
-    hint_status: Mapped[HintStatus] = mapped_column(
-        Enum(HintStatus, name="hintstatus"), nullable=False, default=HintStatus.none
-    )
-    hint_source: Mapped[HintSource] = mapped_column(
-        Enum(HintSource, name="hintsource"), nullable=False, default=HintSource.none
-    )
-    # 🔴 v7.1 red line: there is NO solution column. The corrigé is not ingested or
-    # stored anywhere — only student-safe statements are kept, so nothing can leak.
-    # Reserved for future Adaptive Tutoring (per-concept scoring). Nullable for now.
-    concept: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    # [v7.3] Teacher-corrected rows survive idempotent re-ingestion.
-    edited_by_teacher: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-
-    def __repr__(self) -> str:  # pragma: no cover
-        return f"<Exercise id={self.id} number={self.number!r} doc={self.document_id}>"
-
-
-# ---------------------------------------------------------------------------
-# 13b. Answer — [v8.0] uploaded answers, main-DB (grilling decision B, no vault)
-# ---------------------------------------------------------------------------
-# The single source of truth for pairing + hint (re)generation. Answers are NOT
-# secret (controlled classroom + SQL-hardcoded retrieval), so they live in the
-# main DB — but the STUDENT path never touches this table: chat / agent / prompt /
-# retrieval modules must not import `Answer` (guarded by test_answers_isolation).
-
-
-class Answer(Base):
-    __tablename__ = "answers"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    # Paired to its exercise at hint-generation time → nullable until then.
-    exercise_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("exercises.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-    # The document this answer was ingested from (corrigé or answers-bearing TD/TP).
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    number_raw: Mapped[str] = mapped_column(String(64), nullable=False)
-    number_normalized: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    # Classified at generation time (§9 step 0) → nullable at ingest.
-    answer_form: Mapped[AnswerForm | None] = mapped_column(
-        Enum(AnswerForm, name="answerform"), nullable=True
-    )
-    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
-    # A verified derivation (final_only path) — stored so regeneration reuses it.
-    derivation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # [v8.1] Set by the hint runner's pairing re-check: the LLM judged that this
-    # answer does not answer its paired exercise (number collision / drift).
-    # Surfaced to the teacher; cleared when a later re-check passes.
-    pairing_suspect: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
-    )
-
-    def __repr__(self) -> str:  # pragma: no cover
-        return f"<Answer id={self.id} num={self.number_raw!r} doc={self.document_id}>"
-
-
-# ---------------------------------------------------------------------------
-# 14. LearnerProfile — [v7] prompt-literacy coaching (per student + lab)
+# 13. LearnerProfile — prompt-literacy coaching (per student + lab)
 # ---------------------------------------------------------------------------
 
 
@@ -862,17 +685,16 @@ class LearnerProfile(Base):
 
 
 # ---------------------------------------------------------------------------
-# 15. RouterQueryLog — [v7.1] low-confidence routing telemetry
+# 14. RouterQueryLog — one row per routing decision
 # ---------------------------------------------------------------------------
 
 
 class RouterQueryLog(Base):
-    """[v8.0] Write-only log of EVERY LLM-router decision (redefined from the v7.1
-    low-confidence-only kNN telemetry).
+    """Write-only log of EVERY LLM-router decision.
 
-    Records route + number attribution for each message so a future distilled
-    router has a labelled source. `degraded` marks timeout/failure fallbacks — not
-    a real label, so it must be excludable when distilling. `is_test` marks teacher
+    Records the route for each message so a future distilled router has a
+    labelled source. `degraded` marks timeout/failure fallbacks — not a real
+    label, so it must be excludable when distilling. `is_test` marks teacher
     test-drive traffic (also excluded). Nothing in the live path reads it back.
     """
     __tablename__ = "router_query_logs"
@@ -880,9 +702,6 @@ class RouterQueryLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     route: Mapped[str] = mapped_column(String(16), nullable=False)
-    exercise_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # explicit | context | sticky | none — the resolved number's origin.
-    number_source: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
     degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -894,14 +713,11 @@ class RouterQueryLog(Base):
     )
 
     def __repr__(self) -> str:  # pragma: no cover
-        return (
-            f"<RouterQueryLog route={self.route} "
-            f"num={self.exercise_number} src={self.number_source}>"
-        )
+        return f"<RouterQueryLog route={self.route} degraded={self.degraded}>"
 
 
 # ---------------------------------------------------------------------------
-# 16. AgentTraceLog — [v8.0] per-message observability
+# 15. AgentTraceLog — per-message observability
 # ---------------------------------------------------------------------------
 
 

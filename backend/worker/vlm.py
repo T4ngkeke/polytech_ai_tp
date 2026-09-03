@@ -19,11 +19,11 @@ Runs on the off-peak worker only, and only when VLM_MODEL is configured.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from backend.worker.chunking import _EXERCISE_BOUNDARY_RE
 
 # Spike-tuned thresholds (scripts/vlm_detect_spike.py, run on the real corpus).
 WORD_RATIO_MIN = 0.55
@@ -113,16 +113,33 @@ def find_garbled_regions(pages: list[str]) -> list[Region]:
 
 _UNREADABLE_MARKERS = ("[illisible]", "[unreadable]")
 
+# LaTeX control sequences are expected to appear in a repair and never in the
+# garbled original, so they are not evidence of invention.
+_LATEX_CMD_RE = re.compile(r"\\[a-zA-Z]+")
+_PROSE_WORD_RE = re.compile(r"[^\W\d_]{4,}", re.UNICODE)
 
-def _introduces_boundary(original_lines: list[str], transcription: str) -> bool:
-    """True when the transcription contains an exercise boundary the original
-    region did not — the VLM inventing structure, which we refuse."""
-    original_has = any(_EXERCISE_BOUNDARY_RE.match(l) for l in original_lines)
-    if original_has:
-        return False
-    return any(
-        _EXERCISE_BOUNDARY_RE.match(line) for line in transcription.splitlines()
-    )
+# How many unseen words to tolerate before refusing. A repair rewrites math, not
+# prose, so a word or two recovered from a smudge is normal and a whole new
+# sentence is not.
+MAX_INVENTED_WORDS = 3
+
+
+def _invents_prose(original_lines: list[str], transcription: str) -> bool:
+    """True when the transcription adds prose the original region did not have.
+
+    A repair turns mangled math back into math (`215` → `2^{15}`), so the symbols
+    are expected to change and cannot be checked this way. Words can: a
+    transcription that introduces a sentence's worth of new ones is the model
+    writing rather than reading, and we keep the original instead.
+
+    This replaces an earlier check that refused a transcription introducing a new
+    exercise heading — a narrower version of the same worry, from when the
+    pipeline built exercise rows.
+    """
+    original = {w.casefold() for w in _PROSE_WORD_RE.findall(" ".join(original_lines))}
+    candidate = _LATEX_CMD_RE.sub(" ", transcription)
+    invented = {w.casefold() for w in _PROSE_WORD_RE.findall(candidate)} - original
+    return len(invented) > MAX_INVENTED_WORDS
 
 
 async def repair_pages(
@@ -162,9 +179,10 @@ async def repair_pages(
         if not transcription or any(m in low for m in _UNREADABLE_MARKERS):
             entries.append({**entry, "status": "unreadable"})
             continue
-        if _introduces_boundary(region.lines, transcription):
-            # Red line: transcribe-only — never let the VLM invent an exercise.
-            entries.append({**entry, "status": "refused_new_boundary",
+        if _invents_prose(region.lines, transcription):
+            # Transcribe-only: the model reads what is on the page, it does not
+            # write. Output that adds prose is refused and the original kept.
+            entries.append({**entry, "status": "refused_invented_text",
                             "after": transcription})
             continue
 

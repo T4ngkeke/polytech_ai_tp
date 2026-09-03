@@ -17,7 +17,8 @@ from sqlalchemy import select
 
 from backend.app.main import app
 from backend.app.models import (
-    Class, DocChunk, Document, DocumentStatus, IngestionJob, Lab, UserRole,
+    Class, DocChunk, Document, DocumentStatus, EMBEDDING_DIM, IngestionJob, Lab,
+    UserRole,
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.tests.conftest import make_client, make_user
@@ -157,7 +158,8 @@ async def test_delete_document_removes_it_and_all_artifacts(db_session, tmp_path
     await db_session.flush()
     db_session.add_all([
         DocChunk(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
-                 chunk_index=0, content="a chunk", page_no=1),
+                 chunk_index=0, content="a chunk", page_no=1,
+                 embedding=[0.0] * EMBEDDING_DIM),
         IngestionJob(id=uuid.uuid4(), document_id=doc.id),
     ])
     await db_session.commit()

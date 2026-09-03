@@ -1,11 +1,14 @@
 """
-prompt.py — [v7] system-prompt assembly for the synthesize node.
+prompt.py — system-prompt assembly for the synthesize node.
 
 Assembly order (governance-critical):
   1. skill.md persona      — sets tone first
-  2. retrieved context     — reference material (RAG chunks / exercise statements)
+  2. retrieved context     — reference material (retrieved course-material chunks)
   3. Class → Lab → Student — restrictive rules LAST, so constraints win and
      resist prompt-injection from retrieved or user text.
+
+Per-exercise guidance now lives in those class/lab rules: teachers write what
+they want said about an exercise instead of the system storing exercise rows.
 """
 
 _BASE = "You are a helpful AI tutor for an educational platform."
@@ -23,38 +26,6 @@ _LOW_EVIDENCE = (
     "Answer from general knowledge but tell the student plainly that there was not enough "
     "course material on this, and suggest they double-check with the course documents."
 )
-
-
-_CLARIFY = (
-    "[CLARIFY]\nThe student referred to an exercise, but the reference is ambiguous "
-    "or does not match this lab. Do NOT guess or answer a specific exercise. Ask the "
-    "student — briefly, in your tutoring voice — which exercise they mean, and offer "
-    "the available exercise numbers listed below so they can pick one."
-)
-
-
-def build_clarify_prompt(
-    *,
-    skill_md: str | None = None,
-    class_rules: str | None = None,
-    lab_rules: str | None = None,
-    student_rules: str | None = None,
-    exercise_numbers: list[str] | None = None,
-) -> str:
-    """[v8.0] Lightweight clarify prompt: skill.md tone + a clarify instruction +
-    the lab's exercise-number list. No retrieved context — the model only asks
-    which exercise the student means. Rules stay LAST so constraints still win."""
-    parts: list[str] = []
-    if skill_md:
-        parts.append(skill_md.strip())
-    parts.append(_BASE)
-    parts.append(_CLARIFY)
-    if exercise_numbers:
-        parts.append("[AVAILABLE EXERCISES]\n" + ", ".join(exercise_numbers))
-    for label, text in (("CLASS", class_rules), ("LAB", lab_rules), ("STUDENT", student_rules)):
-        if text and text.strip():
-            parts.append(f"[{label} RULES]\n{text.strip()}")
-    return "\n\n".join(parts)
 
 
 _NO_MATERIAL = (
