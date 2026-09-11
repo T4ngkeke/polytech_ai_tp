@@ -291,19 +291,35 @@ def _native_group_text(lines: list[NativeLine], kind: str) -> str:
             rows[-1].append(line)
         else:
             rows.append([line])
-    origin = min(line.bbox[0] for line in lines)
     widths = [line.char_width for line in lines if line.char_width and line.char_width > 0]
     unit = median(widths) if widths else None
-    result = []
     for row in rows:
         row.sort(key=lambda line: line.bbox[0])
+    # Rows starting within a third of a character are one column: they get one
+    # indentation, measured from the column's median position, so a heading a
+    # little to the left or a 0.06 pt difference cannot round lines apart.
+    column = {}
+    if unit:
+        starts = sorted({row[0].bbox[0] for row in rows})
+        group = [starts[0]]
+        for x in starts[1:] + [None]:
+            if x is not None and x - group[-1] <= unit / 3:
+                group.append(x)
+                continue
+            for member in group:
+                column[member] = median(group)
+            if x is not None:
+                group = [x]
+    origin = min(column.values()) if column else None
+    result = []
+    for row in rows:
         text = row[0].text
         for part in row[1:]:
             text += ('' if text.endswith((' ', '\t')) or part.text.startswith((' ', '\t')) else ' ') + part.text
         # PDF positions contain indentation which span text often omits.
         # This reconstructs whitespace, not the byte layout of an original .c file.
         if kind == 'code' and unit and not text.startswith((' ', '\t')):
-            text = ' ' * min(120, max(0, round((row[0].bbox[0] - origin) / unit))) + text
+            text = ' ' * min(120, max(0, round((column[row[0].bbox[0]] - origin) / unit))) + text
         result.append(text)
     return '\n'.join(result)
 

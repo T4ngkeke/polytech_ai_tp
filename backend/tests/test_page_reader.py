@@ -377,3 +377,17 @@ def test_render_view_converts_only_known_page_errors(tmp_path, monkeypatch):
     with pytest.raises(Exception) as caught:
         render_view(str(tmp_path/'missing.pdf'),native,None)
     assert not isinstance(caught.value,PageReadError)
+
+
+def test_lines_starting_at_almost_the_same_x_get_the_same_indentation():
+    from backend.worker.page_reader import _native_group_text
+    # Geometry of main-3.pdf page 54: a heading slightly left of the code, and two
+    # inner lines 0.06 pt apart that rounded to different indentation before.
+    rows = [('Correction', 28.35, 5.786), ('if (taille == capacite) {', 29.04, 6.115),
+            ('if (temp == NULL) {', 54.14, 6.005), ('free(arr);', 79.38, 6.123),
+            ('return 1;', 79.44, 5.978), ('}', 54.14, 6.0), ('arr[taille] = valeur;', 29.04, 6.05)]
+    lines = [NativeLine(f'l{i}', (x, 10 + 12 * i, x + 60, 20 + 12 * i), text, width)
+             for i, (text, x, width) in enumerate(rows)]
+    assert _native_group_text(lines, 'code').split('\n') == [
+        'Correction', 'if (taille == capacite) {', '    if (temp == NULL) {', '        free(arr);',
+        '        return 1;', '    }', 'arr[taille] = valeur;']

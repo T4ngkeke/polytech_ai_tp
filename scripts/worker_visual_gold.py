@@ -81,11 +81,24 @@ def checklist(results,*,run,cases=None):
     return items
 
 
-def evaluate_content_gate(results,content_reviews,*,run,cases=None):
-    """Pass only with a current human record for every focus page and no loss or error."""
+def _reviewer_kind(record,accept_model_review):
+    if record.get('human') is True:
+        return 'human'
+    # A model review counts only when the caller accepts it and the owner authorised it.
+    if accept_model_review and record.get('reviewer_kind')=='model' and record.get('authorized_by'):
+        return 'model'
+    return None
+
+
+def evaluate_content_gate(results,content_reviews,*,run,cases=None,accept_model_review=False):
+    """Pass only with a current accepted record for every focus page and no loss or error.
+
+    Human records always count. Model records count only with accept_model_review
+    and an owner authorisation; the result reports which kind was used.
+    """
     cases=cases or load_cases()
     records={(r['file'],r['page'],r.get('round',1)):r for r in content_reviews
-             if r.get('human') is True and r.get('run')==run}
+             if r.get('run')==run and _reviewer_kind(r,accept_model_review)}
     pages=[];totals={'important_errors':0,'silent_omissions':0,'sent_to_review':0,'invented_facts':0,
                      'unnecessary_reviews':0,'code_not_preserved':0}
     for row in results:
@@ -121,7 +134,13 @@ def evaluate_content_gate(results,content_reviews,*,run,cases=None):
                 state='passed' if ok else 'failed'
         pages.append({**entry,'state':state})
     checked=[p for p in pages if p['state']!='no_checklist']
-    return {'run':run,'passed':bool(checked) and all(p['state']=='passed' for p in checked),'pages':pages,**totals}
+    kinds={}
+    for p in checked:
+        record=records.get((p['file'],p['page'],p['round']))
+        if record and p['state'] not in ('pending','stale'):
+            kind=_reviewer_kind(record,accept_model_review);kinds[kind]=kinds.get(kind,0)+1
+    return {'run':run,'passed':bool(checked) and all(p['state']=='passed' for p in checked),'pages':pages,
+            'reviewer_kinds':kinds,**totals}
 
 
 if __name__=='__main__' and len(sys.argv)>1 and sys.argv[1] in ('checklist','gate'):
@@ -133,8 +152,8 @@ if __name__=='__main__' and len(sys.argv)>1 and sys.argv[1] in ('checklist','gat
         target.write_text(json.dumps(checklist(rows,run=run_dir.name),ensure_ascii=False,indent=2))
         print('Checklist for a person:',target)
     else:
-        print(json.dumps(evaluate_content_gate(rows,json.loads(Path(sys.argv[3]).read_text()),run=run_dir.name),
-                         ensure_ascii=False,indent=2))
+        print(json.dumps(evaluate_content_gate(rows,json.loads(Path(sys.argv[3]).read_text()),run=run_dir.name,
+                         accept_model_review='--accept-model-review' in sys.argv),ensure_ascii=False,indent=2))
 elif __name__=='__main__':
     records=json.loads(Path(sys.argv[1]).read_text())
     print(json.dumps([{'file':r['file'],'page':r['page'],'round':r.get('round',1),

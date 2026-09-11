@@ -185,3 +185,17 @@ def test_fixed_samples_match_files_and_are_not_read_by_the_worker():
     for source in (ROOT / 'backend').rglob('*.py'):
         if 'tests' not in source.parts:
             assert 'worker_visual_cases' not in source.read_text(), source
+
+
+def test_model_review_counts_only_when_explicitly_accepted_and_is_labelled():
+    from scripts.worker_visual_gold import evaluate_content_gate
+    row = audited()
+    by_model = record(row, human=False)
+    by_model.update(reviewer='claude-opus-5', reviewer_kind='model', authorized_by='project owner, 2026-09-11')
+    assert evaluate_content_gate([row], [by_model], run='run-1')['pages'][0]['state'] == 'pending'
+    gate = evaluate_content_gate([row], [by_model], run='run-1', accept_model_review=True)
+    assert gate['passed'] and gate['reviewer_kinds'] == {'model': 1}
+    unauthorized = {**by_model, 'authorized_by': None}
+    assert evaluate_content_gate([row], [unauthorized], run='run-1', accept_model_review=True)['pages'][0]['state'] == 'pending'
+    human = evaluate_content_gate([row], [record(row)], run='run-1', accept_model_review=True)
+    assert human['reviewer_kinds'] == {'human': 1}
