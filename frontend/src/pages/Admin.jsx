@@ -712,12 +712,13 @@ const NODE_STATUS_META = {
 
 function MapEdges({ config }) {
   const chat = MAP_NODES[0];
-  const byId = Object.fromEntries(MAP_SOURCES.map((s) => [s.id, s]));
+  const byId = Object.fromEntries([...MAP_SOURCES, ...MAP_NODES].map((s) => [s.id, s]));
   return (
     <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100"
       preserveAspectRatio="none" aria-hidden="true">
       {MAP_NODES.map((n) => {
         const s = byId[n.source];
+        if (!s) return null;
         const st = n.status(config);
         return (
           <line key={`call-${n.id}`} x1={s.x} y1={s.y} x2={n.x} y2={n.y}
@@ -801,10 +802,21 @@ function LLMConfigTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState('chat');
+  const [loadError, setLoadError] = useState('');
 
-  useEffect(() => {
-    api.get('/api/admin/llm/config').then(setConfig).catch(() => {}).finally(() => setLoading(false));
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setConfig(await api.get('/api/admin/llm/config'));
+    } catch (err) {
+      setLoadError(err.message || 'Could not load model settings.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadConfig(); }, [loadConfig]);
 
   const set = (k) => (v) => setConfig((p) => ({ ...p, [k]: v }));
   const selected = MAP_NODES.find((n) => n.id === selectedId);
@@ -833,7 +845,15 @@ function LLMConfigTab() {
     } catch (err) { toast.error(err.message); } finally { setSaving(false); }
   };
 
-  if (loading || !config) return <Spinner />;
+  if (loading) return <Spinner />;
+  if (loadError || !config) return (
+    <div className="p-8" role="alert">
+      <p className="text-danger">{loadError || 'No model settings returned.'}</p>
+      <button type="button" onClick={loadConfig} className="mt-3 text-cyan hover:underline">
+        Retry loading settings
+      </button>
+    </div>
+  );
 
   return (
     <div className="p-8 overflow-y-auto h-full">
