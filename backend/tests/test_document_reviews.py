@@ -287,7 +287,7 @@ async def indexed_visual(session, tmp_path, target, embed=fake_embed):
     doc, (p1, p2) = await visual_document(session, tmp_path)
     groups = [native_range(p1, target)] if target['ids'] and target.get('scope') != 'page' else []
     await ingest_v15(session, doc, [v15(p1, *groups), v15(p2)], [review_item(doc, p1, target)], embed=embed)
-    return doc, (p1, p2), (await session.scalars(select(DocumentReview))).one()
+    return doc, (p1, p2), (await session.scalars(select(DocumentReview).where(DocumentReview.document_id == doc.id))).one()
 
 
 async def confirm(session, doc, row, content, embed=fake_embed, revision=None):
@@ -437,3 +437,121 @@ async def test_v3_review_deduplicates_by_source_not_screenshot_box(db_session, t
     with pytest.raises(ReviewConflict) as caught:
         await register_reviews(db_session, doc, [review_item(doc, p1, {'ids': ['p1l4'], 'region_ids': []})])
     assert caught.value.code == 'review_source_conflict'
+
+
+# --- status and API errors: one state rule, machine-readable conflicts --------
+
+@pytest.mark.asyncio
+async def test_resolving_the_last_review_updates_document_state(db_session, tmp_path):
+    doc, _, row = await indexed_visual(db_session, tmp_path, CODE)
+    assert doc.status.value == 'partially_indexed'
+    assert doc.ingest_report['index_state']['pending_review_count'] == 1
+    await confirm(db_session, doc, row, 'The code returns 1.')
+    assert doc.status.value == 'indexed' and doc.error_message is None
+    assert doc.ingest_report['index_state']['pending_review_count'] == 0
+    assert doc.ingest_report['page_reader']['page_results'][0]['status'] == 'partial'
+
+
+@pytest.mark.asyncio
+async def test_image_only_page_marked_no_index_is_not_missing(db_session, tmp_path):
+    from dataclasses import replace
+    from backend.app.services.document_reviews import resolve_review
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    blank = replace(p2, lines=())
+    await ingest_v15(db_session, doc, [v15(p1), v15(blank)],
+                     [review_item(doc, blank, {'ids': [], 'region_ids': [], 'scope': 'page'},
+                                  reason='Scanned page', code='content_review')])
+    assert doc.ingest_report['index_state']['missing_pages'] == [2]
+    row = (await db_session.scalars(select(DocumentReview))).one()
+    await resolve_review(db_session, doc, row.id, revision=row.revision, status='ignored', content=None,
+                         teacher_id=doc.uploaded_by, embed_fn=None)
+    state = doc.ingest_report['index_state']
+    assert state['no_index_pages'] == [2] and state['missing_pages'] == []
+    assert doc.status.value == 'indexed'
+
+
+@pytest.mark.asyncio
+async def test_retained_conflict_page_stays_partial_after_reviews_are_resolved(db_session, tmp_path):
+    from backend.app.services.document_reviews import resolve_review
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    small = {'ids': ['p1l4'], 'region_ids': []}
+    await ingest_v15(db_session, doc, [v15(p1, native_range(p1, small)), v15(p2)], [review_item(doc, p1, small)])
+    await ingest_v15(db_session, doc, [v15(p1, native_range(p1, PICTURE)), v15(p2)], [review_item(doc, p1, PICTURE)])
+    row = (await db_session.scalars(select(DocumentReview))).one()
+    await resolve_review(db_session, doc, row.id, revision=row.revision, status='ignored', content=None,
+                         teacher_id=doc.uploaded_by, embed_fn=None)
+    assert doc.ingest_report['index_state']['pending_review_count'] == 0
+    assert doc.status.value == 'partially_indexed'
+    assert doc.ingest_report['index_state']['problem_pages'] == [1]
+
+
+async def review_client(db_session, user):
+    from backend.tests.conftest import make_client
+    return await make_client(db_session, user)
+
+
+@pytest.mark.asyncio
+async def test_review_image_route_checks_owner_document_and_source(db_session, tmp_path):
+    from pathlib import Path
+    from backend.app.main import app
+    from backend.app.models import User, UserRole
+    from backend.tests.conftest import make_user
+    doc, (p1, _), row = await indexed_visual(db_session, tmp_path / 'a', PICTURE)
+    other_doc, (q1, _), other_row = await indexed_visual(db_session, tmp_path / 'b', PICTURE)
+    stranger = make_user(role=UserRole.teacher); db_session.add(stranger); await db_session.commit()
+    teacher = await db_session.get(User, doc.uploaded_by)
+    image = f'/api/teacher/documents/{doc.id}/reviews/{row.id}/image'
+    client = await review_client(db_session, stranger)
+    try:
+        assert (await client.get(image)).status_code == 404
+    finally:
+        await client.aclose(); app.dependency_overrides.clear()
+    client = await review_client(db_session, teacher)
+    try:
+        response = await client.get(image)
+        assert response.status_code == 200 and response.content.startswith(b'\x89PNG')
+        # A review of another document is never reachable through this document.
+        assert (await client.get(f'/api/teacher/documents/{doc.id}/reviews/{other_row.id}/image')).status_code == 404
+        row.bbox = [0, 0, 5000, 5000]; await db_session.commit()
+        response = await client.get(image)
+        assert response.status_code == 409 and response.json()['detail']['code'] == 'review_source_changed'
+        row.bbox = [290, 50, 540, 110]; await db_session.commit()
+        Path(doc.storage_path).write_bytes(b'changed source')
+        response = await client.get(image)
+        assert response.status_code == 409 and response.json()['detail']['code'] == 'review_source_changed'
+        Path(doc.storage_path).unlink()
+        response = await client.get(image)
+        assert response.status_code == 409 and response.json()['detail']['code'] == 'review_source_changed'
+    finally:
+        await client.aclose(); app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_review_update_route_returns_machine_readable_errors(db_session, tmp_path):
+    import httpx
+    from openai import APIConnectionError
+    from backend.app.main import app
+    from backend.app.models import User
+    from backend.app.routers.teacher import get_embed_fn
+    doc, _, row = await indexed_visual(db_session, tmp_path, CODE)
+    teacher = await db_session.get(User, doc.uploaded_by)
+    path = f'/api/teacher/documents/{doc.id}/reviews/{row.id}'
+    async def offline(texts):
+        raise APIConnectionError(request=httpx.Request('POST', 'http://embeddings.test/v1'))
+    app.dependency_overrides[get_embed_fn] = lambda: offline
+    client = await review_client(db_session, teacher)
+    try:
+        response = await client.put(path, json={'revision': 2, 'status': 'ignored'})
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'review_revision_conflict'
+        assert response.json()['detail']['message']
+        response = await client.put(path, json={'revision': 1, 'status': 'confirmed', 'content': 'Explanation.'})
+        assert response.status_code == 503
+        assert response.json()['detail']['code'] == 'embedding_unavailable'
+        await db_session.refresh(row)
+        assert (row.status, row.revision) == ('pending', 1)
+        app.dependency_overrides[get_embed_fn] = lambda: fake_embed
+        response = await client.put(path, json={'revision': 1, 'status': 'confirmed', 'content': 'Explanation.'})
+        assert response.status_code == 200 and response.json()['status'] == 'confirmed'
+    finally:
+        await client.aclose(); app.dependency_overrides.clear()

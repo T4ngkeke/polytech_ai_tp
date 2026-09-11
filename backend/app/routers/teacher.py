@@ -752,6 +752,11 @@ async def get_class_analytics(
 # Visual review endpoints: scope comes exclusively from the owned document.
 
 
+def _review_conflict(exc):
+    # Machine-readable code so the page can say what happened and what helps.
+    return HTTPException(409,{'code':exc.code,'message':str(exc)})
+
+
 @router.get('/documents/{document_id}/reviews', response_model=list[DocumentReviewResponse])
 async def list_document_reviews(document_id: uuid.UUID,
     teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
@@ -771,7 +776,7 @@ async def document_review_image(document_id: uuid.UUID, review_id: uuid.UUID,
     try:
         image=document_reviews.render_review_image(doc,row)
     except document_reviews.ReviewConflict as exc:
-        raise HTTPException(409,str(exc)) from exc
+        raise _review_conflict(exc) from exc
     return Response(content=image,media_type='image/png',headers={'Cache-Control':'private, no-store'})
 
 
@@ -784,7 +789,10 @@ async def resolve_document_review(document_id: uuid.UUID, review_id: uuid.UUID, 
         row=await document_reviews.resolve_review(db,doc,review_id,revision=body.revision,
             status=body.status,content=body.content,teacher_id=teacher.id,embed_fn=embed_fn)
     except document_reviews.ReviewConflict as exc:
-        raise HTTPException(409,str(exc)) from exc
+        raise _review_conflict(exc) from exc
+    except document_reviews.EmbeddingUnavailable as exc:
+        # Nothing was written; the teacher keeps the text and can retry.
+        raise HTTPException(503,{'code':'embedding_unavailable','message':str(exc)}) from exc
     except LookupError as exc:
         raise HTTPException(404,str(exc)) from exc
     except ValueError as exc:

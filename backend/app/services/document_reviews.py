@@ -20,6 +20,10 @@ class ReviewConflict(ValueError):
         self.code = code
 
 
+class EmbeddingUnavailable(RuntimeError):
+    """The embedding service failed; nothing was written and the teacher can retry."""
+
+
 def _prepare(doc, item):
     if item['file_sha256'] != doc.content_hash:
         raise ReviewConflict('Source file changed; upload a new document', 'review_source_changed')
@@ -209,7 +213,8 @@ async def publish_review_confirmation(db, doc, review_id, prepared, embeddings, 
     """Lock Document -> DocumentReview -> DocChunk, re-check the snapshot, write once."""
     from datetime import datetime, timezone
     from sqlalchemy import delete
-    from backend.app.models import DocChunk, DocumentStatus
+    from backend.app.models import DocChunk
+    from backend.app.services.document_index_state import apply_document_index_summary, summarize_document_index
     from backend.worker.chunking import Chunk
     from backend.worker.ingest import _source_fingerprint, _tsv_value
     doc=await db.scalar(select(Document).where(Document.id==doc.id).with_for_update()
@@ -246,18 +251,11 @@ async def publish_review_confirmation(db, doc, review_id, prepared, embeddings, 
         .order_by(DocChunk.page_no,DocChunk.chunk_index,DocChunk.id))).all())
     for index,chunk in enumerate(chunks):chunk.chunk_index=index
     all_reviews=list((await db.scalars(select(DocumentReview).where(DocumentReview.document_id==doc.id))).all())
-    pending=sum(r.status=='pending' for r in all_reviews)
-    available={c.page_no for c in chunks}
-    missing=set(range(1,(doc.page_count or 0)+1))-available
-    unresolved_pages=any(p.get('status') not in ('read','updated','partial') for p in
-        (doc.ingest_report or {}).get('page_reader',{}).get('page_results',[]))
-    if chunks:
-        doc.status=DocumentStatus.partially_indexed if pending or missing or unresolved_pages or not doc.page_count else DocumentStatus.indexed
-    else:
-        doc.status=DocumentStatus.needs_review
-    doc.ingest_report={**(doc.ingest_report or {}),'review_summary':{'pending':pending,
-        'confirmed':sum(r.status=='confirmed' for r in all_reviews),'ignored':sum(r.status=='ignored' for r in all_reviews)}}
-    doc.error_message=None if doc.status==DocumentStatus.indexed else f'{pending} review tasks pending; missing pages {sorted(missing)}'
+    doc.ingest_report={**(doc.ingest_report or {}),'review_summary':{
+        state:sum(r.status==state for r in all_reviews) for state in ('pending','confirmed','ignored')}}
+    # Same rule as ingestion; the processing history in page_results is not changed.
+    apply_document_index_summary(doc,summarize_document_index(page_count=doc.page_count,chunks=chunks,reviews=all_reviews,
+        page_results=(doc.ingest_report or {}).get('page_reader',{}).get('page_results',[])))
     await db.commit()
     return row
 
@@ -280,7 +278,12 @@ async def resolve_review(db, doc, review_id, *, revision, status, content, teach
     prepared=embeddings=None
     if status=='confirmed':
         prepared=prepare_review_confirmation(doc,row,await _page_chunks(db,doc,row.page_no,lock=False),content)
-        embeddings=await _embed_batches(list(prepared.texts),embed_fn)
+        from openai import APIError
+        from backend.worker.ingest import EmbeddingResultError
+        try:
+            embeddings=await _embed_batches(list(prepared.texts),embed_fn)
+        except (APIError,EmbeddingResultError,TimeoutError) as exc:
+            raise EmbeddingUnavailable(f'Embedding service unavailable: {exc}') from exc
     return await publish_review_confirmation(db,doc,review_id,prepared,embeddings,
                                              revision=revision,status=status,teacher_id=teacher_id)
 
@@ -288,9 +291,13 @@ async def resolve_review(db, doc, review_id, *, revision, status, content, teach
 def render_review_image(doc, row):
     from pathlib import Path
     import pymupdf
-    if hashlib.sha256(Path(doc.storage_path).read_bytes()).hexdigest()!=row.file_sha256:
+    try:
+        data=Path(doc.storage_path).read_bytes()
+    except OSError:
+        raise ReviewConflict('Original file unavailable; screenshot unavailable', 'review_source_changed') from None
+    if hashlib.sha256(data).hexdigest()!=row.file_sha256:
         raise ReviewConflict('Original file changed; screenshot unavailable', 'review_source_changed')
-    with pymupdf.open(doc.storage_path) as pdf:
+    with pymupdf.open(stream=data,filetype='pdf') as pdf:
         if not 1<=row.page_no<=len(pdf):
             raise ReviewConflict('Original physical page unavailable', 'review_source_changed')
         page=pdf[row.page_no-1]

@@ -217,15 +217,28 @@ function StatusBadge({ status }) {
   );
 }
 
+// Current usable state (index_state) when present; older reports only have the
+// processing history (page_summary).
+function currentPages(report) {
+  const state = report?.index_state;
+  if (state) {
+    return { usable: state.available_pages.length, unavailable: state.missing_pages.length,
+      noIndex: state.no_index_pages.length, pending: state.pending_review_count };
+  }
+  const pages = report?.page_summary;
+  if (!pages) return null;
+  return { usable: pages.total - pages.missing.length, unavailable: pages.missing.length, noIndex: 0,
+    pending: report?.review_summary?.pending };
+}
+
 function SummaryChips({ doc }) {
-  const pages = doc.ingest_report?.page_summary;
-  const reviews = doc.ingest_report?.review_summary;
+  const pages = currentPages(doc.ingest_report);
   return (
     <span className="hidden gap-1 text-xs text-cream-muted sm:flex">
       <span title="pages">📄 {doc.page_count ?? '–'}</span>
       <span title="chunks">🧩 {doc.chunk_count}</span>
-      {pages && <span>{pages.total - pages.missing.length} usable · {pages.missing.length} unavailable</span>}
-      {reviews && <span>{reviews.pending} visual reviews pending</span>}
+      {pages && <span>{pages.usable} usable · {pages.unavailable} unavailable{pages.noIndex ? ` · ${pages.noIndex} not indexed` : ''}</span>}
+      {pages?.pending != null && <span>{pages.pending} visual reviews pending</span>}
     </span>
   );
 }
@@ -233,8 +246,12 @@ function SummaryChips({ doc }) {
 function IngestReport({ report }) {
   const warnings = ingestReportWarnings(report);
   const summary = report?.page_summary;
+  const state = report?.index_state;
+  if (state && state.status !== 'indexed') {
+    warnings.push(`Now: ${state.available_pages.length} pages usable, ${state.missing_pages.length} unavailable, ${state.no_index_pages.length} marked "no indexing needed", ${state.pending_review_count} visual reviews pending.`);
+  }
   if (summary) {
-    warnings.push(`${summary.total} pages: ${summary.updated.length} updated, ${summary.retained.length} kept from the previous run, ${summary.missing.length} unavailable.`);
+    warnings.push(`Last processing run, ${summary.total} pages: ${summary.updated.length} updated, ${summary.retained.length} kept from the previous run, ${summary.missing.length} unavailable.`);
     for (const page of report?.page_reader?.page_results || []) {
       if (page.status !== 'updated') warnings.push(`Page ${page.page_no}: ${page.status}. ${page.error || ''}`);
     }

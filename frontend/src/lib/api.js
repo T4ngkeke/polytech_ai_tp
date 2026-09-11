@@ -36,16 +36,28 @@ async function request(endpoint, options = {}) {
   return res;
 }
 
+/**
+ * Error for a failed response. `detail` is either a string or
+ * `{ code, message }`; the machine-readable code is kept on `error.code`.
+ */
+export async function responseError(res) {
+  let message = `HTTP ${res.status}`;
+  let code;
+  try {
+    const { detail } = await res.json();
+    if (typeof detail === 'string') message = detail;
+    else if (detail && typeof detail.message === 'string') ({ message, code } = detail);
+  } catch { /* not JSON */ }
+  const error = new Error(message);
+  error.status = res.status;
+  error.code = code;
+  return error;
+}
+
 async function jsonRequest(endpoint, options = {}) {
   const res = await request(endpoint, options);
 
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try { const body = await res.json(); detail = body.detail || detail; } catch {}
-    const error = new Error(detail);
-    error.status = res.status;
-    throw error;
-  }
+  if (!res.ok) throw await responseError(res);
 
   if (res.status === 204) return null;
   return res.json();

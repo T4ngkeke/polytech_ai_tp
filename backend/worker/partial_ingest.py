@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import replace
 from openai import APIConnectionError, APITimeoutError
 from sqlalchemy import select, delete
-from backend.app.models import DocChunk, Document, DocumentStatus
+from backend.app.models import DocChunk, Document
 from backend.worker.page_reader import chunk_read_pages, PageReadError
 
 
@@ -229,7 +229,9 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
                 source_fingerprint=key, section=c.section, context=ctx, embedding=embedding,
                 tsv=_tsv_value(db,aug,doc.language), page_no=n,
                 edited_by_teacher=prev.edited_by_teacher if prev else False))
-        outcomes[n] = dict(page_no=n, status='partial' if reviews_by_page.get(n) else 'updated', error=None, retained_chunks=len(preserved.get(n, [])))
+        visual = {'visual_processed': False} if outcomes.get(n, {}).get('visual_processed') is False else {}
+        outcomes[n] = dict(page_no=n, status='partial' if reviews_by_page.get(n) else 'updated', error=None,
+                           retained_chunks=len(preserved.get(n, [])), **visual)
     await db.flush()
     rows = list((await db.scalars(select(DocChunk).where(DocChunk.document_id == doc.id)
                .order_by(DocChunk.page_no, DocChunk.chunk_index))).all())
@@ -250,7 +252,7 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
     report['pages'] = [new_pages[n] if n in updated else prior_pages[n]
                        for n in sorted(available) if (n in updated and n in new_pages) or (n not in updated and n in prior_pages)]
     doc.page_count = total
-    pending = 0
+    review_rows = []
     review_summary = {}
     if has_review_protocol:
         from backend.app.services.document_reviews import register_reviews
@@ -259,13 +261,12 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
         await register_reviews(db, doc, [r for r in review_items if r['page_no'] not in review_changed
                                          and r['page_no'] not in review_conflicts and r['page_no'] not in ignored_pages])
         review_rows = list((await db.scalars(select(DocumentReview).where(DocumentReview.document_id == doc.id))).all())
-        pending = sum(r.status == 'pending' for r in review_rows)
         review_summary = {state: sum(r.status == state for r in review_rows) for state in ('pending', 'confirmed', 'ignored')}
     doc.ingest_report = {'page_reader':report, 'chunk_count':len(rows), 'ingest_tokens_est':tokens,
         'token_budget':token_budget, 'over_budget': token_budget is not None and tokens > token_budget,
         'page_summary': {'total':total, 'updated':updated, 'retained':retained, 'missing':missing},
         **({'review_summary': review_summary} if has_review_protocol else {})}
-    doc.status = (DocumentStatus.indexed if len(updated) == total and not pending else
-                  DocumentStatus.partially_indexed if rows else DocumentStatus.needs_review)
-    doc.error_message = None if doc.status == DocumentStatus.indexed else f'{len(updated)}/{total} pages updated; retained {retained}; missing {missing}; {pending} review tasks pending'
+    from backend.app.services.document_index_state import apply_document_index_summary, summarize_document_index
+    apply_document_index_summary(doc, summarize_document_index(page_count=total, chunks=rows, reviews=review_rows,
+                                                               page_results=report['page_results']))
     await db.commit()
