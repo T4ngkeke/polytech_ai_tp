@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "purpose": "Acceptance samples only: file positions, hashes and facts a person must check. Never read by the production worker.",
+  "check_kinds": {
+    "native_code": "Program-copied code: characters and indentation must be exactly right. Only 'correct' passes.",
+    "visual_fact": "Information carried by the picture: must be saved correctly or sent to review. 'correct' or 'reviewed' passes.",
+    "text": "Native text must be kept. Only 'correct' passes.",
+    "review_quality": "Reviews must be precise; count unnecessary reviews separately."
+  },
+  "files": {
+    "main-2.pdf": {"sha256": "c12a6562da5c9d9f64823153a4a46ddb57d48398f65d3f0df766e18b2109d220", "pages": 70},
+    "main-3.pdf": {"sha256": "016b7dd160071c09c570d6b92bf182e02e35de338b457ec47d781259908ea5b1", "pages": 72},
+    "Heritage.pdf": {"sha256": "96d5885cdb412674d6ce8ef0212388d91581ef00def8e5fc900487fb9c85d021", "pages": 22}
+  },
+  "focus": [
+    {"file": "main-2.pdf", "page": 6, "checks": [
+      {"id": "table_rows", "kind": "visual_fact", "fact": "Table with 3 columns (Type de séance, Nombre, Durée): CM 3 1h30; TD 4 1h30; TP 3 4h. Rows must not be mixed up."},
+      {"id": "total", "kind": "text", "fact": "Total : 22h30."},
+      {"id": "sequence_order", "kind": "visual_fact", "fact": "Order CM1 → TD1 → CM2 → TD2 → TP1 → CM3 → TD3 → TP2 → TD4 → TP3."},
+      {"id": "no_decoration_review", "kind": "review_quality", "fact": "The top navigation bar and page number need no review."}
+    ]},
+    {"file": "main-2.pdf", "page": 55, "checks": [
+      {"id": "sign_exponent", "kind": "visual_fact", "fact": "(−1)^S: S is an exponent, not a factor."},
+      {"id": "mantissa_point", "kind": "visual_fact", "fact": "The mantissa is written 1.M (a point). The text layer shows 1:M; that must not be presented as the formula."},
+      {"id": "power_of_two", "kind": "visual_fact", "fact": "2^(E−biais): E−biais is the exponent, not 2E−biais."},
+      {"id": "bit_widths", "kind": "visual_fact", "fact": "Single precision: S 1 bit, Exposant (E) 8 bits, Mantisse (M) 23 bits, in this order."},
+      {"id": "bias_127", "kind": "text", "fact": "biais = 127; bit implicite = 1."}
+    ]},
+    {"file": "main-3.pdf", "page": 27, "checks": [
+      {"id": "code_block", "kind": "native_code", "fact": "The malloc / if (tab == NULL) / for / free(tab) code keeps its characters and indentation; return 1; is one line."},
+      {"id": "space_symbol", "kind": "native_code", "fact": "The string keeps the visible-space symbols: \"plus␣de␣memoire\\n\"."},
+      {"id": "bullets_separate", "kind": "text", "fact": "The three bullets on the right are not woven into the code lines."},
+      {"id": "warning_box", "kind": "text", "fact": "Box 'Ce que vous verrez dans beaucoup de code' and its text are kept."}
+    ]},
+    {"file": "main-3.pdf", "page": 54, "checks": [
+      {"id": "code_block", "kind": "native_code", "fact": "The realloc correction keeps its characters and nesting; int nouvelle = capacite * 2; is one line; arr[taille] = valeur; and taille++ follow the if block."}
+    ]},
+    {"file": "Heritage.pdf", "page": 2, "checks": [
+      {"id": "two_classes", "kind": "visual_fact", "fact": "Two UML classes, Livre and Rapport, each with attributes and methods as printed."},
+      {"id": "shared_members", "kind": "visual_fact", "fact": "Members printed in dark red are the ones both classes share: titre, auteur, afficher(), toString()."},
+      {"id": "problem_text", "kind": "text", "fact": "The problem statement about describing identical properties twice is kept."}
+    ]},
+    {"file": "Heritage.pdf", "page": 8, "checks": [
+      {"id": "first_level", "kind": "visual_fact", "fact": "Manager and Programmer inherit from Employee (triangle points to the parent)."},
+      {"id": "second_level", "kind": "visual_fact", "fact": "Project Manager, Dept. Manager and Strategic Manager inherit from Manager, not from Employee directly."},
+      {"id": "attributes", "kind": "visual_fact", "fact": "Attributes stay with their class: Manager budgetsControlled, dateAppointed; Programmer project, progLanguages; Project Manager projects; Dept. Manager dept; Strategic Manager responsibilities."},
+      {"id": "graph_sentence", "kind": "text", "fact": "The sentence about the inheritance graph is kept."}
+    ]},
+    {"file": "Heritage.pdf", "page": 13, "checks": [
+      {"id": "left_code", "kind": "native_code", "fact": "A x; A a1 = new A(...); B b1 = new B(...); C c1 = new C(...); x = a1; → OK; x = b1; → OK; x = c1 → OK (no semicolon after c1 in the source)."},
+      {"id": "right_code", "kind": "native_code", "fact": "Public class A{ …} / Public class B extends A{ …} / Public class C extends B{ ...} stay separate from the left column."},
+      {"id": "definitions", "kind": "text", "fact": "C hérite de B, qui hérite de A; the definition of type dynamique is kept."}
+    ]},
+    {"file": "Heritage.pdf", "page": 15, "checks": [
+      {"id": "code_arrows", "kind": "native_code", "fact": "d1.afficher(); → afficher() de Document, then d1 = r1;, then d1.afficher(); → afficher() de Rapport, in this order."},
+      {"id": "late_binding", "kind": "text", "fact": "Ce mécanisme s'appelle la liaison dynamique (\"late binding\")."}
+    ]}
+  ],
+  "source_anomalies": [
+    {"file": "main-2.pdf", "page": 58, "status": "confirmed_source_defect", "note": "Bottom paragraph clipped at the page edge in the PDF itself. Still counted as a missing page for users."},
+    {"file": "main-2.pdf", "page": 65, "status": "not_confirmed", "note": "Text box exceeds the page by about 1.31 points but the words stay readable. Must not be excluded."},
+    {"file": "main-2.pdf", "page": 68, "status": "confirmed_source_defect", "note": "Bottom paragraph clipped at the page edge in the PDF itself. Still counted as a missing page for users."}
+  ],
+  "generalization_samples": {
+    "required": 2,
+    "present": [],
+    "note": "Two more samples from other subjects and layouts are needed. Until then cross-course generalization stays unverified. Do not download material of unknown origin."
+  }
+}

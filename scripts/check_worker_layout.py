@@ -5,6 +5,7 @@ once per round; reruns require a separate run directory, never overwrite history
 """
 import argparse
 import asyncio
+from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
@@ -22,6 +23,20 @@ FOCUS=[('main-2.pdf',6),('main-2.pdf',55),('main-3.pdf',27),('main-3.pdf',54),
 
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def validate_resume_manifest(saved, current):
+    """A resumed run continues the same experiment: every recorded input must match."""
+    changed=[k for k in sorted(set(saved)|set(current)) if saved.get(k)!=current.get(k)]
+    if changed:
+        raise ValueError('Resume refused; changed: '+', '.join(changed))
+
+
+def git_commit(root):
+    import subprocess
+    run=lambda *args:subprocess.run(['git','-C',str(root),*args],capture_output=True,text=True).stdout.strip()
+    # Tracked code changes make the commit alone insufficient; the code hashes still identify it.
+    return run('rev-parse','HEAD')+('-dirty' if run('status','--porcelain','--','backend','scripts') else '')
 
 
 def aggregate(rows):
@@ -44,6 +59,8 @@ def aggregate(rows):
         'usable_page_rate':sum(r['status'] in ('accepted','partial') for r in rows)/len(rows) if rows else None,
         'request_failures':sum(r['status']=='failed' for r in rows),
         'seconds':round(sum(r['seconds'] for r in rows),2),
+        'review_reasons':dict(Counter(v.get('reason_code','unrecorded') for r in rows for v in r.get('audit',{}).get('reviews',[]))),
+        'page_failure_reasons':dict(Counter(p['reason'] for r in rows for p in r.get('audit',{}).get('page_results',[]) if p.get('reason'))),
         'source_geometry_unverified':[{'file':r['file'],'page':r['page']} for r in rows
             if any(p.get('reason')=='source_geometry_unverified' for p in r.get('audit',{}).get('page_results',[]))]}
 
@@ -75,21 +92,26 @@ async def main():
     model=os.environ.get('VISION_TEST_MODEL','ornith')
     review_path=root/'documentation/worker-visual-2026-09-09/source-reviews.json'
     reviews=json.loads(review_path.read_text()) if review_path.exists() else []
-    manifest={'source_reviews_sha256':digest(review_path) if review_path.exists() else None,'cases':[list(c) for c in cases],'files':{n:digest(paths[n]) for n in sorted({n for n,p in cases})},
-        'code':{str(p.relative_to(root)):digest(p) for p in sorted((root/'backend/worker').glob('*.py'))},
-        'script_sha256':digest(Path(__file__)),'harness':args.harness,'group_correction':not args.full_retry,
-        'frequency_penalty':args.frequency_penalty,'rounds':args.repeat,'model':model,'base_url':base,
-        'temperature':0,'max_tokens':8192,'timeout':120,'workers':1}
-    out=args.resume or root/'documentation/worker-visual-2026-09-09'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-    if args.resume:
-        if json.loads((out/'manifest.json').read_text())!=manifest:raise SystemExit('Resume refused: code, source or options changed')
-    else:
-        out.mkdir(parents=True,exist_ok=False)
-        (out/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2))
-    print('Report:',out,flush=True)
     async with AsyncOpenAI(base_url=base,api_key=os.environ.get('VISION_TEST_API_KEY','local'),timeout=120,max_retries=0) as client:
         available=await client.models.list()
         if model not in [m.id for m in available.data]:raise SystemExit('Configured model not present at endpoint')
+        served=next(m for m in available.data if m.id==model)
+        manifest={'source_reviews_sha256':digest(review_path) if review_path.exists() else None,'cases':[list(c) for c in cases],'files':{n:digest(paths[n]) for n in sorted({n for n,p in cases})},
+            'code':{str(p.relative_to(root)):digest(p) for p in sorted((root/'backend/worker').glob('*.py'))},
+            'script_sha256':digest(Path(__file__)),'git_commit':git_commit(root),'harness':args.harness,'group_correction':not args.full_retry,
+            'frequency_penalty':args.frequency_penalty,'rounds':args.repeat,'model':model,'base_url':base,
+            # The API names the served model only; weights are identified by the operator, if at all.
+            'model_service':{'id':served.id,'root':getattr(served,'root',None),'max_model_len':getattr(served,'max_model_len',None)},
+            'model_weights':os.environ.get('VISION_TEST_MODEL_WEIGHTS'),
+            'temperature':0,'max_tokens':8192,'timeout':120,'workers':1}
+        out=args.resume or root/'documentation/worker-visual-2026-09-09'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        if args.resume:
+            try:validate_resume_manifest(json.loads((out/'manifest.json').read_text()),manifest)
+            except ValueError as exc:raise SystemExit(str(exc)) from None
+        else:
+            out.mkdir(parents=True,exist_ok=False)
+            (out/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2))
+        print('Report:',out,flush=True)
         if args.harness=='region':
             from backend.worker.region_reader import make_region_reader
             reader=make_region_reader(client,model)
@@ -112,7 +134,7 @@ async def main():
                     if proof and outcome.get('reason')=='source_geometry_unverified':
                         outcome.update(reason='source_defect_confirmed',source_review=proof)
                 row.update(status=('accepted' if audit['page_results'][0]['status']=='read' else audit['page_results'][0]['status']) if args.harness=='region' else ('accepted' if read else audit['page_results'][0]['status']),audit=audit,
-                           chunks=[asdict(c) for c in chunk_read_pages(read)],seconds=round(time.monotonic()-started,3))
+                           chunks=[asdict(c) for c in chunk_read_pages(read,file_sha256=manifest['files'][name])],seconds=round(time.monotonic()-started,3))
                 temp=output.with_suffix('.tmp');temp.write_text(json.dumps(row,ensure_ascii=False,indent=2));temp.replace(output)
                 results.append(row)
                 print(json.dumps({k:v for k,v in row.items() if k not in ('audit','chunks')}),flush=True)
