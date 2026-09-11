@@ -63,15 +63,17 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 # Skipped automatically when no test DB is reachable, so the SQLite suite still
 # runs everywhere. Point TEST_PG_URL at any pgvector Postgres to enable.
 
-TEST_PG_URL = os.environ.get(
-    "TEST_PG_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5433/edudb_test",
-)
+TEST_PG_URL = os.environ.get("TEST_PG_URL")
 
 
 @pytest_asyncio.fixture(scope="function")
 async def pg_session() -> AsyncGenerator[AsyncSession, None]:
     """Yields an AsyncSession on a live pgvector Postgres, with native types."""
+    if not TEST_PG_URL:
+        pytest.skip("Set TEST_PG_URL explicitly; no implicit database/port selection")
+    from sqlalchemy.engine import make_url
+    if not make_url(TEST_PG_URL).database.endswith("_test"):
+        pytest.fail("Destructive PostgreSQL fixtures require a database ending in _test")
     # NullPool: don't reuse connections across tests — pytest-asyncio gives each
     # test its own event loop, and a pooled asyncpg connection bound to a closed
     # loop breaks every test after the first.

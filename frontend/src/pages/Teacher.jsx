@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
+import { createMessageId } from '../lib/messageId';
 import { interpretStreamEvent } from '../lib/streamEvents';
 import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
@@ -534,10 +535,10 @@ function TestDrivePanel({ labId, labName }) {
     const text = input.trim();
     if (!text || isStreaming || !sessionId) return;
 
-    const assistantMsgId = crypto.randomUUID();
+    const assistantMsgId = createMessageId();
     setMessages((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), sender: 'user', content: text },
+      { id: createMessageId(), sender: 'user', content: text },
       { id: assistantMsgId, sender: 'llm', content: '' },
     ]);
     setInput('');

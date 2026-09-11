@@ -16,6 +16,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
+import { createMessageId } from '../lib/messageId';
 import { interpretStreamEvent } from '../lib/streamEvents';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 // Lazy: the markdown/highlight/KaTeX stack is heavy and only needed once the
@@ -186,10 +187,10 @@ export default function Chat() {
       }
     }
 
-    // Unique client ids (UUIDs) — Date.now() collides with itself and with
-    // server message ids, which would route streamed tokens to the wrong bubble.
-    const userMsgId = crypto.randomUUID();
-    const assistantMsgId = crypto.randomUUID();
+    // Prefix + sequence keeps pending message IDs distinct, even in the same
+    // millisecond, so streamed tokens reach the correct bubble on HTTP too.
+    const userMsgId = createMessageId();
+    const assistantMsgId = createMessageId();
     // [v8.0] Client temp ids aren't the server Message ids, so this bubble can't
     // be rated until the session reloads (feedback endpoint needs the real id).
     streamedIdsRef.current.add(assistantMsgId);

@@ -205,6 +205,9 @@ async def create_session_in_lab(
     session = await session_service.create_session(
         db, user_id=current_user.id, lab_id=lab_id, title=body.title
     )
+    # The browser can send the first chat request as soon as it sees 201.
+    # Dependency cleanup may run after that response, so commit before returning.
+    await db.commit()
     return SessionResponse.model_validate(session)
 
 
