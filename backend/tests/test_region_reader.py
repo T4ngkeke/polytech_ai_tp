@@ -146,7 +146,7 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
     from backend.worker.region_reader import make_region_reader
     reader=make_region_reader(client,'fake',render_fn=render)
     pages,report=await reader(str(path),prepared_pages=[page()])
-    assert report['version']==VERSION=='region-reader-v1.5'
+    assert report['version']==VERSION=='region-reader-v1.6'
     assert pages[0].reader_version==VERSION
     assert report['page_results'][0]['status']=='partial'
     assert len(report['reviews'])==1
@@ -158,10 +158,50 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
 
 @pytest.mark.asyncio
 async def test_layout_selects_visual_ranges_without_relisting_other_text():
-    result=await run([{'action':'layout','regions':[{'ids':['a'],'region_ids':['ra']}]},review('Unclear direction')])
+    result=await run([{'action':'layout','regions':[{'ids':['a'],'region_ids':['ra']}],'decorations':['rb']},review('Unclear direction')])
     assert {i for g in result.page.groups for i in g.ids}=={'a','b'}
-    assert any(r.region_ids==('rb',) and r.reason_code=='content_review' for r in result.reviews)
+    assert [r.ids for r in result.reviews]==[('a',)]
     assert result.page.calls==2
+
+
+@pytest.mark.asyncio
+async def test_layout_must_account_for_every_candidate_graphic():
+    seen=[]
+    replies=iter([{'action':'layout','regions':[{'ids':['a'],'region_ids':['ra']}]},
+                  {'action':'layout','regions':[{'ids':['a'],'region_ids':['ra']}],'decorations':['rb']},
+                  formula()])
+    async def decide(messages,**kwargs):
+        seen.append(messages)
+        return next(replies)
+    result=await read_page(page(),decide=decide,render=render,max_calls=6)
+    error=json.loads(seen[1][2]['content'])['error']
+    assert 'rb' in error and 'decorations' in error
+    assert json.loads(seen[1][2]['content'])['phase']=='layout'
+    assert not result.reviews
+    assert result.page.calls==3 and set(result.page.decorations)=={'rb'}
+
+
+@pytest.mark.asyncio
+async def test_graphic_still_unassessed_when_budget_ends_goes_to_a_teacher():
+    incomplete={'action':'layout','regions':[{'ids':['a'],'region_ids':['ra']}]}
+    result=await run([incomplete,incomplete])
+    # Only the missing graphic is a content question; the unprocessed range ran out of calls.
+    assert {(r.region_ids,r.reason_code) for r in result.reviews}=={(('ra',),'budget_exhausted'),(('rb',),'content_review')}
+    assert next(r for r in result.reviews if r.region_ids==('rb',)).reason=='Graphic not assessed in layout'
+    assert {i for g in result.page.groups for i in g.ids}=={'a','b'}
+    assert result.page.calls==2
+
+
+def test_prompt_and_schema_state_the_figure_description_limit():
+    from backend.worker.region_reader import PROMPT
+    from backend.worker.visual_harness import FIGURE_DESCRIPTION_MAX
+    assert str(FIGURE_DESCRIPTION_MAX) in PROMPT
+    assert 'decorations' in PROMPT and 'exactly once' in PROMPT
+    actions=response_format('region',page())['json_schema']['schema']['properties']['next_step']['anyOf']
+    figure=[a for a in actions if a['properties'].get('kind',{}).get('enum')==['figure']]
+    assert len(figure)==1 and str(FIGURE_DESCRIPTION_MAX) in figure[0]['properties']['content']['description']
+    # Stated, not enforced by the grammar: a forced cut would end a sentence mid-way.
+    assert 'maxLength' not in figure[0]['properties']['content']
 
 
 @pytest.mark.asyncio
