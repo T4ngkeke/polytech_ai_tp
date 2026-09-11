@@ -67,15 +67,19 @@ def compare(before,after,content=None):
 
 
 if __name__=='__main__':
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    accept_model='--accept-model-review' in sys.argv
+    sys.argv=[a for a in sys.argv if a!='--accept-model-review']
     left,right=map(Path,sys.argv[1:3])
     manifests=[json.loads((p/'manifest.json').read_text()) for p in (left,right)]
     try:recorded=validate_comparison_manifests(*manifests)
     except ValueError as exc:raise SystemExit(str(exc)) from None
-    content=None
+    content=None;result_kinds={}
     if len(sys.argv)>4:
         from scripts.worker_visual_gold import evaluate_content_gate
-        gates=[evaluate_content_gate(json.loads((p/'results.json').read_text()),json.loads(Path(r).read_text()),run=p.name)
-               for p,r in zip((left,right),sys.argv[3:5])]
+        gates=[evaluate_content_gate(json.loads((p/'results.json').read_text()),json.loads(Path(r).read_text()),run=p.name,
+                                     accept_model_review=accept_model) for p,r in zip((left,right),sys.argv[3:5])]
+        result_kinds={'reviewer_kinds':{'before':gates[0]['reviewer_kinds'],'after':gates[1]['reviewer_kinds']}}
         content=tuple({(g['file'],g['page'],g['round']):g['state']=='passed' for g in gate['pages']} for gate in gates)
     result=compare(json.loads((left/'results.json').read_text()),json.loads((right/'results.json').read_text()),content)
-    print(json.dumps({**recorded,**result},ensure_ascii=False,indent=2,default=list))
+    print(json.dumps({**recorded,**result_kinds,**result},ensure_ascii=False,indent=2,default=list))
