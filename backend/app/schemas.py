@@ -253,6 +253,7 @@ class DocumentSummaryResponse(BaseModel):
     page_count: int | None
     error_message: str | None
     chunk_count: int
+    ingest_report: dict | None = None
 
 
 class ChunkResponse(BaseModel):
@@ -573,3 +574,22 @@ class StudentUsageResponse(BaseModel):
 
 class InviteCodeResponse(BaseModel):
     invite_code: str
+
+
+class DocumentReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    page_no: int
+    bbox: list[float]
+    reason: str
+    candidate_content: str | None
+    status: Literal['pending','confirmed','ignored']
+    revision: int
+    final_content: str | None
+
+
+class DocumentReviewRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    revision: int = Field(ge=1)
+    status: Literal['confirmed','ignored']
+    content: str | None = Field(default=None,max_length=20000)

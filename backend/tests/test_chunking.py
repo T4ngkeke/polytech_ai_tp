@@ -2,10 +2,10 @@
 test_chunking.py — course-material chunking.
 
 Invariants:
-  * The table of contents is detected and dropped (else it matches every query).
+  * Contents pages remain available as source material.
   * Code blocks stay intact.
   * Tiny neighbouring paragraphs merge; oversized ones split at sentences.
-  * A paragraph repeated across pages (a recurring notice) is stored once.
+  * Repeated paragraphs retain each source occurrence.
 
 Exercise-boundary segmentation and its numbering-anomaly detection are gone with
 the Exercises table, and with them the `doc_type` argument — there is one kind of
@@ -17,7 +17,7 @@ Pure logic over page strings — no model, no DB.
 from backend.worker.chunking import chunk_pages
 
 
-def test_table_of_contents_page_is_dropped():
+def test_table_of_contents_page_is_preserved():
     toc = (
         "Table des matieres\n"
         "1 Introduction ................... 3\n"
@@ -28,8 +28,8 @@ def test_table_of_contents_page_is_dropped():
     chunks = chunk_pages([toc, body])
 
     joined = " ".join(c.content for c in chunks)
-    assert "Table des matieres" not in joined
-    assert "Introduction" not in joined
+    assert "Table des matieres" in joined
+    assert "Introduction" in joined
     assert "codage binaire" in joined
 
 
@@ -71,7 +71,7 @@ def test_code_block_with_blank_lines_stays_intact():
     assert "return resultat" in code_chunk.content
 
 
-def test_repeated_paragraph_across_pages_deduped_at_paragraph_level():
+def test_repeated_paragraph_keeps_each_source_location():
     notice = ("Rappel important: rendre le compte-rendu avant vendredi soir "
               "sur la plateforme de depot.")
     pages = [
@@ -80,7 +80,7 @@ def test_repeated_paragraph_across_pages_deduped_at_paragraph_level():
     ]
     chunks = chunk_pages(pages, min_chars=10, max_chars=1000)
     notice_chunks = [c for c in chunks if "Rappel important" in c.content]
-    assert len(notice_chunks) == 1
+    assert [c.page_no for c in notice_chunks] == [1, 2]
 
 
 def test_chunks_carry_their_source_page():

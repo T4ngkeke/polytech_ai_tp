@@ -152,6 +152,7 @@ class DocumentStatus(str, enum.Enum):
     pending = "pending"
     processing = "processing"
     indexed = "indexed"
+    partially_indexed = "partially_indexed"
     failed = "failed"
     # [v7.1] PDF rejected by the character-yield gate — returned to the teacher,
     # never silently ingested. Not an error; a request to re-export a clean PDF.
@@ -624,8 +625,14 @@ class DocChunk(Base):
     class_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False, index=True)
     lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    # The ORIGINAL chunk text — what citations and the teacher chunk-inspector show.
+    # Search/citation text: native, visually supplemented, or teacher-corrected.
+    # source_text/source_ref retain its original provenance on the layout path.
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Fingerprint of the worker's original text, unchanged by teacher edits.
+    # Null on legacy rows: edited legacy rows require review before rebuilding.
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_ref: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # [v7.1] LLM-generated Contextual-Retrieval context, prepended before embedding.
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     # [v7.1] Heading/section path the chunk came from.
@@ -754,3 +761,27 @@ class AgentTraceLog(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<AgentTraceLog msg={self.message_id} route={self.route}>"
+
+
+class DocumentReview(Base):
+    """Human decisions over stable PDF sources, independent of run reports."""
+    __tablename__ = 'document_reviews'
+    __table_args__ = (UniqueConstraint('document_id', 'source_key', name='uq_document_review_source'),)
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey('documents.id', ondelete='CASCADE'), nullable=False, index=True)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_ref: Mapped[dict] = mapped_column(JSON, nullable=False)
+    page_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    bbox: Mapped[list] = mapped_column(JSON, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default='pending')
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    final_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)

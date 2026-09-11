@@ -14,7 +14,7 @@ from typing import Awaitable, Callable
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Class, DocChunk, Document, IngestionJob
+from backend.app.models import Class, DocChunk, Document, DocumentReview, IngestionJob
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 
@@ -151,7 +151,9 @@ async def get_chunk_in_document(
     db: AsyncSession, document_id: uuid.UUID, chunk_id: uuid.UUID
 ) -> DocChunk | None:
     """Fetch a chunk only if it belongs to the given document (scopes the edit)."""
-    stmt = select(DocChunk).where(
+    # Same parent lock as worker publication: never edit a row being replaced.
+    await db.scalar(select(Document).where(Document.id == document_id).with_for_update())
+    stmt = select(DocChunk).execution_options(populate_existing=True).where(
         DocChunk.id == chunk_id, DocChunk.document_id == document_id
     )
     return (await db.execute(stmt)).scalar_one_or_none()
@@ -189,6 +191,7 @@ async def delete_document(db: AsyncSession, document: Document) -> str:
     transaction commits (filesystem side effects stay in the router)."""
     storage_path = document.storage_path
     doc_id = document.id
+    await db.execute(delete(DocumentReview).where(DocumentReview.document_id == doc_id))
     await db.execute(delete(DocChunk).where(DocChunk.document_id == doc_id))
     await db.execute(delete(IngestionJob).where(IngestionJob.document_id == doc_id))
     await db.delete(document)

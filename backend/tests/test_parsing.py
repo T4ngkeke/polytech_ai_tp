@@ -62,7 +62,7 @@ def test_strips_line_repeated_on_enough_pages():
         "TD3 – Informatique – Polytech\nExercice 2\nTrier une liste.",
         "TD3 – Informatique – Polytech\nExercice 3\nInverser une chaîne.",
     ]
-    cleaned = strip_repeated_lines(pages)
+    cleaned = strip_repeated_lines(pages, margin_lines=[{0} for _ in pages])
     assert all("TD3 – Informatique" not in p for p in cleaned)
     # Real content survives, page count unchanged.
     assert len(cleaned) == 3
@@ -77,7 +77,7 @@ def test_page_number_variants_count_as_the_same_footer():
         "Contenu B\npage 2",
         "Contenu C\npage 3",
     ]
-    cleaned = strip_repeated_lines(pages)
+    cleaned = strip_repeated_lines(pages, margin_lines=[{1} for _ in pages])
     assert all("page" not in p for p in cleaned)
     assert cleaned[0].strip() == "Contenu A"
 
@@ -108,7 +108,7 @@ def test_blank_lines_are_structure_not_footers():
 def test_min_repeat_is_tunable_for_short_docs():
     # A 2-page TD: caller lowers the threshold to strip its header.
     pages = ["En-tête TD1\nExercice 1", "En-tête TD1\nExercice 2"]
-    cleaned = strip_repeated_lines(pages, min_repeat=2)
+    cleaned = strip_repeated_lines(pages, min_repeat=2, margin_lines=[{0}, {0}])
     assert all("En-tête" not in p for p in cleaned)
 
 
@@ -141,7 +141,7 @@ def test_strip_repeated_lines_still_removes_header_after_sort():
     pages = extract_pdf_text(_TD1)
     header = "TD 1 - Codage et numération — Tds"
     assert any(header in p for p in pages)                 # present before
-    stripped = strip_repeated_lines(pages)
+    stripped = extract_pdf_text(_TD1, clean_margins=True)
     assert all(header not in p for p in stripped)          # gone after
 
 

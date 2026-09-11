@@ -354,9 +354,8 @@ async def test_ingest_marks_failed_and_rolls_back_on_indexing_error(db_session, 
 # --- [v7.3] upstream cleaning --------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_repeated_headers_are_stripped_before_chunking(db_session, tmp_path):
-    """A header repeated on every page ('TD3 – Informatique') must not reach
-    the chunks — it pollutes recall with near-identical garbage."""
+async def test_plain_text_repetition_without_positions_is_preserved(db_session, tmp_path):
+    """Without PDF coordinates, a repeated line may be legitimate body text."""
     doc = await _seed_document(db_session, tmp_path)
 
     def three_page_parse(storage_path):
@@ -373,14 +372,13 @@ async def test_repeated_headers_are_stripped_before_chunking(db_session, tmp_pat
 
     chunks = await _chunks_of(db_session, doc)
     assert chunks, "content paragraphs must still be ingested"
-    assert all("TD3 – Informatique" not in c.content for c in chunks)
+    assert sum("TD3 – Informatique" in c.content for c in chunks) == 3
     assert any("codage binaire" in c.content for c in chunks)
 
 
 @pytest.mark.asyncio
-async def test_duplicate_chunks_within_document_are_deduped(db_session, tmp_path):
-    """The same paragraph appearing on several pages (below the header-strip
-    threshold) is stored once — duplicates waste recall slots."""
+async def test_repeated_content_keeps_all_source_occurrences(db_session, tmp_path):
+    """The worker preserves occurrences; search can later group duplicate hits."""
     doc = await _seed_document(db_session, tmp_path)
 
     notice = "Rappel: rendre le compte-rendu avant vendredi."
@@ -397,7 +395,7 @@ async def test_duplicate_chunks_within_document_are_deduped(db_session, tmp_path
 
     chunks = await _chunks_of(db_session, doc)
     notice_chunks = [c for c in chunks if notice in c.content]
-    assert len(notice_chunks) == 1
+    assert {c.page_no for c in notice_chunks} == {1, 2}
 
 
 # --- [v8.1 item 8] VLM garbled-formula repair wiring ------------------------

@@ -7,6 +7,7 @@ PDFs back to the teacher (`needs_review`) rather than silently ingesting garbage
 """
 
 import re
+from collections import Counter
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,15 +27,40 @@ class GateResult:
     reason: str | None = None
 
 
-def extract_pdf_text(path: str | Path) -> list[str]:
-    """Extract one text string per page from a PDF (pymupdf, no OCR)."""
-    import fitz  # pymupdf — imported lazily so the gate stays import-light
+def extract_pdf_text(path: str | Path, *, clean_margins: bool = False) -> list[str]:
+    """Extract PDF text; optionally remove repeated, geometrically proven margins.
 
-    # sort=True extracts in visual reading order, so two-column / formula-heavy
-    # pages don't reorder (variables pulled to the page end leaving voids in the
-    # running prose). Load-bearing for exercise segmentation on real TD/TP PDFs.
+    Keep the original sorted text extraction. Dict extraction supplies positions
+    only: a line is eligible for cleaning if it occurs once in the text and all
+    matching PDF lines lie entirely within the top/bottom 5% (at most 36 pt).
+    Ambiguous matches are retained, including identical text in the page body.
+    """
+    import fitz
+
+    pages: list[str] = []
+    margins: list[set[int]] = []
     with fitz.open(str(path)) as doc:
-        return [page.get_text("text", sort=True) for page in doc]
+        for page in doc:
+            text = page.get_text("text", sort=True)
+            pages.append(text)
+            if not clean_margins:
+                continue
+            positions: dict[str, list[bool]] = {}
+            edge = min(36, page.rect.height * 0.05)
+            for block in page.get_text("dict")["blocks"]:
+                for line in block.get("lines", []):
+                    key = "".join(span["text"] for span in line.get("spans", [])).strip()
+                    _, y0, _, y1 = line["bbox"]
+                    at_margin = y1 <= page.rect.y0 + edge or y0 >= page.rect.y1 - edge
+                    positions.setdefault(key, []).append(at_margin)
+            lines = text.splitlines()
+            counts = Counter(line.strip() for line in lines)
+            margins.append({
+                i for i, line in enumerate(lines)
+                if counts[line.strip()] == 1 and positions.get(line.strip())
+                and all(positions[line.strip()])
+            })
+    return strip_repeated_lines(pages, margin_lines=margins) if clean_margins else pages
 
 
 def character_yield_gate(
@@ -77,40 +103,37 @@ _PAGINATION_RE = re.compile(
 )
 
 
-def strip_repeated_lines(pages: list[str], min_repeat: int = 3) -> list[str]:
-    """Remove header/footer lines that recur on >= min_repeat pages.
+def strip_repeated_lines(
+    pages: list[str], min_repeat: int = 3, *,
+    margin_lines: list[set[int]] | None = None,
+) -> list[str]:
+    """Clean only repeated lines with PDF margin coordinates (zero-based indices).
 
-    Two narrow rules, so numbered structure ('Exercice 1') is never eaten:
-      A. lines that are byte-identical (after trim) across >= min_repeat pages
-         — constant headers like 'TD3 – Informatique – Polytech';
-      B. pure pagination lines ('page 3', '4/12', bare digits) when pagination
-         appears on >= min_repeat pages — they differ per page by design.
-    Counting is per page; blank lines are paragraph structure, never stripped.
+    Text repetition alone is not evidence of a header: code and definitions
+    legitimately repeat. Without positions (Markdown, HTML or text), keep all
+    lines. Replace removed lines with blanks to preserve line numbering.
     """
-    pages_per_line: dict[str, int] = {}
+    if margin_lines is None:
+        return list(pages)
+    if len(margin_lines) != len(pages):
+        raise ValueError("Margin metadata must match the number of pages.")
+    pages_per_line: Counter[str] = Counter()
     pagination_pages = 0
-    for page in pages:
-        lines = {line.strip() for line in page.splitlines()}
-        for key in lines:
-            if key:
-                pages_per_line[key] = pages_per_line.get(key, 0) + 1
-        if any(key and _PAGINATION_RE.match(key) for key in lines):
-            pagination_pages += 1
-
+    for page, indices in zip(pages, margin_lines):
+        keys = {line.strip() for i, line in enumerate(page.splitlines()) if i in indices}
+        pages_per_line.update(key for key in keys if key)
+        pagination_pages += any(_PAGINATION_RE.fullmatch(key) for key in keys if key)
     repeated = {key for key, count in pages_per_line.items() if count >= min_repeat}
     strip_pagination = pagination_pages >= min_repeat
-
-    def _keep(line: str) -> bool:
-        stripped = line.strip()
-        if not stripped:
-            return True
-        if stripped in repeated:
-            return False
-        return not (strip_pagination and _PAGINATION_RE.match(stripped))
-
     return [
-        "\n".join(line for line in page.splitlines() if _keep(line))
-        for page in pages
+        "".join(
+            "\n" if i in indices and (
+                line.strip() in repeated or
+                (strip_pagination and _PAGINATION_RE.fullmatch(line.strip()))
+            ) else line
+            for i, line in enumerate(page.splitlines(keepends=True))
+        )
+        for page, indices in zip(pages, margin_lines)
     ]
 
 
@@ -154,7 +177,11 @@ def html_to_markdown(html: str) -> str:
         for tag in soup.find_all(f"h{level}"):
             tag.replace_with(f"\n\n{'#' * level} {tag.get_text(' ', strip=True)}\n\n")
     for tag in soup.find_all("pre"):
-        tag.replace_with(f"\n\n```\n{tag.get_text()}\n```\n\n")
+        code = tag.get_text()
+        # A code example may itself contain Markdown fences. Use a longer outer
+        # fence so its comments and blank lines remain code throughout parsing.
+        fence = "`" * max(3, max((len(run) + 1 for run in re.findall(r"`+", code)), default=3))
+        tag.replace_with(f"\n\n{fence}\n{code}\n{fence}\n\n")
     for tag in soup.find_all(_BLOCK_TAGS):
         tag.append("\n\n")
 
@@ -163,8 +190,18 @@ def html_to_markdown(html: str) -> str:
     # pretty-printing) become blank lines; code indentation inside fences is
     # untouched.
     text = soup.get_text("")
-    lines = [line if line.strip() else "" for line in text.splitlines()]
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    lines: list[str] = []
+    fence = None
+    for line in text.splitlines():
+        previous_fence = fence
+        fence = markdown_fence_state(line, fence)
+        if previous_fence is not None or fence is not None:
+            lines.append(line)
+        elif line.strip():
+            lines.append(line)
+        elif lines and lines[-1] != "":
+            lines.append("")
+    return "\n".join(lines).strip()
 
 
 # [v8.1] Markdown "pages". PDF pages are the unit every downstream step works
@@ -172,8 +209,23 @@ def html_to_markdown(html: str) -> str:
 # pages, so we synthesize them from its heading tree: split at the SHALLOWEST
 # heading level present (a doc using only "##" still splits). Hash lines inside
 # ``` / ~~~ fences (e.g. Python comments) are code, never headings.
-_MD_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+_MD_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _MD_HEADING_RE = re.compile(r"^(#{1,6})\s+\S")
+
+
+def markdown_fence_state(line: str, fence: str | None) -> str | None:
+    """Track matching fence character and length; shorter/other fences are code."""
+    match = _MD_FENCE_RE.match(line)
+    if not match:
+        return fence
+    marker, suffix = match.groups()
+    if fence is None:
+        if marker[0] == "`" and "`" in suffix:
+            return None
+        return marker
+    if marker[0] == fence[0] and len(marker) >= len(fence) and not suffix.strip():
+        return None
+    return fence
 
 
 def split_markdown_pages(text: str) -> list[str]:
@@ -182,33 +234,32 @@ def split_markdown_pages(text: str) -> list[str]:
     Content before the first heading becomes its own leading page; a doc with
     no headings at all is a single page. Empty input → no pages."""
     lines = text.splitlines()
-    in_fence = False
+    fence = None
     headings: list[tuple[int, int]] = []  # (line index, heading level)
     for i, line in enumerate(lines):
-        if _MD_FENCE_RE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
+        previous_fence = fence
+        fence = markdown_fence_state(line, fence)
+        if previous_fence is not None or fence is not None:
             continue
         m = _MD_HEADING_RE.match(line)
         if m:
             headings.append((i, len(m.group(1))))
 
     if not headings:
-        stripped = text.strip()
-        return [stripped] if stripped else []
+        stripped = text.strip("\r\n")
+        return [stripped] if stripped.strip() else []
 
     min_level = min(level for _, level in headings)
     starts = [i for i, level in headings if level == min_level]
 
     pages: list[str] = []
-    preamble = "\n".join(lines[: starts[0]]).strip()
-    if preamble:
+    preamble = "\n".join(lines[: starts[0]]).strip("\r\n")
+    if preamble.strip():
         pages.append(preamble)
     for j, start in enumerate(starts):
         end = starts[j + 1] if j + 1 < len(starts) else len(lines)
-        body = "\n".join(lines[start:end]).strip()
-        if body:
+        body = "\n".join(lines[start:end]).strip("\r\n")
+        if body.strip():
             pages.append(body)
     return pages
 

@@ -41,7 +41,7 @@ from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    Class, ClassStudent, Lab, RuleLevel, Session,
+    Class, ClassStudent, Lab, RuleLevel, Session, DocumentReview,
     SystemConfig, UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
@@ -56,6 +56,7 @@ from backend.app.schemas import (
     ChunkResponse,
     ChunkUpdateRequest,
     DocumentResponse,
+    DocumentReviewRequest, DocumentReviewResponse,
     DocumentSummaryResponse,
     ApplySkillRequest,
     RuleResponse,
@@ -69,6 +70,7 @@ from backend.app.schemas import (
 from backend.app.services import (
     class_service,
     document_service,
+    document_reviews,
     lab_service,
     router_service,
     rule_service,
@@ -307,6 +309,7 @@ async def list_lab_documents(
             page_count=r["doc"].page_count,
             error_message=r["doc"].error_message,
             chunk_count=r["chunk_count"],
+            ingest_report=r["doc"].ingest_report,
         )
         for r in rows
     ]
@@ -744,3 +747,46 @@ async def get_class_analytics(
     cls = await _verify_class_ownership(db, class_id, teacher)
     result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
     return ClassAnalyticsResponse.from_analytics(result)
+
+
+# Visual review endpoints: scope comes exclusively from the owned document.
+
+
+@router.get('/documents/{document_id}/reviews', response_model=list[DocumentReviewResponse])
+async def list_document_reviews(document_id: uuid.UUID,
+    teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
+    await _owned_document_or_404(db,document_id,teacher)
+    rows=(await db.scalars(select(DocumentReview).where(DocumentReview.document_id==document_id)
+        .order_by(DocumentReview.page_no,DocumentReview.id))).all()
+    return [DocumentReviewResponse.model_validate(row) for row in rows]
+
+
+@router.get('/documents/{document_id}/reviews/{review_id}/image')
+async def document_review_image(document_id: uuid.UUID, review_id: uuid.UUID,
+    teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
+    doc=await _owned_document_or_404(db,document_id,teacher)
+    row=await db.scalar(select(DocumentReview).where(DocumentReview.id==review_id,
+        DocumentReview.document_id==document_id))
+    if row is None:raise HTTPException(404,'Review not found')
+    try:
+        image=document_reviews.render_review_image(doc,row)
+    except document_reviews.ReviewConflict as exc:
+        raise HTTPException(409,str(exc)) from exc
+    return Response(content=image,media_type='image/png',headers={'Cache-Control':'private, no-store'})
+
+
+@router.put('/documents/{document_id}/reviews/{review_id}', response_model=DocumentReviewResponse)
+async def resolve_document_review(document_id: uuid.UUID, review_id: uuid.UUID, body: DocumentReviewRequest,
+    teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db),
+    embed_fn: document_service.EmbedFn = Depends(get_embed_fn)):
+    doc=await _owned_document_or_404(db,document_id,teacher)
+    try:
+        row=await document_reviews.resolve_review(db,doc,review_id,revision=body.revision,
+            status=body.status,content=body.content,teacher_id=teacher.id,embed_fn=embed_fn)
+    except document_reviews.ReviewConflict as exc:
+        raise HTTPException(409,str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404,str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
+    return DocumentReviewResponse.model_validate(row)
