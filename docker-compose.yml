@@ -44,12 +44,28 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/edudb
       - LLM_BASE_URL=http://host.docker.internal:11434/v1
       - DOCUMENTS_STORAGE_ROOT=/data/documents
+      - WORKER_PAGE_READER=${WORKER_PAGE_READER:-0}
     volumes:
       - documents_data:/data/documents
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
+    restart: unless-stopped
+
+  # Optional local embedding service. CPU only; the existing chat engine stays
+  # separate. Enable with --profile local-embeddings and pull bge-m3 once.
+  embeddings:
+    image: ollama/ollama:latest
+    container_name: edullm-embeddings
+    profiles: ["local-embeddings"]
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_VULKAN=0
+    volumes:
+      - embedding_models:/root/.ollama
+    cpus: 4
+    mem_limit: 4g
     restart: unless-stopped
 
   frontend:
@@ -66,3 +82,4 @@ services:
 volumes:
   postgres_data:
   documents_data:
+  embedding_models:

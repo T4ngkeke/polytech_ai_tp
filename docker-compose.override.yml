@@ -1,0 +1,7 @@
+# Untracked. The v6 stable stack now serves port 80, so the v9 beta stack moves
+# to 8080. Everything else keeps its current names, ports and volumes, so the
+# beta stack's existing database and uploaded documents are untouched.
+services:
+  frontend:
+    ports: !override
+      - "8080:80"
