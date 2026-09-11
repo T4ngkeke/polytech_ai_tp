@@ -81,6 +81,19 @@ class UnreadablePage(PageReadError):
     """Model reported lost visual content; do not erase that signal by retrying."""
 
 
+class PageRenderError(PageReadError):
+    """已确认是当前页面或当前裁剪的渲染失败。"""
+
+
+def _page_render_errors():
+    # MuPDF data errors for this page only. Missing files, argument/system errors
+    # and Python programming errors are deliberately not included.
+    import pymupdf
+    m = pymupdf.mupdf
+    return (pymupdf.FileDataError, m.FzErrorFormat, m.FzErrorSyntax, m.FzErrorLimit,
+            m.FzErrorUnsupported, m.FzErrorGeneric)
+
+
 def _extract_native_page(page, number, *, geometry_hints=False):
     lines = []
     # Preserve native spans; do not use sorted plain text which can weave
@@ -123,8 +136,13 @@ def extract_native_pages(path: str, *, geometry_hints=False, isolate_errors=Fals
 
 def render_view(path: str, page: NativePage, ids: list[str] | None, *, bbox=None, with_bounds=False):
     import pymupdf
+    # Opening the whole PDF stays outside the page conversion: a missing or
+    # unreadable file is a document error, not "this picture could not be seen".
     with pymupdf.open(path) as pdf:
-        source = pdf[page.page_no - 1]
+        try:
+            source = pdf.load_page(page.page_no - 1)
+        except _page_render_errors() as exc:
+            raise PageRenderError(f'Page {page.page_no} could not be loaded: {exc}') from exc
         clip = source.rect
         if bbox is not None:
             from backend.worker.visual_harness import _box
@@ -142,7 +160,10 @@ def render_view(path: str, page: NativePage, ids: list[str] | None, *, bbox=None
             raise PageReadError('Crop lies outside the visible page.')
         # Bound both dimensions, including unusually tall pages.
         scale = min(4, (2000 if ids or bbox is not None else 1200) / max(clip.width, clip.height))
-        png = source.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip, alpha=False).tobytes('png')
+        try:
+            png = source.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip, alpha=False).tobytes('png')
+        except _page_render_errors() as exc:
+            raise PageRenderError(f'Page {page.page_no} could not be rendered: {exc}') from exc
         if with_bounds:
             from backend.worker.visual_harness import RenderedView
             return RenderedView(png, tuple(clip))

@@ -351,3 +351,29 @@ async def test_missing_centered_footer_number_is_preserved_by_program(unreadable
     assert calls == 1
     assert result.groups[-1].text == '16'
     assert result.groups[-1].kind == 'navigation'
+
+
+def test_render_view_converts_only_known_page_errors(tmp_path, monkeypatch):
+    import pymupdf
+    from backend.worker.page_reader import PageRenderError, render_view
+    path=tmp_path/'one.pdf'
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((20,40),'native text')
+        pdf.save(path)
+    native=extract_native_pages(str(path))[0]
+    def bad_page(*args,**kwargs):raise pymupdf.mupdf.FzErrorFormat('broken content stream')
+    monkeypatch.setattr(pymupdf.Page,'get_pixmap',bad_page)
+    with pytest.raises(PageRenderError,match='broken content stream'):
+        render_view(str(path),native,None)
+    def bug(*args,**kwargs):raise RuntimeError('programming error')
+    monkeypatch.setattr(pymupdf.Page,'get_pixmap',bug)
+    with pytest.raises(RuntimeError) as caught:
+        render_view(str(path),native,None)
+    assert not isinstance(caught.value,PageReadError)
+    monkeypatch.undo()
+    with pytest.raises(PageReadError) as caught:
+        render_view(str(path),native,['unknown'])
+    assert not isinstance(caught.value,PageRenderError)
+    with pytest.raises(Exception) as caught:
+        render_view(str(tmp_path/'missing.pdf'),native,None)
+    assert not isinstance(caught.value,PageReadError)
