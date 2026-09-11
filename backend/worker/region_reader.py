@@ -18,7 +18,7 @@ from backend.worker.page_reader import (
 )
 from backend.worker.visual_harness import _box, _group, CODE, FIGURE_DESCRIPTION_MAX
 
-VERSION = 'region-reader-v1.9'
+VERSION = 'region-reader-v1.10'
 REASON_CODES = ('content_review', 'budget_exhausted', 'protocol_failure', 'model_request_failure',
                 'extraction_failure', 'render_failure', 'source_geometry_unverified')
 CANDIDATE_MAX = 10000
@@ -46,7 +46,7 @@ preserve the important meaning, not merely say 'a diagram'. Images containing co
 and scans require review. Native characters are copied by the program.
 The program supplies an actual crop of the current range automatically.
 Inspect only when another view is needed.
-Information conveyed only by connections, arrows, position, shape or typography is
+Information conveyed only by connections, arrows, position, shape, color or typography is
 NOT decorative and is NOT preserved by copying labels. Explicitly describe those
 relationships in a figure supplement, or request review if too complex or uncertain.
 Flattened exponents and lost table structure need a supplement or review.

@@ -146,7 +146,7 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
     from backend.worker.region_reader import make_region_reader
     reader=make_region_reader(client,'fake',render_fn=render)
     pages,report=await reader(str(path),prepared_pages=[page()])
-    assert report['version']==VERSION=='region-reader-v1.9'
+    assert report['version']==VERSION=='region-reader-v1.10'
     assert pages[0].reader_version==VERSION
     assert report['page_results'][0]['status']=='partial'
     assert len(report['reviews'])==1
@@ -612,3 +612,8 @@ def test_prompt_is_back_to_the_v16_wording_on_code():
     from backend.worker.region_reader import PROMPT
     assert 'never retype' not in PROMPT.lower()
     assert 'Images containing code' in PROMPT
+
+
+def test_prompt_counts_colour_as_information_to_describe():
+    from backend.worker.region_reader import PROMPT
+    assert 'connections, arrows, position, shape, color or typography' in PROMPT
