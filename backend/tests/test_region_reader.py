@@ -146,7 +146,7 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
     from backend.worker.region_reader import make_region_reader
     reader=make_region_reader(client,'fake',render_fn=render)
     pages,report=await reader(str(path),prepared_pages=[page()])
-    assert report['version']==VERSION=='region-reader-v1.8'
+    assert report['version']==VERSION=='region-reader-v1.9'
     assert pages[0].reader_version==VERSION
     assert report['page_results'][0]['status']=='partial'
     assert len(report['reviews'])==1
@@ -536,7 +536,7 @@ async def test_review_never_changes_native_code_characters_or_indentation():
     assert result.page.groups[0].kind=='code'
 
 
-# --- v1.8: a description line that repeats a native line is not searchable --
+# --- v1.9: repeated lines leave search; code areas keep only the native text --
 
 def code_page():
     lines=(NativeLine('a',(10,10,200,20),'int *tab = malloc(n * sizeof(int ));',char_width=5),
@@ -545,12 +545,19 @@ def code_page():
     return NativePage(1,600,400,lines,(NativeRegion('ra',(5,5,205,40),'drawing'),NativeRegion('rb',(300,10,380,30),'drawing')))
 
 
+def label_page(texts=('Livre', '+ afficher() : void', '+ toString() : String')):
+    lines=tuple(NativeLine(f'l{i}',(10,10+15*i,200,20+15*i),text,char_width=5) for i,text in enumerate(texts))
+    return NativePage(1,600,400,lines+(NativeLine('c',(300,10,380,30),'45'),),
+                      (NativeRegion('ra',(5,5,205,60),'drawing'),NativeRegion('rb',(300,10,380,30),'drawing')))
+
+
 async def code_crop(ids=None,*,bbox=None):
     from backend.worker.visual_harness import RenderedView
-    return RenderedView(b'png',tuple(bbox) if bbox else (0,0,210,45) if ids else (0,0,600,400))
+    return RenderedView(b'png',tuple(bbox) if bbox else (0,0,210,65) if ids else (0,0,600,400))
 
 
 CODE_LAYOUT={'action':'layout','regions':[{'ids':['a','b'],'region_ids':['ra']}],'decorations':['rb']}
+LABEL_LAYOUT={'action':'layout','regions':[{'ids':['l0','l1','l2'],'region_ids':['ra']}],'decorations':['rb']}
 
 
 def figure(content):
@@ -558,42 +565,47 @@ def figure(content):
 
 
 @pytest.mark.asyncio
-async def test_description_lines_repeating_native_lines_are_not_searchable():
-    described=('A box with an allocation example.\n'
-               'int *tab = malloc(n * sizeof(int));\n'
-               '  fprintf(stderr, "plus␣de␣memoire\\n");\n'
-               'The check stops the program when memory is missing.')
+async def test_code_area_keeps_only_the_program_copy_in_search():
+    described='The code calls fprintf(stderr, "plus de memoire\\n"); when malloc fails.'
     result=await run([CODE_LAYOUT,figure(described)],code_page(),render=code_crop)
     assert not result.reviews and result.page.calls==2
     group=result.page.groups[0]
-    assert group.text.startswith('A box with an allocation example.\nThe check stops the program')
-    # The program's copy of the code is still there, exactly once.
-    assert group.text.count('malloc(')==1 and group.text.count('memoire')==1
-    assert 'int *tab = malloc(n * sizeof(int ));' in group.text
-    # The model's full wording stays in the report, outside search.
+    assert group.kind=='code'
+    assert group.text=='int *tab = malloc(n * sizeof(int ));\nfprintf(stderr , "plus␣de␣memoire\\n");'
+    assert 'plus de memoire' not in group.text
+    assert group.visual['model_description']==described and group.visual['description_searchable'] is False
+
+
+@pytest.mark.asyncio
+async def test_uml_member_lines_are_not_code_and_the_description_stays_searchable():
+    result=await run([LABEL_LAYOUT,figure('Class Livre with the shared methods afficher() and toString().')],
+                     label_page(),render=code_crop)
+    group=result.page.groups[0]
+    assert group.kind=='figure' and group.visual['description_searchable'] is True
+    assert group.text.startswith('Class Livre with the shared methods afficher() and toString().\nLivre')
+
+
+@pytest.mark.asyncio
+async def test_description_lines_repeating_native_lines_are_not_searchable():
+    described='A class box.\n+ afficher() : void\n  +toString():String\nBoth methods are shared.'
+    result=await run([LABEL_LAYOUT,figure(described)],label_page(),render=code_crop)
+    group=result.page.groups[0]
+    assert group.text.startswith('A class box.\nBoth methods are shared.\nLivre')
+    assert group.text.count('afficher()')==1
     assert group.visual['model_description']==described
     assert len(group.visual['removed_repeated_lines'])==2
 
 
 @pytest.mark.asyncio
-async def test_code_inside_a_sentence_or_changed_code_is_kept():
-    described='It calls fprintf(stderr, "plus de memoire\\n"); when malloc fails.\nfprintf(stderr, "plus de memoire\\n");'
-    result=await run([CODE_LAYOUT,figure(described)],code_page(),render=code_crop)
-    # Only an exact repeat of a native line is removed; a changed copy is not recognised.
-    assert result.page.groups[0].text.startswith(described)
-    assert result.page.groups[0].visual['removed_repeated_lines']==[]
-
-
-@pytest.mark.asyncio
 async def test_description_that_only_repeats_native_lines_is_returned():
     seen=[]
-    replies=iter([CODE_LAYOUT,figure('int *tab = malloc(n * sizeof(int ));'),figure('A box with an allocation example.')])
+    replies=iter([LABEL_LAYOUT,figure('+ afficher() : void'),figure('A class box with two methods.')])
     async def decide(messages,**kwargs):
         seen.append(messages)
         return next(replies)
-    result=await read_page(code_page(),decide=decide,render=code_crop,max_calls=6)
+    result=await read_page(label_page(),decide=decide,render=code_crop,max_calls=6)
     assert 'only repeats' in json.loads(seen[2][2]['content'])['error']
-    assert result.page.groups[0].text.startswith('A box with an allocation example.')
+    assert result.page.groups[0].text.startswith('A class box with two methods.')
 
 
 def test_prompt_is_back_to_the_v16_wording_on_code():

@@ -18,7 +18,7 @@ from backend.worker.page_reader import (
 )
 from backend.worker.visual_harness import _box, _group, CODE, FIGURE_DESCRIPTION_MAX
 
-VERSION = 'region-reader-v1.8'
+VERSION = 'region-reader-v1.9'
 REASON_CODES = ('content_review', 'budget_exhausted', 'protocol_failure', 'model_request_failure',
                 'extraction_failure', 'render_failure', 'source_geometry_unverified')
 CANDIDATE_MAX = 10000
@@ -118,6 +118,11 @@ def _native(target, page):
     # Native order and coordinate-derived indentation, never model transcription.
     return ReadGroup('code' if any(CODE.search(line.text) for line in lines) else 'text', tuple(line.id for line in lines),
                      _native_group_text(lines, 'code'), tuple(target['region_ids']))
+
+
+def _is_code_line(text):
+    # Statement or block lines only; UML members such as '+ afficher() : void' are not code here.
+    return text.rstrip().endswith((';', '{', '}'))
 
 
 def _drop_repeated_lines(description, target, page):
@@ -336,8 +341,16 @@ async def read_page(page: NativePage, *, decide, render, max_calls=6, file_sha25
                 group = _group(wire, page, {r.id:r for r in page.regions}, {o['id']:o for o in observations})
                 if kind == 'figure':
                     # The model's full wording stays in the report; only `text` is searchable.
-                    group = replace(group, visual={**group.visual, 'model_description': value['content'],
-                                                   'removed_repeated_lines': removed})
+                    lines = [l for l in page.lines if l.id in set(target['ids'])]
+                    code_area = any(_is_code_line(l.text) for l in lines)
+                    visual = {**group.visual, 'model_description': value['content'],
+                              'removed_repeated_lines': removed, 'description_searchable': not code_area}
+                    if code_area:
+                        # An area with code keeps only the program's copy in search, so a
+                        # code line the model retyped (possibly wrongly) cannot be found.
+                        group = replace(group, kind='code', text=_native_group_text(lines, 'code'), visual=visual)
+                    else:
+                        group = replace(group, visual=visual)
                 groups.append(group)
             else:
                 raise PageReadError('Submit supplement or review with its required fields')
