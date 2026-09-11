@@ -146,7 +146,7 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
     from backend.worker.region_reader import make_region_reader
     reader=make_region_reader(client,'fake',render_fn=render)
     pages,report=await reader(str(path),prepared_pages=[page()])
-    assert report['version']==VERSION=='region-reader-v1.7'
+    assert report['version']==VERSION=='region-reader-v1.8'
     assert pages[0].reader_version==VERSION
     assert report['page_results'][0]['status']=='partial'
     assert len(report['reviews'])==1
@@ -536,7 +536,7 @@ async def test_review_never_changes_native_code_characters_or_indentation():
     assert result.page.groups[0].kind=='code'
 
 
-# --- v1.7: native text, code included, is never retyped in a description ----
+# --- v1.8: a description line that repeats a native line is not searchable --
 
 def code_page():
     lines=(NativeLine('a',(10,10,200,20),'int *tab = malloc(n * sizeof(int ));',char_width=5),
@@ -558,32 +558,45 @@ def figure(content):
 
 
 @pytest.mark.asyncio
-async def test_description_that_retypes_native_code_is_returned_to_the_model():
+async def test_description_lines_repeating_native_lines_are_not_searchable():
+    described=('A box with an allocation example.\n'
+               'int *tab = malloc(n * sizeof(int));\n'
+               '  fprintf(stderr, "plus␣de␣memoire\\n");\n'
+               'The check stops the program when memory is missing.')
+    result=await run([CODE_LAYOUT,figure(described)],code_page(),render=code_crop)
+    assert not result.reviews and result.page.calls==2
+    group=result.page.groups[0]
+    assert group.text.startswith('A box with an allocation example.\nThe check stops the program')
+    # The program's copy of the code is still there, exactly once.
+    assert group.text.count('malloc(')==1 and group.text.count('memoire')==1
+    assert 'int *tab = malloc(n * sizeof(int ));' in group.text
+    # The model's full wording stays in the report, outside search.
+    assert group.visual['model_description']==described
+    assert len(group.visual['removed_repeated_lines'])==2
+
+
+@pytest.mark.asyncio
+async def test_code_inside_a_sentence_or_changed_code_is_kept():
+    described='It calls fprintf(stderr, "plus de memoire\\n"); when malloc fails.\nfprintf(stderr, "plus de memoire\\n");'
+    result=await run([CODE_LAYOUT,figure(described)],code_page(),render=code_crop)
+    # Only an exact repeat of a native line is removed; a changed copy is not recognised.
+    assert result.page.groups[0].text.startswith(described)
+    assert result.page.groups[0].visual['removed_repeated_lines']==[]
+
+
+@pytest.mark.asyncio
+async def test_description_that_only_repeats_native_lines_is_returned():
     seen=[]
-    replies=iter([CODE_LAYOUT,
-                  figure('Allocation: int *tab = malloc(n * sizeof(int)); then fprintf(stderr, "plus de memoire\\n");'),
-                  figure('A box with an allocation example and its error check.')])
+    replies=iter([CODE_LAYOUT,figure('int *tab = malloc(n * sizeof(int ));'),figure('A box with an allocation example.')])
     async def decide(messages,**kwargs):
         seen.append(messages)
         return next(replies)
     result=await read_page(code_page(),decide=decide,render=code_crop,max_calls=6)
-    error=json.loads(seen[2][2]['content'])['error']
-    assert 'retype' in error.lower()
-    assert not result.reviews
-    text=result.page.groups[0].text
-    assert text.startswith('A box with an allocation example')
-    assert 'plus de memoire' not in text and text.count('malloc(')==1
-    assert '"plus␣de␣memoire\\n"' in text
+    assert 'only repeats' in json.loads(seen[2][2]['content'])['error']
+    assert result.page.groups[0].text.startswith('A box with an allocation example.')
 
 
-@pytest.mark.asyncio
-async def test_short_identifiers_in_a_description_are_allowed():
-    result=await run([CODE_LAYOUT,figure('Shows how tab is checked against NULL before use.')],
-                     code_page(),render=code_crop)
-    assert not result.reviews and result.page.groups[0].kind=='figure'
-
-
-def test_prompt_forbids_retyping_and_limits_code_review_to_pictures():
+def test_prompt_is_back_to_the_v16_wording_on_code():
     from backend.worker.region_reader import PROMPT
-    assert 'never retype' in PROMPT.lower()
-    assert 'no native text' in PROMPT.lower()
+    assert 'never retype' not in PROMPT.lower()
+    assert 'Images containing code' in PROMPT
