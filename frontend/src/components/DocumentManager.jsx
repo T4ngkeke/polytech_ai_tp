@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
+import DocumentReviews from './DocumentReviews';
 import { ingestReportWarnings } from '../lib/ingestReport';
 
 // Document language selects the BM25 tsvector config; ingest and query sides
@@ -38,6 +39,7 @@ const STATUS_BADGE = {
   pending: 'bg-ink-surface text-cream-muted',
   processing: 'bg-cyan-muted text-cyan',
   indexed: 'bg-emerald-500/15 text-emerald-300',
+  partially_indexed: 'bg-gold-muted text-gold',
   failed: 'bg-danger-muted text-danger',
   needs_review: 'bg-gold-muted text-gold',
 };
@@ -128,6 +130,11 @@ export default function DocumentManager({ labId }) {
     return (
       <DocumentDetail
         document={selected}
+        onRefresh={async () => {
+          const rows = await loadDocuments();
+          const updated = rows.find((row) => row.id === selected.id);
+          if (updated) setSelected(updated);
+        }}
         onBack={() => setSelected(null)}
       />
     );
@@ -175,7 +182,7 @@ export default function DocumentManager({ labId }) {
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
-                  {(doc.status === 'needs_review' || doc.status === 'failed') && (
+                  {(doc.status === 'needs_review' || doc.status === 'failed' || doc.status === 'partially_indexed') && (
                     <span title={doc.error_message || ''} className="text-gold">⚠</span>
                   )}
                 </span>
@@ -211,16 +218,27 @@ function StatusBadge({ status }) {
 }
 
 function SummaryChips({ doc }) {
+  const pages = doc.ingest_report?.page_summary;
+  const reviews = doc.ingest_report?.review_summary;
   return (
     <span className="hidden gap-1 text-xs text-cream-muted sm:flex">
       <span title="pages">📄 {doc.page_count ?? '–'}</span>
       <span title="chunks">🧩 {doc.chunk_count}</span>
+      {pages && <span>{pages.total - pages.missing.length} usable · {pages.missing.length} unavailable</span>}
+      {reviews && <span>{reviews.pending} visual reviews pending</span>}
     </span>
   );
 }
 
 function IngestReport({ report }) {
   const warnings = ingestReportWarnings(report);
+  const summary = report?.page_summary;
+  if (summary) {
+    warnings.push(`${summary.total} pages: ${summary.updated.length} updated, ${summary.retained.length} kept from the previous run, ${summary.missing.length} unavailable.`);
+    for (const page of report?.page_reader?.page_results || []) {
+      if (page.status !== 'updated') warnings.push(`Page ${page.page_no}: ${page.status}. ${page.error || ''}`);
+    }
+  }
   if (warnings.length === 0) return null;
   return (
     <ul className="mt-2 space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
@@ -229,9 +247,10 @@ function IngestReport({ report }) {
   );
 }
 
-function DocumentDetail({ document: doc, onBack }) {
+function DocumentDetail({ document: doc, onBack, onRefresh }) {
   const [chunks, setChunks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [reviewRevision, setReviewRevision] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -241,7 +260,7 @@ function DocumentDetail({ document: doc, onBack }) {
       .catch((err) => toast.error(err.message))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [doc.id]);
+  }, [doc.id, reviewRevision]);
 
   return (
     <div className="space-y-4">
@@ -262,6 +281,11 @@ function DocumentDetail({ document: doc, onBack }) {
         )}
         <IngestReport report={doc.ingest_report} />
       </div>
+
+      <DocumentReviews key={doc.id} documentId={doc.id} onResolved={() => {
+        setReviewRevision((v) => v + 1);
+        onRefresh().catch((err) => toast.error(`Saved, but document summary could not refresh: ${err.message}`));
+      }} />
 
       {loading ? (
         <p className="text-sm text-cream-muted">Loading processing report…</p>
