@@ -146,7 +146,7 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
     from backend.worker.region_reader import make_region_reader
     reader=make_region_reader(client,'fake',render_fn=render)
     pages,report=await reader(str(path),prepared_pages=[page()])
-    assert report['version']==VERSION=='region-reader-v1.6'
+    assert report['version']==VERSION=='region-reader-v1.7'
     assert pages[0].reader_version==VERSION
     assert report['page_results'][0]['status']=='partial'
     assert len(report['reviews'])==1
@@ -534,3 +534,56 @@ async def test_review_never_changes_native_code_characters_or_indentation():
                       review('Picture of code needs a person',candidate_content='if (x) { return 2; }')],p,render=crop)
     assert result.page.groups[0].text=='if (x) {\n    return 1;\n}'
     assert result.page.groups[0].kind=='code'
+
+
+# --- v1.7: native text, code included, is never retyped in a description ----
+
+def code_page():
+    lines=(NativeLine('a',(10,10,200,20),'int *tab = malloc(n * sizeof(int ));',char_width=5),
+           NativeLine('b',(10,25,200,35),'fprintf(stderr , "plus␣de␣memoire\\n");',char_width=5),
+           NativeLine('c',(300,10,380,30),'45'))
+    return NativePage(1,600,400,lines,(NativeRegion('ra',(5,5,205,40),'drawing'),NativeRegion('rb',(300,10,380,30),'drawing')))
+
+
+async def code_crop(ids=None,*,bbox=None):
+    from backend.worker.visual_harness import RenderedView
+    return RenderedView(b'png',tuple(bbox) if bbox else (0,0,210,45) if ids else (0,0,600,400))
+
+
+CODE_LAYOUT={'action':'layout','regions':[{'ids':['a','b'],'region_ids':['ra']}],'decorations':['rb']}
+
+
+def figure(content):
+    return {'action':'submit','outcome':'supplement','kind':'figure','content':content}
+
+
+@pytest.mark.asyncio
+async def test_description_that_retypes_native_code_is_returned_to_the_model():
+    seen=[]
+    replies=iter([CODE_LAYOUT,
+                  figure('Allocation: int *tab = malloc(n * sizeof(int)); then fprintf(stderr, "plus de memoire\\n");'),
+                  figure('A box with an allocation example and its error check.')])
+    async def decide(messages,**kwargs):
+        seen.append(messages)
+        return next(replies)
+    result=await read_page(code_page(),decide=decide,render=code_crop,max_calls=6)
+    error=json.loads(seen[2][2]['content'])['error']
+    assert 'retype' in error.lower()
+    assert not result.reviews
+    text=result.page.groups[0].text
+    assert text.startswith('A box with an allocation example')
+    assert 'plus de memoire' not in text and text.count('malloc(')==1
+    assert '"plus␣de␣memoire\\n"' in text
+
+
+@pytest.mark.asyncio
+async def test_short_identifiers_in_a_description_are_allowed():
+    result=await run([CODE_LAYOUT,figure('Shows how tab is checked against NULL before use.')],
+                     code_page(),render=code_crop)
+    assert not result.reviews and result.page.groups[0].kind=='figure'
+
+
+def test_prompt_forbids_retyping_and_limits_code_review_to_pictures():
+    from backend.worker.region_reader import PROMPT
+    assert 'never retype' in PROMPT.lower()
+    assert 'no native text' in PROMPT.lower()

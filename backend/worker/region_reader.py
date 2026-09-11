@@ -6,6 +6,7 @@ and comparison gates pass. No generated review draft is searchable content.
 from dataclasses import asdict, dataclass
 import asyncio
 import json
+import re
 import time
 
 import pymupdf
@@ -17,7 +18,7 @@ from backend.worker.page_reader import (
 )
 from backend.worker.visual_harness import _box, _group, CODE, FIGURE_DESCRIPTION_MAX
 
-VERSION = 'region-reader-v1.6'
+VERSION = 'region-reader-v1.7'
 REASON_CODES = ('content_review', 'budget_exhausted', 'protocol_failure', 'model_request_failure',
                 'extraction_failure', 'render_failure', 'source_geometry_unverified')
 CANDIDATE_MAX = 10000
@@ -41,8 +42,9 @@ the program appends the printed labels itself), formula or table; review with a 
 reason if important text, relationships or structure cannot be reliably preserved. With review,
 candidate_content may hold your tentative reading (or null); it is shown only to a teacher and is
 never searchable. Do not report confidence numbers. Simple descriptions must
-preserve the important meaning, not merely say 'a diagram'. Images containing code
-and scans require review. Native characters are copied by the program.
+preserve the important meaning, not merely say 'a diagram'. Code that exists only as a picture,
+with no native text, and scans require review. Native characters, code included, are copied by the
+program: never retype them in a supplement; describe only what the picture adds.
 The program supplies an actual crop of the current range automatically.
 Inspect only when another view is needed.
 Information conveyed only by connections, arrows, position, shape or typography is
@@ -117,6 +119,17 @@ def _native(target, page):
     # Native order and coordinate-derived indentation, never model transcription.
     return ReadGroup('code' if any(CODE.search(line.text) for line in lines) else 'text', tuple(line.id for line in lines),
                      _native_group_text(lines, 'code'), tuple(target['region_ids']))
+
+
+def _retyped_code(description, target, page, minimum=12):
+    """Native code lines of this range that reappear in a generated description.
+
+    Spaces are ignored, so a retyped copy with changed spacing is still found.
+    Short identifiers stay allowed.
+    """
+    compact = re.sub(r'\s+', '', description)
+    lines = [l for l in page.lines if l.id in set(target['ids']) and CODE.search(l.text)]
+    return [l.text for l in lines if len(re.sub(r'\s+', '', l.text)) >= minimum and re.sub(r'\s+', '', l.text) in compact]
 
 
 def copy_native_groups(page: NativePage, ids=None) -> tuple[ReadGroup, ...]:
@@ -310,6 +323,11 @@ async def read_page(page: NativePage, *, decide, render, max_calls=6, file_sha25
                     raise PageReadError('Supplement needs kind and content (figure/formula) or rows (table)')
                 if field == 'content' and not isinstance(value[field], str):
                     raise PageReadError('content must be a string')
+                if kind == 'figure':
+                    retyped = _retyped_code(value['content'], target, page)
+                    if retyped:
+                        raise PageReadError('Do not retype native code in the description; the program appends '
+                                            'the original lines itself. Retyped: ' + json.dumps(retyped[:3], ensure_ascii=False))
                 wire = {**target, 'kind': kind, 'observation_ids': [o['id'] for o in observations[-len(views):]],
                         {'figure':'description', 'formula':'latex', 'table':'rows'}[kind]:value[field]}
                 groups.append(_group(wire, page, {r.id:r for r in page.regions}, {o['id']:o for o in observations}))
