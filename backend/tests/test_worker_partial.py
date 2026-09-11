@@ -285,3 +285,166 @@ async def test_uncertain_discovered_source_never_rematches_teacher(db_session,tm
     old=(await _chunks_of(db_session,doc))[0];old.content='teacher exact';old.edited_by_teacher=True;await db_session.commit()
     await ingest_document(db_session,doc.id,embed_fn=fake_embed,page_reader_fn=reader_for([p],failed=(2,3)))
     assert doc.ingest_report['page_summary']['retained']==[1]
+
+
+# --- v3 sources: reruns never overwrite unresolved reviews or teacher work --
+
+from dataclasses import asdict
+from sqlalchemy import select
+from backend.app.models import DocumentReview
+from backend.tests.test_worker_source_integrity import V15, CODE, PICTURE, native_pages
+
+
+async def visual_document(session, tmp_path):
+    import hashlib
+    doc = await _seed_document(session, tmp_path)
+    path, pages = native_pages(tmp_path)
+    doc.storage_path = str(path)
+    doc.content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    await session.commit()
+    return doc, pages
+
+
+def v15(page, *groups):
+    """A v1.5 page: the given visual groups plus every other line copied by PDF block."""
+    from backend.worker.region_reader import copy_native_groups
+    used = {i for g in groups for i in g.ids}
+    rest = copy_native_groups(page, [l.id for l in page.lines if l.id not in used])
+    order = {l.id: i for i, l in enumerate(page.lines)}
+    ordered = sorted((*groups, *rest), key=lambda g: min((order[i] for i in g.ids), default=len(order)))
+    return ReadPage(page, tuple(ordered), 1, reader_version=V15)
+
+
+def figure(page, target, description):
+    from backend.worker.page_reader import _native_group_text
+    labels = _native_group_text([l for l in page.lines if l.id in target['ids']], 'code') if target['ids'] else ''
+    return ReadGroup('figure', tuple(target['ids']), description + ('\n' + labels if labels else ''),
+                     tuple(target['region_ids']))
+
+
+def native_range(page, target):
+    from backend.worker.region_reader import _native
+    return _native(target, page)
+
+
+def review_item(doc, page, target, reason='Arrow unclear', code='content_review'):
+    from backend.worker.region_reader import make_review
+    r = make_review(page, target, reason=reason, reason_code=code, file_sha256=doc.content_hash)
+    return {**asdict(r), 'file_sha256': doc.content_hash}
+
+
+def v15_report(doc, read_pages, reviews=()):
+    reviews = list(reviews)
+    return {'version': V15, 'source_sha256': doc.content_hash, 'page_count': 2, 'reviews': reviews,
+            'page_results': [{'page_no': p.source.page_no,
+                              'status': 'partial' if any(r['page_no'] == p.source.page_no for r in reviews) else 'read'}
+                             for p in read_pages]}
+
+
+async def ingest_v15(session, doc, read_pages, reviews=(), embed=fake_embed):
+    from backend.worker.partial_ingest import ingest_pages
+    await ingest_pages(session, doc, list(read_pages), v15_report(doc, read_pages, reviews),
+                       embed_fn=embed, context_fn=None, token_budget=None)
+
+
+def owner(chunks, line_id):
+    return next(c for c in chunks if line_id in c.source_ref.get('ids', []) and c.source_ref.get('scope') != 'page')
+
+
+@pytest.mark.asyncio
+async def test_pending_review_missing_from_rerun_still_protects_old_content(db_session, tmp_path):
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    await ingest_v15(db_session, doc, [v15(p1, native_range(p1, PICTURE)), v15(p2)], [review_item(doc, p1, PICTURE)])
+    old = owner(await _chunks_of(db_session, doc), 'p1l4')
+    old_id, old_content = old.id, old.content
+    # The next run no longer reports the review and supplies a new visual result.
+    await ingest_v15(db_session, doc, [v15(p1, figure(p1, PICTURE, 'The node points to the next node.')), v15(p2)])
+    chunks = await _chunks_of(db_session, doc)
+    kept = owner(chunks, 'p1l4')
+    assert (kept.id, kept.content) == (old_id, old_content)
+    assert not any('points to' in c.content for c in chunks)
+    assert (await db_session.scalars(select(DocumentReview))).one().status == 'pending'
+
+
+@pytest.mark.asyncio
+async def test_model_wording_change_keeps_teacher_edit_and_id(db_session, tmp_path):
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    await ingest_v15(db_session, doc, [v15(p1, figure(p1, PICTURE, 'First wording.')), v15(p2)])
+    old = owner(await _chunks_of(db_session, doc), 'p1l4')
+    old.content = 'Teacher wording.'; old.edited_by_teacher = True
+    await db_session.commit()
+    identity = old.id
+    await ingest_v15(db_session, doc, [v15(p1, figure(p1, PICTURE, 'Second, different wording.')), v15(p2)])
+    kept = owner(await _chunks_of(db_session, doc), 'p1l4')
+    assert (kept.id, kept.content) == (identity, 'Teacher wording.')
+    assert kept.source_ref['version'] == 3
+    assert doc.ingest_report['page_summary']['updated'] == [1, 2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['split', 'merge', 'resplit'])
+async def test_regrouped_or_resplit_source_never_moves_teacher_edit(db_session, tmp_path, change):
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    long = lambda word: ''.join(f'{word} sentence {i} about the linked list.\n' for i in range(80))
+    first = figure(p1, PICTURE, long('First') if change == 'resplit' else 'Two linked nodes.')
+    await ingest_v15(db_session, doc, [v15(p1, first), v15(p2)])
+    rows = sorted([c for c in await _chunks_of(db_session, doc) if 'p1l4' in c.source_ref['ids']],
+                  key=lambda c: c.source_ref['part'])
+    edited = rows[-1]
+    edited.content = 'Teacher part.'; edited.edited_by_teacher = True
+    await db_session.commit()
+    identity = edited.id
+    if change == 'split':
+        groups = [figure(p1, {'ids': ['p1l4'], 'region_ids': ['p1r0']}, 'One node.'),
+                  native_range(p1, {'ids': ['p1l5'], 'region_ids': []})]
+    elif change == 'merge':
+        groups = [figure(p1, {'ids': ['p1l4', 'p1l5', 'p1l6'], 'region_ids': ['p1r0']}, 'Nodes and a number.')]
+    else:
+        groups = [figure(p1, PICTURE, long('Second'))]
+    await ingest_v15(db_session, doc, [v15(p1, *groups), v15(p2)])
+    kept = next(c for c in await _chunks_of(db_session, doc) if c.id == identity)
+    assert kept.content == 'Teacher part.'
+    assert doc.ingest_report['page_summary']['retained'] == [1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scope', ['range', 'page'])
+async def test_ignored_visual_is_not_restored_on_rerun_v3(db_session, tmp_path, scope):
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    target = PICTURE if scope == 'range' else {'ids': [l.id for l in p1.lines], 'region_ids': ['p1r0'], 'scope': 'page'}
+    await ingest_v15(db_session, doc, [v15(p1, *([native_range(p1, PICTURE)] if scope == 'range' else [])), v15(p2)],
+                     [review_item(doc, p1, target)])
+    row = (await db_session.scalars(select(DocumentReview))).one()
+    row.status = 'ignored'; row.revision += 1
+    await db_session.commit()
+    await ingest_v15(db_session, doc, [v15(p1, figure(p1, PICTURE, 'Generated interpretation.')), v15(p2)])
+    chunks = await _chunks_of(db_session, doc)
+    assert not any('Generated' in c.content for c in chunks)
+    assert 'Node' in owner(chunks, 'p1l4').content
+    assert row.status == 'ignored'
+
+
+@pytest.mark.asyncio
+async def test_new_review_overlapping_old_review_keeps_page_and_adds_no_task(db_session, tmp_path):
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    small = {'ids': ['p1l4'], 'region_ids': []}
+    await ingest_v15(db_session, doc, [v15(p1, native_range(p1, small)), v15(p2)], [review_item(doc, p1, small)])
+    before = {(c.id, c.content) for c in await _chunks_of(db_session, doc) if c.page_no == 1}
+    await ingest_v15(db_session, doc, [v15(p1, native_range(p1, PICTURE)), v15(p2)], [review_item(doc, p1, PICTURE)])
+    assert {(c.id, c.content) for c in await _chunks_of(db_session, doc) if c.page_no == 1} == before
+    assert len((await db_session.scalars(select(DocumentReview))).all()) == 1
+    page = doc.ingest_report['page_reader']['page_results'][0]
+    assert page['status'] == 'retained' and 'review_source_conflict' in page['error']
+
+
+@pytest.mark.asyncio
+async def test_reviews_without_chunks_still_refuse_another_file(db_session, tmp_path):
+    from backend.app.services.document_reviews import register_reviews
+    from backend.worker.ingest import TeacherEditConflict
+    doc, (p1, p2) = await visual_document(db_session, tmp_path)
+    await register_reviews(db_session, doc, [review_item(doc, p1, PICTURE)])
+    await db_session.commit()
+    doc.content_hash = 'b' * 64
+    with pytest.raises(TeacherEditConflict, match='Source file changed'):
+        await ingest_v15(db_session, doc, [v15(p1), v15(p2)])
+    assert not await _chunks_of(db_session, doc)

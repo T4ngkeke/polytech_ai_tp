@@ -152,7 +152,8 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
     assert len(report['reviews'])==1
     assert report['reviews'][0]['reason_code']=='content_review'
     assert len(pages[0].groups)==2
-    assert all(c.source_ref['version']==2 for c in chunk_read_pages(pages))
+    assert all(c.source_ref['version']==3 for c in chunk_read_pages(pages,file_sha256=report['source_sha256']))
+    assert report['reviews'][0]['source_ref']['version']==3
 
 
 @pytest.mark.asyncio

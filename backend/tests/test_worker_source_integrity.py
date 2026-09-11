@@ -1,5 +1,6 @@
 """Regression cases for source loss, incorrect edits and incomplete indexing."""
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -338,3 +339,142 @@ def test_markdown_paging_preserves_leading_code_indentation():
 def test_heading_path_stays_within_database_limit_on_following_pages():
     chunks = chunk_pages(["# " + "A" * 600 + "\nFirst", "Continuation"])
     assert all(len(chunk.section) <= 512 for chunk in chunks)
+
+
+# --- v3: one source definition shared by chunks and review records ---------
+
+V15 = 'region-reader-v1.5'
+
+
+def visual_pdf(path):
+    """Heading, a code block split over two PDF blocks, a two-box picture and a formula."""
+    import pymupdf
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        page.insert_text((40, 40), 'Pointers', fontsize=14)
+        page.insert_text((40, 80), 'if (x) {', fontname='cour', fontsize=10)
+        page.insert_text((64, 94), 'return 1;', fontname='cour', fontsize=10)
+        page.insert_text((40, 108), '}', fontname='cour', fontsize=10)
+        page.draw_rect(pymupdf.Rect(300, 60, 380, 100))
+        page.insert_text((310, 85), 'Node', fontsize=10)
+        page.draw_line((380, 80), (450, 80))
+        page.draw_rect(pymupdf.Rect(450, 60, 530, 100))
+        page.insert_text((460, 85), 'Next', fontsize=10)
+        page.insert_text((40, 200), '2', fontsize=10)
+        page.insert_text((48, 195), '64', fontsize=6)
+        page.insert_text((58, 200), '- 1', fontsize=10)
+        pdf.new_page().insert_text((40, 40), 'second page text')
+        pdf.save(path)
+    return path
+
+
+def native_pages(tmp_path):
+    from backend.worker.page_reader import extract_native_pages
+    path = visual_pdf(tmp_path / 'visual.pdf')
+    return path, extract_native_pages(str(path), geometry_hints=True, isolate_errors=True)
+
+
+CODE = {'ids': ['p1l1', 'p1l2', 'p1l3'], 'region_ids': []}
+PICTURE = {'ids': ['p1l4', 'p1l5'], 'region_ids': ['p1r0']}
+
+
+def test_v3_group_identity_ignores_order_screenshot_and_split_fields(tmp_path):
+    from backend.worker.visual_sources import build_source_ref, source_chunk_key, source_group_key, compare_sources
+    _, pages = native_pages(tmp_path)
+    page, sha = pages[0], 'f' * 64
+    a = build_source_ref(page, ['p1l5', 'p1l4'], ['p1r0'], file_sha256=sha)
+    b = build_source_ref(page, ['p1l4', 'p1l5'], ['p1r0'], file_sha256=sha)
+    assert a == b and a['version'] == 3 and a['file_sha256'] == sha and a['page_no'] == 1
+    assert a['regions'] == [{'id': 'p1r0', 'signature': page.regions[0].signature}]
+    assert a['source_ranges'] == [['p1l4', 0, 4], ['p1l5', 0, 4]]
+    assert compare_sources(a, b) == 'exact'
+    aux = {'part': 1, 'parts': 3, 'split_signature': 'x', 'group_id': 'y', 'previous_part': 0,
+           'next_part': 2, 'kind': 'figure', 'observation': [1, 2, 3, 4]}
+    assert source_group_key(a) == source_group_key({**a, **aux})
+    first = {**a, 'part': 0, 'parts': 2}
+    assert source_chunk_key(first, 'Node\nNext') == source_chunk_key({**first, 'group_id': 'z', 'kind': 'text',
+                                                                      'split_signature': 's'}, 'Node\nNext')
+    assert source_chunk_key(first, 'Node\nNext') != source_chunk_key({**first, 'part': 1}, 'Node\nNext')
+    assert source_chunk_key(first, 'Node\nNext') != source_chunk_key(first, 'changed')
+
+
+def test_v3_review_and_chunk_of_the_same_range_are_the_same_source(tmp_path):
+    from backend.worker.page_reader import ReadPage, chunk_read_pages
+    from backend.worker.region_reader import _native, make_review
+    from backend.worker.visual_sources import compare_sources, source_group_key
+    _, pages = native_pages(tmp_path)
+    page, sha = pages[0], 'f' * 64
+    review = make_review(page, PICTURE, reason='Arrow unclear', reason_code='content_review', file_sha256=sha)
+    chunk = chunk_read_pages([ReadPage(page, (_native(PICTURE, page),), 1, reader_version=V15)], file_sha256=sha)[0]
+    assert compare_sources(chunk.source_ref, review.source_ref) == 'exact'
+    assert chunk.source_ref['group_id'] == source_group_key(review.source_ref)
+    whole = make_review(page, {'ids': [l.id for l in page.lines], 'region_ids': ['p1r0'], 'scope': 'page'},
+                        reason='Preview failed', reason_code='render_failure', file_sha256=sha)
+    assert whole.source_ref['scope'] == 'page'
+    assert compare_sources(chunk.source_ref, whole.source_ref) == 'overlap'
+
+
+def test_pictures_without_text_never_match_each_other():
+    from backend.worker.page_reader import NativeLine, NativePage, NativeRegion
+    from backend.worker.visual_sources import build_source_ref, compare_sources, source_group_key
+    page = NativePage(1, 600, 400, (NativeLine('t', (10, 300, 50, 310), 'x'),),
+                      (NativeRegion('ra', (10, 10, 80, 30), 'drawing', signature='A'),
+                       NativeRegion('rb', (300, 10, 380, 30), 'drawing', signature='B')))
+    a = build_source_ref(page, [], ['ra'], file_sha256='f' * 64)
+    b = build_source_ref(page, [], ['rb'], file_sha256='f' * 64)
+    assert compare_sources(a, b) == 'disjoint'
+    assert source_group_key(a) != source_group_key(b)
+    redrawn = replace(page, regions=(NativeRegion('ra', (10, 10, 80, 30), 'drawing', signature='C'),))
+    assert compare_sources(a, build_source_ref(redrawn, [], ['ra'], file_sha256='f' * 64)) == 'uncertain'
+
+
+def test_compare_sources_says_uncertain_when_evidence_is_missing(tmp_path):
+    from backend.worker.visual_sources import build_source_ref, compare_sources
+    _, pages = native_pages(tmp_path)
+    page, sha = pages[0], 'f' * 64
+    one = build_source_ref(page, ['p1l4'], [], file_sha256=sha)
+    two = build_source_ref(page, ['p1l4', 'p1l5'], ['p1r0'], file_sha256=sha)
+    assert compare_sources(one, two) == 'overlap'
+    assert compare_sources(one, build_source_ref(page, ['p1l6'], [], file_sha256=sha)) == 'disjoint'
+    assert compare_sources(one, build_source_ref(pages[1], ['p2l0'], [], file_sha256=sha)) == 'disjoint'
+    assert compare_sources(one, {**one, 'file_sha256': 'e' * 64}) == 'uncertain'
+    assert compare_sources(one, {**one, 'identity_uncertain': True}) == 'uncertain'
+    assert compare_sources(one, None) == 'uncertain'
+    assert compare_sources(build_source_ref(page, [], [], file_sha256=sha), one) == 'uncertain'
+    legacy = {'version': 1, 'file_sha256': sha, 'page_no': 1, 'ids': ['p1l4', 'p1l5'], 'regions': ['p1r0']}
+    assert compare_sources(legacy, two) == 'uncertain'
+    assert compare_sources({**two, 'scope': 'page'}, two) == 'overlap'
+
+
+def test_legacy_source_migrates_only_when_proven(tmp_path):
+    from backend.worker.visual_sources import build_source_ref, match_legacy_source
+    _, pages = native_pages(tmp_path)
+    page, sha = pages[0], 'f' * 64
+    signature = page.regions[0].signature
+    new = {**build_source_ref(page, ['p1l4', 'p1l5'], ['p1r0'], file_sha256=sha), 'part': 0, 'parts': 1}
+    v2 = {'version': 2, 'file_sha256': sha, 'page_no': 1, 'ids': ['p1l5', 'p1l4'], 'regions': ['p1r0:' + signature],
+          'source_ranges': [['p1l4', 0, 4], ['p1l5', 0, 4]], 'part': 0, 'parts': 1, 'identity_uncertain': False}
+    text = 'Node\nNext'
+    assert match_legacy_source(v2, new, old_source_text=text, new_source_text=text)
+    assert not match_legacy_source(v2, new, old_source_text=None, new_source_text=text)
+    assert not match_legacy_source(v2, new, old_source_text='teacher rewrote this', new_source_text=text)
+    assert not match_legacy_source({**v2, 'regions': ['p1r0:other']}, new, old_source_text=text, new_source_text=text)
+    assert not match_legacy_source({**v2, 'identity_uncertain': True}, new, old_source_text=text, new_source_text=text)
+    assert not match_legacy_source(v2, {**new, 'identity_uncertain': True}, old_source_text=text, new_source_text=text)
+    assert not match_legacy_source({**v2, 'parts': 2}, new, old_source_text=text, new_source_text=text)
+    v1 = {'version': 1, 'file_sha256': sha, 'page_no': 1, 'ids': ['p1l4', 'p1l5'], 'regions': ['p1r0'],
+          'source_ranges': [['p1l4', 0, 4], ['p1l5', 0, 4]], 'part': 0, 'parts': 1}
+    assert match_legacy_source(v1, new, old_source_text=text, new_source_text=text)
+    assert not match_legacy_source({**v1, 'regions': ['p1v0']}, new, old_source_text=text, new_source_text=text)
+
+
+def test_only_v15_pages_use_v3_sources(tmp_path):
+    from backend.worker.page_reader import ReadPage, chunk_read_pages
+    from backend.worker.region_reader import copy_native_groups
+    _, pages = native_pages(tmp_path)
+    groups = copy_native_groups(pages[0])
+    old = chunk_read_pages([ReadPage(pages[0], groups, 1, reader_version='region-reader-v1.4')])
+    new = chunk_read_pages([ReadPage(pages[0], groups, 1, reader_version=V15)], file_sha256='f' * 64)
+    assert {c.source_ref['version'] for c in old} == {2}
+    assert {c.source_ref['version'] for c in new} == {3}
+    assert {c.source_ref['file_sha256'] for c in new} == {'f' * 64}

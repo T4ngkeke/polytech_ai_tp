@@ -349,7 +349,8 @@ async def read_page(page: NativePage, *, decide, render, max_calls: int = 3) -> 
     raise PageReadError(f'Page {page.page_no}, {max_calls} calls exhausted: {last_error}')
 
 
-def _chunk_items(pages: list[ReadPage]):
+def _chunk_items(pages: list[ReadPage], file_sha256=None):
+    from backend.worker.visual_sources import build_source_ref, source_group_key, source_ref, uses_v3
     index = 0
     for page in pages:
         section = None
@@ -366,13 +367,17 @@ def _chunk_items(pages: list[ReadPage]):
                            'ids': sorted(group.ids), 'regions': sorted(group.region_ids),
                            'source_ranges': [[i, 0, len(lookup[i].text)] for i in sorted(group.ids)],
                            'part': 0, 'parts': len(parts)}
-                    if page.reader_version.startswith(('visual-harness-v4', 'region-reader-')):
-                        from backend.worker.visual_sources import source_ref
+                    if uses_v3(page.reader_version):
+                        ref = {**build_source_ref(page.source, group.ids, group.region_ids, file_sha256=file_sha256),
+                               'part': 0, 'parts': len(parts)}
+                        source_text = '\n'.join(line.text for line in page.source.lines if line.id in ref['ids'])
+                    elif page.reader_version.startswith(('visual-harness-v4', 'region-reader-')):
                         ref = source_ref(page.source, group, len(parts))
                         source_text = '\n'.join(line.text for line in page.source.lines if line.id in ref['ids'])
                     # Single-part source identity never depends on visual text.
                     ref['part'] = next(i for i in range(len(parts)) if sum(map(len,parts[:i])) == offset)
-                    ref['group_id'] = hashlib.sha256(json.dumps([page.source.page_no, ref['ids'], ref['regions']]).encode()).hexdigest()
+                    ref['group_id'] = (source_group_key(ref) if ref['version'] == 3 else
+                                       hashlib.sha256(json.dumps([page.source.page_no, ref['ids'], ref['regions']]).encode()).hexdigest())
                     ref['previous_part'] = ref['part']-1 if ref['part'] else None
                     ref['next_part'] = ref['part']+1 if ref['part']+1<len(parts) else None
                     if len(parts)>1:
@@ -386,8 +391,8 @@ def _chunk_items(pages: list[ReadPage]):
                 offset += len(text)
 
 
-def chunk_read_pages(pages: list[ReadPage]) -> list[Chunk]:
-    return [chunk for chunk, _ in _chunk_items(pages)]
+def chunk_read_pages(pages: list[ReadPage], file_sha256=None) -> list[Chunk]:
+    return [chunk for chunk, _ in _chunk_items(pages, file_sha256)]
 
 
 async def read_visual_page(page, *, decide, render, max_calls=6, harness='v4', group_correction=True):

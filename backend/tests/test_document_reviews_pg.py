@@ -65,3 +65,28 @@ async def test_partial_review_content_search_is_course_scoped(pg_session,tmp_pat
     assert await bm25_search(pg_session,'allocation',doc.lab_id,class_id=doc.class_id)
     assert not await bm25_search(pg_session,'unverifiedgiraffe',doc.lab_id,class_id=doc.class_id)
     assert not await bm25_search(pg_session,'allocation',other.lab_id,class_id=other.class_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_range_confirmation_embeds_outside_lock_and_publishes_once(pg_session,tmp_path):
+    from backend.tests.test_document_reviews import indexed_visual
+    from backend.tests.test_worker_source_integrity import CODE
+    doc,_,row=await indexed_visual(pg_session,tmp_path,CODE,embed=_fixed_embed)
+    doc_id,review_id,teacher_id=doc.id,row.id,doc.uploaded_by
+    factory=async_sessionmaker(pg_session.bind,expire_on_commit=False)
+    async def submit(content):
+        async with factory() as db:
+            current=await db.get(Document,doc_id)
+            try:
+                await resolve_review(db,current,review_id,revision=1,status='confirmed',content=content,
+                                     teacher_id=teacher_id,embed_fn=_fixed_embed)
+                return 'saved'
+            except ReviewConflict:
+                await db.rollback()
+                return 'conflict'
+    results=await asyncio.wait_for(asyncio.gather(submit('first explanation'),submit('second explanation')),20)
+    assert sorted(results)==['conflict','saved']
+    await pg_session.refresh(row)
+    code=[c for c in (await pg_session.scalars(select(DocChunk).where(DocChunk.document_id==doc_id))).all()
+          if 'return 1;' in c.content]
+    assert len(code)==1 and code[0].content==row.final_content+'\nif (x) {\n    return 1;\n}'

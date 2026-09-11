@@ -12,6 +12,33 @@ def snapshot(row):
     return (row.id, row.content, row.edited_by_teacher, row.source_fingerprint, row.context)
 
 
+def review_item_ref(item):
+    """The report's program-built v3 source, or the legacy v1 form of older reports."""
+    return item.get('source_ref') or {'version': 1, 'file_sha256': item['file_sha256'], 'page_no': item['page_no'],
+                                      'ids': sorted(item['ids']), 'regions': sorted(item['region_ids'])}
+
+
+def _group_ref(page, group, digest):
+    from backend.worker.visual_sources import build_source_ref, uses_v3
+    if uses_v3(page.reader_version):
+        return build_source_ref(page.source, group.ids, group.region_ids, file_sha256=digest)
+    return {'version': 1, 'file_sha256': digest, 'page_no': page.source.page_no,
+            'ids': sorted(group.ids), 'regions': sorted(group.region_ids)}
+
+
+def _protects(row_ref, status, review_ref):
+    """Unresolved or teacher-confirmed reviews keep the old index of their source.
+
+    A confirmed page-level review owns only the teacher's own page note, never the
+    native blocks of that page. Anything not provably disjoint stays protected.
+    """
+    from backend.worker.visual_sources import compare_sources
+    state = compare_sources(row_ref, review_ref)
+    if review_ref.get('scope') == 'page' and status == 'confirmed':
+        return state == 'exact'
+    return state != 'disjoint'
+
+
 async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_budget):
     from backend.worker.ingest import (_source_fingerprint, _context_scope, _augmented,
         _embed_batches, _tsv_value, _estimate_tokens, TeacherEditConflict, EmbeddingResultError)
@@ -25,16 +52,25 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
     for review in review_items:
         reviews_by_page.setdefault(review['page_no'], []).append(review)
     review_before = {}
-    ignored_by_page = {}
+    db_reviews_by_page = {}
     if has_review_protocol:
         from backend.app.models import DocumentReview
         records = list((await db.scalars(select(DocumentReview).where(DocumentReview.document_id == doc.id))).all())
         if any(row.file_sha256 != digest for row in records):
             raise TeacherEditConflict('Source file changed; upload it as a new document.')
         for row in records:
-            if row.status == 'ignored':
-                ignored_by_page.setdefault(row.page_no, []).append(row.source_ref)
+            db_reviews_by_page.setdefault(row.page_no, []).append((row.status, row.source_ref))
             review_before.setdefault(row.page_no, []).append((str(row.id), row.revision, row.status))
+    from backend.worker.visual_sources import compare_sources, legacy_match
+    # Visual questions already answered "no index needed" for a whole page are not asked again.
+    ignored_pages = {n for n, rows in db_reviews_by_page.items()
+                     if any(s == 'ignored' and ref.get('scope') == 'page' for s, ref in rows)}
+    # A new review may repeat an existing one exactly, or be clearly separate. A
+    # partial overlap is never guessed: no overlapping task is created, the page stays.
+    review_conflicts = {n for n, items in reviews_by_page.items() if n not in ignored_pages
+                        for ref in map(review_item_ref, items) for status, old_ref in db_reviews_by_page.get(n, [])
+                        if (status == 'pending' or old_ref.get('scope') != 'page')
+                        and compare_sources(ref, old_ref) in ('overlap', 'uncertain')}
     preserved = {}
     old_report = doc.ingest_report or {}
     old_hash = old_report.get('page_reader', {}).get('source_sha256')
@@ -59,56 +95,55 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
             outcomes[n] = dict(page_no=n, status='not_processed', error='Three consecutive service failures')
             continue
         try:
-            if ignored_by_page.get(n):
+            db_reviews = db_reviews_by_page.get(n, [])
+            run_refs = [] if n in ignored_pages else [review_item_ref(r) for r in reviews_by_page.get(n, [])]
+            if n in review_conflicts:
+                raise TeacherEditConflict('review_source_conflict: new review overlaps an existing review; keep previous page')
+            ignored = [ref for status, ref in db_reviews if status == 'ignored']
+            if ignored:
                 from backend.worker.page_reader import _native_group_text
                 groups = []
                 for group in page.groups:
                     if group.kind in ('text', 'code'):
                         groups.append(group)
                         continue
-                    ids, regions = set(group.ids), set(group.region_ids)
-                    overlaps = [ref for ref in ignored_by_page[n]
-                                if ids & set(ref['ids']) or regions & set(ref['regions'])]
-                    if not overlaps:
+                    group_ref = _group_ref(page, group, digest)
+                    hit = False
+                    for ref in ignored:
+                        state = compare_sources(group_ref, ref)
+                        if state == 'disjoint':
+                            continue
+                        if state != 'exact' and ref.get('scope') != 'page':
+                            raise TeacherEditConflict('review_source_conflict: ignored visual now crosses other sources; keep previous page')
+                        hit = True
+                    if not hit:
                         groups.append(group)
-                        continue
-                    allowed_ids = {i for ref in overlaps for i in ref['ids']}
-                    allowed_regions = {r for ref in overlaps for r in ref['regions']}
-                    if not ids <= allowed_ids or not regions <= allowed_regions:
-                        raise TeacherEditConflict('Ignored visual now crosses other sources; keep previous page')
-                    if ids:
-                        lines = [line for line in page.source.lines if line.id in ids]
+                    elif group.ids:
+                        # Only the visual part is ignored; the native text stays searchable.
+                        lines = [line for line in page.source.lines if line.id in set(group.ids)]
                         groups.append(replace(group, kind='text', text=_native_group_text(lines, 'code')))
                 page = replace(page, groups=tuple(groups))
-            chunks = chunk_read_pages([page])
+            chunks = chunk_read_pages([page], file_sha256=digest)
             if not chunks:
                 raise PageReadError('No searchable content')
             chunks = [replace(c, source_ref={**(c.source_ref or {}), 'file_sha256': digest}) for c in chunks]
             keys = [_source_fingerprint(c) for c in chunks]
             counts = Counter(keys)
             previous = by_page.get(n, [])
-            keep = []
-            for row in previous:
-                for review in reviews_by_page.get(n, []):
-                    ref = row.source_ref or {}
-                    if not ref:
-                        raise TeacherEditConflict('Cannot locate review in legacy page; keep previous page')
-                    ids, regions = set(ref.get('ids', [])), {r.split(':', 1)[0] for r in ref.get('regions', [])}
-                    if ids & set(review['ids']) or regions & set(review['region_ids']) or not (review['ids'] or review['region_ids']):
-                        keep.append(row)
-                        break
-            # Preserve existing text/embedding for unresolved sources. New chunks
-            # can be discarded only when fully covered by those kept sources.
-            keep_ids = {i for row in keep for i in (row.source_ref or {}).get('ids', [])}
-            keep_regions = {r.split(':', 1)[0] for row in keep for r in (row.source_ref or {}).get('regions', [])}
+            # Database reviews still pending or confirmed, plus this run's reviews,
+            # decide which old sources keep their existing text and embedding.
+            protecting = [(s, ref) for s, ref in db_reviews if s in ('pending', 'confirmed')]
+            protecting += [('pending', ref) for ref in run_refs]
+            keep = [row for row in previous if any(_protects(row.source_ref, s, ref) for s, ref in protecting)]
+            # A new chunk is dropped only when an old kept source is exactly the same.
+            # A teacher's page note owns no native line and never covers new chunks.
+            owners = [row for row in keep if (row.source_ref or {}).get('scope') != 'page']
             fresh = []
             for c in chunks:
-                ids = set(c.source_ref.get('ids', []))
-                regions = {r.split(':', 1)[0] for r in c.source_ref.get('regions', [])}
-                if ids & keep_ids or regions & keep_regions:
-                    if not ids <= keep_ids or not regions <= keep_regions:
-                        raise TeacherEditConflict('Review crosses newly grouped sources; keep previous page')
-                else:
+                states = {compare_sources(c.source_ref, row.source_ref) for row in owners}
+                if states & {'overlap', 'uncertain'}:
+                    raise TeacherEditConflict('Review crosses newly grouped sources; keep previous page')
+                if 'exact' not in states:
                     fresh.append(c)
             chunks = fresh
             keys = [_source_fingerprint(c) for c in chunks]
@@ -126,7 +161,6 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
                     target = next(keys[i] for i,c in enumerate(chunks)
                                   if _source_fingerprint(replace(c, content=c.source_text or '', source_text=None, source_ref=None)) == key)
                 if target is None and row.source_ref:
-                    from backend.worker.visual_sources import legacy_match
                     proven = [(k,c) for k,c in zip(keys,chunks) if counts[k]==1 and legacy_match(row,c)]
                     if len(proven)==1:
                         k,c=proven[0]
@@ -221,7 +255,9 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
     if has_review_protocol:
         from backend.app.services.document_reviews import register_reviews
         from backend.app.models import DocumentReview
-        await register_reviews(db, doc, [r for r in review_items if r['page_no'] not in review_changed])
+        # Pages with a source conflict register nothing; the old record stays the task.
+        await register_reviews(db, doc, [r for r in review_items if r['page_no'] not in review_changed
+                                         and r['page_no'] not in review_conflicts and r['page_no'] not in ignored_pages])
         review_rows = list((await db.scalars(select(DocumentReview).where(DocumentReview.document_id == doc.id))).all())
         pending = sum(r.status == 'pending' for r in review_rows)
         review_summary = {state: sum(r.status == state for r in review_rows) for state in ('pending', 'confirmed', 'ignored')}

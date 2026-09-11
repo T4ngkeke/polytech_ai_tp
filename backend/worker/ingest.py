@@ -96,6 +96,9 @@ def _augmented(context: str | None, content: str) -> str:
 def _source_fingerprint(chunk) -> str:
     """Identify the source text and heading, independently of its current index."""
     ref = getattr(chunk, 'source_ref', None)
+    if ref is not None and ref.get('version') == 3:
+        from backend.worker.visual_sources import source_chunk_key
+        return source_chunk_key(ref, getattr(chunk, 'source_text', None))
     if ref is not None:
         ref = {k:v for k,v in ref.items() if k != 'split_signature'}
         ref = {**ref, 'ids': sorted(ref.get('ids', [])), 'regions': sorted(ref.get('regions', []))}

@@ -127,8 +127,14 @@ def copy_native_groups(page: NativePage, ids=None) -> tuple[ReadGroup, ...]:
     return tuple(_native({'ids': block, 'region_ids': []}, page) for block in blocks.values())
 
 
-def make_review(page: NativePage, target, *, reason, reason_code, candidate_content=None) -> Review:
-    """One record format for every review path: bounds, source IDs, cleaned candidate."""
+def make_review(page: NativePage, target, *, reason, reason_code, candidate_content=None,
+                file_sha256=None) -> Review:
+    """One record format for every review path: bounds, source, cleaned candidate.
+
+    The source reference comes from the shared v3 function when the file hash is
+    known; it is never taken from the model. target['scope']=='page' marks a
+    review with no trusted local range.
+    """
     if reason_code not in REASON_CODES:
         raise ValueError(f'Unknown review reason code: {reason_code}')
     if not isinstance(reason, str) or not reason.strip():
@@ -139,8 +145,13 @@ def make_review(page: NativePage, target, *, reason, reason_code, candidate_cont
             raise ValueError(f'Candidate content must be text of at most {CANDIDATE_MAX} characters')
         # Reasoning text is never a candidate; an unclosed reasoning block yields nothing.
         candidate = _final_part(candidate_content) or None
+    ref = None
+    if file_sha256 is not None:
+        from backend.worker.visual_sources import build_source_ref
+        ref = build_source_ref(page, target['ids'], target['region_ids'], file_sha256=file_sha256,
+                               scope=target.get('scope', 'range'))
     return Review(page.page_no, tuple(target['ids']), tuple(target['region_ids']),
-                  _bounds(target, page), reason.strip(), candidate, reason_code)
+                  _bounds(target, page), reason.strip(), candidate, reason_code, ref)
 
 
 def _review_submit(value):
@@ -155,7 +166,7 @@ def _review_submit(value):
     return reason.strip(), candidate
 
 
-async def read_page(page: NativePage, *, decide, render, max_calls=6):
+async def read_page(page: NativePage, *, decide, render, max_calls=6, file_sha256=None):
     if not 1 <= max_calls <= 6:
         raise ValueError('max_calls must be 1..6')
     targets = None
@@ -163,17 +174,18 @@ async def read_page(page: NativePage, *, decide, render, max_calls=6):
     groups, reviews, observations, trace = [], [], [], []
     decorations = []
     error = request_failed = None
-    fallback ={'ids': [l.id for l in page.lines], 'region_ids': [r.id for r in page.regions]}
+    fallback = {'ids': [l.id for l in page.lines], 'region_ids': [r.id for r in page.regions], 'scope': 'page'}
 
     def review_range(target, reason, code, candidate=None):
         # A selected range keeps its native text as ONE group, matching its review.
-        reviews.append(make_review(page, target, reason=reason, reason_code=code, candidate_content=candidate))
+        reviews.append(make_review(page, target, reason=reason, reason_code=code, candidate_content=candidate,
+                                   file_sha256=file_sha256))
         if target['ids']:
             groups.append(_native(target, page))
 
     def review_page(reason, code):
         # No trusted range exists: page-level review, native text copied by PDF block.
-        reviews.append(make_review(page, fallback, reason=reason, reason_code=code))
+        reviews.append(make_review(page, fallback, reason=reason, reason_code=code, file_sha256=file_sha256))
         groups.extend(copy_native_groups(page))
 
     def result(failure_kind=None):
@@ -393,7 +405,7 @@ def make_region_reader(client, model, *, render_fn=None):
                     return await render_fn(ids,bbox=bbox)
                 return render_observation(path,page,ids,bbox=bbox)
             started=time.monotonic()
-            result=await read_page(page,decide=decide,render=render)
+            result=await read_page(page,decide=decide,render=render,file_sha256=digest)
             # A page without any model request neither breaks nor extends the failure streak.
             if result.failure_kind=='model_request_failure':
                 failures+=1
