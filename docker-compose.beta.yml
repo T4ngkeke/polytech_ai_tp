@@ -45,7 +45,11 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     ports:
-      - "${BETA_BIND_IP:-127.0.0.1}:${BETA_HTTP_PORT:-18080}:80"
+      - "127.0.0.1:${BETA_HTTP_PORT:-18080}:80"
+      - "${BETA_LAN_IP:?Set the authorized LAN IP}:${BETA_HTTPS_PORT:-18443}:443"
+    volumes:
+      - ./frontend/nginx.beta.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${BETA_TLS_DIR:?Set the private TLS directory}:/etc/nginx/tls:ro
     depends_on:
       backend:
         condition: service_healthy
