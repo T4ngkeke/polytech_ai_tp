@@ -353,7 +353,8 @@ async def chat_stream(
                     delta = chunk.choices[0].delta
                     if delta.content:
                         stream_results["content"] += delta.content
-                        yield f"data: {delta.content}\n\n"
+                        # JSON keeps embedded newlines inside one SSE data field.
+                        yield f"data: {json.dumps(delta.content, ensure_ascii=False)}\n\n"
         finally:
             # Enqueue the background task with fallback token estimates
             pt = stream_results["prompt_tokens"] or 10

@@ -12,6 +12,7 @@ Coverage
 import json
 import uuid
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -352,8 +353,8 @@ class TestStreamingAndBackgroundTask:
                     chunks.append(chunk)
 
                 full_text = "".join(chunks)
-                assert "data: Bonjour\n\n" in full_text
-                assert "data:  monde\n\n" in full_text
+                assert "data: \"Bonjour\"\n\n" in full_text
+                assert "data: \" monde\"\n\n" in full_text
 
         # Verify DB writes (background task)
         result = await db_session.execute(
@@ -378,6 +379,39 @@ class TestStreamingAndBackgroundTask:
         usage = usage_result.scalar_one()
         assert usage.tokens_used == 15
         assert usage.request_count == 1
+
+    async def test_multiline_code_token_stays_in_one_sse_event(
+        self, client1, seed_chat, db_session, mock_openai
+    ):
+        """Embedded code newlines must survive SSE framing and DB persistence."""
+        code = '```python\nprint("hello")\n```\n'
+
+        async def create(*args, **kwargs):
+            async def chunks():
+                yield SimpleNamespace(
+                    usage=None,
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content=code))],
+                )
+            return chunks()
+
+        mock_openai.return_value.chat.completions.create = create
+        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
+            async with client1.stream("POST", "/api/chat/stream", json={
+                "session_id": str(seed_chat["sess1"].id), "message": "show code",
+            }) as resp:
+                assert resp.status_code == 200
+                payload = "".join([part async for part in resp.aiter_text()])
+                frames = [frame for frame in payload.split("\n\n") if frame]
+                assert len(frames) == 1
+                assert frames[0].startswith("data: ")
+                assert json.loads(frames[0][6:]) == code
+
+        result = await db_session.execute(
+            select(Message).where(Message.session_id == seed_chat["sess1"].id)
+            .order_by(Message.created_at)
+        )
+        assert result.scalars().all()[-1].content == code
 
     async def test_legacy_session_without_lab_works(
         self, client1, seed_chat, db_session, mock_openai

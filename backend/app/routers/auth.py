@@ -71,6 +71,9 @@ async def signup(
     )
     db.add(user)
     await db.flush()
+    # The returned JWT is used immediately for /auth/me; commit before the
+    # signup response so the next request can see the new account.
+    await db.commit()
     await db.refresh(user)
 
     access_token = create_access_token(user_id=user.id)

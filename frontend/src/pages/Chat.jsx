@@ -8,13 +8,16 @@
  * Join class flow is a modal triggered from the sidebar.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
+
+const loadMessageContent = () => import('../components/MessageContent');
+const MessageContent = lazy(loadMessageContent);
 
 export default function Chat() {
   const { labId: urlLabId } = useParams();
@@ -73,6 +76,9 @@ export default function Chat() {
   }, []);
 
   useEffect(() => { loadClasses(); }, [loadClasses]);
+
+  // Warm the Markdown bundle so the first streamed reply formats immediately.
+  useEffect(() => { loadMessageContent(); }, []);
 
   // ── Load usage stats ──
   const loadUsage = useCallback(async () => {
@@ -183,8 +189,17 @@ export default function Chat() {
         onmessage(ev) {
           if (ev.event === 'done') { setIsStreaming(false); loadUsage(); return; }
           if (ev.data) {
+            // The backend JSON-encodes tokens so newlines survive SSE framing.
+            // Accept raw text too while an older backend instance is draining.
+            let tokenText = ev.data;
+            try {
+              const decoded = JSON.parse(ev.data);
+              if (typeof decoded === 'string') tokenText = decoded;
+            } catch {
+              tokenText = ev.data;
+            }
             setMessages((prev) => prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: m.content + ev.data } : m
+              m.id === assistantMsgId ? { ...m, content: m.content + tokenText } : m
             ));
           }
         },
@@ -396,8 +411,12 @@ export default function Chat() {
             </div>
           )}
 
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+          {messages.map((msg, index) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              streaming={isStreaming && msg.sender === 'llm' && index === messages.length - 1}
+            />
           ))}
           <div ref={messagesEndRef} />
         </div>
@@ -479,7 +498,7 @@ export default function Chat() {
 }
 
 /* ── Message Bubble ── */
-function MessageBubble({ message }) {
+const MessageBubble = memo(function MessageBubble({ message, streaming }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -493,11 +512,17 @@ function MessageBubble({ message }) {
           ? 'bg-cyan-muted text-cream rounded-tr-sm border border-cyan/20'
           : 'bg-ink-raised text-cream-secondary border border-border-subtle rounded-tl-sm'
       }`}>
-        {message.content || <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
+        {message.content
+          ? (isUser
+              ? <span className="whitespace-pre-wrap">{message.content}</span>
+              : <Suspense fallback={<span className="whitespace-pre-wrap">{message.content}</span>}>
+                  <MessageContent content={message.content} streaming={streaming} />
+                </Suspense>)
+          : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
       </div>
     </div>
   );
-}
+});
 
 function BlinkDot({ delay = '0ms' }) {
   return <span className="w-1.5 h-1.5 rounded-full bg-cream-muted animate-pulse inline-block" style={{ animationDelay: delay }} />;
