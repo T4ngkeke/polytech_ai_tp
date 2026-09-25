@@ -17,6 +17,7 @@ services:
     restart: unless-stopped
 
   backend:
+    image: edullm-v6-beta-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -75,9 +76,7 @@ services:
 
   bootstrap:
     profiles: ["bootstrap"]
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    image: edullm-v6-beta-backend
     command: ["python", "-m", "backend.bootstrap_beta"]
     environment:
       DATABASE_URL: postgresql+asyncpg://beta:${BETA_DB_PASSWORD}@postgres:5432/edudb
