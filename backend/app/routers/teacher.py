@@ -385,6 +385,11 @@ async def update_lab(
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
     lab = await lab_service.update_lab(db, lab, name=body.name, is_active=body.is_active)
+    # Make the new state visible before acknowledging a close or reopen.
+    # Otherwise another request may create a session while the response's
+    # dependency teardown is still committing this transaction.
+    await db.commit()
+    await db.refresh(lab)
     return LabResponse.model_validate(lab)
 
 
