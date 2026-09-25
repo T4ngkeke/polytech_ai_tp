@@ -238,13 +238,14 @@ function LabNode({ lab, classId, role, isSelected, onSelect, onLabAction }) {
   return (
     <div className="group relative flex items-center">
       <button
-        onClick={!isLocked ? onSelect : undefined}
-        disabled={isLocked}
+        onClick={!lab.is_deleted ? onSelect : undefined}
+        disabled={lab.is_deleted}
+        title={!lab.is_active ? 'Closed lab — history only' : undefined}
         className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer text-left
           ${isSelected
             ? 'bg-cyan-muted text-cyan font-medium'
             : isLocked
-              ? 'text-cream-muted opacity-50 cursor-not-allowed'
+              ? 'text-cream-muted hover:bg-ink-hover disabled:opacity-50 disabled:cursor-not-allowed'
               : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
           }`}
       >

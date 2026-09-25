@@ -181,6 +181,31 @@ async def mock_openai():
 
 
 class TestGateChecks:
+    async def test_deleted_lab_rejects_chat_without_calling_model(
+        self, client1, seed_chat, db_session, mock_openai,
+    ):
+        seed_chat["lab"].is_deleted = True
+        await db_session.flush()
+        resp = await client1.post(
+            "/api/chat/stream",
+            json={"session_id": str(seed_chat["sess1"].id), "message": "Can I continue?"},
+        )
+        assert resp.status_code == 404
+        mock_openai.assert_not_called()
+
+    async def test_closed_lab_rejects_chat_without_calling_model(
+        self, client1, seed_chat, db_session, mock_openai,
+    ):
+        seed_chat["lab"].is_active = False
+        await db_session.flush()
+        resp = await client1.post(
+            "/api/chat/stream",
+            json={"session_id": str(seed_chat["sess1"].id), "message": "Can I continue?"},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Lab is closed"
+        mock_openai.assert_not_called()
+
     async def test_unauthenticated_returns_401(self, db_session):
         async def override_get_db():
             yield db_session

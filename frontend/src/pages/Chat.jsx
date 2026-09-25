@@ -32,6 +32,8 @@ export default function Chat() {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [usage, setUsage] = useState({ used: 0, limit: 50000 });
+  const activeLab = classes.flatMap((cls) => cls.labs || []).find((lab) => lab.id === activeLabId);
+  const labIsClosed = Boolean(activeLab && (activeLab.is_deleted || !activeLab.is_active));
 
   // ── Chat state ──
   const [input, setInput] = useState('');
@@ -110,7 +112,7 @@ export default function Chat() {
 
   // ── Create new session ──
   const handleNewSession = useCallback(async () => {
-    if (!activeLabId) return;
+    if (!activeLabId || labIsClosed) return;
     try {
       const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {
         title: `Session ${new Date().toLocaleDateString()}`,
@@ -121,7 +123,7 @@ export default function Chat() {
     } catch (err) {
       toast.error(err.message || 'Failed to create session');
     }
-  }, [activeLabId]);
+  }, [activeLabId, labIsClosed]);
 
   // ── Load session messages ──
   const handleSelectSession = useCallback(async (sessionId) => {
@@ -145,7 +147,7 @@ export default function Chat() {
   // ── Send message ──
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || !activeSessionId || isStreaming) return;
+    if (!text || !activeSessionId || isStreaming || labIsClosed) return;
 
     let currentSessionId = activeSessionId;
     // Auto-create session if none exists
@@ -193,7 +195,7 @@ export default function Chat() {
     } finally {
       setIsStreaming(false);
     }
-  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage]);
+  }, [input, activeSessionId, activeLabId, isStreaming, labIsClosed, token, loadUsage]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -279,7 +281,9 @@ export default function Chat() {
             <button
               id="new-session-btn"
               onClick={handleNewSession}
-              className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
+              disabled={labIsClosed}
+              title={labIsClosed ? 'This lab is closed' : undefined}
+              className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               + New Session
             </button>
@@ -349,6 +353,12 @@ export default function Chat() {
           </div>
         </div>
 
+        {labIsClosed && (
+          <p role="status" className="px-6 py-2 text-xs text-cream-secondary bg-ink-surface border-b border-border-subtle">
+            This lab is closed. You can review previous messages, but cannot start a session or send messages.
+          </p>
+        )}
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
           {!activeLabId && (
@@ -371,9 +381,11 @@ export default function Chat() {
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <p className="text-cream-secondary text-sm mb-3">No sessions yet for this lab.</p>
-                <button onClick={handleNewSession} className="px-4 py-2 rounded-lg gradient-cyan text-cream text-sm font-medium cursor-pointer hover:brightness-110 transition-all">
-                  Start First Session
-                </button>
+                {!labIsClosed && (
+                  <button onClick={handleNewSession} className="px-4 py-2 rounded-lg gradient-cyan text-cream text-sm font-medium cursor-pointer hover:brightness-110 transition-all">
+                    Start First Session
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -393,24 +405,24 @@ export default function Chat() {
         {/* Input */}
         <div className="shrink-0 px-6 py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
           <div className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
-            activeSessionId ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
+            activeSessionId && !labIsClosed ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
           } bg-ink-deep`}>
             <textarea
               ref={inputRef}
               id="chat-input"
               rows={1}
-              disabled={!activeSessionId || isStreaming}
+              disabled={!activeSessionId || isStreaming || labIsClosed}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={activeSessionId ? 'Type your message… (Enter to send)' : 'Select a session first'}
+              placeholder={labIsClosed ? 'This lab is closed' : activeSessionId ? 'Type your message… (Enter to send)' : 'Select a session first'}
               className="flex-1 bg-transparent text-cream text-sm resize-none outline-none placeholder:text-cream-muted max-h-32 min-h-[1.5rem] leading-relaxed"
               style={{ height: 'auto' }}
             />
             <button
               id="send-btn"
               onClick={isStreaming ? () => abortRef.current?.abort() : handleSend}
-              disabled={!activeSessionId}
+              disabled={!activeSessionId || labIsClosed}
               className={`shrink-0 p-2 rounded-lg transition-all cursor-pointer ${
                 isStreaming
                   ? 'bg-danger-muted text-danger hover:bg-danger-muted/80'

@@ -199,6 +199,10 @@ async def create_session_in_lab(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a member of the class that owns this lab",
         )
+    if lab.is_deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+    if not lab.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Lab is closed")
 
     session = Session(
         user_id=current_user.id,

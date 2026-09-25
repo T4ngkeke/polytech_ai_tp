@@ -188,6 +188,38 @@ class TestCreateSessionInLab:
         )
         assert resp.status_code == 403
 
+    async def test_closed_lab_rejects_new_session(self, client_s1, seed_data, db_session):
+        seed_data["lab"].is_active = False
+        await db_session.flush()
+        resp = await client_s1.post(
+            f"/api/student/labs/{seed_data['lab'].id}/sessions",
+            json={"title": "After closing"},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Lab is closed"
+
+    async def test_deleted_lab_rejects_new_session(self, client_s1, seed_data, db_session):
+        seed_data["lab"].is_deleted = True
+        await db_session.flush()
+        resp = await client_s1.post(
+            f"/api/student/labs/{seed_data['lab'].id}/sessions", json={}
+        )
+        assert resp.status_code == 404
+
+    async def test_reopened_lab_accepts_new_session(self, client_s1, seed_data, db_session):
+        seed_data["lab"].is_active = False
+        await db_session.flush()
+        closed = await client_s1.post(
+            f"/api/student/labs/{seed_data['lab'].id}/sessions", json={}
+        )
+        seed_data["lab"].is_active = True
+        await db_session.flush()
+        reopened = await client_s1.post(
+            f"/api/student/labs/{seed_data['lab'].id}/sessions", json={}
+        )
+        assert closed.status_code == 403
+        assert reopened.status_code == 201
+
     async def test_nonexistent_lab_404(self, client_s1):
         resp = await client_s1.post(
             f"/api/student/labs/{uuid.uuid4()}/sessions", json={"title": "X"})
@@ -226,6 +258,13 @@ class TestListSessions:
 
 
 class TestGetSession:
+    async def test_closed_lab_history_remains_readable(self, client_s1, seed_data, db_session):
+        seed_data["lab"].is_active = False
+        await db_session.flush()
+        resp = await client_s1.get(f"/api/student/sessions/{seed_data['session'].id}")
+        assert resp.status_code == 200
+        assert len(resp.json()["messages"]) == 2
+
     async def test_get_own_session(self, client_s1, seed_data):
         resp = await client_s1.get(
             f"/api/student/sessions/{seed_data['session'].id}")

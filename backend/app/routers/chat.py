@@ -240,21 +240,24 @@ async def chat_stream(
     if lab_id:
         lab_result = await db.execute(select(Lab).where(Lab.id == lab_id))
         lab = lab_result.scalar_one_or_none()
-        if lab:
-            class_id = lab.class_id
+        if lab is None or lab.is_deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+        class_id = lab.class_id
 
-            # Verify student membership in the class
-            membership = await db.execute(
-                select(ClassStudent).where(
-                    ClassStudent.class_id == class_id,
-                    ClassStudent.student_id == current_user.id,
-                )
+        # Verify student membership in the class before exposing its state.
+        membership = await db.execute(
+            select(ClassStudent).where(
+                ClassStudent.class_id == class_id,
+                ClassStudent.student_id == current_user.id,
             )
-            if membership.scalar_one_or_none() is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You are not a member of the class that owns this lab",
-                )
+        )
+        if membership.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of the class that owns this lab",
+            )
+        if not lab.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Lab is closed")
 
     # Check quota
     today = date.today()
