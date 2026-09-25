@@ -1,0 +1,105 @@
+name: edullm-v6-beta
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: beta
+      POSTGRES_PASSWORD: ${BETA_DB_PASSWORD:?Set BETA_DB_PASSWORD in the private env file}
+      POSTGRES_DB: edudb
+    volumes:
+      - beta_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beta -d edudb"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://beta:${BETA_DB_PASSWORD}@postgres:5432/edudb
+      JWT_SECRET: ${BETA_JWT_SECRET:?Set BETA_JWT_SECRET in the private env file}
+      LLM_BASE_URL: ${BETA_LLM_BASE_URL:?Set BETA_LLM_BASE_URL in the private env file}
+      LLM_API_KEY: ${BETA_LLM_API_KEY:?Set BETA_LLM_API_KEY in the private env file}
+      LLM_MODEL: ${BETA_LLM_MODEL:?Set BETA_LLM_MODEL in the private env file}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+      - model
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "${BETA_BIND_IP:-127.0.0.1}:${BETA_HTTP_PORT:-18080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${BETA_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - beta_backups:/backups
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        while true; do
+          backup_file="/backups/beta-$$(date -u +%Y%m%dT%H%M%SZ).dump"
+          pg_dump -h postgres -U beta -d edudb -Fc > "$$backup_file"
+          pg_restore -l "$$backup_file" > /dev/null
+          find /backups -type f -name 'beta-*.dump' -mtime +13 -delete
+          sleep 86400
+        done
+    restart: unless-stopped
+
+  bootstrap:
+    profiles: ["bootstrap"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "backend.bootstrap_beta"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://beta:${BETA_DB_PASSWORD}@postgres:5432/edudb
+      JWT_SECRET: ${BETA_JWT_SECRET}
+      LLM_BASE_URL: ${BETA_LLM_BASE_URL}
+      LLM_API_KEY: ${BETA_LLM_API_KEY}
+      LLM_MODEL: ${BETA_LLM_MODEL}
+      BETA_ADMIN_USERNAME: ${BETA_ADMIN_USERNAME:-beta_admin}
+      BETA_ADMIN_PASSWORD: ${BETA_ADMIN_PASSWORD:?Set BETA_ADMIN_PASSWORD in the private env file}
+      BETA_TEACHER_USERNAME: ${BETA_TEACHER_USERNAME:-beta_teacher}
+      BETA_TEACHER_PASSWORD: ${BETA_TEACHER_PASSWORD:?Set BETA_TEACHER_PASSWORD in the private env file}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+
+networks:
+  model:
+    external: true
+    name: ${BETA_MODEL_NETWORK:-edullm-v6_default}
+
+volumes:
+  beta_postgres_data:
+  beta_backups:
