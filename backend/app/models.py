@@ -20,6 +20,8 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    Index,
+    text,
     JSON,
     BigInteger,
     Boolean,
@@ -27,6 +29,8 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
+    CheckConstraint,
     Integer,
     String,
     Text,
@@ -528,6 +532,18 @@ class Message(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        CheckConstraint("lifecycle IN ('active','archived','deleted')", name="ck_document_lifecycle"),
+        CheckConstraint("generation >= 0", name="ck_document_generation"),
+        ForeignKeyConstraint(["id", "current_revision_id"],
+            ["document_revisions.document_id", "document_revisions.id"],
+            name="fk_document_current_revision", use_alter=True),
+    )
+    lifecycle: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+    generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    current_revision_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    structured: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(
         GUID(), primary_key=True, default=uuid.uuid4
@@ -574,6 +590,26 @@ class Document(Base):
 
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(["document_id", "source_version_id"],
+            ["document_sources.document_id", "document_sources.id"], name="fk_job_source"),
+        ForeignKeyConstraint(["document_id", "revision_id"],
+            ["document_revisions.document_id", "document_revisions.id"], name="fk_job_revision"),
+        UniqueConstraint("revision_id", name="uq_job_revision"),
+        CheckConstraint("(task_kind IS NULL AND source_version_id IS NULL AND revision_id IS NULL) OR "
+                        "(task_kind IN ('odp_parse','pdf_parse','pdf_index') AND source_version_id IS NOT NULL AND revision_id IS NOT NULL)",
+                        name="ck_job_binding"),
+    )
+    # M2: a structured job is bound to one source file and one draft revision.
+    # Legacy rows leave all of these NULL; the legacy claim only sees those rows.
+    task_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_version_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    revision_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    # Who holds the claim, the document generation it saw, and until when it may
+    # still write. A result is only committed while all three still match.
+    lock_token: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    claimed_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(
         GUID(), primary_key=True, default=uuid.uuid4
@@ -614,6 +650,21 @@ class IngestionJob(Base):
 
 class DocChunk(Base):
     __tablename__ = "doc_chunks"
+    __table_args__ = (
+        ForeignKeyConstraint(["document_id", "revision_id"],
+            ["document_revisions.document_id", "document_revisions.id"], name="fk_chunk_revision"),
+        ForeignKeyConstraint(["revision_id", "block_id"],
+            ["document_blocks.revision_id", "document_blocks.block_id"], name="fk_chunk_block"),
+        CheckConstraint("(revision_id IS NULL AND block_id IS NULL) OR (revision_id IS NOT NULL AND block_id IS NOT NULL AND content_start IS NOT NULL AND content_end IS NOT NULL AND part_index IS NOT NULL AND part_count IS NOT NULL AND content_start >= 0 AND content_end > content_start AND part_index >= 0 AND part_count > part_index)", name="ck_chunk_range"),
+    )
+    revision_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    block_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    part_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    part_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    token_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunker_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(
         GUID(), primary_key=True, default=uuid.uuid4
@@ -766,7 +817,29 @@ class AgentTraceLog(Base):
 class DocumentReview(Base):
     """Human decisions over stable PDF sources, independent of run reports."""
     __tablename__ = 'document_reviews'
-    __table_args__ = (UniqueConstraint('document_id', 'source_key', name='uq_document_review_source'),)
+    __table_args__ = (
+        # Legacy PDF reviews: one per document source key, exactly as before.
+        Index('uq_review_legacy_source', 'document_id', 'source_key', unique=True,
+              postgresql_where=text('revision_id IS NULL'), sqlite_where=text('revision_id IS NULL')),
+        # M2-C structured reviews: one per revision source key.
+        Index('uq_review_revision_source', 'revision_id', 'source_key', unique=True,
+              postgresql_where=text('revision_id IS NOT NULL'), sqlite_where=text('revision_id IS NOT NULL')),
+        ForeignKeyConstraint(['document_id', 'revision_id'],
+            ['document_revisions.document_id', 'document_revisions.id'], name='fk_review_revision'),
+        ForeignKeyConstraint(['document_id', 'source_version_id'],
+            ['document_sources.document_id', 'document_sources.id'], name='fk_review_source'),
+        ForeignKeyConstraint(['revision_id', 'block_id'],
+            ['document_blocks.revision_id', 'document_blocks.block_id'], name='fk_review_block'),
+        CheckConstraint("(revision_id IS NULL AND source_version_id IS NULL AND block_id IS NULL AND kind IS NULL) OR "
+                        "(revision_id IS NOT NULL AND source_version_id IS NOT NULL AND "
+                        "kind IN ('teacher_edit_unmatched','vision_description'))", name='ck_review_binding'),
+    )
+    # M2-C: a structured review belongs to one source, one revision and (usually)
+    # one block. All four stay NULL on legacy PDF reviews.
+    source_version_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    revision_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    block_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     document_id: Mapped[uuid.UUID] = mapped_column(
@@ -785,3 +858,208 @@ class DocumentReview(Base):
         GUID(), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+# M1: immutable source identities and revision-scoped content. No relationships
+# back to Document: legacy joins remain unambiguous and publication is explicit.
+class DocumentSource(Base):
+    __tablename__ = "document_sources"
+    __table_args__ = (
+        UniqueConstraint("document_id", "id", name="uq_source_document"),
+        UniqueConstraint("document_id", "sha256", name="uq_source_hash"),
+        ForeignKeyConstraint(["document_id", "replaces_source_id"],
+            ["document_sources.document_id", "document_sources.id"], name="fk_source_replaces"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("documents.id"), index=True)
+    sha256: Mapped[str] = mapped_column(String(64))
+    format: Mapped[str] = mapped_column(String(16))
+    original_filename: Mapped[str] = mapped_column(String(512))
+    storage_key: Mapped[str] = mapped_column(String(1024), unique=True)
+    replaces_source_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class DocumentRevision(Base):
+    __tablename__ = "document_revisions"
+    __table_args__ = (
+        UniqueConstraint("document_id", "id", name="uq_revision_document"),
+        UniqueConstraint("id", "source_version_id", name="uq_revision_source"),
+        ForeignKeyConstraint(["document_id", "source_version_id"],
+            ["document_sources.document_id", "document_sources.id"], name="fk_revision_source"),
+        ForeignKeyConstraint(["document_id", "parent_revision_id"],
+            ["document_revisions.document_id", "document_revisions.id"], name="fk_revision_parent"),
+        ForeignKeyConstraint(["source_version_id", "preview_pdf_asset_id"],
+            ["document_assets.source_version_id", "document_assets.id"], name="fk_revision_preview", use_alter=True),
+        # M2 adds parsed: content is stored but not indexed, so it cannot publish.
+        CheckConstraint("processing_state IN ('queued','processing','parsed','ready','partial','failed')", name="ck_revision_processing"),
+        CheckConstraint("publication_state IN ('draft','published','superseded')", name="ck_revision_publication"),
+        CheckConstraint("reason IN ('upload','reparse','teacher_edit')", name="ck_revision_reason"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("documents.id"), index=True)
+    source_version_id: Mapped[uuid.UUID] = mapped_column(GUID())
+    parent_revision_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    preview_pdf_asset_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    reason: Mapped[str] = mapped_column(String(16), default="upload")
+    processing_state: Mapped[str] = mapped_column(String(16), default="queued")
+    publication_state: Mapped[str] = mapped_column(String(16), default="draft")
+    reader_version: Mapped[str] = mapped_column(String(64), default="pending")
+    config_hash: Mapped[str] = mapped_column(String(64), default="")
+    report: Mapped[dict] = mapped_column(JSON, default=dict)
+    index_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DocumentAsset(Base):
+    __tablename__ = "document_assets"
+    __table_args__ = (
+        UniqueConstraint("source_version_id", "id", name="uq_asset_source"),
+        CheckConstraint("access_class IN ('teacher_original','student_visible')", name="ck_asset_access"),
+        # M2 adds formula_source (the original formula object) and figure_preview
+        # (an object rendered on its own page; not a crop of the slide).
+        CheckConstraint("kind IN ('embedded_image','figure_crop','page_preview','pdf_preview','formula_source','figure_preview')", name="ck_asset_kind"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    source_version_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("document_sources.id"), index=True)
+    storage_key: Mapped[str] = mapped_column(String(1024), unique=True)
+    sha256: Mapped[str] = mapped_column(String(64))
+    mime: Mapped[str] = mapped_column(String(128))
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    access_class: Mapped[str] = mapped_column(String(32))
+
+
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
+    __table_args__ = (
+        UniqueConstraint("revision_id", "order_index", name="uq_page_order"),
+        UniqueConstraint("revision_id", "page_id", "source_version_id", name="uq_page_source"),
+        ForeignKeyConstraint(["revision_id", "source_version_id"],
+            ["document_revisions.id", "document_revisions.source_version_id"], name="fk_page_revision"),
+        ForeignKeyConstraint(["source_version_id", "preview_asset_id"],
+            ["document_assets.source_version_id", "document_assets.id"], name="fk_page_preview"),
+        CheckConstraint("order_index >= 0 AND source_slide_no > 0 AND preview_page_no > 0", name="ck_page_order"),
+        CheckConstraint("state IN ('usable','partial','unavailable')", name="ck_page_state"),
+    )
+    revision_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    page_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    source_version_id: Mapped[uuid.UUID] = mapped_column(GUID())
+    order_index: Mapped[int] = mapped_column(Integer)
+    source_slide_no: Mapped[int] = mapped_column(Integer)
+    # M2: NULL while the preview mapping of this page is not proven.
+    preview_page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state: Mapped[str] = mapped_column(String(16), default="usable")
+    issues: Mapped[list] = mapped_column(JSON, default=list)
+    width: Mapped[float | None] = mapped_column(Float, nullable=True)
+    height: Mapped[float | None] = mapped_column(Float, nullable=True)
+    preview_asset_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+
+
+class DocumentBlock(Base):
+    __tablename__ = "document_blocks"
+    __table_args__ = (
+        UniqueConstraint("revision_id", "page_id", "order_index", name="uq_block_order"),
+        UniqueConstraint("revision_id", "block_id", "source_version_id", name="uq_block_source"),
+        ForeignKeyConstraint(["revision_id", "page_id", "source_version_id"],
+            ["document_pages.revision_id", "document_pages.page_id", "document_pages.source_version_id"], name="fk_block_page"),
+        CheckConstraint("kind IN ('heading','text','code','formula','table','figure','navigation')", name="ck_block_kind"),
+        CheckConstraint("content_format IN ('plain','markdown','latex')", name="ck_block_format"),
+        CheckConstraint("source_completeness IN ('complete','incomplete','unknown')", name="ck_block_completeness"),
+        CheckConstraint("index_state IN ('searchable','needs_review','excluded')", name="ck_block_index"),
+        CheckConstraint("description_origin IN ('none','model','teacher')", name="ck_block_origin"),
+        CheckConstraint("order_index >= 0", name="ck_block_order"),
+    )
+    revision_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    block_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    source_version_id: Mapped[uuid.UUID] = mapped_column(GUID())
+    page_id: Mapped[uuid.UUID] = mapped_column(GUID())
+    order_index: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    content_format: Mapped[str] = mapped_column(String(16), default="plain")
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_ref: Mapped[dict] = mapped_column(JSON, default=dict)
+    section_path: Mapped[list] = mapped_column(JSON, default=list)
+    content_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description_origin: Mapped[str] = mapped_column(String(16), default="none")
+    source_completeness: Mapped[str] = mapped_column(String(16), default="unknown")
+    index_state: Mapped[str] = mapped_column(String(16), default="needs_review")
+    issues: Mapped[list] = mapped_column(JSON, default=list)
+    edited_by_teacher: Mapped[bool] = mapped_column(Boolean, default=False)
+    # M2: structure the plain content cannot hold, e.g. a table with its repeated
+    # and merged cells, or which object a preview has to show. Null for legacy.
+    structure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class DocumentBlockAsset(Base):
+    __tablename__ = "document_block_assets"
+    __table_args__ = (
+        ForeignKeyConstraint(["revision_id", "block_id", "source_version_id"],
+            ["document_blocks.revision_id", "document_blocks.block_id", "document_blocks.source_version_id"], name="fk_block_asset_block"),
+        ForeignKeyConstraint(["source_version_id", "asset_id"],
+            ["document_assets.source_version_id", "document_assets.id"], name="fk_block_asset_asset"),
+        CheckConstraint("role IN ('primary','preview')", name="ck_block_asset_role"),
+    )
+    revision_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    block_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    source_version_id: Mapped[uuid.UUID] = mapped_column(GUID())
+    role: Mapped[str] = mapped_column(String(16), default="primary")
+    bbox: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class DocumentBlockLink(Base):
+    __tablename__ = "document_block_links"
+    __table_args__ = (
+        ForeignKeyConstraint(["revision_id", "from_block_id"], ["document_blocks.revision_id", "document_blocks.block_id"], name="fk_link_from"),
+        ForeignKeyConstraint(["revision_id", "to_block_id"], ["document_blocks.revision_id", "document_blocks.block_id"], name="fk_link_to"),
+        CheckConstraint("relation IN ('continues','explains') AND basis IN ('explicit_source','teacher')", name="ck_link_basis"),
+        CheckConstraint("from_block_id <> to_block_id", name="ck_link_distinct"),
+    )
+    revision_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    from_block_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    to_block_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    relation: Mapped[str] = mapped_column(String(16), primary_key=True)
+    basis: Mapped[str] = mapped_column(String(24))
+    source_ref: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class DocumentCleanupJob(Base):
+    __tablename__ = "document_cleanup_jobs"
+    __table_args__ = (CheckConstraint("state IN ('pending','failed','complete')", name="ck_cleanup_state"),)
+    document_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("documents.id"), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remaining_storage_keys: Mapped[list] = mapped_column(JSON, default=list)
+
+class DocumentStagedObject(Base):
+    """M2: a file written to storage before the row that will own it exists.
+
+    The row is committed first, then the file is written. When the owning
+    source or asset row commits, this row is deleted in the same transaction.
+    Otherwise a cleanup sweep removes the file once the lease has passed, so a
+    crash, a lost claim or a deletion never leaves an unrecorded file behind.
+    No FK on document_id: a new upload stages its file before the document row.
+    """
+    __tablename__ = "document_staged_objects"
+    __table_args__ = (CheckConstraint("purpose IN ('upload_source','parse_asset')", name="ck_staged_purpose"),)
+    storage_key: Mapped[str] = mapped_column(String(1024), primary_key=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(GUID(), index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    purpose: Mapped[str] = mapped_column(String(32))
+    lease_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# Register ORM immutability checks after all model names exist.
+from backend.app.services import document_snapshot_guards as _snapshot_guards  # noqa: E402,F401

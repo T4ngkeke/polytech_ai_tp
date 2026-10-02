@@ -146,7 +146,7 @@ async def test_adapter_reports_partial_separately_and_retains_source(tmp_path):
     from backend.worker.region_reader import make_region_reader
     reader=make_region_reader(client,'fake',render_fn=render)
     pages,report=await reader(str(path),prepared_pages=[page()])
-    assert report['version']==VERSION=='region-reader-v1.10'
+    assert report['version']==VERSION=='region-reader-v9.1'
     assert pages[0].reader_version==VERSION
     assert report['page_results'][0]['status']=='partial'
     assert len(report['reviews'])==1
@@ -568,7 +568,9 @@ def figure(content):
 async def test_code_area_keeps_only_the_program_copy_in_search():
     described='The code calls fprintf(stderr, "plus de memoire\\n"); when malloc fails.'
     result=await run([CODE_LAYOUT,figure(described)],code_page(),render=code_crop)
-    assert not result.reviews and result.page.calls==2
+    assert len(result.reviews)==1 and result.page.calls==2
+    assert result.reviews[0].candidate_content==described
+    assert result.reviews[0].reason_code=='content_review'
     group=result.page.groups[0]
     assert group.kind=='code'
     assert group.text=='int *tab = malloc(n * sizeof(int ));\nfprintf(stderr , "plus␣de␣memoire\\n");'
@@ -617,3 +619,12 @@ def test_prompt_is_back_to_the_v16_wording_on_code():
 def test_prompt_counts_colour_as_information_to_describe():
     from backend.worker.region_reader import PROMPT
     assert 'connections, arrows, position, shape, color or typography' in PROMPT
+
+
+@pytest.mark.asyncio
+async def test_code_with_real_visual_relationship_never_silently_drops_description():
+    described='The arrow returns to the condition, so the operation repeats until it is false.'
+    result=await run([CODE_LAYOUT,figure(described)],code_page(),render=code_crop)
+    assert len(result.reviews)==1
+    assert result.reviews[0].candidate_content==described
+    assert all(described not in g.text for g in result.page.groups)

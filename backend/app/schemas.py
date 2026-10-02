@@ -243,6 +243,13 @@ class DocumentResponse(BaseModel):
     lab_id: uuid.UUID | None
     filename: str
     status: str
+    # M2-B: filled for structured (ODP) uploads; legacy uploads leave them empty.
+    structured: bool = False
+    generation: int | None = None
+    source_version_id: uuid.UUID | None = None
+    revision_id: uuid.UUID | None = None
+    processing_state: str | None = None
+    job_id: uuid.UUID | None = None
 
 
 class DocumentSummaryResponse(BaseModel):
@@ -254,6 +261,13 @@ class DocumentSummaryResponse(BaseModel):
     error_message: str | None
     chunk_count: int
     ingest_report: dict | None = None
+    lifecycle: str = "active"
+    generation: int = 0
+    structured: bool = False
+    current_revision_id: uuid.UUID | None = None
+    # M2-B: the newest revision of a structured document, which may be a draft.
+    # processing_state "parsed" means: content stored, waiting for indexing.
+    latest_revision: dict | None = None
 
 
 class ChunkResponse(BaseModel):

@@ -22,7 +22,7 @@ from typing import Awaitable, Callable, Hashable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import DocChunk
+from backend.app.models import DocChunk, Document
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,10 @@ class ChunkHit:
     # [v7.3] The Contextual-Retrieval context — recall matched on the augmented
     # text, so the reranker must score it too (citations still show content).
     context: str | None = None
+    revision_id: uuid.UUID | None = None
+    block_id: uuid.UUID | None = None
+    content_start: int | None = None
+    content_end: int | None = None
 
 
 def _augmented_text(hit: ChunkHit) -> str:
@@ -119,6 +123,12 @@ def _scope(stmt, lab_id: uuid.UUID, class_id: uuid.UUID | None = None):
     With `class_id`, the scope is 'this lab OR class-wide shared (lab_id NULL)'
     bounded to the class — shared material is reachable from every lab of the
     class and never leaks across classes. Without it, strict lab-only."""
+    # Search only live legacy chunks or the published structured revision.
+    stmt = stmt.where(select(Document.id).where(
+        Document.id == DocChunk.document_id, Document.lifecycle == "active",
+        ((Document.structured.is_(False) & DocChunk.revision_id.is_(None)) |
+         (Document.structured.is_(True) & (Document.current_revision_id == DocChunk.revision_id)))
+    ).exists())
     if class_id is not None:
         stmt = stmt.where(DocChunk.class_id == class_id)
         stmt = stmt.where((DocChunk.lab_id == lab_id) | (DocChunk.lab_id.is_(None)))
@@ -139,13 +149,15 @@ async def vector_search(
     distance = DocChunk.embedding.cosine_distance(query_embedding)
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
-               DocChunk.document_id, DocChunk.context),
+               DocChunk.document_id, DocChunk.context, DocChunk.revision_id,
+               DocChunk.block_id, DocChunk.content_start, DocChunk.content_end),
         lab_id, class_id,
     ).order_by(distance).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
         ChunkHit(id=r.id, content=r.content, page_no=r.page_no,
-                 document_id=r.document_id, context=r.context)
+                 document_id=r.document_id, context=r.context, revision_id=r.revision_id,
+                 block_id=r.block_id, content_start=r.content_start, content_end=r.content_end)
         for r in rows
     ]
 
@@ -175,13 +187,15 @@ async def bm25_search(
     rank = func.ts_rank(DocChunk.tsv, tsquery)
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
-               DocChunk.document_id, DocChunk.context),
+               DocChunk.document_id, DocChunk.context, DocChunk.revision_id,
+               DocChunk.block_id, DocChunk.content_start, DocChunk.content_end),
         lab_id, class_id,
     ).where(DocChunk.tsv.op("@@")(tsquery)).order_by(rank.desc()).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
         ChunkHit(id=r.id, content=r.content, page_no=r.page_no,
-                 document_id=r.document_id, context=r.context)
+                 document_id=r.document_id, context=r.context, revision_id=r.revision_id,
+                 block_id=r.block_id, content_start=r.content_start, content_end=r.content_end)
         for r in rows
     ]
 

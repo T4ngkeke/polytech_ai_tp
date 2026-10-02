@@ -5,6 +5,7 @@ true result never replaces the full image/content audit. File hashes are listed
 with CLI output so the checked artifact is unambiguous.
 """
 import json
+from collections import Counter
 import re
 import sys
 from pathlib import Path
@@ -90,15 +91,22 @@ def _reviewer_kind(record,accept_model_review):
     return None
 
 
-def evaluate_content_gate(results,content_reviews,*,run,cases=None,accept_model_review=False):
+def evaluate_content_gate(results,content_reviews,*,run,cases=None,accept_model_review=False,manifest=None):
     """Pass only with a current accepted record for every focus page and no loss or error.
 
     Human records always count. Model records count only with accept_model_review
     and an owner authorisation; the result reports which kind was used.
     """
     cases=cases or load_cases()
-    records={(r['file'],r['page'],r.get('round',1)):r for r in content_reviews
-             if r.get('run')==run and _reviewer_kind(r,accept_model_review)}
+    row_key=lambda r:(r['file'],r['page'],r.get('round',1))
+    accepted_records=[r for r in content_reviews if r.get('run')==run and _reviewer_kind(r,accept_model_review)]
+    output_counts=Counter(row_key(r) for r in results)
+    review_counts=Counter(row_key(r) for r in accepted_records)
+    records={row_key(r):r for r in accepted_records}
+    expected=None
+    if manifest is not None:
+        expected={(name,page,round_no) for name,page in manifest['cases']
+                  for round_no in range(1,manifest['rounds']+1)}
     pages=[];totals={'important_errors':0,'silent_omissions':0,'sent_to_review':0,'invented_facts':0,
                      'unnecessary_reviews':0,'code_not_preserved':0}
     for row in results:
@@ -106,7 +114,11 @@ def evaluate_content_gate(results,content_reviews,*,run,cases=None,accept_model_
         case=_case(cases,row)
         record=records.get(key)
         entry={'file':key[0],'page':key[1],'round':key[2]}
-        if case is None:
+        if output_counts[key]>1 or review_counts[key]>1:
+            state='duplicate'
+        elif expected is not None and key not in expected:
+            state='unexpected_output'
+        elif case is None:
             state='no_checklist'
         elif record is None:
             state='pending'
@@ -133,7 +145,10 @@ def evaluate_content_gate(results,content_reviews,*,run,cases=None,accept_model_
                 totals['unnecessary_reviews']+=int(record.get('unnecessary_reviews') or 0)
                 state='passed' if ok else 'failed'
         pages.append({**entry,'state':state})
-    checked=[p for p in pages if p['state']!='no_checklist']
+    if expected is not None:
+        pages.extend({'file':f,'page':p,'round':r,'state':'missing_output'}
+                     for f,p,r in sorted(expected-set(output_counts)))
+    checked=pages
     kinds={}
     for p in checked:
         record=records.get((p['file'],p['page'],p['round']))
@@ -153,7 +168,8 @@ if __name__=='__main__' and len(sys.argv)>1 and sys.argv[1] in ('checklist','gat
         print('Checklist for a person:',target)
     else:
         print(json.dumps(evaluate_content_gate(rows,json.loads(Path(sys.argv[3]).read_text()),run=run_dir.name,
-                         accept_model_review='--accept-model-review' in sys.argv),ensure_ascii=False,indent=2))
+                         accept_model_review='--accept-model-review' in sys.argv,
+                         manifest=json.loads((run_dir/'manifest.json').read_text())),ensure_ascii=False,indent=2))
 elif __name__=='__main__':
     records=json.loads(Path(sys.argv[1]).read_text())
     print(json.dumps([{'file':r['file'],'page':r['page'],'round':r.get('round',1),

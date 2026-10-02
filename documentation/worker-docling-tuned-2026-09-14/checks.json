@@ -1,0 +1,508 @@
+{
+  "main-2-p6": [
+    {
+      "id": "table_rows",
+      "kind": "visual_fact",
+      "fact": "Table with 3 columns (Type de séance, Nombre, Durée): CM 3 1h30; TD 4 1h30; TP 3 4h. Rows must not be mixed up."
+    },
+    {
+      "id": "total",
+      "kind": "text",
+      "fact": "Total : 22h30."
+    },
+    {
+      "id": "sequence_order",
+      "kind": "visual_fact",
+      "fact": "Order CM1 → TD1 → CM2 → TD2 → TP1 → CM3 → TD3 → TP2 → TD4 → TP3."
+    }
+  ],
+  "main-2-p55": [
+    {
+      "id": "sign_exponent",
+      "kind": "visual_fact",
+      "fact": "(−1)^S: S is an exponent, not a factor."
+    },
+    {
+      "id": "mantissa_point",
+      "kind": "visual_fact",
+      "fact": "The mantissa is written 1.M (a point). The text layer shows 1:M; that must not be presented as the formula."
+    },
+    {
+      "id": "power_of_two",
+      "kind": "visual_fact",
+      "fact": "2^(E−biais): E−biais is the exponent, not 2E−biais."
+    },
+    {
+      "id": "bit_widths",
+      "kind": "visual_fact",
+      "fact": "Single precision: S 1 bit, Exposant (E) 8 bits, Mantisse (M) 23 bits, in this order."
+    },
+    {
+      "id": "bias_127",
+      "kind": "text",
+      "fact": "biais = 127; bit implicite = 1."
+    }
+  ],
+  "main-3-p27": [
+    {
+      "id": "code_block",
+      "kind": "native_code",
+      "fact": "The malloc / if (tab == NULL) / for / free(tab) code keeps its characters and indentation; return 1; is one line."
+    },
+    {
+      "id": "space_symbol",
+      "kind": "native_code",
+      "fact": "The string keeps the visible-space symbols: \"plus␣de␣memoire\\n\"."
+    },
+    {
+      "id": "bullets_separate",
+      "kind": "text",
+      "fact": "The three bullets on the right are not woven into the code lines."
+    },
+    {
+      "id": "warning_box",
+      "kind": "text",
+      "fact": "Box 'Ce que vous verrez dans beaucoup de code' and its text are kept."
+    }
+  ],
+  "main-3-p54": [
+    {
+      "id": "code_block",
+      "kind": "native_code",
+      "fact": "The realloc correction keeps its characters and nesting; int nouvelle = capacite * 2; is one line; arr[taille] = valeur; and taille++ follow the if block."
+    }
+  ],
+  "Heritage-p2": [
+    {
+      "id": "two_classes",
+      "kind": "visual_fact",
+      "fact": "Two UML classes, Livre and Rapport, each with attributes and methods as printed."
+    },
+    {
+      "id": "shared_members",
+      "kind": "visual_fact",
+      "fact": "Members printed in dark red are the ones both classes share: titre, auteur, afficher(), toString()."
+    },
+    {
+      "id": "problem_text",
+      "kind": "text",
+      "fact": "The problem statement about describing identical properties twice is kept."
+    }
+  ],
+  "Heritage-p8": [
+    {
+      "id": "first_level",
+      "kind": "visual_fact",
+      "fact": "Manager and Programmer inherit from Employee (triangle points to the parent)."
+    },
+    {
+      "id": "second_level",
+      "kind": "visual_fact",
+      "fact": "Project Manager, Dept. Manager and Strategic Manager inherit from Manager, not from Employee directly."
+    },
+    {
+      "id": "attributes",
+      "kind": "visual_fact",
+      "fact": "Attributes stay with their class: Manager budgetsControlled, dateAppointed; Programmer project, progLanguages; Project Manager projects; Dept. Manager dept; Strategic Manager responsibilities."
+    },
+    {
+      "id": "graph_sentence",
+      "kind": "text",
+      "fact": "The sentence about the inheritance graph is kept."
+    }
+  ],
+  "Heritage-p13": [
+    {
+      "id": "left_code",
+      "kind": "native_code",
+      "fact": "A x; A a1 = new A(...); B b1 = new B(...); C c1 = new C(...); x = a1; → OK; x = b1; → OK; x = c1 → OK (no semicolon after c1 in the source)."
+    },
+    {
+      "id": "right_code",
+      "kind": "native_code",
+      "fact": "Public class A{ …} / Public class B extends A{ …} / Public class C extends B{ ...} stay separate from the left column."
+    },
+    {
+      "id": "definitions",
+      "kind": "text",
+      "fact": "C hérite de B, qui hérite de A; the definition of type dynamique is kept."
+    }
+  ],
+  "Heritage-p15": [
+    {
+      "id": "code_arrows",
+      "kind": "native_code",
+      "fact": "d1.afficher(); → afficher() de Document, then d1 = r1;, then d1.afficher(); → afficher() de Rapport, in this order."
+    },
+    {
+      "id": "late_binding",
+      "kind": "text",
+      "fact": "Ce mécanisme s'appelle la liaison dynamique (\"late binding\")."
+    }
+  ],
+  "main-2-p1": [
+    {
+      "id": "title",
+      "kind": "text",
+      "fact": "CM1 - Introduction au langage C : types, représentation, compilation."
+    },
+    {
+      "id": "author",
+      "kind": "text",
+      "fact": "Guillaume Ginolhac, Université Savoie Mont Blanc, POLYTECH Annecy-Chambéry."
+    }
+  ],
+  "main-2-p46": [
+    {
+      "id": "base_subscripts",
+      "kind": "visual_fact",
+      "fact": "00000011₂ + 11111101₂ = ? — the subscript 2 is the base, not a ninth digit (000000112 is wrong)."
+    },
+    {
+      "id": "addition_rows",
+      "kind": "native_code",
+      "fact": "Retenue: 11111111 / 00000011 (+3) / + 11111101 (-3) / - - - / 1 00000000 (0) stay on separate lines; each value keeps its label (+3), (-3), (0)."
+    },
+    {
+      "id": "carry_note",
+      "kind": "text",
+      "fact": "On ignore la retenue sortante; Le résultat est bien 0 !"
+    }
+  ],
+  "main-2-p49": [
+    {
+      "id": "range",
+      "kind": "visual_fact",
+      "fact": "Problème: the result exceeds the range [−128, +127] (negative sign kept)."
+    },
+    {
+      "id": "example",
+      "kind": "text",
+      "fact": "Exemple : 100 + 50 = 150 (overflow !)."
+    },
+    {
+      "id": "table_rows",
+      "kind": "visual_fact",
+      "fact": "Rows: Retenue 0 1 1 1 0 0 0 0; +100 0 1 1 0 0 1 0 0; +50 0 0 1 1 0 0 1 0; Résultat 1 0 0 1 0 1 1 0. Rows not mixed."
+    },
+    {
+      "id": "result",
+      "kind": "visual_fact",
+      "fact": "Résultat : 1001 0110₂ = −106 en complément à 2 (absurde !). Base subscript and minus sign kept."
+    }
+  ],
+  "main-2-p54": [
+    {
+      "id": "power",
+      "kind": "visual_fact",
+      "fact": "6.022 × 10^23: 23 is an exponent (not 1023)."
+    },
+    {
+      "id": "solution",
+      "kind": "text",
+      "fact": "IEEE 754 solution with its three bullets (Signe + Mantisse + Exposant; très grande plage dynamique; standard universel, float et double)."
+    },
+    {
+      "id": "attention",
+      "kind": "text",
+      "fact": "Attention: les flottants ont des limitations de précision."
+    }
+  ],
+  "main-2-p62": [
+    {
+      "id": "python_cmd",
+      "kind": "native_code",
+      "fact": "python3 mon_programme.py (underscore kept)."
+    },
+    {
+      "id": "two_steps",
+      "kind": "text",
+      "fact": "1. Compilation (gcc traduit ... vérifie syntaxe et types) and 2. Exécution, in this order."
+    },
+    {
+      "id": "gcc_lines",
+      "kind": "native_code",
+      "fact": "Two lines: gcc -o hello hello.c  # etape 1 : compilation / ./hello  # etape 2 : execution — each comment on the line of its command."
+    },
+    {
+      "id": "consequence",
+      "kind": "text",
+      "fact": "Conséquence box: errors detected before the program runs; Python detects them only at execution."
+    }
+  ],
+  "main-2-p68": [
+    {
+      "id": "code_block",
+      "kind": "native_code",
+      "fact": "int main() { / int x; / printf(\"%d\\n\", x); // x n'a jamais ete initialisee / return 0; / } — one statement per line, body indented, comment on the printf line."
+    },
+    {
+      "id": "compiler_output",
+      "kind": "native_code",
+      "fact": "demo.c: In function 'main': / demo.c:3:20: warning: 'x' is used uninitialized [-Wuninitialized] / 3 | printf(\"%d\\n\", x); — separate lines, flag written -Wuninitialized."
+    },
+    {
+      "id": "difference",
+      "kind": "text",
+      "fact": "A warning does not stop compilation; Ne jamais ignorer un warning."
+    },
+    {
+      "id": "reflex",
+      "kind": "text",
+      "fact": "Toujours compiler avec gcc -Wall -Wextra. The overlapping page number 36 is not inserted into the command; the cut-off last line is not invented."
+    }
+  ],
+  "main-3-p8": [
+    {
+      "id": "problem",
+      "kind": "text",
+      "fact": "On veut lire une suite d'entiers saisis par l'utilisateur, et les garder tous."
+    },
+    {
+      "id": "code_line",
+      "kind": "native_code",
+      "fact": "int tab[???];  // combien ? on one line."
+    },
+    {
+      "id": "bullets",
+      "kind": "text",
+      "fact": "Three bullets: trop petit; trop grand; nombre connu qu'à l'exécution."
+    },
+    {
+      "id": "python_box",
+      "kind": "text",
+      "fact": "Box 'Ce que Python vous cachait, cette fois' with ma_liste.append(x) text."
+    }
+  ],
+  "main-3-p25": [
+    {
+      "id": "code_pairs",
+      "kind": "native_code",
+      "fact": "int *tab = malloc(n * sizeof(int));  // oui / int *tab = malloc(n * 4);  // non — each comment stays with its own line (not swapped)."
+    },
+    {
+      "id": "bullets",
+      "kind": "text",
+      "fact": "Three bullets, including sizeof(int) vaut 4 ... and malloc(n * sizeof(Point))."
+    },
+    {
+      "id": "box",
+      "kind": "native_code",
+      "fact": "Box: int *tab = malloc(n * sizeof(*tab)); followed by the sentence about tab becoming a double *."
+    }
+  ],
+  "main-3-p38": [
+    {
+      "id": "item1",
+      "kind": "native_code",
+      "fact": "1. Ne pas libérer — followed by int *tab = malloc(100 * sizeof(int)); / return 0;  // fuite."
+    },
+    {
+      "id": "item2",
+      "kind": "native_code",
+      "fact": "2. Libérer deux fois — followed by free(tab); / free(tab);  // double free."
+    },
+    {
+      "id": "item3",
+      "kind": "native_code",
+      "fact": "3. Utiliser après avoir libéré — followed by free(tab); / tab[0] = 42;  // use after free."
+    },
+    {
+      "id": "closing",
+      "kind": "text",
+      "fact": "Closing paragraph: mettre le pointeur à NULL après free gives a clean, reproducible crash."
+    }
+  ],
+  "main-3-p48": [
+    {
+      "id": "sentence",
+      "kind": "text",
+      "fact": "Un realloc peut recopier toute la zone ... recopier tout le tableau à chaque ajout."
+    },
+    {
+      "id": "no_invention",
+      "kind": "visual_fact",
+      "fact": "The page has no chart or picture below the text; the output does not invent one."
+    }
+  ],
+  "main-3-p70": [
+    {
+      "id": "table_rows",
+      "kind": "visual_fact",
+      "fact": "Table Fonction/Rôle/Contenu/Retour à tester: malloc allouer indéterminé oui; calloc allouer à zéro tout à 0 oui; realloc redimensionner l'ancien, conservé oui; free libérer — pas de retour. Cells not shifted."
+    },
+    {
+      "id": "header",
+      "kind": "text",
+      "fact": "Toutes les quatre sont dans <stdlib.h>."
+    }
+  ],
+  "main-3-p72": [
+    {
+      "id": "bullets",
+      "kind": "text",
+      "fact": "Four bullets: Pile et tas; malloc / calloc / free (sizeof, tester le retour); realloc; Le contrat."
+    },
+    {
+      "id": "thread",
+      "kind": "text",
+      "fact": "Le fil de tout le semestre: savoir ce qu'on a en mémoire, et le gérer soi-même."
+    },
+    {
+      "id": "td3",
+      "kind": "text",
+      "fact": "TD3 : vous écrivez des fonctions qui allouent elles-mêmes leur résultat — et vous décidez qui le libère."
+    }
+  ],
+  "Heritage-p3": [
+    {
+      "id": "document_class",
+      "kind": "text",
+      "fact": "On définit une classe Document qui regroupe ces propriétés communes."
+    },
+    {
+      "id": "two_views",
+      "kind": "visual_fact",
+      "fact": "Under 'en analyse/conception': Document généralise Livre et Rapport. Under 'dans les langages à objets': Livre, Rapport héritent de Document. Direction not reversed, sentences under the right sub-bullet."
+    },
+    {
+      "id": "same_notion",
+      "kind": "text",
+      "fact": "Deux points de vue pour la même notion."
+    }
+  ],
+  "Heritage-p7": [
+    {
+      "id": "exercise",
+      "kind": "text",
+      "fact": "Exercice: Donnez un exemple de hierarchie avec une super-classe et deux sous-classes."
+    }
+  ],
+  "Heritage-p10": [
+    {
+      "id": "uml_direction",
+      "kind": "visual_fact",
+      "fact": "Livre and Rapport inherit from Document (arrows point to Document)."
+    },
+    {
+      "id": "uml_members",
+      "kind": "visual_fact",
+      "fact": "Document: titre, auteur, afficher(), toString(); Livre: editeur, isbn, getEditeur(), afficher(); Rapport: org, numero, setNumero(), afficher(). Members stay with their class."
+    },
+    {
+      "id": "code",
+      "kind": "native_code",
+      "fact": "Public class Livre{ ... Public void printInfo(){ / System.out.println(titre); / System.out.println(isbn); / System.out.println(auteur); / } — one statement per line, in this order."
+    },
+    {
+      "id": "question",
+      "kind": "text",
+      "fact": "'OK or not OK?' is kept and not woven into the code."
+    },
+    {
+      "id": "advice",
+      "kind": "text",
+      "fact": "Évitez des noms de champs identiques dans les deux classes, sinon utilisez this, self, current, etc."
+    }
+  ],
+  "Heritage-p14": [
+    {
+      "id": "uml_direction",
+      "kind": "visual_fact",
+      "fact": "Livre and Rapport inherit from Document; Livre and Rapport each have afficher()."
+    },
+    {
+      "id": "code_arrows",
+      "kind": "native_code",
+      "fact": "Livre l1; Rapport r1; Document d1; / ... / d1 = l1; / ... / l1.afficher(); → afficher() de Livre / r1.afficher(); → afficher() de Rapport / d1.afficher(); → afficher() de Livre — each call paired with its own result, in this order."
+    },
+    {
+      "id": "question",
+      "kind": "text",
+      "fact": "Que devient la méthode afficher() ? and Nécessité de pouvoir afficher un document."
+    }
+  ],
+  "Heritage-p17": [
+    {
+      "id": "compte",
+      "kind": "text",
+      "fact": "CompteBancaire: procédure traitementQuotidien() qui met à jour le compte chaque nuit."
+    },
+    {
+      "id": "two_types",
+      "kind": "visual_fact",
+      "fact": "CompteDepot: agios si solde négatif (tauxAgios); CompteEpargne: jamais de solde négatif, intérêts versés (tauxInterets). Each rate stays with its account type."
+    }
+  ],
+  "Heritage-p18": [
+    {
+      "id": "sentence",
+      "kind": "text",
+      "fact": "Les classes CompteDepot, CompteEpargne spécialisent CompteBancaire."
+    },
+    {
+      "id": "uml_direction",
+      "kind": "visual_fact",
+      "fact": "CompteDepot and CompteEpargne inherit from CompteBancaire ('hérite de' arrows point to CompteBancaire)."
+    },
+    {
+      "id": "uml_members",
+      "kind": "visual_fact",
+      "fact": "CompteBancaire: nom: String, traitementQuotidien(), afficher(), toString(); CompteDepot: tauxAgios: double, traitementQuotidien(); CompteEpargne: tauxInterets: double, traitementQuotidien(), debiter(double montant)."
+    }
+  ],
+  "INFO501_1-p1": [
+    {
+      "id": "intro",
+      "kind": "text",
+      "fact": "Intro: IEEE 754; 32 bits (simple précision) or 64 bits (double précision); three fields Signe, Exposant, Mantisse."
+    },
+    {
+      "id": "table_image",
+      "kind": "visual_fact",
+      "fact": "Fig. 2.5 table (a picture): Simple précision 32 bits, 1 bit, 8 bits, 23 bits, (−1)^S × M × 2^(E−127), 24 bits, environ 7; Double précision 64 bits, 1 bit, 11 bits, 52 bits, (−1)^S × M × 2^(E−1023), 53 bits, environ 16."
+    },
+    {
+      "id": "bar_image",
+      "kind": "visual_fact",
+      "fact": "Fig. 2.6 (a picture): fields S, E, M from left to right; bit positions 31, 23, 0."
+    },
+    {
+      "id": "decode_formula",
+      "kind": "visual_fact",
+      "fact": "N10 = −1^S.(1,M2.2^((E2)10−127))10 — exponents and base subscripts not flattened into digits."
+    },
+    {
+      "id": "example_fields",
+      "kind": "visual_fact",
+      "fact": "S = 1; E = 10001001₂ = 137₁₀; M = 00000000001100000000000₂ (subscripts not merged into the digits)."
+    },
+    {
+      "id": "example_result",
+      "kind": "text",
+      "fact": "Result N = −1024,75."
+    }
+  ],
+  "INFO501_1-p2": [
+    {
+      "id": "principle",
+      "kind": "text",
+      "fact": "Four steps: signe S; conversion en binaire; mantisse par décalage pour faire apparaître 1,...; calcul de l'exposant."
+    },
+    {
+      "id": "example_steps",
+      "kind": "visual_fact",
+      "fact": "N = 12,625₁₀ = 1100,101₂ = 1,100101₂ · 2^3; M = 10010100000000000000000₂; 2^(E−127) = 2^3; E = (130)₂ = 10000010₂ — exponents and subscripts not flattened."
+    },
+    {
+      "id": "example_result",
+      "kind": "text",
+      "fact": "N = 12,625 est représenté par 01000001010010100000000000000000 (IEEE754)."
+    },
+    {
+      "id": "ascii_exercise",
+      "kind": "text",
+      "fact": "Section 2.6 Caractères and the ASCII exercise with its three questions and the '123' question."
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+# Test facility for the M2-A slide renderer. It is not part of the running
+# application: it starts no database, no API and no worker, and it does not
+# touch docker-compose.yml or any volume the application uses.
+#
+# Build and run one task by hand:
+#
+#   docker compose -f docker-compose.renderer-test.yml build renderer
+#   TASK_DIR=/tmp/m2a-render/<task-id> \
+#     docker compose -f docker-compose.renderer-test.yml run --rm renderer
+#
+# The task directory is produced by backend/worker/slide_renderer.py. The
+# renderer sees that directory and nothing else.
+services:
+  renderer:
+    build:
+      context: .
+      dockerfile: backend/renderer/Dockerfile
+    image: edullm-slide-renderer:1
+    # No network at all: the renderer never needs one, and a courseware file
+    # must not be able to make it fetch anything.
+    network_mode: none
+    read_only: true
+    user: "${RENDERER_UID:-1000}:${RENDERER_GID:-1000}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    cpus: 2
+    mem_limit: 3g
+    tmpfs:
+      - /tmp:rw,size=256m
+    environment:
+      # Limits the entry point applies to the conversion process itself.
+      RENDERER_MAX_CPU_SECONDS: "240"
+      RENDERER_MAX_ADDRESS_SPACE_BYTES: "3221225472"
+      RENDERER_MAX_FILE_SIZE_BYTES: "536870912"
+      RENDERER_MAX_OPEN_FILES: "1024"
+    volumes:
+      # The one task directory, and nothing else. No docker socket, no
+      # documents volume, no application configuration.
+      - "${TASK_DIR:?set TASK_DIR to one prepared task directory}:/task"
+    command: ["/task"]

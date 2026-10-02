@@ -1,0 +1,72 @@
+# Structured PDF ingestion
+
+This change delivers the document foundation and PDF worker through M3. The
+student agent loop, durable research runs and M4 accounting are developed
+separately on `feature/agentic-search`.
+
+## Processing path
+
+A structured PDF upload creates an immutable source and a draft revision. The
+worker extracts each physical page with MinerU, normalizes blocks, records
+issues and retains the original PDF. A separate index job creates bounded,
+source-linked chunks and validates embedding batches. Publication requires a
+ready index and verified page mapping; uploading or parsing alone does not
+publish a revision.
+
+The `mineru-text` policy keeps extracted text, code, formulas and tables. It
+replaces generated figure descriptions with native labels from the region and
+retains the figure asset. It does not mean text-only ingestion. Missing labels,
+figures, mathematical scripts and diagram relationships remain known extraction
+limitations; the original PDF is the reference for review.
+
+Teachers can inspect drafts, edit blocks and review issues before publication.
+Version, tenant and permission checks protect reader endpoints and file access.
+The student PDF view opens the complete authorized source at its resolved
+physical page. This milestone does not establish autonomous search quality.
+
+## Configuration and migration
+
+Structured writes remain disabled by default. Explicitly apply the incremental
+M1, M2, M2-C, M3-A and M3-B migrations before enabling them. For example, supply a
+database URL explicitly and run:
+
+```sh
+python -m scripts.migrate_document_snapshots --database-url "$INGESTION_DB_URL"
+python -m scripts.migrate_document_snapshots --database-url "$INGESTION_DB_URL" --apply
+```
+
+The first command is a read-only dry-run. Applied versions have checksums and
+are serialized in a transaction. These commands do not select a production
+database implicitly. Existing installations require the explicit migration;
+`create_all` cannot replace it.
+
+Set `STRUCTURED_INGEST_ENABLED=true` and `PDF_STRUCTURED_INGEST_ENABLED=true`
+only in the intended environment. The PDF worker needs `PDF_MINERU_PYTHON`,
+`PDF_MINERU_SERVER_URL` and an absolute `PDF_MINERU_CONFIG` path. Extraction runs
+in a separate interpreter with MinerU 3.4.5 and locally provisioned models.
+`PDF_MINERU_PAGE_TIMEOUT_SECONDS` defaults to 240. Missing configuration or a
+version mismatch is an explicit failure.
+
+ODP parsing and an isolated LibreOffice renderer remain available for historical
+fixtures and source-to-PDF experiments. ODP feature development is frozen;
+there is no requirement to implement a custom reader for every source format.
+The renderer Dockerfile and test Compose file run separately from application
+services. They do not automatically install MinerU in the worker image.
+
+## Validation and experimental artifacts
+
+Install `backend/requirements-test.txt` for the offline test dependencies.
+Offline tests generate deterministic document fixtures. Live MinerU and
+PostgreSQL tests require explicit isolated services. Real-course tests that
+lack their local corpus are skipped; this is not a live-model acceptance result.
+
+Course PDFs/ODPs, preview images, raw model responses, JSONL logs and generated
+reports remain local. Small frozen checks and input manifests used by benchmark
+scripts are tracked separately; JSON is a storage format, not a reason to commit
+every output. The retained benchmark definitions still require matching local
+course files. Chinese Markdown reports and plans are excluded from this commit.
+
+Use a separate artifact store or release archive for complete experimental
+outputs, with hashes and environment metadata when sharing a reproducible run.
+Automatic source, range and permission checks do not establish semantic accuracy
+or human acceptance. Historical results are not rewritten by this Git split.

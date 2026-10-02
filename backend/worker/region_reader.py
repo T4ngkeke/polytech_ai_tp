@@ -18,7 +18,7 @@ from backend.worker.page_reader import (
 )
 from backend.worker.visual_harness import _box, _group, CODE, FIGURE_DESCRIPTION_MAX
 
-VERSION = 'region-reader-v1.10'
+VERSION = 'region-reader-v9.1'
 REASON_CODES = ('content_review', 'budget_exhausted', 'protocol_failure', 'model_request_failure',
                 'extraction_failure', 'render_failure', 'source_geometry_unverified')
 CANDIDATE_MAX = 10000
@@ -349,6 +349,10 @@ async def read_page(page: NativePage, *, decide, render, max_calls=6, file_sha25
                         # An area with code keeps only the program's copy in search, so a
                         # code line the model retyped (possibly wrongly) cannot be found.
                         group = replace(group, kind='code', text=_native_group_text(lines, 'code'), visual=visual)
+                        reviews.append(make_review(page, target,
+                            reason='Visual description withheld to protect native code; review the picture information before indexing it.',
+                            reason_code='content_review', candidate_content=value['content'],
+                            file_sha256=file_sha256))
                     else:
                         group = replace(group, visual=visual)
                 groups.append(group)

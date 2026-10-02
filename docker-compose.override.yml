@@ -1,7 +1,17 @@
-# Untracked. The v6 stable stack now serves port 80, so the v9 beta stack moves
-# to 8080. Everything else keeps its current names, ports and volumes, so the
-# beta stack's existing database and uploaded documents are untouched.
+# Keep the v9 test stack available locally and through Tailscale only.
+# The v6 stable stack uses port 80, so v9 keeps port 8080.
 services:
+  postgres:
+    # This test database still uses default credentials; keep it local.
+    ports: !override
+      - "127.0.0.1:5432:5432"
+
+  backend:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+      - "100.108.32.29:8000:8000"
+
   frontend:
     ports: !override
-      - "8080:80"
+      - "127.0.0.1:8080:80"
+      - "100.108.32.29:8080:80"

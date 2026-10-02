@@ -555,3 +555,23 @@ async def test_review_update_route_returns_machine_readable_errors(db_session, t
         assert response.status_code == 200 and response.json()['status'] == 'confirmed'
     finally:
         await client.aclose(); app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_ingestion_links_failed_page_to_exact_review_and_confirmation_closes_it(db_session,tmp_path):
+    from backend.worker.partial_ingest import ingest_pages
+    from backend.worker.page_reader import ReadPage
+    from backend.tests.test_worker_partial import v15_report
+    doc,(p1,p2)=await visual_document(db_session,tmp_path)
+    target={'ids':[line.id for line in p1.lines],'region_ids':[r.id for r in p1.regions],'scope':'page'}
+    pending=review_item(doc,p1,target,reason='Page preview failed',code='render_failure')
+    pages=[ReadPage(p1,(),0,reader_version='region-reader-v9.1'),v15(p2)]
+    report=v15_report(doc,pages,[pending])
+    report['page_results'][0].update(status='needs_review',reason='render_failure')
+    await ingest_pages(db_session,doc,pages,report,embed_fn=fake_embed,context_fn=None,token_budget=None)
+    history=doc.ingest_report['page_reader']['page_results'][0].copy()
+    assert history['reason']=='render_failure' and history['review_dependencies']
+    row=(await db_session.scalars(select(DocumentReview))).one()
+    await confirm(db_session,doc,row,'Teacher verified this page: allocation is followed by a null check.')
+    assert doc.status.value=='indexed'
+    assert doc.ingest_report['page_reader']['page_results'][0]==history

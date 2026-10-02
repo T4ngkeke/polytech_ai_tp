@@ -12,6 +12,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Structured ingestion remains opt-in during development.
+    STRUCTURED_INGEST_ENABLED: bool = False
+    PDF_STRUCTURED_INGEST_ENABLED: bool = False
+    # M2-C: model descriptions of pictures, on a teacher's request only. Turn on
+    # only after the configured VLM_MODEL was checked to really read images.
+    STRUCTURED_VISION_ENABLED: bool = False
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/edudb"
 

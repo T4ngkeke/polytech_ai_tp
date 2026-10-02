@@ -210,7 +210,8 @@ def build_agent(
         return {
             "context_blocks": [h.content for h in hits],
             "citations": [
-                {"document_id": str(h.document_id), "page_no": h.page_no} for h in hits
+                {"document_id": str(h.document_id), "page_no": h.page_no,
+                 **({"revision_id": str(h.revision_id)} if h.revision_id else {})} for h in hits
             ],
             "low_evidence": low_evidence,
         }

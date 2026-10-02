@@ -8,6 +8,10 @@ from backend.app.models import DocChunk, Document
 from backend.worker.page_reader import chunk_read_pages, PageReadError
 
 
+class NoSearchableContent(PageReadError):
+    """A read page has no publishable text; preserve its original failure reason."""
+
+
 def snapshot(row):
     return (row.id, row.content, row.edited_by_teacher, row.source_fingerprint, row.context)
 
@@ -125,7 +129,7 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
                 page = replace(page, groups=tuple(groups))
             chunks = chunk_read_pages([page], file_sha256=digest)
             if not chunks:
-                raise PageReadError('No searchable content')
+                raise NoSearchableContent('No searchable content')
             chunks = [replace(c, source_ref={**(c.source_ref or {}), 'file_sha256': digest}) for c in chunks]
             keys = [_source_fingerprint(c) for c in chunks]
             counts = Counter(keys)
@@ -193,7 +197,9 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
         except (PageReadError, TeacherEditConflict, EmbeddingResultError, APIConnectionError, APITimeoutError, TimeoutError) as exc:
             network = isinstance(exc, (APIConnectionError, APITimeoutError, TimeoutError))
             failures = failures + 1 if network else 0
-            outcomes[n] = dict(page_no=n, status='failed' if network else 'needs_review', error=str(exc))
+            reason = ({'reason': outcomes.get(n, {}).get('reason') or 'no_searchable_content'}
+                      if isinstance(exc, NoSearchableContent) else {})
+            outcomes[n] = dict(page_no=n, status='failed' if network else 'needs_review', error=str(exc), **reason)
     # Serialize publication with teacher edits, then reload to detect edits made
     # while the worker waited on model/embedding calls. No long model call holds this lock.
     await db.scalar(select(Document).where(Document.id == doc.id).with_for_update())
@@ -258,8 +264,11 @@ async def ingest_pages(db, doc, pages, report, *, embed_fn, context_fn, token_bu
         from backend.app.services.document_reviews import register_reviews
         from backend.app.models import DocumentReview
         # Pages with a source conflict register nothing; the old record stays the task.
-        await register_reviews(db, doc, [r for r in review_items if r['page_no'] not in review_changed
-                                         and r['page_no'] not in review_conflicts and r['page_no'] not in ignored_pages])
+        registered_items = [r for r in review_items if r['page_no'] not in review_changed
+                            and r['page_no'] not in review_conflicts and r['page_no'] not in ignored_pages]
+        registered_rows = await register_reviews(db, doc, registered_items)
+        from backend.app.services.document_index_state import bind_review_dependencies
+        bind_review_dependencies(report['page_results'], registered_items, registered_rows)
         review_rows = list((await db.scalars(select(DocumentReview).where(DocumentReview.document_id == doc.id))).all())
         review_summary = {state: sum(r.status == state for r in review_rows) for state in ('pending', 'confirmed', 'ignored')}
     doc.ingest_report = {'page_reader':report, 'chunk_count':len(rows), 'ingest_tokens_est':tokens,

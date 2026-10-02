@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import DocumentReviews from './DocumentReviews';
+import StructuredDocumentDetail from './DocumentBlockEditor';
 import { ingestReportWarnings } from '../lib/ingestReport';
 
 // Document language selects the BM25 tsvector config; ingest and query sides
@@ -42,9 +43,22 @@ const STATUS_BADGE = {
   partially_indexed: 'bg-gold-muted text-gold',
   failed: 'bg-danger-muted text-danger',
   needs_review: 'bg-gold-muted text-gold',
+  parsed: 'bg-cyan-muted text-cyan',
 };
 
+const STATUS_LABEL = { parsed: 'parsed · waiting for indexing' };
+
 const IN_PROGRESS = new Set(['pending', 'processing']);
+
+// A structured document has no published version until indexing
+// exists (M3). Until then its newest draft tells what is going on.
+const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', failed: 'failed' };
+function displayStatus(doc) {
+  if (doc.structured && !doc.current_revision_id && doc.latest_revision) {
+    return REVISION_STATUS[doc.latest_revision.processing_state] || doc.latest_revision.processing_state;
+  }
+  return doc.status;
+}
 
 export default function DocumentManager({ labId }) {
   const [documents, setDocuments] = useState([]);
@@ -75,7 +89,7 @@ export default function DocumentManager({ labId }) {
 
   // Poll only while something is still being ingested (pending → indexed).
   useEffect(() => {
-    if (!documents.some((d) => IN_PROGRESS.has(d.status))) return;
+    if (!documents.some((d) => IN_PROGRESS.has(displayStatus(d)))) return;
     const id = setInterval(() => {
       loadDocuments().catch(() => {});
     }, 3000);
@@ -113,7 +127,8 @@ export default function DocumentManager({ labId }) {
       `Delete "${doc.filename}" and everything indexed from it? This cannot be undone.`
     )) return;
     try {
-      await api.delete(`/api/teacher/documents/${doc.id}`);
+      // A structured document is deleted with the generation the teacher saw.
+      await api.delete(`/api/teacher/documents/${doc.id}${doc.structured ? `?expected_generation=${doc.generation}` : ''}`);
       toast.success('Document deleted');
       if (selected?.id === doc.id) setSelected(null);
       await loadDocuments();
@@ -127,8 +142,9 @@ export default function DocumentManager({ labId }) {
   }
 
   if (selected) {
+    const Detail = selected.structured ? StructuredDocumentDetail : DocumentDetail;
     return (
-      <DocumentDetail
+      <Detail
         document={selected}
         onRefresh={async () => {
           const rows = await loadDocuments();
@@ -187,7 +203,7 @@ export default function DocumentManager({ labId }) {
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
-                  <StatusBadge status={doc.status} />
+                  <StatusBadge status={displayStatus(doc)} />
                   <SummaryChips doc={doc} />
                 </span>
               </button>
@@ -212,7 +228,7 @@ function StatusBadge({ status }) {
   const cls = STATUS_BADGE[status] || 'bg-ink-surface text-cream-muted';
   return (
     <span className={`rounded px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {status.replace('_', ' ')}
+      {STATUS_LABEL[status] || status.replace('_', ' ')}
     </span>
   );
 }

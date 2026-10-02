@@ -52,6 +52,8 @@ from backend.app.models import (
     Class,
     ClassStudent,
     Document,
+    DocumentPage,
+    DocumentRevision,
     Lab,
     Message,
     MessageFeedback,
@@ -120,47 +122,76 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 async def _build_citations_payload(db: AsyncSession, citations: list[dict]) -> list[dict]:
-    """Dedup the agent's citations and enrich each with its document filename.
+    """Resolve retrieved source pages to verified physical pages of a PDF.
 
-    The agent emits ``{document_id, page_no}``; students can't resolve a raw
-    document_id, so we resolve filenames here (one query) while the request DB
-    session is still open. Returns ``[{document_id, filename, page_no}, ...]``.
+    A structured citation without its exact revision or verified page mapping
+    stays visible as text, but cannot become a misleading PDF link.
     """
     if not citations:
         return []
 
-    # Dedup by (document_id, page_no), preserving first-seen order.
     seen: set[tuple] = set()
     deduped: list[dict] = []
     for c in citations:
-        key = (c.get("document_id"), c.get("page_no"))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(c)
+        key = (str(c.get("document_id")), str(c.get("revision_id")), c.get("page_no"))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(c)
 
-    # Resolve filenames in a single query.
-    uuid_ids = []
-    for doc_id in {c.get("document_id") for c in deduped if c.get("document_id")}:
+    document_ids = set()
+    revision_ids = set()
+    page_nos = set()
+    for c in deduped:
         try:
-            uuid_ids.append(uuid.UUID(str(doc_id)))
+            document_ids.add(uuid.UUID(str(c.get("document_id"))))
+            if c.get("revision_id"):
+                revision_ids.add(uuid.UUID(str(c["revision_id"])))
         except (ValueError, TypeError):
             continue
-    filenames: dict[str, str] = {}
-    if uuid_ids:
-        rows = await db.execute(
-            select(Document.id, Document.filename).where(Document.id.in_(uuid_ids))
-        )
-        filenames = {str(r.id): r.filename for r in rows.all()}
+        if type(c.get("page_no")) is int and c["page_no"] > 0:
+            page_nos.add(c["page_no"])
 
-    return [
-        {
-            "document_id": c.get("document_id"),
-            "filename": filenames.get(c.get("document_id")),
-            "page_no": c.get("page_no"),
-        }
-        for c in deduped
-    ]
+    documents = {}
+    if document_ids:
+        documents = {str(d.id): d for d in (await db.scalars(
+            select(Document).where(Document.id.in_(document_ids)))).all()}
+    pages = {}
+    if revision_ids and page_nos:
+        rows = (await db.execute(select(DocumentPage, DocumentRevision.document_id)
+            .join(DocumentRevision, DocumentPage.revision_id == DocumentRevision.id)
+            .where(DocumentPage.revision_id.in_(revision_ids),
+                   DocumentPage.source_slide_no.in_(page_nos),
+                   DocumentRevision.publication_state.in_(("published", "superseded"))))).all()
+        for page, owner_id in rows:
+            key = (str(owner_id), str(page.revision_id), page.source_slide_no)
+            # Ambiguous mappings are never linked.
+            pages[key] = page if key not in pages else None
+
+    payload = []
+    for c in deduped:
+        doc = documents.get(str(c.get("document_id")))
+        page_no = c.get("page_no")
+        revision_id = str(c.get("revision_id")) if c.get("revision_id") else None
+        pdf_page_no = None
+        page_id = None
+        if doc is not None and type(page_no) is int and page_no > 0:
+            if doc.structured and revision_id:
+                page = pages.get((str(doc.id), revision_id, page_no))
+                if page is not None and page.preview_page_no is not None:
+                    pdf_page_no = page.preview_page_no
+                    page_id = str(page.page_id)
+            elif (not doc.structured and doc.filename.lower().endswith('.pdf')
+                  and (doc.page_count is None or page_no <= doc.page_count)):
+                pdf_page_no = page_no
+        payload.append({
+            "document_id": str(c.get("document_id")),
+            "filename": doc.filename if doc else None,
+            "page_no": page_no,
+            "revision_id": revision_id if pdf_page_no and doc and doc.structured else None,
+            "page_id": page_id,
+            "pdf_page_no": pdf_page_no,
+        })
+    return payload
 
 
 # ---------------------------------------------------------------------------

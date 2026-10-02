@@ -78,7 +78,7 @@ if __name__=='__main__':
     if len(sys.argv)>4:
         from scripts.worker_visual_gold import evaluate_content_gate
         gates=[evaluate_content_gate(json.loads((p/'results.json').read_text()),json.loads(Path(r).read_text()),run=p.name,
-                                     accept_model_review=accept_model) for p,r in zip((left,right),sys.argv[3:5])]
+                                     accept_model_review=accept_model,manifest=m) for p,r,m in zip((left,right),sys.argv[3:5],manifests)]
         result_kinds={'reviewer_kinds':{'before':gates[0]['reviewer_kinds'],'after':gates[1]['reviewer_kinds']}}
         content=tuple({(g['file'],g['page'],g['round']):g['state']=='passed' for g in gate['pages']} for gate in gates)
     result=compare(json.loads((left/'results.json').read_text()),json.loads((right/'results.json').read_text()),content)

@@ -199,3 +199,28 @@ def test_model_review_counts_only_when_explicitly_accepted_and_is_labelled():
     assert evaluate_content_gate([row], [unauthorized], run='run-1', accept_model_review=True)['pages'][0]['state'] == 'pending'
     human = evaluate_content_gate([row], [record(row)], run='run-1', accept_model_review=True)
     assert human['reviewer_kinds'] == {'human': 1}
+
+
+def test_content_gate_fails_for_a_page_without_checklist():
+    from scripts.worker_visual_gold import evaluate_content_gate
+    row=audited()
+    unknown={**row,'file':'new-course.pdf'}
+    gate=evaluate_content_gate([row,unknown],[record(row)],run='run-1')
+    assert not gate['passed']
+    assert gate['pages'][1]['state']=='no_checklist'
+
+
+def test_content_gate_requires_all_manifest_pages_and_rounds():
+    from scripts.worker_visual_gold import evaluate_content_gate
+    row=audited()
+    manifest={'cases':[[row['file'],row['page']]],'rounds':2}
+    gate=evaluate_content_gate([row],[record(row)],run='run-1',manifest=manifest)
+    assert not gate['passed']
+    assert any(p['round']==2 and p['state']=='missing_output' for p in gate['pages'])
+
+
+def test_content_gate_rejects_duplicate_output_or_review():
+    from scripts.worker_visual_gold import evaluate_content_gate
+    row=audited();checked=record(row)
+    assert not evaluate_content_gate([row,row],[checked],run='run-1')['passed']
+    assert not evaluate_content_gate([row],[checked,checked],run='run-1')['passed']

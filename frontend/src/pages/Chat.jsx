@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
@@ -491,6 +491,7 @@ export default function Chat() {
             <MessageBubble
               key={msg.id}
               message={msg}
+              sessionId={activeSessionId}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
             />
@@ -613,7 +614,7 @@ function FeedbackButtons({ messageId, initial }) {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ message, streaming, canRate }) {
+const MessageBubble = memo(function MessageBubble({ message, streaming, canRate, sessionId }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -638,17 +639,7 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, canRate 
           : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
         {!isUser && message.citations?.length > 0 && (
           <div className="mt-2.5 pt-2.5 border-t border-border-subtle flex flex-wrap gap-1.5">
-            {message.citations.map((c, i) => (
-              <span
-                key={`${c.document_id}-${c.page_no}-${i}`}
-                className="inline-flex items-center gap-1 rounded-md bg-cyan-muted/60 border border-cyan/20 px-1.5 py-0.5 text-[10px] text-cream-secondary"
-                title={c.filename || c.document_id}
-              >
-                <DocIcon className="w-2.5 h-2.5 text-cyan" />
-                <span className="max-w-[180px] truncate">{c.filename || 'Source'}</span>
-                {c.page_no != null && <span className="text-cream-muted">· p.{c.page_no}</span>}
-              </span>
-            ))}
+            {message.citations.map((c, i) => renderCitationBadge(c, sessionId, i))}
           </div>
         )}
         {!isUser && !streaming && canRate && (
@@ -658,6 +649,31 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, canRate 
     </div>
   );
 });
+
+function renderCitationBadge(c, sessionId, index, onSelectCitation) {
+  const key = c.citation_id || `${c.document_id}-${c.revision_id}-${c.page_no}-${index}`;
+  const label = <>
+    <DocIcon className="w-2.5 h-2.5 text-cyan" />
+    <span className="max-w-[180px] truncate">{c.filename || 'Source'}</span>
+    {(c.pdf_page_no || c.page_no) != null && <span className="text-cream-muted">· p.{c.pdf_page_no || c.page_no}</span>}
+    {c.label && <span>[{c.label}]</span>}
+  </>;
+  const className = 'inline-flex items-center gap-1 rounded-md bg-cyan-muted/60 border border-cyan/20 px-1.5 py-0.5 text-[10px] text-cream-secondary';
+  if (c.citation_id && !c.available) {
+    return <span key={key} className={className} title="Source no longer available">{label} · Unavailable</span>;
+  }
+  if (!sessionId || !c.document_id || !Number.isInteger(c.pdf_page_no) || c.pdf_page_no < 1) {
+    return <span key={key} className={className} title="PDF page not available">{label}</span>;
+  }
+  const query = new URLSearchParams({ session_id: sessionId, page: String(c.pdf_page_no) });
+  if (c.revision_id) query.set('revision_id', c.revision_id);
+  return <Link key={key} className={`${className} hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}
+    to={c.href || `/source/${encodeURIComponent(c.document_id)}?${query}`} target="_blank" rel="noopener noreferrer"
+    title={`Open ${c.filename || 'course PDF'} at PDF page ${c.pdf_page_no}`}>
+    {label}{c.newer_revision && <span title="A newer course revision exists"> · Older version</span>}
+    {c.teacher_revised && <span title="Teacher edited this source"> · Teacher edited</span>}
+  </Link>;
+}
 
 function BlinkDot({ delay = '0ms' }) {
   return <span className="w-1.5 h-1.5 rounded-full bg-cream-muted animate-pulse inline-block" style={{ animationDelay: delay }} />;

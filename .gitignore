@@ -10,3 +10,15 @@ backend/.env
 .DS_Store
 .claude
 docs/
+
+# Courseware and generated acceptance artifacts remain local.
+/cours/
+/documentation/ingestion-agent-acceptance/
+/documentation/pdf-ingest-comparison-*/
+/documentation/**/runs/
+/documentation/**/previews/
+/documentation/**/*.page.json
+/documentation/**/*.review.json
+/documentation/**/*.raw.json
+/documentation/**/*.jsonl
+/documentation/**/*.log

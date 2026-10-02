@@ -34,7 +34,7 @@ def test_nested_fence_examples_do_not_create_fake_sections_or_pages():
     assert "````markdown" in example.content and example.content.endswith("````")
 
 
-@pytest.mark.parametrize("text", ["x" * 5000, "长段落没有句号" * 800, "    x = 'Hello. World!'\n" * 150])
+@pytest.mark.parametrize("text", ["x" * 5000, "\u957f\u6bb5\u843d\u6ca1\u6709\u53e5\u53f7" * 800, "    x = 'Hello. World!'\n" * 150])
 def test_long_content_is_bounded_without_losing_or_reformatting_text(text):
     chunks = chunk_pages([text], max_chars=300)
     assert len(chunks) > 1
@@ -478,3 +478,20 @@ def test_only_v15_pages_use_v3_sources(tmp_path):
     assert {c.source_ref['version'] for c in old} == {2}
     assert {c.source_ref['version'] for c in new} == {3}
     assert {c.source_ref['file_sha256'] for c in new} == {'f' * 64}
+
+
+def test_project_v9_reader_keeps_existing_source_identity():
+    from dataclasses import replace
+    from backend.worker.page_reader import NativePage, NativeLine, ReadPage, ReadGroup, chunk_read_pages
+    from backend.worker.visual_sources import uses_v3
+    from backend.worker.ingest import _source_fingerprint
+    from backend.worker.region_reader import VERSION
+    assert VERSION == 'region-reader-v9.1'
+    assert uses_v3(VERSION) and uses_v3('region-reader-v1.11')
+    assert not uses_v3('region-reader-v1.4')
+    page=ReadPage(NativePage(1,600,400,(NativeLine('p1l0',(10,10,100,20),'source'),)),
+                  (ReadGroup('text',('p1l0',),'source'),),1,reader_version='region-reader-v1.11')
+    old=chunk_read_pages([page],file_sha256='same-file')[0]
+    new=chunk_read_pages([replace(page,reader_version=VERSION)],file_sha256='same-file')[0]
+    assert old.source_ref == new.source_ref
+    assert _source_fingerprint(old) == _source_fingerprint(new)

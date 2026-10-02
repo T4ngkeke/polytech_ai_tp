@@ -14,7 +14,9 @@ from typing import Awaitable, Callable
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Class, DocChunk, Document, DocumentReview, IngestionJob
+from backend.app.models import (
+    Class, DocChunk, Document, DocumentReview, DocumentRevision, IngestionJob,
+)
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 
@@ -41,6 +43,8 @@ async def create_document(
                 Document.class_id == class_id,
                 Document.lab_id == lab_id,
                 Document.content_hash == content_hash,
+                Document.structured.is_(False),
+                Document.lifecycle == "active",
             )
         )
     ).scalar_one_or_none()
@@ -84,14 +88,30 @@ async def _count(db: AsyncSession, model, document_id: uuid.UUID) -> int:
 async def list_lab_documents(db: AsyncSession, lab_id: uuid.UUID) -> list[dict]:
     """Documents in a lab with their status + processing summary (pages/chunks)."""
     docs = (await db.execute(
-        select(Document).where(Document.lab_id == lab_id).order_by(Document.id)
+        select(Document).where(Document.lab_id == lab_id, Document.lifecycle != "deleted").order_by(Document.id)
     )).scalars().all()
 
     summaries: list[dict] = []
     for doc in docs:
+        if doc.structured:
+            chunk_count = (await db.scalar(select(func.count()).select_from(DocChunk).where(
+                DocChunk.document_id == doc.id, DocChunk.revision_id == doc.current_revision_id
+            ))) if doc.current_revision_id else 0
+        else:
+            chunk_count = await _count(db, DocChunk, doc.id)
+        latest = None
+        if doc.structured:
+            rev = await db.scalar(select(DocumentRevision).where(DocumentRevision.document_id == doc.id)
+                                  .order_by(DocumentRevision.created_at.desc(), DocumentRevision.id.desc()).limit(1))
+            if rev is not None:
+                latest = {"id": str(rev.id), "processing_state": rev.processing_state,
+                          "publication_state": rev.publication_state,
+                          "parse_quality": (rev.report or {}).get("parse_quality"),
+                          "error_code": (rev.report or {}).get("error_code")}
         summaries.append({
             "doc": doc,
-            "chunk_count": await _count(db, DocChunk, doc.id),
+            "chunk_count": chunk_count,
+            "latest_revision": latest,
         })
     return summaries
 
@@ -103,7 +123,7 @@ async def get_owned_document(
     stmt = (
         select(Document)
         .join(Class, Class.id == Document.class_id)
-        .where(Document.id == document_id, Class.teacher_id == teacher_id)
+        .where(Document.id == document_id, Class.teacher_id == teacher_id, Document.lifecycle != "deleted")
     )
     return (await db.execute(stmt)).scalar_one_or_none()
 
@@ -189,6 +209,8 @@ async def delete_document(db: AsyncSession, document: Document) -> str:
 
     Returns the `storage_path` so the caller can remove the stored file after the
     transaction commits (filesystem side effects stay in the router)."""
+    if document.structured:
+        raise ValueError("structured_document_requires_cleanup_job")
     storage_path = document.storage_path
     doc_id = document.id
     await db.execute(delete(DocumentReview).where(DocumentReview.document_id == doc_id))

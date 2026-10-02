@@ -74,3 +74,38 @@ def test_apply_writes_current_state_and_keeps_history():
     partial = summary(results=[result(1), result(2, 'retained')])
     apply_document_index_summary(doc, partial)
     assert doc.status == DocumentStatus.partially_indexed and '2' in doc.error_message
+
+
+def linked_review(status='confirmed', revision=2):
+    return NS(id='r1',page_no=2,status=status,revision=revision,file_sha256='file',source_key='source',source_ref={'scope':'page'})
+
+
+def linked_result(**extra):
+    return result(2,'needs_review',reason='render_failure',review_dependencies=[
+        {'review_id':'r1','revision':1,'file_sha256':'file','source_key':'source'}],**extra)
+
+
+def test_resolved_exact_review_closes_its_historical_render_failure():
+    state=summary(reviews=[linked_review()],results=[result(1),linked_result()])
+    assert state['status']=='indexed' and state['problem_pages']==[]
+
+
+def test_stale_or_unrelated_review_cannot_close_failure():
+    for row in (linked_review('pending',1),linked_review(revision=4),review(2,'confirmed','page')):
+        assert summary(reviews=[row],results=[result(1),linked_result()])['status']=='partially_indexed'
+    changed=linked_review();changed.file_sha256='other'
+    assert summary(reviews=[changed],results=[result(1),linked_result()])['status']=='partially_indexed'
+    conflict={**linked_result(),'reason':'review_source_conflict'}
+    assert summary(reviews=[linked_review()],results=[result(1),conflict])['status']=='partially_indexed'
+
+
+def test_no_index_page_does_not_hide_independent_source_conflict():
+    state=summary(chunks=(1,),reviews=[review(2,'ignored','page')],
+        results=[result(1),result(2,'needs_review',reason='review_source_conflict')])
+    assert state['status']=='partially_indexed' and state['problem_pages']==[2]
+
+
+def test_no_content_keeps_original_extraction_problem_even_if_ignored():
+    state=summary(chunks=(1,),reviews=[review(2,'ignored','page')],results=[result(1),
+        result(2,'needs_review',reason='extraction_failure',error='No searchable content')])
+    assert state['status']=='partially_indexed' and state['problem_pages']==[2]

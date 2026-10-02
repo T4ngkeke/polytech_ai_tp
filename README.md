@@ -49,7 +49,7 @@ The cut goes deep because segmentation only ever existed to serve those rows. An
 it with confidence, so the split had to be exactly right. The LLM line
 classifier, the numbering-anomaly detector, the boundary cache and the
 compare-and-confirm UI were all built to make that claim trustworthy. With no
-rows to build, `chunking.py` drops from 499 lines to 138.
+rows to build, the exercise-specific segmentation machinery was removed.
 
 ### How it works now
 
@@ -57,7 +57,11 @@ rows to build, `chunking.py` drops from 499 lines to 138.
   (`router → [rag | direct] → tutor → synthesize → SSE`).
 - **One upload path**: PDF, Markdown or HTML, all becoming Contextual-Retrieval
   chunks. The form asks for the file, a language and whether to share it
-  class-wide. Nothing else.
+  class-wide. Nothing else. The worker preserves repeated body text, recognizes
+  Markdown/HTML headings and code fences, validates embedding batches, and
+  matches teacher corrections by source fingerprint. See the
+  [worker change guide](documentation/PDF_INGESTION.md) for examples, limits and the
+  additive schema update required for an existing database.
 - **Hybrid retrieval on a single DB**: `pgvector` and Postgres full-text
   (`tsvector`) live in one table, fused with RRF and reranked. No third-party
   vector DB.
@@ -73,6 +77,13 @@ rows to build, `chunking.py` drops from 499 lines to 138.
 - **Vision repair, opt-in**: garbled formulas in printed PDFs are detected
   deterministically, cropped, and re-read by a vision model under a
   transcribe-only prompt. Empty `VLM_MODEL` = off.
+- **PDF layout reader, experimental**: `WORKER_PAGE_READER=1` lets the main
+  multimodal model group native text IDs and request bounded crops. Coverage is
+  checked before indexing; code characters come from the PDF. Successful pages
+  can index independently; failed pages retain prior content. Local formula/table/diagram
+  transcription and stable source provenance are implemented, with real-model quality
+  acceptance still required. Off by default; apply the source-column/status migration first. See
+  [implementation details and limits](documentation/PDF_INGESTION.md).
 
 ### Red lines (security and governance)
 
@@ -320,3 +331,9 @@ If you prefer running services outside of Docker for development:
    npm run dev
    ```
    Access the dev server at `http://localhost:5173`.
+
+## Structured PDF ingestion
+
+The M1-M3 document foundation, page-aware PDF worker, teacher review and student
+PDF view are described in [PDF_INGESTION.md](documentation/PDF_INGESTION.md).
+Structured ingestion is opt-in; later agent work is developed separately.

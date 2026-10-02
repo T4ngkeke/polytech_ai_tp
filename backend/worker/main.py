@@ -22,6 +22,7 @@ from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.config import settings
 from backend.app.models import IngestionJob, JobStatus
 from backend.worker.context import CONTEXT_RESPONSE_FORMAT, parse_context_response
 from backend.worker.ingest import ContextFn, EmbedFn, RepairFn, PageReaderFn, ingest_document
@@ -97,6 +98,7 @@ async def run_tick(
     token_budget: int | None = None,
     repair_fn: RepairFn | None = None,
     page_reader_fn: PageReaderFn | None = None,
+    structured=None,
 ) -> bool:
     """
     One iteration of the worker loop.
@@ -129,6 +131,20 @@ async def run_tick(
     if not urgent and not gate.should_run():
         await sleep_fn(gate_seconds)
         return False
+
+    # Structured ODP/PDF jobs have their own claim and never touch the
+    # legacy rows. They run only while new structured writes are enabled.
+    if structured is not None and settings.STRUCTURED_INGEST_ENABLED:
+        from backend.worker.structured_ingest import process_structured_job, sweep
+
+        if await process_structured_job(db, settings=structured):
+            return True
+        from backend.worker.structured_index import process_index_job
+        if await process_index_job(db, embed_fn=embed_fn,
+                                   lease_seconds=structured.lease_seconds,
+                                   max_attempts=structured.max_attempts):
+            return True
+        await sweep(db, structured)
 
     processed = await process_one(
         db, embed_fn=embed_fn, context_fn=context_fn,
@@ -183,6 +199,7 @@ async def run_forever(
     build_fns,
     chat_gate=None,
     chat_load_fn: Callable[[AsyncSession], Awaitable[float]] | None = None,
+    structured=None,
 ) -> None:  # pragma: no cover - thin infinite-loop glue
     """Run the ingestion worker loop forever, hot-reloading model config each tick
     (`build_fns(db)` re-reads SystemConfig and rebuilds clients on change)."""
@@ -192,7 +209,7 @@ async def run_forever(
             db, gate, embed_fn=fns.embed_fn, context_fn=fns.context_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
             token_budget=fns.token_budget, repair_fn=fns.repair_fn,
-            page_reader_fn=fns.page_reader_fn,
+            page_reader_fn=fns.page_reader_fn, structured=structured,
         )
 
 
@@ -398,9 +415,16 @@ async def main() -> None:  # pragma: no cover - entrypoint
         build_fns = make_fn_builder()
         chat_gate = ChatLoadGate()
         gate = GpuGate(util_fn=_pynvml_util)
+        structured = None
+        if settings.STRUCTURED_INGEST_ENABLED:
+            from backend.worker.structured_ingest import StructuredSettings, sweep_task_root
+
+            structured = StructuredSettings.from_env(settings.DOCUMENTS_STORAGE_ROOT)
+            # Job folders a crashed run left behind; a live job is never this old.
+            sweep_task_root(structured.task_root, older_than_seconds=structured.lease_seconds)
         await run_forever(
             db, gate, build_fns=build_fns,
-            chat_gate=chat_gate, chat_load_fn=_recent_chat_count,
+            chat_gate=chat_gate, chat_load_fn=_recent_chat_count, structured=structured,
         )
 
 

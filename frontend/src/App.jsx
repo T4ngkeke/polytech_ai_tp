@@ -17,6 +17,7 @@ import MainLayout from './components/MainLayout';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Chat from './pages/Chat';
+import SourcePdf from './pages/SourcePdf';
 import Teacher from './pages/Teacher';
 import Admin from './pages/Admin';
 import Account from './pages/Account';
@@ -43,6 +44,7 @@ export default function App() {
 
           {/* All authenticated users — Chat is the unified student workspace */}
           <Route element={<ProtectedRoute allowedRoles={['admin', 'teacher', 'student']} />}>
+            <Route path="/source/:documentId" element={<SourcePdf />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/chat/:labId" element={<Chat />} />
             <Route path="/account" element={<Account />} />

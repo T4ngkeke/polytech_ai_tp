@@ -244,9 +244,13 @@ async def list_labs(
 @router.post("/labs/{lab_id}/documents", response_model=DocumentResponse, status_code=201)
 async def upload_document(
     lab_id: uuid.UUID,
+    response: Response,
     file: UploadFile = File(...),
     language: str = Form("fr"),
     shared: bool = Form(False),
+    mode: str = Form("new"),
+    replace_document_id: uuid.UUID | None = Form(None),
+    expected_generation: int | None = Form(None, ge=0),
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
     storage_root: str = Depends(get_storage_root),
@@ -261,6 +265,23 @@ async def upload_document(
     """
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+
+    if (file.filename or "").lower().endswith(".pdf") and settings.PDF_STRUCTURED_INGEST_ENABLED and settings.STRUCTURED_INGEST_ENABLED:
+        return await _upload_structured(
+            db, response, lab=lab, file=file, language=language, shared=shared, mode=mode,
+            replace_document_id=replace_document_id, expected_generation=expected_generation,
+            teacher=teacher, storage_root=storage_root, fmt="pdf")
+    if (file.filename or "").lower().endswith(".odp"):
+        if settings.PDF_STRUCTURED_INGEST_ENABLED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="odp_not_supported")
+        return await _upload_structured(
+            db, response, lab=lab, file=file, language=language, shared=shared, mode=mode,
+            replace_document_id=replace_document_id, expected_generation=expected_generation,
+            teacher=teacher, storage_root=storage_root, fmt="odp")
+    # Replacing a file is part of the structured path only (M2-B, ODP).
+    if mode != "new" or replace_document_id is not None or expected_generation is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="replace_requires_structured_odp")
 
     # PDF (slides exported to PDF), Markdown or HTML — no other formats.
     if not (file.filename or "").lower().endswith((".pdf", ".md", ".html", ".htm")):
@@ -284,6 +305,42 @@ async def upload_document(
         language=language,
     )
     return DocumentResponse.model_validate(doc)
+
+
+async def _upload_structured(db, response, *, lab, file, language, shared, mode,
+                             replace_document_id, expected_generation, teacher, storage_root, fmt):
+    """[M2-B] ODP upload: new document or replacement, one parse job each."""
+    from backend.app.services import structured_upload
+    from backend.app.services.document_access import DocumentNotFound
+    from backend.app.services.document_versions import VersionConflict
+
+    # With the flag off no new structured content is written; legacy formats
+    # keep working and already stored structured documents stay readable.
+    if not settings.STRUCTURED_INGEST_ENABLED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="structured_ingest_disabled")
+    limit = structured_upload.max_upload_bytes(fmt=fmt)
+    content = await file.read(limit + 1)
+    if len(content) > limit:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+    try:
+        result = await (structured_upload.upload_pdf if fmt == "pdf" else structured_upload.upload_odp)(
+            db, teacher_id=teacher.id, lab=lab, shared=shared, filename=file.filename,
+            content=content, language=language, storage_root=storage_root, mode=mode,
+            replace_document_id=replace_document_id, expected_generation=expected_generation)
+    except structured_upload.UploadRejected as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except DocumentNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from None
+    except VersionConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    # Same content sent again to the same document: nothing new was created.
+    response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
+    doc, rev = result.document, result.revision
+    return DocumentResponse(
+        id=doc.id, class_id=doc.class_id, lab_id=doc.lab_id, filename=doc.filename,
+        status=doc.status.value, structured=True, generation=doc.generation,
+        source_version_id=rev.source_version_id, revision_id=rev.id,
+        processing_state=rev.processing_state, job_id=result.job.id if result.job else None)
 
 
 # ===================================================================
@@ -310,6 +367,11 @@ async def list_lab_documents(
             error_message=r["doc"].error_message,
             chunk_count=r["chunk_count"],
             ingest_report=r["doc"].ingest_report,
+            lifecycle=r["doc"].lifecycle,
+            generation=r["doc"].generation,
+            structured=r["doc"].structured,
+            current_revision_id=r["doc"].current_revision_id,
+            latest_revision=r["latest_revision"],
         )
         for r in rows
     ]
@@ -349,7 +411,9 @@ async def update_document_chunk(
 ) -> ChunkResponse:
     """[v7.2] Correct a mis-split chunk's text. The edit re-embeds + re-indexes the
     chunk so retrieval reflects the correction. Ownership enforced via the document."""
-    await _owned_document_or_404(db, document_id, teacher)
+    owned = await _owned_document_or_404(db, document_id, teacher)
+    if owned.structured:
+        raise HTTPException(409, "edit_complete_block_required")
     chunk = await document_service.get_chunk_in_document(db, document_id, chunk_id)
     if chunk is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found")
@@ -363,12 +427,27 @@ async def update_document_chunk(
 )
 async def delete_document(
     document_id: uuid.UUID,
+    expected_generation: int | None = Query(default=None, ge=0),
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
-) -> None:
+):
     """Delete an uploaded document and everything derived from it — its chunks
     and ingestion jobs — plus the stored file. Ownership-checked."""
     doc = await _owned_document_or_404(db, document_id, teacher)
+    if doc.structured:
+        from fastapi.responses import JSONResponse
+        from backend.app.services.document_cleanup import mark_deleted
+        from backend.app.services.document_versions import VersionConflict
+        if expected_generation is None:
+            raise HTTPException(422, "expected_generation_required")
+        try:
+            await mark_deleted(db, document_id=doc.id, teacher_id=teacher.id,
+                               expected_generation=expected_generation)
+            await db.commit()
+        except VersionConflict as exc:
+            await db.rollback()
+            raise HTTPException(409, str(exc)) from None
+        return JSONResponse(status_code=202, content={"document_id": str(doc.id), "state": "pending"})
     storage_path = await document_service.delete_document(db, doc)
     await db.commit()
     # Best-effort file cleanup after the row is gone (never fail the request for a
@@ -761,8 +840,9 @@ def _review_conflict(exc):
 async def list_document_reviews(document_id: uuid.UUID,
     teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
     await _owned_document_or_404(db,document_id,teacher)
-    rows=(await db.scalars(select(DocumentReview).where(DocumentReview.document_id==document_id)
-        .order_by(DocumentReview.page_no,DocumentReview.id))).all()
+    # Legacy PDF reviews only; structured ones are listed per revision (M2-C).
+    rows=(await db.scalars(select(DocumentReview).where(DocumentReview.document_id==document_id,
+        DocumentReview.revision_id.is_(None)).order_by(DocumentReview.page_no,DocumentReview.id))).all()
     return [DocumentReviewResponse.model_validate(row) for row in rows]
 
 
@@ -770,6 +850,8 @@ async def list_document_reviews(document_id: uuid.UUID,
 async def document_review_image(document_id: uuid.UUID, review_id: uuid.UUID,
     teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
     doc=await _owned_document_or_404(db,document_id,teacher)
+    if doc.structured:
+        raise HTTPException(409,'structured_review_endpoint_required')
     row=await db.scalar(select(DocumentReview).where(DocumentReview.id==review_id,
         DocumentReview.document_id==document_id))
     if row is None:raise HTTPException(404,'Review not found')
@@ -785,6 +867,8 @@ async def resolve_document_review(document_id: uuid.UUID, review_id: uuid.UUID, 
     teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db),
     embed_fn: document_service.EmbedFn = Depends(get_embed_fn)):
     doc=await _owned_document_or_404(db,document_id,teacher)
+    if doc.structured:
+        raise HTTPException(409,'structured_review_endpoint_required')
     try:
         row=await document_reviews.resolve_review(db,doc,review_id,revision=body.revision,
             status=body.status,content=body.content,teacher_id=teacher.id,embed_fn=embed_fn)
