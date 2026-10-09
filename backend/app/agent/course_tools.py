@@ -523,6 +523,12 @@ class CourseTools:
             return {'ok': False, 'error': {'code': 'visual_budget_exhausted'}}
         return None
 
+    def refuse(self, name: str, model_arguments, result: dict) -> None:
+        """Record a call that is not a readable course tool call; it takes a slot."""
+        self.trace.append({'event': 'tool', 'name': name, 'arguments': None,
+                           'model_arguments': model_arguments, 'dispatched': False,
+                           'ok': False, 'result': result, 'elapsed_seconds': 0.0})
+
     async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
         """One model call with handles: translate, execute, render compact text."""
         if self.view is None:
