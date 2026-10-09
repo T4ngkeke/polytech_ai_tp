@@ -1,4 +1,7 @@
-"""
+"""Legacy chat compatibility module.
+
+Used by the fallback in routers/chat.py, outside the M4 research loop.
+
 router.py — one-call LLM intent router.
 
 A single ROUTER_MODEL call classifies each message into one of two lanes (rag /

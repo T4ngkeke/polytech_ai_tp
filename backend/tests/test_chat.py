@@ -357,7 +357,7 @@ class TestRuleInjection:
         db_session.add(seed_chat["rule_lab"])
         await db_session.commit()
 
-        from backend.app.agent.prompt import build_system_prompt
+        from backend.app.agent.legacy.prompt import build_system_prompt
         from backend.app.services.rule_service import get_active_rule_texts
 
         rule_texts = await get_active_rule_texts(

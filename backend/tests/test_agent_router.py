@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from backend.app.agent.router import RouterDecision, classify
+from backend.app.agent.legacy.router import RouterDecision, classify
 
 
 def _fake_llm(payload: dict):
@@ -178,6 +178,6 @@ async def test_classify_degrade_defaults_effort_none_answer_seeking_false():
 
 def test_resolve_number_is_deleted():
     """Kept as an explicit epitaph: nothing resolves exercise numbers any more."""
-    import backend.app.agent.router as router_module
+    import backend.app.agent.legacy.router as router_module
 
     assert not hasattr(router_module, "resolve_number")

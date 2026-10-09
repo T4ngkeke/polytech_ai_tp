@@ -1,4 +1,7 @@
-"""
+"""Legacy chat compatibility module.
+
+Used by the fallback in routers/chat.py, outside the M4 research loop.
+
 selfeval.py — [v7.1] bounded self-eval retrieval loop.
 
 At ~60 tps the *grade* is nearly free (a short guided verdict); the expensive part

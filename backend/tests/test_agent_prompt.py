@@ -6,7 +6,7 @@ context is reference material; restrictive Class/Lab/Student rules come LAST so
 constraints win and resist prompt-injection from retrieved/user text.
 """
 
-from backend.app.agent.prompt import build_system_prompt
+from backend.app.agent.legacy.prompt import build_system_prompt
 
 
 def test_persona_precedes_constraint_rules():

@@ -1,4 +1,7 @@
-"""
+"""Legacy chat compatibility module.
+
+Used by the fallback in routers/chat.py, outside the M4 research loop.
+
 prompt.py — system-prompt assembly for the synthesize node.
 
 Assembly order (governance-critical):

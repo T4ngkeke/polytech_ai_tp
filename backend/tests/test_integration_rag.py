@@ -19,7 +19,7 @@ import uuid
 
 import pytest
 
-from backend.app.agent.graph import build_agent
+from backend.app.agent.legacy.graph import build_agent
 from backend.app.models import Class, EMBEDDING_DIM, Lab, UserRole
 from backend.app.services.document_service import create_document
 from backend.worker.ingest import ingest_document

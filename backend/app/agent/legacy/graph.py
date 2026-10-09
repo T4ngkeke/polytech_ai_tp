@@ -1,4 +1,7 @@
-"""
+"""Legacy chat compatibility module.
+
+Used by the fallback in routers/chat.py, outside the M4 research loop.
+
 graph.py — LangGraph chat agent.
 
     START → router → ┬ rag    → tutor → synthesize → END
@@ -25,9 +28,9 @@ from typing import Awaitable, Callable, TypedDict
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agent.prompt import build_no_material_prompt, build_system_prompt
-from backend.app.agent.router import ROUTER_PROMPT_VERSION, RouterLLMFn, classify
-from backend.app.agent.selfeval import GradeFn, RewriteFn, run_self_eval_loop
+from backend.app.agent.legacy.prompt import build_no_material_prompt, build_system_prompt
+from backend.app.agent.legacy.router import ROUTER_PROMPT_VERSION, RouterLLMFn, classify
+from backend.app.agent.legacy.selfeval import GradeFn, RewriteFn, run_self_eval_loop
 from backend.app.models import CoachingLevel
 from backend.app.services import learner_service, router_service
 from backend.app.services.retrieval_service import RerankFn, hybrid_search

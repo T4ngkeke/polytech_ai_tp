@@ -10,7 +10,7 @@ Pure orchestration over injected retrieve / grade / rewrite functions:
 
 import pytest
 
-from backend.app.agent.selfeval import run_self_eval_loop
+from backend.app.agent.legacy.selfeval import run_self_eval_loop
 
 
 class _Hit:

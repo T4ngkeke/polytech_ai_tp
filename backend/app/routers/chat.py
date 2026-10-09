@@ -43,8 +43,8 @@ from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agent.router import _ROUTER_SCHEMA
-from backend.app.agent.graph import build_agent
+from backend.app.agent.legacy.router import _ROUTER_SCHEMA
+from backend.app.agent.legacy.graph import build_agent
 from backend.app.agent.history import trim_history
 from backend.app.auth import get_current_user
 from backend.app.database import AsyncSessionLocal, get_db

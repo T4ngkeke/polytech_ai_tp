@@ -27,7 +27,7 @@ from backend.app.models import (
     LearnerProfile,
     UserRole,
 )
-from backend.app.agent.graph import build_agent
+from backend.app.agent.legacy.graph import build_agent
 from backend.tests.conftest import make_user
 
 

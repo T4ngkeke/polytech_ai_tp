@@ -20,7 +20,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from backend.app.agent.graph import build_agent
+from backend.app.agent.legacy.graph import build_agent
 from backend.app.models import (
     Class,
     CoachingLevel,

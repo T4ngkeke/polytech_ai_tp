@@ -1,1 +1,1 @@
-"""backend.app.agent — [v7] LangGraph chat agent (router → retrieve → synthesize)."""
+"""backend.app.agent — chat agent; the LangGraph implementation is in ``legacy``."""
