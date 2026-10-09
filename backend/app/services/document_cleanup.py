@@ -10,7 +10,7 @@ from datetime import timezone
 from backend.app.models import (
     Document, DocumentSource, DocumentRevision, DocumentAsset, DocumentPage,
     DocumentBlock, DocumentBlockAsset, DocumentBlockLink, DocumentCleanupJob,
-    DocChunk, DocumentReview, DocumentStagedObject, IngestionJob, _utcnow,
+    DocChunk, DocumentReview, DocumentStagedObject, IngestionJob, MessageCitation, _utcnow,
 )
 from backend.app.services import document_storage
 from backend.app.services.document_access import owned_document
@@ -25,6 +25,9 @@ async def mark_deleted(db, *, document_id, teacher_id, expected_generation):
         raise VersionConflict('source_unavailable')
     await _cas(db, doc, expected_generation, expected_lifecycle=doc.lifecycle,
                lifecycle='deleted', current_revision_id=None, deleted_at=_utcnow())
+    # Keep a logical citation tombstone after files/blocks are purged.
+    await db.execute(update(MessageCitation).where(
+        MessageCitation.document_id == doc.id).values(availability='unavailable'))
     sources = list((await db.scalars(select(DocumentSource).where(DocumentSource.document_id == doc.id))).all())
     assets = list((await db.scalars(select(DocumentAsset).where(
         DocumentAsset.source_version_id.in_([s.id for s in sources])))).all())

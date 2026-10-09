@@ -23,8 +23,11 @@ M3A_VERSION = 'm3a_pdf_parse_v1'
 M3A_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m3a.sql')
 M3B_VERSION = 'm3b_pdf_index_v1'
 M3B_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m3b.sql')
+M4C_VERSION = 'm4c_research_persistence_v1'
+M4C_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4c.sql')
 MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_SQL_PATH),
-              (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH))
+              (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH),
+              (M4C_VERSION, M4C_SQL_PATH))
 
 
 async def _apply_one(conn, version, path):

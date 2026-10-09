@@ -1063,3 +1063,118 @@ class DocumentStagedObject(Base):
 
 # Register ORM immutability checks after all model names exist.
 from backend.app.services import document_snapshot_guards as _snapshot_guards  # noqa: E402,F401
+
+
+# ---------------------------------------------------------------------------
+# M4-C: research runs, durable citations and per-call accounting.
+# Research is opt-in; these tables do not alter the legacy chat write path.
+# ---------------------------------------------------------------------------
+
+
+class AgentRun(Base):
+    __tablename__ = 'agent_runs'
+    __table_args__ = (
+        UniqueConstraint('user_id', 'client_request_id', name='uq_agent_run_user_request'),
+        Index('uq_agent_run_active_session', 'session_id', unique=True,
+              postgresql_where=text("status IN ('running','cancelling')"),
+              sqlite_where=text("status IN ('running','cancelling')")),
+        CheckConstraint("status IN ('running','cancelling','finished','failed','cancelled')",
+                        name='ck_agent_run_status'),
+        CheckConstraint("settlement_status IN ('open','settled')",
+                        name='ck_agent_run_settlement'),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('sessions.id', ondelete='CASCADE'), nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default='running')
+    snapshot_map: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    user_message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey('messages.id', ondelete='SET NULL'))
+    assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey('messages.id', ondelete='SET NULL'))
+    stop_reason: Mapped[str | None] = mapped_column(String(64))
+    settlement_status: Mapped[str] = mapped_column(String(16), nullable=False, default='open')
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MessageCitation(Base):
+    __tablename__ = 'message_citations'
+    __table_args__ = (
+        UniqueConstraint('message_id', 'label', name='uq_message_citation_label'),
+        CheckConstraint('(range_start IS NULL AND range_end IS NULL) OR '
+                        '(range_start IS NOT NULL AND range_end IS NOT NULL AND '
+                        'range_start >= 0 AND range_end > range_start)',
+                        name='ck_message_citation_range'),
+        CheckConstraint("availability IN ('available','unavailable')",
+                        name='ck_message_citation_availability'),
+        CheckConstraint('pdf_page_no > 0', name='ck_message_citation_page'),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('messages.id', ondelete='CASCADE'), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(24), nullable=False)
+    # Logical IDs deliberately have no document FK: cleanup leaves a tombstone.
+    document_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    revision_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    page_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    pdf_page_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    block_id: Mapped[uuid.UUID | None] = mapped_column(GUID())
+    range_start: Mapped[int | None] = mapped_column(Integer)
+    range_end: Mapped[int | None] = mapped_column(Integer)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(GUID())
+    origin: Mapped[str] = mapped_column(String(32), nullable=False)
+    availability: Mapped[str] = mapped_column(String(16), nullable=False, default='available')
+
+
+class SessionReadState(Base):
+    __tablename__ = 'session_read_state'
+    session_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('sessions.id', ondelete='CASCADE'), primary_key=True)
+    state_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    focused_sources: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    last_used_citation_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    open_question: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ModelCallUsage(Base):
+    __tablename__ = 'model_call_usage'
+    __table_args__ = (
+        CheckConstraint("usage_source IN ('actual','estimated','none')", name='ck_model_call_usage_source'),
+        CheckConstraint('billed_tokens >= 0 AND elapsed_seconds >= 0', name='ck_model_call_cost'),
+    )
+    call_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('agent_runs.id', ondelete='CASCADE'), nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    usage_source: Mapped[str] = mapped_column(String(16), nullable=False)
+    token_alpha: Mapped[float] = mapped_column(Float, nullable=False)
+    token_beta: Mapped[float] = mapped_column(Float, nullable=False)
+    billed_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    elapsed_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class UsageReservation(Base):
+    __tablename__ = 'usage_reservations'
+    __table_args__ = (
+        CheckConstraint("state IN ('active','unknown','settled')", name='ck_usage_reservation_state'),
+        CheckConstraint('reserved_tokens >= 0', name='ck_usage_reservation_amount'),
+    )
+    call_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('agent_runs.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    reserved_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    estimated_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_alpha: Mapped[float] = mapped_column(Float, nullable=False)
+    token_beta: Mapped[float] = mapped_column(Float, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    settled_tokens: Mapped[int | None] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default='active')
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
