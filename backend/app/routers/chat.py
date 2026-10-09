@@ -32,6 +32,7 @@ Execution Flow
    - Upsert usage_stats (increment tokens_used + request_count for today).
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -41,11 +42,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.agent.legacy.router import _ROUTER_SCHEMA
 from backend.app.agent.legacy.graph import build_agent
 from backend.app.agent.history import trim_history
+from backend.app.agent.model import ResearchModel
+from backend.app.agent.tools import create_scope
+from backend.app.config import settings
 from backend.app.auth import get_current_user
 from backend.app.database import AsyncSessionLocal, get_db
 from backend.app.models import (
@@ -66,7 +70,11 @@ from backend.app.models import (
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
 from backend.app.services import rule_service
 from backend.app.services.billing import compute_billed_tokens
-from backend.app.services.model_routing import resolve_model_routing
+from backend.app.services.model_routing import Endpoint, resolve_model_routing
+from backend.app.services.document_access import DocumentNotFound
+from backend.app.services.research_runs import ResearchRuns, RunConflict
+from backend.app.services.research_service import run_persisted_research
+from backend.app.services.research_vision import ResearchVision
 from backend.app.services.trace_service import TraceBuilder
 
 logger = logging.getLogger(__name__)
@@ -114,6 +122,12 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "context_max_tokens": configs.get("CONTEXT_MAX_TOKENS", "8000"),
         "token_alpha": str(routing.token_alpha),
         "token_beta": str(routing.token_beta),
+        "agent_base_url": routing.agent.base_url,
+        "agent_api_key": routing.agent.api_key,
+        "agent_model": routing.agent.model,
+        "vlm_base_url": routing.vlm.base_url,
+        "vlm_api_key": routing.vlm.api_key,
+        "vlm_model": routing.vlm.model,
     }
 
 
@@ -512,6 +526,97 @@ async def chat_stream(
 
     rule_texts = await rule_service.get_active_rule_texts(db, class_id, lab_id, current_user.id)
 
+    if settings.AGENTIC_SEARCH_ENABLED and lab_id is not None:
+        # All source scope and focus IDs are resolved from the authenticated
+        # session. The model never supplies a URL or a revision map.
+        try:
+            scope = await create_scope(db, user_id=current_user.id,
+                                       session_id=body.session_id)
+            research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
+            runs = ResearchRuns(research_factory)
+            if body.selected_citation_id:
+                await runs.select_citation(scope=scope,
+                                           citation_id=body.selected_citation_id)
+            safe_history = await runs.load_safe_history(scope)
+            read_state = await runs.load_read_state(scope)
+        except DocumentNotFound:
+            raise HTTPException(404, 'source_unavailable') from None
+        focus = read_state['focused_sources'][:1]
+        research_note = ('The student explicitly selected this source for the follow-up: '
+                         + json.dumps(focus, ensure_ascii=False)) if focus else ''
+        teaching_rules = '\n\n'.join(
+            f'[{label.upper()} RULES]\n{rule_texts[key]}'
+            for key, label in (('class_rules', 'class'), ('lab_rules', 'lab'),
+                               ('student_rules', 'student')) if rule_texts.get(key))
+        embedder = _make_embed_fn(llm_config)
+        async def embed_query(query: str):
+            return (await embedder([query]))[0]
+        # The research model is the AGENT_* endpoint (default: the main LLM);
+        # view_image uses the VLM_* endpoint and is off when no VLM_MODEL is set.
+        agent = Endpoint(llm_config['agent_base_url'],
+                         llm_config['agent_api_key'], llm_config['agent_model'])
+        if not agent.model or not agent.base_url:
+            raise HTTPException(503, 'agent_model_not_configured')
+        vlm = Endpoint(llm_config['vlm_base_url'],
+                       llm_config['vlm_api_key'], llm_config['vlm_model'])
+        vision = ResearchVision(vlm) if vlm.model and vlm.base_url else None
+        request_id = str(body.client_request_id or uuid.uuid4())
+
+        async def research_events():
+            queue = asyncio.Queue()
+            def phase(name):
+                if name in {'finding', 'reading', 'checking_image', 'checking_sources'}:
+                    queue.put_nowait(name)
+            yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking'})}\n\n"
+            task = asyncio.create_task(run_persisted_research(
+                scope=scope, question=body.message, client_request_id=request_id,
+                model=ResearchModel(agent), model_name=agent.model,
+                token_alpha=float(llm_config['token_alpha']),
+                token_beta=float(llm_config['token_beta']),
+                history=safe_history, teaching_rules=teaching_rules,
+                research_note=research_note,
+                embed_fn=embed_query,
+                rerank_fn=_make_rerank_fn(llm_config),
+                embed_model=llm_config['embedding_model'],
+                rerank_model=llm_config['rerank_model'], on_phase=phase,
+                vision_fn=vision, vision_model=vlm.model,
+                session_factory=research_factory))
+            try:
+                while not task.done():
+                    if await request.is_disconnected():
+                        task.cancel()
+                        break
+                    try:
+                        name = await asyncio.wait_for(queue.get(), timeout=0.5)
+                        yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': name})}\n\n"
+                    except asyncio.TimeoutError:
+                        pass
+                if task.cancelled():
+                    return
+                result = await task
+                if result['status'] != 'finished':
+                    yield f"event: error\ndata: {json.dumps({'detail': 'Research did not finish'})}\n\n"
+                    return
+                # Commit and reload are complete before any answer bytes leave.
+                yield f"data: {json.dumps(result['answer'])}\n\n"
+                yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
+                yield f"event: done\ndata: {json.dumps({'message_id': result['message_id']})}\n\n"
+            except RunConflict:
+                yield f"event: error\ndata: {json.dumps({'detail': 'Another research request is already running'})}\n\n"
+            except Exception:
+                logger.exception('Research request failed')
+                yield f"event: error\ndata: {json.dumps({'detail': 'Research failed'})}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+        return StreamingResponse(research_events(), media_type='text/event-stream',
+                                 headers={'Cache-Control': 'no-store',
+                                          'X-Accel-Buffering': 'no'})
+
     # [v8.0] Per-request trace: the graph writes route + degradation flags; here we
     # add the injection red-flag and, after the run, recall/all-filtered. Flushed to
     # one AgentTraceLog row in the background task (the health panel's data source).
@@ -653,6 +758,21 @@ async def chat_stream(
         event_generator(),
         media_type="text/event-stream",
     )
+
+
+@router.post('/citations/{citation_id}/select')
+async def select_research_citation(
+    citation_id: uuid.UUID, session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    if not settings.AGENTIC_SEARCH_ENABLED:
+        raise HTTPException(404, 'not_found')
+    try:
+        scope = await create_scope(db, user_id=current_user.id, session_id=session_id)
+        factory = async_sessionmaker(db.bind, expire_on_commit=False)
+        return await ResearchRuns(factory).select_citation(scope=scope, citation_id=citation_id)
+    except DocumentNotFound:
+        raise HTTPException(404, 'source_unavailable') from None
 
 
 @router.post("/messages/{message_id}/feedback")

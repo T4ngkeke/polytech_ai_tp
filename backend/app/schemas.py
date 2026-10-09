@@ -428,6 +428,7 @@ class MessageResponse(BaseModel):
     completion_tokens: int | None
     total_tokens: int | None
     created_at: datetime
+    citations: list[dict] = []
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +439,8 @@ class MessageResponse(BaseModel):
 class ChatStreamRequest(BaseModel):
     session_id: uuid.UUID
     message: str = Field(..., min_length=1)
+    client_request_id: uuid.UUID | None = None
+    selected_citation_id: uuid.UUID | None = None
 
 
 # ---------------------------------------------------------------------------

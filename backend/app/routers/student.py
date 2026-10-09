@@ -24,9 +24,10 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.auth import get_current_user
+from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import Class, ClassStudent, Lab, User, UsageStat
 from backend.app.schemas import (
@@ -40,6 +41,7 @@ from backend.app.schemas import (
     SessionWithMessagesResponse,
 )
 from backend.app.services import session_service
+from backend.app.services.research_runs import ResearchRuns
 
 router = APIRouter(prefix="/api/student", tags=["student"])
 
@@ -265,7 +267,14 @@ async def get_session(
             detail="Session not found",
         )
 
-    return SessionWithMessagesResponse.model_validate(session)
+    response = SessionWithMessagesResponse.model_validate(session)
+    factory = async_sessionmaker(db.bind, expire_on_commit=False)
+    citations = (await ResearchRuns(factory).load_session_citations(
+        session_id=session_id, user_id=current_user.id)
+        if settings.AGENTIC_SEARCH_ENABLED else {})
+    for message in response.messages:
+        message.citations = citations.get(message.id, [])
+    return response
 
 
 # ===================================================================

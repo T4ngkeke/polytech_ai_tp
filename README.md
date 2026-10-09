@@ -54,7 +54,11 @@ rows to build, the exercise-specific segmentation machinery was removed.
 ### How it works now
 
 - **Agent, not proxy**: `/api/chat/stream` is a LangGraph graph
-  (`router → [rag | direct] → tutor → synthesize → SSE`).
+  (`router → [rag | direct] → tutor → synthesize → SSE`). With
+  `AGENTIC_SEARCH_ENABLED` (off by default), a lab session uses the research
+  agent instead: one model searches and reads the published course PDFs with
+  tools, answers, and cites the pages it read (see
+  [API.md](documentation/API.md)).
 - **One upload path**: PDF, Markdown or HTML, all becoming Contextual-Retrieval
   chunks. The form asks for the file, a language and whether to share it
   class-wide. Nothing else. The worker preserves repeated body text, recognizes
@@ -146,18 +150,20 @@ polytech_ai_tp/
 │   │   │   ├── retrieval_service.py # Hybrid (vector+BM25) + rerank, tenant-filtered in SQL
 │   │   │   ├── skill_preset_service.py # Teacher skill-preset library + snapshot-copy
 │   │   │   └── billing.py           # Weighted billed-token helper (prompt·α + completion·β)
-│   │   ├── agent/                   # LangGraph agent
-│   │   │   ├── graph.py             # router → [rag | direct] → tutor → synthesize
-│   │   │   ├── router.py            # One-call LLM router: route + search terms + coaching
-│   │   │   ├── selfeval.py          # Cheap gate + guided good/partial/bad + bounded retry
+│   │   ├── agent/                   # Chat agents
+│   │   │   ├── runner.py            # Research agent loop: one model, course tools, cited answer
+│   │   │   ├── course_tools.py      # Tools as the model sees them: handles, budget, evidence
+│   │   │   ├── tools.py             # Scoped search/open/read/grep/view_image over published PDFs
+│   │   │   ├── evidence.py          # Evidence IDs (E1, E2, ...) and their citations
+│   │   │   ├── model.py             # Research model client (native tool calls)
 │   │   │   ├── history.py           # Per-turn chat-history token cap (OOM protection)
-│   │   │   └── prompt.py            # Prompt Controller (skill.md → rules → context → history)
+│   │   │   └── legacy/              # LangGraph agent: graph, router, selfeval, prompt
 │   │   └── routers/
 │   │       ├── auth.py              # POST /api/auth/signup, /api/auth/login
 │   │       ├── admin.py             # /api/admin/* — no ownership checks
 │   │       ├── teacher.py           # /api/teacher/* — ownership-checked
 │   │       ├── student.py           # /api/student/* — join, sessions
-│   │       └── chat.py              # POST /api/chat/stream (LangGraph agent + SSE)
+│   │       └── chat.py              # POST /api/chat/stream (research or LangGraph agent + SSE)
 │   ├── worker/                      # Off-peak ingestion worker
 │   │   ├── main.py                  # Polling loop + production model-client glue
 │   │   ├── queue.py                 # FOR UPDATE SKIP LOCKED claim + stale-lock reclaim

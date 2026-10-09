@@ -277,3 +277,16 @@ change lands cleanly. Teacher-edited chunks survive the rebuild.*
 > classes that already selected it (safe, explicit re-selection required). Teachers may still
 > hand-edit the class rule text directly without using a preset.
 
+### 16. Research agent tables (opt-in, migration `m4c_research_persistence_v1`)
+
+Written only by the research agent (`AGENTIC_SEARCH_ENABLED`). Apply
+`scripts/ingestion_agent_schema_m4c.sql` with
+`scripts/migrate_document_snapshots.py`; with the flag on, startup checks it.
+
+| Table | One row per | Main columns |
+| --- | --- | --- |
+| `agent_runs` | research request | `user_id`, `session_id`, `client_request_id` (unique per user), `question`, `status` (`running`, `cancelling`, `finished`, `failed`, `cancelled`), `snapshot_map` (document → revision used), `user_message_id`, `assistant_message_id`, `stop_reason`, `settlement_status`. At most one running run per session. |
+| `message_citations` | cited source of an answer | `message_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range_start`/`range_end` (null for a visual observation), `asset_id`, `origin`, `availability`. No foreign key to the document: deleting it marks the citation `unavailable` and keeps the row. |
+| `session_read_state` | session | The source selected for the next follow-up (`focused_sources`), the citations of the last answer and its open points. |
+| `usage_reservations` | model call | The tokens held on the student's daily quota before the call (`reserved_tokens`, `state`: `active`, `unknown`, `settled`). An `unknown` reservation still counts against the quota until reconciled. |
+| `model_call_usage` | model, embedding or rerank call | `purpose` (`agent`, `answer`, `citation_correction`, `vision`, `embedding`, `rerank`), `model`, token counts, `usage_source` (`actual`, `estimated`, `none`), `billed_tokens`, `elapsed_seconds`, `status`. |

@@ -145,9 +145,3 @@ class EvidenceStore:
             else:
                 self.touch(evidence_id)
         return added
-
-    def validated(self, ids: list[str]) -> list[Evidence] | None:
-        if len(ids) != len(set(ids)):
-            return None
-        items = [self.get(x) for x in ids]
-        return None if any(x is None for x in items) else items
