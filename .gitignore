@@ -20,5 +20,53 @@ docs/
 /documentation/**/*.page.json
 /documentation/**/*.review.json
 /documentation/**/*.raw.json
+/documentation/**/*.json
 /documentation/**/*.jsonl
 /documentation/**/*.log
+
+# Generated worker experiments; keep the small versioned inputs visible.
+/documentation/worker-*/
+!/documentation/worker-docling-tuned-2026-09-14/
+/documentation/worker-docling-tuned-2026-09-14/*
+!/documentation/worker-docling-tuned-2026-09-14/checks.json
+!/documentation/worker-docling-tuned-2026-09-14/manifest.json
+!/documentation/worker-docling-tuned-2026-09-14/native_code.py
+!/documentation/worker-docling-tuned-2026-09-14/run_docling_tuned.py
+!/documentation/worker-docling-benchmark/
+/documentation/worker-docling-benchmark/*
+!/documentation/worker-docling-benchmark/extra-2026-09-15/
+/documentation/worker-docling-benchmark/extra-2026-09-15/*
+!/documentation/worker-docling-benchmark/extra-2026-09-15/checks.json
+!/documentation/worker-docling-benchmark/extra-2026-09-15/manifest.json
+!/documentation/worker-docling-benchmark/extra2-2026-09-15/
+/documentation/worker-docling-benchmark/extra2-2026-09-15/*
+!/documentation/worker-docling-benchmark/extra2-2026-09-15/checks.json
+!/documentation/worker-docling-benchmark/extra2-2026-09-15/manifest.json
+
+# Local presentations and their rendered assets.
+/documentation/presentation-*
+
+# Local planning and review notes, excluded from English/French commits.
+/documentation/INGESTION_AGENT_ALIGNMENT.md
+/documentation/INGESTION_AGENT_ROADMAP.md
+/documentation/LOCAL_SETUP.md
+/documentation/M0_ODP_EXECUTION_PLAN.md
+/documentation/M2_EXECUTION_PLAN.md
+/documentation/M3_EXECUTION_PLAN.md
+/documentation/M4_AGENT_DESIGN_REVIEW.md
+/documentation/M4_EXECUTION_PLAN.md
+/documentation/M4_PATCH_AND_E_PLAN.md
+/documentation/M4_DSH_MIGRATION_PLAN.md
+/documentation/V9_CHANGES.md
+/documentation/WORKER.md
+/backend/app/agent/README.md
+/backend/renderer/README.md
+
+# Local test/editor caches and temporary files.
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.tmp
+*.bak
+*~

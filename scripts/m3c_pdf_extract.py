@@ -29,9 +29,14 @@ def save(path: Path, data: object) -> None:
     temporary.replace(path)
 
 
-def run(question_map: Path, output: Path, server_url: str, config: Path) -> None:
-    questions = json.loads(question_map.read_text())['questions']
-    files = {e['pdf_path']: e['pdf_sha256'] for q in questions for e in q['required_evidence']}
+def run(question_map: Path | None, output: Path, server_url: str, config: Path,
+        pdfs: list[Path] = ()) -> None:
+    if question_map is not None:
+        questions = json.loads(question_map.read_text())['questions']
+        files = {e['pdf_path']: e['pdf_sha256'] for q in questions for e in q['required_evidence']}
+    else:
+        # An explicit corpus: each PDF is frozen by the hash read now.
+        files = {str(p.resolve().relative_to(ROOT)): sha(p) for p in pdfs}
     if not config.is_file():
         raise FileNotFoundError(config)
     if not os.getenv('MINERU_TOOLS_CONFIG_JSON'):
@@ -75,7 +80,7 @@ def run(question_map: Path, output: Path, server_url: str, config: Path) -> None
         save(output / 'parsed' / f'{stem}.json', {
             'pdf_path': relative, 'pdf_sha256': digest,
             'reader_version': READER_VERSION, 'reader_config': CONFIG,
-            'question_map_sha256': sha(question_map),
+            'question_map_sha256': sha(question_map) if question_map is not None else None,
             'elapsed_seconds': round(time.monotonic() - started, 3),
             'pages': [p.to_dict() for p in document.pages],
             'timing': timing, 'failures': failures,
@@ -85,9 +90,11 @@ def run(question_map: Path, output: Path, server_url: str, config: Path) -> None
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--question-map', type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--question-map', type=Path)
+    source.add_argument('--pdf', type=Path, action='append', dest='pdfs')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--server-url', default='http://127.0.0.1:18003/v1')
     args = parser.parse_args()
-    run(args.question_map, args.output, args.server_url, args.config)
+    run(args.question_map, args.output, args.server_url, args.config, args.pdfs or [])
