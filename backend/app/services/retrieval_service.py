@@ -17,12 +17,12 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Hashable
+from typing import Awaitable, Callable, Hashable, Mapping
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import DocChunk, Document
+from backend.app.models import DocChunk, Document, DocumentBlock, DocumentRevision, DocumentSource
 
 logger = logging.getLogger(__name__)
 
@@ -117,23 +117,63 @@ async def apply_rerank(
     return [hits[i] for i in order[:top_k]], False
 
 
-def _scope(stmt, lab_id: uuid.UUID, class_id: uuid.UUID | None = None):
-    """Apply the mandatory tenant filter in SQL.
+def _scope(
+    stmt,
+    lab_id: uuid.UUID,
+    class_id: uuid.UUID | None = None,
+    *,
+    snapshot_revisions: Mapping[uuid.UUID, uuid.UUID] | None = None,
+    document_id: uuid.UUID | None = None,
+    kind: str | None = None,
+):
+    """Apply the mandatory tenant filter, and the research filters, in SQL before LIMIT.
 
     With `class_id`, the scope is 'this lab OR class-wide shared (lab_id NULL)'
     bounded to the class — shared material is reachable from every lab of the
-    class and never leaks across classes. Without it, strict lab-only."""
-    # Search only live legacy chunks or the published structured revision.
-    stmt = stmt.where(select(Document.id).where(
-        Document.id == DocChunk.document_id, Document.lifecycle == "active",
-        ((Document.structured.is_(False) & DocChunk.revision_id.is_(None)) |
-         (Document.structured.is_(True) & (Document.current_revision_id == DocChunk.revision_id)))
-    ).exists())
+    class and never leaks across classes. Without it, strict lab-only.
+
+    No snapshot keeps the legacy chat's current-revision behavior. A supplied
+    snapshot permits only its structured, published/superseded revision pairs.
+    """
+    if snapshot_revisions is None:
+        stmt = stmt.where(select(Document.id).where(
+            Document.id == DocChunk.document_id, Document.lifecycle == "active",
+            ((Document.structured.is_(False) & DocChunk.revision_id.is_(None)) |
+             (Document.structured.is_(True) & (Document.current_revision_id == DocChunk.revision_id)))
+        ).exists())
+    else:
+        pairs = list(snapshot_revisions.items())
+        if not pairs:
+            return stmt.where(False)
+        stmt = stmt.where(tuple_(DocChunk.document_id, DocChunk.revision_id).in_(pairs))
+        stmt = stmt.where(select(DocumentRevision.id).join(
+            Document, Document.id == DocumentRevision.document_id
+        ).where(
+            Document.id == DocChunk.document_id,
+            Document.lifecycle == "active",
+            Document.structured.is_(True),
+            DocumentRevision.id == DocChunk.revision_id,
+            DocumentRevision.publication_state.in_(("published", "superseded")),
+            DocumentRevision.index_ready.is_(True),
+            select(DocumentSource.id).where(
+                DocumentSource.id == DocumentRevision.source_version_id,
+                DocumentSource.format == "pdf",
+            ).exists(),
+        ).exists())
     if class_id is not None:
         stmt = stmt.where(DocChunk.class_id == class_id)
         stmt = stmt.where((DocChunk.lab_id == lab_id) | (DocChunk.lab_id.is_(None)))
     else:
         stmt = stmt.where(DocChunk.lab_id == lab_id)
+    if document_id is not None:
+        stmt = stmt.where(DocChunk.document_id == document_id)
+    if kind is not None:
+        stmt = stmt.where(select(DocumentBlock.block_id).where(
+            DocumentBlock.revision_id == DocChunk.revision_id,
+            DocumentBlock.block_id == DocChunk.block_id,
+            DocumentBlock.kind == kind,
+            DocumentBlock.index_state == "searchable",
+        ).exists())
     return stmt
 
 
@@ -144,6 +184,9 @@ async def vector_search(
     *,
     k: int = 20,
     class_id: uuid.UUID | None = None,
+    snapshot_revisions: Mapping[uuid.UUID, uuid.UUID] | None = None,
+    document_id: uuid.UUID | None = None,
+    kind: str | None = None,
 ) -> list[ChunkHit]:
     """Vector ANN recall (cosine), scoped to a lab (+ class-wide material)."""
     distance = DocChunk.embedding.cosine_distance(query_embedding)
@@ -151,7 +194,8 @@ async def vector_search(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context, DocChunk.revision_id,
                DocChunk.block_id, DocChunk.content_start, DocChunk.content_end),
-        lab_id, class_id,
+        lab_id, class_id, snapshot_revisions=snapshot_revisions,
+        document_id=document_id, kind=kind,
     ).order_by(distance).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
@@ -170,6 +214,9 @@ async def bm25_search(
     k: int = 20,
     language: str = "fr",
     class_id: uuid.UUID | None = None,
+    snapshot_revisions: Mapping[uuid.UUID, uuid.UUID] | None = None,
+    document_id: uuid.UUID | None = None,
+    kind: str | None = None,
 ) -> list[ChunkHit]:
     """BM25-style full-text recall over the `tsv` column (Postgres only).
 
@@ -189,7 +236,8 @@ async def bm25_search(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context, DocChunk.revision_id,
                DocChunk.block_id, DocChunk.content_start, DocChunk.content_end),
-        lab_id, class_id,
+        lab_id, class_id, snapshot_revisions=snapshot_revisions,
+        document_id=document_id, kind=kind,
     ).where(DocChunk.tsv.op("@@")(tsquery)).order_by(rank.desc()).limit(k)
     rows = (await db.execute(stmt)).all()
     return [
@@ -212,6 +260,9 @@ async def hybrid_search(
     score_threshold: float | None = None,
     language: str = "fr",
     class_id: uuid.UUID | None = None,
+    snapshot_revisions: Mapping[uuid.UUID, uuid.UUID] | None = None,
+    document_id: uuid.UUID | None = None,
+    kind: str | None = None,
 ) -> tuple[list[ChunkHit], bool]:
     """Vector + BM25 recall → RRF fusion → optional rerank + threshold → top-k.
 
@@ -223,13 +274,33 @@ async def hybrid_search(
     # [v8.0] query_embedding None = embedding endpoint degraded → BM25-only recall.
     vector_hits = (
         await vector_search(db, query_embedding, lab_id,
-                            k=recall_k, class_id=class_id)
+                            k=recall_k, class_id=class_id,
+                            snapshot_revisions=snapshot_revisions, document_id=document_id,
+                            kind=kind)
         if query_embedding is not None else []
     )
-    bm25_hits = await bm25_search(
-        db, query_text, lab_id, k=recall_k, language=language,
-        class_id=class_id,
-    )
+    if language == "auto" and snapshot_revisions is not None:
+        # Structured documents may have different tsvector languages. Match
+        # each document with the config used to build its index, then interleave
+        # the lexical ranks before global vector/lexical fusion.
+        ids = ([document_id] if document_id in snapshot_revisions else []) if document_id is not None else list(snapshot_revisions)
+        rows = (await db.execute(select(Document.id, Document.language)
+                                 .where(Document.id.in_(ids)))).all() if ids else []
+        language_groups: dict[str, dict[uuid.UUID, uuid.UUID]] = {}
+        for doc_id, document_language in rows:
+            language_groups.setdefault(document_language or "simple", {})[doc_id] = snapshot_revisions[doc_id]
+        legs = [await bm25_search(
+            db, query_text, lab_id, k=recall_k, language=lang,
+            class_id=class_id, snapshot_revisions=selected,
+            document_id=document_id, kind=kind,
+        ) for lang, selected in sorted(language_groups.items())]
+        bm25_hits = [hit for rank in range(recall_k) for leg in legs for hit in leg[rank:rank + 1]]
+    else:
+        bm25_hits = await bm25_search(
+            db, query_text, lab_id, k=recall_k, language=language,
+            class_id=class_id, snapshot_revisions=snapshot_revisions,
+            document_id=document_id, kind=kind,
+        )
 
     by_id: dict[uuid.UUID, ChunkHit] = {}
     for hit in [*vector_hits, *bm25_hits]:
