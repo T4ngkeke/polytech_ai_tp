@@ -49,3 +49,12 @@ test('citations are parsed to an array; malformed → empty array', () => {
 test('an unknown named event without data is ignored, never a token', () => {
   assert.equal(interpretStreamEvent({ event: 'ping' }).type, 'ignore');
 });
+
+test('a research status carries its phase; done carries the saved message id', () => {
+  const status = interpretStreamEvent({ event: 'status', data: '{"route": "agent", "phase": "reading"}' });
+  assert.equal(status.phase, 'reading');
+  assert.equal(interpretStreamEvent({ event: 'status', data: '{"route": "rag"}' }).phase, null);
+  const done = interpretStreamEvent({ event: 'done', data: '{"message_id": "m-1"}' });
+  assert.equal(done.messageId, 'm-1');
+  assert.equal(interpretStreamEvent({ event: 'done', data: '{}' }).messageId, null);
+});

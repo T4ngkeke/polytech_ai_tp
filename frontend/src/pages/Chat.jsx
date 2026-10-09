@@ -47,6 +47,9 @@ export default function Chat() {
   // ── Chat state ──
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [researchPhase, setResearchPhase] = useState(null);
+  const selectedCitationRef = useRef(null);
+  const restoredLabRef = useRef(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -103,10 +106,12 @@ export default function Chat() {
 
   // ── When a lab is selected ──
   const handleSelectLab = useCallback(async (labId, classId) => {
+    restoredLabRef.current = true;
     setActiveLabId(labId);
     setActiveClassId(classId);
     setMessages([]);
     setActiveSessionId(null);
+    selectedCitationRef.current = null;
     navigate(`/chat/${labId}`, { replace: true });
 
     // Load or create a session for this lab
@@ -127,6 +132,11 @@ export default function Chat() {
     }
   }, [navigate]);
 
+  // The URL survives a reload; restore its latest session and persisted citations.
+  useEffect(() => {
+    if (urlLabId && !restoredLabRef.current) handleSelectLab(urlLabId, null);
+  }, [urlLabId, handleSelectLab]);
+
   // ── Create new session ──
   const handleNewSession = useCallback(async () => {
     if (!activeLabId) return;
@@ -136,6 +146,7 @@ export default function Chat() {
       });
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
+      selectedCitationRef.current = null;
       setMessages([]);
     } catch (err) {
       toast.error(err.message || 'Failed to create session');
@@ -149,6 +160,7 @@ export default function Chat() {
     abortRef.current = null;
     setIsStreaming(false);
     setActiveSessionId(sessionId);
+    selectedCitationRef.current = null;
     setIsLoadingMessages(true);
     try {
       const data = await api.get(`/api/student/sessions/${sessionId}`);
@@ -208,7 +220,9 @@ export default function Chat() {
       await fetchEventSource('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: currentSessionId, message: text }),
+        body: JSON.stringify({ session_id: currentSessionId, message: text,
+          client_request_id: crypto.randomUUID(),
+          selected_citation_id: selectedCitationRef.current }),
         signal: ctrl.signal,
         onmessage(ev) {
           // Named events (status/done/error/citations) are matched before the
@@ -217,8 +231,15 @@ export default function Chat() {
           const action = interpretStreamEvent(ev);
           switch (action.type) {
             case 'status':
-              return; // handshake only — the spinner already shows "working…"
+              setResearchPhase(action.phase);
+              return;
             case 'done':
+              if (action.messageId) {
+                streamedIdsRef.current.delete(assistantMsgId);
+                setMessages((prev) => prev.map((m) => m.id === assistantMsgId
+                  ? { ...m, id: action.messageId } : m));
+              }
+              setResearchPhase(null);
               setIsStreaming(false);
               loadUsage();
               return;
@@ -247,6 +268,7 @@ export default function Chat() {
     } catch (err) {
       if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
+      setResearchPhase(null);
       setIsStreaming(false);
     }
   }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage]);
@@ -491,8 +513,13 @@ export default function Chat() {
             <MessageBubble
               key={msg.id}
               message={msg}
-              sessionId={activeSessionId}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
+              sessionId={activeSessionId}
+              onSelectCitation={(citationId) => {
+                selectedCitationRef.current = citationId;
+                api.post(`/api/chat/citations/${citationId}/select?session_id=${activeSessionId}`, {})
+                  .catch(() => { selectedCitationRef.current = null; });
+              }}
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
             />
           ))}
@@ -529,6 +556,10 @@ export default function Chat() {
               {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
             </button>
           </div>
+          {researchPhase && <p role="status" className="mt-1 text-center text-xs text-cream-muted">
+            {({ thinking: 'Thinking…', finding: 'Searching course material…', reading: 'Reading source pages…',
+              checking_image: 'Checking the image…', checking_sources: 'Checking citations…' })[researchPhase]}
+          </p>}
           {/* [v8.0] Transparency: students are told their teacher can see the chat. */}
           <p className="mt-2 text-center text-[11px] text-cream-muted">
             Your teacher can see this conversation.
@@ -614,7 +645,7 @@ function FeedbackButtons({ messageId, initial }) {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ message, streaming, canRate, sessionId }) {
+const MessageBubble = memo(function MessageBubble({ message, streaming, canRate, sessionId, onSelectCitation }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -639,7 +670,16 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, canRate,
           : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
         {!isUser && message.citations?.length > 0 && (
           <div className="mt-2.5 pt-2.5 border-t border-border-subtle flex flex-wrap gap-1.5">
-            {message.citations.map((c, i) => renderCitationBadge(c, sessionId, i))}
+            {message.citations.map((c, i) => renderCitationBadge(c, sessionId, i, onSelectCitation))}
+          </div>
+        )}
+        {!isUser && message.citations?.some((c) => c.origin === 'live_visual') && (
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {message.citations.filter((c) => c.origin === 'live_visual' && c.available &&
+              c.asset_id && c.asset_mime?.startsWith('image/')).slice(0, 3).map((c) => (
+              <VisualEvidenceCard key={c.citation_id} citation={c} sessionId={sessionId}
+                onSelectCitation={onSelectCitation} />
+            ))}
           </div>
         )}
         {!isUser && !streaming && canRate && (
@@ -649,6 +689,38 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, canRate,
     </div>
   );
 });
+
+
+function VisualEvidenceCard({ citation, sessionId, onSelectCitation }) {
+  const [imageUrl, setImageUrl] = useState(null);
+  useEffect(() => {
+    if (!sessionId || !citation.available || !citation.asset_id) return;
+    const controller = new AbortController();
+    let objectUrl;
+    const endpoint = `/api/documents/${encodeURIComponent(citation.document_id)}` +
+      `/revisions/${encodeURIComponent(citation.revision_id)}` +
+      `/assets/${encodeURIComponent(citation.asset_id)}?session_id=${encodeURIComponent(sessionId)}`;
+    api.raw(endpoint, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok || !(response.headers.get('Content-Type') || '').startsWith('image/')) return;
+      const blob = await response.blob();
+      if (controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(blob);
+      setImageUrl(objectUrl);
+    }).catch(() => {});
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [citation.asset_id, citation.available, citation.document_id, citation.revision_id, sessionId]);
+  if (!imageUrl) return null;
+  return <Link to={citation.href} target="_blank" rel="noopener noreferrer"
+    onClick={() => { if (!citation.newer_revision) onSelectCitation?.(citation.citation_id); }}
+    className="rounded-lg border border-border-subtle p-1.5 text-xs text-cream-secondary hover:border-cyan">
+    <img src={imageUrl} alt={`Original course image on PDF page ${citation.pdf_page_no}`}
+      className="max-h-36 w-full object-contain" />
+    <span>Original image · p.{citation.pdf_page_no}</span>
+  </Link>;
+}
 
 function renderCitationBadge(c, sessionId, index, onSelectCitation) {
   const key = c.citation_id || `${c.document_id}-${c.revision_id}-${c.page_no}-${index}`;
@@ -669,6 +741,7 @@ function renderCitationBadge(c, sessionId, index, onSelectCitation) {
   if (c.revision_id) query.set('revision_id', c.revision_id);
   return <Link key={key} className={`${className} hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}
     to={c.href || `/source/${encodeURIComponent(c.document_id)}?${query}`} target="_blank" rel="noopener noreferrer"
+    onClick={() => { if (c.citation_id && !c.newer_revision) onSelectCitation?.(c.citation_id); }}
     title={`Open ${c.filename || 'course PDF'} at PDF page ${c.pdf_page_no}`}>
     {label}{c.newer_revision && <span title="A newer course revision exists"> · Older version</span>}
     {c.teacher_revised && <span title="Teacher edited this source"> · Teacher edited</span>}

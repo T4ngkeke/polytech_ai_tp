@@ -24,9 +24,9 @@ function safeParse(data) {
 export function interpretStreamEvent(ev) {
   switch (ev.event) {
     case 'status':
-      return { type: 'status', route: safeParse(ev.data)?.route ?? null };
+      return { type: 'status', route: safeParse(ev.data)?.route ?? null, phase: safeParse(ev.data)?.phase ?? null };
     case 'done':
-      return { type: 'done' };
+      return { type: 'done', messageId: safeParse(ev.data)?.message_id ?? null };
     case 'error':
       return { type: 'error', detail: safeParse(ev.data)?.detail || 'Generation failed' };
     case 'citations': {
