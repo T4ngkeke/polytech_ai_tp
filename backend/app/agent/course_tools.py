@@ -472,12 +472,13 @@ class ToolView:
 class CourseTools:
     """The course tools of one research run, with handles, budget and evidence."""
 
-    def __init__(self, tools, *, max_tool_calls=8, research_seconds=45.0, max_visual_calls=2):
+    def __init__(self, tools, *, max_tool_calls=8, research_seconds=45.0, max_visual_calls=2,
+                 first_evidence=1):
         # tools: ResearchTools (or a test double with the same methods).
         self.tools, self.scope = tools, tools.scope
         self.max_tool_calls, self.research_seconds = max_tool_calls, research_seconds
         self.max_visual_calls = max_visual_calls
-        self.evidence = EvidenceStore(self.scope.snapshot_revisions)
+        self.evidence = EvidenceStore(self.scope.snapshot_revisions, first_number=first_evidence)
         self.trace: list[dict] = []
         self.started = time.monotonic()
         self.visual_calls = 0

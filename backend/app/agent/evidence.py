@@ -50,8 +50,11 @@ class Evidence:
 
 
 class EvidenceStore:
-    def __init__(self, snapshot_revisions: Mapping[UUID, UUID]):
+    def __init__(self, snapshot_revisions: Mapping[UUID, UUID], *, first_number: int = 1):
+        # first_number: a chat session numbers evidence across its runs, so an
+        # ID copied from an earlier answer is never valid in a later run.
         self.snapshot_revisions = snapshot_revisions
+        self.first_number = first_number
         self._items: dict[str, Evidence] = {}
         self._keys: dict[tuple, str] = {}
 
@@ -96,7 +99,7 @@ class EvidenceStore:
                    origin, content)
             evidence_id = self._keys.get(key)
             if evidence_id is None:
-                evidence_id = f'E{len(self._items) + 1}'
+                evidence_id = f'E{self.first_number + len(self._items)}'
                 evidence = Evidence(
                     evidence_id, document_id, revision_id, page_id,
                     page['preview_page_no'], block_id, start, end, length, content,
@@ -134,7 +137,7 @@ class EvidenceStore:
             key = (doc_id, rev_id, page_id, asset_id, content)
             evidence_id = self._keys.get(key)
             if evidence_id is None:
-                evidence_id = f'E{len(self._items) + 1}'
+                evidence_id = f'E{self.first_number + len(self._items)}'
                 evidence = Evidence(evidence_id, doc_id, rev_id, page_id,
                     page_no, block_id, 0, 0, 0, content, 'figure', 'visual_observation',
                     tuple(item.get('uncertainties') or ()), 'live_visual',

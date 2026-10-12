@@ -129,15 +129,26 @@ async def test_bad_arguments_return_an_error_to_the_model():
 
 
 @pytest.mark.asyncio
-async def test_history_is_sent_as_turns_without_old_evidence_ids():
+async def test_history_is_sent_as_turns_with_their_evidence_ids():
     model = Script('Oui.')
     history = [{'role': 'user', 'content': 'Produit cartésien ?'},
                {'role': 'assistant', 'content': 'Voir la page 10 [E1, E2].'}]
     await ResearchRunner(CourseTools(ViewFixture()), model).run('Et la page 11 ?', history=history)
     assert model.seen[0][1:] == [
         {'role': 'user', 'content': 'Produit cartésien ?'},
-        {'role': 'assistant', 'content': 'Voir la page 10 .'},
+        {'role': 'assistant', 'content': 'Voir la page 10 [E1, E2].'},
         {'role': 'user', 'content': 'Et la page 11 ?'}]
+
+
+@pytest.mark.asyncio
+async def test_a_later_run_continues_the_numbering_and_corrects_old_ids():
+    # The session's earlier answer cited E1-E2; this run starts at E3.
+    model = Script([('read', {'page': 'd1.p10'})], 'Encore [E1].', 'Encore [E3].')
+    result = await ResearchRunner(CourseTools(ViewFixture(), first_evidence=3), model).run(
+        'Et la page 10 ?', history=[{'role': 'user', 'content': 'Q ?'},
+                                    {'role': 'assistant', 'content': 'Voir [E1, E2].'}])
+    assert 'unknown evidence IDs' in model.seen[-1][-1]['content'] and 'E3' in model.seen[-1][-1]['content']
+    assert result.answer == 'Encore [E3].' and [c['evidence_id'] for c in result.citations] == ['E3']
 
 
 @pytest.mark.asyncio

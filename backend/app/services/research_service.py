@@ -150,7 +150,8 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                 vision_fn=counted_vision if vision_fn else None))
     course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
                                research_seconds=limits.research_seconds,
-                               max_visual_calls=limits.visual_calls)
+                               max_visual_calls=limits.visual_calls,
+                               first_evidence=await runs.next_evidence_number(scope.session_id))
     runner = ResearchRunner(course_tools,
         usage.wrap_model(run_id=started.run_id, model=model_name,
                          alpha=token_alpha, beta=token_beta, call=model),

@@ -100,16 +100,29 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
             pdf = await client.get(f'/api/documents/{doc.id}/pdf', params={
                 'session_id': str(chat.id), 'revision_id': str(rev.id)})
             assert pdf.status_code == 200 and pdf.content.startswith(b'%PDF-')
-            steps.append(ModelReply('Which definition do you mean?', [], 'fixture', 50, 20))
+            # A follow-up: the session numbers evidence after the cited E1, so
+            # the old [E1] the model copies is unknown and gets corrected.
+            steps.extend([tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
+                          ModelReply('Toujours [E1].', [], 'fixture', 50, 20),
+                          ModelReply('Toujours [E2].', [], 'fixture', 50, 20)])
             followup = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'And this page?',
                 'client_request_id': str(uuid.uuid4())})
-            assert followup.status_code == 200
-            assert any(name == 'done' for name, _ in events(followup.text))
-            # Earlier turns are real messages, without their old evidence IDs.
-            assert [m['role'] for m in model_messages[-1][1:]] == ['user', 'assistant', 'user']
-            assert model_messages[-1][-1]['content'] == 'And this page?'
-            assert '[E1]' not in model_messages[-1][2]['content']
+            stream = events(followup.text)
+            assert ('token', 'Toujours [E2].') in stream
+            cited = next(payload for name, payload in stream if name == 'citations')
+            assert [c['label'] for c in cited] == ['E2']
+            assert cited[0]['pdf_page_no'] == page.preview_page_no
+            # Earlier turns are real messages and keep their evidence IDs.
+            first = model_messages[-3]
+            assert [m['role'] for m in first[1:]] == ['user', 'assistant', 'user']
+            assert first[2]['content'] == 'Voir la définition [E1].'
+            assert 'unknown evidence IDs' in model_messages[-1][-1]['content']
+            steps.append(ModelReply('Which definition do you mean?', [], 'fixture', 50, 20))
+            clarify = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'And the other one?',
+                'client_request_id': str(uuid.uuid4())})
+            assert any(name == 'done' for name, _ in events(clarify.text))
             steps.append(ModelReply('Autre réponse.', [], 'fixture', 50, 20))
             later = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'Another topic?',

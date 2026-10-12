@@ -361,6 +361,15 @@ class ResearchRuns:
                 'asset_id': str(c.asset_id) if asset else None,
                 'asset_mime': asset.mime if asset else None}
 
+    async def next_evidence_number(self, session_id: uuid.UUID) -> int:
+        """The first evidence number for a new run of the session: after every
+        ID its earlier answers cite, so a copied old ID is never valid again."""
+        async with self.session_factory() as db:
+            labels = (await db.scalars(select(MessageCitation.label)
+                .join(AgentRun, AgentRun.assistant_message_id == MessageCitation.message_id)
+                .where(AgentRun.session_id == session_id))).all()
+        return 1 + max((int(label[1:]) for label in labels), default=0)
+
     async def load_safe_history(self, scope: ResearchScope, *, limit: int = 20) -> list[dict]:
         async with self.session_factory() as db:
             await _live_session(db, scope.user_id, scope.session_id)
