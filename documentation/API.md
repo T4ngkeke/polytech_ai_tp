@@ -122,13 +122,18 @@ Server-sent events, in order:
 | --- | --- |
 | `status` | `{"route": "agent", "phase": ...}`; phase is `thinking`, then `finding` (search), `reading` (read, open, grep), `checking_image` (view_image) or `checking_sources` (answer). |
 | (default) | The whole answer text, as one JSON string. |
-| `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`. |
+| `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`, `box` (the cited block's region as `[x0, y0, x1, y1]` fractions of the page, or `null`). |
 | `done` | `{"message_id": ...}` |
 | `error` | `{"detail": ...}`, for example when another research request of the session is still running, or `Daily token quota exceeded` when the quota runs out during research. |
 | (comment) | `: keep-alive`, every 15 s without another event, so proxies keep the stream open. SSE clients ignore it. |
 
 `GET /api/student/sessions/{session_id}` returns the same citations on each
 message, with `available` and `href` rechecked against current access.
+
+The chat shows a cited page with its passages highlighted from
+`GET /api/documents/{document_id}/revisions/{revision_id}/pages/{page_no}/image?session_id=`:
+one page of the revision's PDF as a PNG (at most 1400 px), with the same
+access checks as the revision's PDF; a page the revision does not have is 404.
 
 Models (system configuration):
 
