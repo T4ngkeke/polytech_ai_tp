@@ -163,9 +163,14 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                   research_note=research_note)
         await runs.finish_run(started.run_id, result)
     except asyncio.CancelledError:
-        await asyncio.shield(runs.request_cancel(started.run_id, scope.user_id))
-        await asyncio.shield(runs.mark_terminal(started.run_id, status='cancelled',
-                                               stop_reason='client_cancelled'))
+        # Both steps in one shielded task: a second cancellation (the server
+        # can cancel a closed stream more than once) must not stop the run
+        # between 'cancelling' and 'cancelled'.
+        async def close_cancelled():
+            await runs.request_cancel(started.run_id, scope.user_id)
+            await runs.mark_terminal(started.run_id, status='cancelled',
+                                     stop_reason='client_cancelled')
+        await asyncio.shield(close_cancelled())
         raise
     except ResearchRunStopped:
         await runs.mark_terminal(started.run_id, status='cancelled',

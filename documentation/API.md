@@ -125,6 +125,7 @@ Server-sent events, in order:
 | `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`. |
 | `done` | `{"message_id": ...}` |
 | `error` | `{"detail": ...}`, for example when another research request of the session is still running, or `Daily token quota exceeded` when the quota runs out during research. |
+| (comment) | `: keep-alive`, every 15 s without another event, so proxies keep the stream open. SSE clients ignore it. |
 
 `GET /api/student/sessions/{session_id}` returns the same citations on each
 message, with `available` and `href` rechecked against current access.

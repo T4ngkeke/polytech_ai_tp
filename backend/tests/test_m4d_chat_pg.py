@@ -40,7 +40,8 @@ def tool_call(name, arguments):
 def events(raw):
     parsed = []
     for frame in raw.split('\n\n'):
-        if not frame.strip():
+        # Blank frames and SSE comments (keep-alive) carry no event.
+        if not frame.strip() or all(x.startswith(':') for x in frame.splitlines()):
             continue
         lines = frame.splitlines()
         name = next((x[7:] for x in lines if x.startswith('event: ')), 'token')
@@ -238,6 +239,38 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
                                                           AgentRun.question == 'Encore ?'))
             await db.refresh(run)
             assert run.status == 'failed'
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_silent_research_sends_keep_alive_comments(pg_session, tmp_path, monkeypatch):
+    """A long silent model call must not leave the stream idle (nginx closes
+    a proxied stream after 60 s without data)."""
+    import asyncio
+    try:
+        db = pg_session
+        _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+        db.add_all(models('http://example.invalid/v1'))
+        await db.commit()
+        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
+        import backend.app.routers.chat as chat_api
+        monkeypatch.setattr(chat_api, 'KEEPALIVE_SECONDS', 0.2)
+        class SlowModel:
+            def __init__(self, endpoint):
+                pass
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+                await asyncio.sleep(1.2)
+                return ModelReply('Bonjour !', [], 'ornith', 25, 8)
+        monkeypatch.setattr(chat_api, 'ResearchModel', SlowModel)
+        client = await make_client(db, student)
+        async with client:
+            response = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Bonjour',
+                'client_request_id': str(uuid.uuid4())})
+        assert response.text.count(': keep-alive\n\n') >= 3
+        assert ('token', 'Bonjour !') in events(response.text)
+        assert any(name == 'done' for name, _ in events(response.text))
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 

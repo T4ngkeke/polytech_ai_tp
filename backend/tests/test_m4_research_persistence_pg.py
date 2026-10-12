@@ -461,6 +461,36 @@ async def test_task_cancellation_charges_started_call_and_stops(pg_session):
 
 
 @pytest.mark.asyncio
+async def test_repeated_cancellation_still_ends_the_run(pg_session):
+    """A closed stream can be cancelled again while the run is cleaning up; the
+    run must still reach 'cancelled' instead of staying 'cancelling'."""
+    from backend.app.services.research_service import run_persisted_research
+    scope, factory = await _setup(pg_session, quota=5000)
+    entered = asyncio.Event()
+    async def waiting_model(messages, max_output, timeout, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+    task = asyncio.create_task(run_persisted_research(
+        scope=scope, question='Closed twice?', client_request_id='closed-twice',
+        model=waiting_model, model_name='fake',
+        token_alpha=.2, token_beta=1, session_factory=factory))
+    await asyncio.wait_for(entered.wait(), 5)
+    while not task.done():
+        task.cancel()
+        await asyncio.sleep(0.005)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(100):  # the shielded cleanup may finish just after the task
+        async with factory() as db:
+            run = await db.get(AgentRun, scope.run_id)
+        if run.status == 'cancelled':
+            break
+        await asyncio.sleep(0.05)
+    assert (run.status, run.stop_reason) == ('cancelled', 'client_cancelled')
+    assert run.finished_at is not None
+
+
+@pytest.mark.asyncio
 async def test_teacher_preview_bills_only_teacher_identity(pg_session):
     teacher, _, lab, _ = await seed(pg_session)
     preview = Session(id=uuid.uuid4(), lab_id=lab.id, user_id=teacher.id,

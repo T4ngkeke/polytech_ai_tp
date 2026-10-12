@@ -35,6 +35,7 @@ Execution Flow
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import date
 
@@ -79,6 +80,10 @@ from backend.app.services.research_vision import ResearchVision
 from backend.app.services.trace_service import TraceBuilder
 
 logger = logging.getLogger(__name__)
+
+# Seconds without an event before the research stream sends an SSE comment
+# (proxies such as nginx close a stream after 60 s of silence by default).
+KEEPALIVE_SECONDS = 15
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -580,6 +585,7 @@ async def chat_stream(
                 rerank_model=llm_config['rerank_model'], on_phase=phase,
                 vision_fn=vision, vision_model=vlm.model, limits=limits,
                 session_factory=research_factory))
+            last_sent = time.monotonic()
             try:
                 while not task.done():
                     if await request.is_disconnected():
@@ -587,8 +593,13 @@ async def chat_stream(
                     try:
                         name = await asyncio.wait_for(queue.get(), timeout=0.5)
                         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': name})}\n\n"
+                        last_sent = time.monotonic()
                     except asyncio.TimeoutError:
-                        pass
+                        # A model call can be silent for minutes; an SSE comment
+                        # keeps proxies from closing the stream. Clients ignore it.
+                        if time.monotonic() - last_sent >= KEEPALIVE_SECONDS:
+                            yield ": keep-alive\n\n"
+                            last_sent = time.monotonic()
                 result = await task
                 if result['status'] != 'finished':
                     yield f"event: error\ndata: {json.dumps({'detail': 'Research did not finish'})}\n\n"

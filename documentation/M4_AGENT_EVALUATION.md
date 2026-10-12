@@ -113,6 +113,26 @@ Check on Qwen3.8-27B for research and vision (W08, W03, W02, 2 rounds,
 succeeded 4/9 before and 7/7 after; all failures before were the 18 s
 time-out. Pages 16/18 on both sides; W03 answers were complete on both sides.
 
+## End-to-end test (2026-10-12)
+
+A temporary stack (own database, the 14-PDF corpus loaded through the
+product's upload and publish path, Qwen3.8-27B for research, answers and
+vision) was driven in headless Firefox: log in, ask W03, open a citation,
+ask a follow-up, reload, say thanks. What it found and what changed:
+
+- A fresh backend image did not start (SQLAlchemy without greenlet); fixed.
+- Follow-ups had no citations (see the prompt section); fixed by numbering
+  evidence across the session. Follow-up after W03, 2 runs: 5 citations
+  each, all on the page asked about.
+- nginx closed the stream after 60 s without data while 27B wrote a long
+  answer, and the answer was lost. The backend now sends an SSE comment
+  every 15 s, and nginx waits up to 600 s.
+- After that disconnect the run stayed 'cancelling', which blocks its
+  session until the stale-run timeout. The two cancel steps now run in one
+  shielded task.
+- Query embedding on the CPU took 0.25 s with spikes of 8-11 s; on the GPU
+  0.03 s with the same vectors.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable
