@@ -15,7 +15,7 @@ Environment:
   M4_UPSTREAM      model server (OpenAI-compatible, native tool calls), default Ornith
   M4_MODEL_NAME    served model name (default: ornith)
   M4_MODEL_LABEL   model name written to the manifest
-  M4_VISION_URL    vision model for view_image (default: Ornith), M4_VISION_LABEL
+  M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
   M4_BUDGET        standard | relaxed | relaxed_slow (see BUDGETS)
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
   M4_QUESTIONS     comma-separated question IDs to keep
@@ -130,7 +130,8 @@ def make_tool_dependencies(config):
         vectors.update({row['text_sha256']: row['embedding']
                         for row in map(json.loads, shared.read_text().splitlines())})
     embedding_client = httpx.AsyncClient(timeout=20)
-    vision = ResearchVision(Endpoint(os.getenv('M4_VISION_URL', 'http://127.0.0.1:18001/v1'), 'local', 'ornith'))
+    vision = ResearchVision(Endpoint(config['vision_url'], 'local', config['model_name']),
+                            timeout=config['call_seconds'])
     visual_usage = []
 
     async def embed(text):
@@ -158,7 +159,8 @@ def make_tool_dependencies(config):
                        if reply.input_tokens is not None and reply.output_tokens is not None else 'unknown')
             return reply
         except BaseException as exc:
-            row.update(status=type(exc).__name__, usage_source='unknown')
+            row.update(status=getattr(exc, 'code', type(exc).__name__),
+                       detail=getattr(exc, 'detail', ''), usage_source='unknown')
             raise
         finally:
             row['elapsed_seconds'] = time.monotonic() - started
@@ -219,11 +221,15 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     scope = await create_scope(db, user_id=chat.user_id, session_id=chat.id)
     by_doc = {d.id: d.filename for d in (await db.scalars(select(Document))).all()}
     factory = async_sessionmaker(db.bind, expire_on_commit=False)
-    tool_config = {'storage_root': str(storage_root), 'embedding_url': embedding_url,
-                   'query_cache': str(query_cache)}
     call_seconds = limits['call_seconds']
     upstream = os.getenv('M4_UPSTREAM', 'http://127.0.0.1:18001/v1')
-    model = ResearchModel(Endpoint(upstream, 'local', os.getenv('M4_MODEL_NAME', 'ornith')))
+    model_name = os.getenv('M4_MODEL_NAME', 'ornith')
+    model = ResearchModel(Endpoint(upstream, 'local', model_name))
+    # One model for research and vision unless M4_VISION_URL names another.
+    vision_url = os.getenv('M4_VISION_URL', upstream)
+    tool_config = {'storage_root': str(storage_root), 'embedding_url': embedding_url,
+                   'query_cache': str(query_cache), 'vision_url': vision_url,
+                   'model_name': model_name, 'call_seconds': call_seconds}
     concurrency = int(os.getenv('M4_CONCURRENCY', '1'))
     results = []
     dependencies = []
@@ -345,7 +351,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'benchmark': benchmark, 'split': split if benchmark in ('v2', 'v3', 'v4') else None,
             'corpus': os.getenv('M4_CORPUS', 'm3c-4pdf'), 'variants': variants,
             'model': os.getenv('M4_MODEL_LABEL', 'Ornith-1.5-35B-A3B-NVFP4'), 'upstream': upstream,
-            'vision_model': os.getenv('M4_VISION_LABEL', 'Ornith-1.5-35B-A3B-NVFP4'),
+            'vision_model': os.getenv('M4_VISION_LABEL', os.getenv('M4_MODEL_LABEL', 'Ornith-1.5-35B-A3B-NVFP4')),
+            'vision_url': vision_url,
             'thinking_enabled': False, 'temperature': 0, 'budget': budget, 'limits': limits,
             'concurrency': concurrency, 'reranker': None,
             'index': 'frozen M3-C mineru-text/BGE-M3',

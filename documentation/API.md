@@ -139,7 +139,14 @@ Models (system configuration):
   vLLM: `--enable-auto-tool-choice` and a `--tool-call-parser`).
 - `VLM_BASE_URL`, `VLM_API_KEY`, `VLM_MODEL`: the vision model behind the
   `view_image` tool. Without `VLM_MODEL`, `view_image` returns
-  `model_unavailable`.
+  `model_unavailable`. The system is meant to run one model, so these usually
+  name the same model as `AGENT_*`.
+
+A failed `view_image` call tells the model why: `vision_timeout` and
+`vision_bad_output` (with the hint to ask a narrower question),
+`vision_unreachable`, or `image_unavailable` (the image file could not be read
+or rendered). A failed call takes a tool slot but not a visual call. Long
+observations and uncertainties are shortened, not refused.
 
 Limits of one research run (system configuration, whole numbers; an empty or
 invalid value means the default; the admin API rejects values out of range):
@@ -150,7 +157,7 @@ invalid value means the default; the admin API rejects values out of range):
 | `AGENT_MAX_VISUAL_CALLS` (`agent_max_visual_calls`) | 2 | 0–10 | `view_image` calls. |
 | `AGENT_RESEARCH_SECONDS` (`agent_research_seconds`) | 45 | 5–1800 | Time for research; then the tools are withdrawn. At most the total time. |
 | `AGENT_TOTAL_SECONDS` (`agent_total_seconds`) | 60 | 10–1800 | Time for the whole run, answer included. |
-| `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 20 | 5–600 | Time for one model call. |
+| `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 20 | 5–600 | Time for one model call, `view_image` included. |
 | `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 12000 | 4000–200000 | Estimated input tokens of one model call. Chat history may use a quarter of it. |
 
 The system prompt states the tool and visual limits. The defaults are the

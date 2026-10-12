@@ -233,14 +233,26 @@ async def test_live_visual_page_is_scoped_and_failures_are_not_evidence(pg_sessi
         assert ids == ['E1'] and evidence.get('E1').citation()['range'] is None
         assert evidence.get('E1').citation()['asset_id'] == str(page.preview_asset_id)
 
+        from backend.app.services.research_vision import VisionError
         async def timeout(*_args):
-            raise TimeoutError()
+            raise VisionError('vision_timeout', 'no reply within 20 s')
         failed = ResearchTools(db, scope, vision_fn=timeout,
                                storage_root=tmp_path / 'storage')
         bad = await failed.execute('view_image', {
             'asset_id': str(page.preview_asset_id), 'question': 'What is shown?'})
-        assert not bad['ok'] and bad['error']['code'] == 'model_unavailable'
+        # The model learns what to change, not just that the model is unavailable.
+        assert not bad['ok'] and bad['error']['code'] == 'vision_timeout'
+        assert 'narrower question' in bad['error']['message']
         assert evidence.add_visual(bad) == []
+        async def broken(*_args):
+            raise RuntimeError('socket')
+        other = await ResearchTools(db, scope, vision_fn=broken, storage_root=tmp_path / 'storage'
+            ).execute('view_image', {'asset_id': str(page.preview_asset_id), 'question': 'What?'})
+        assert other['error']['code'] == 'vision_unreachable'
+        # A missing image file is not reported as a model problem.
+        missing = await ResearchTools(db, scope, vision_fn=vision, storage_root=tmp_path / 'elsewhere'
+            ).execute('view_image', {'asset_id': str(page.preview_asset_id), 'question': 'What?'})
+        assert missing['error']['code'] == 'image_unavailable'
         assert (await tools.execute('view_image', {
             'asset_id': str(uuid.uuid4()), 'question': 'What is shown?'}))['error']['code'] == 'not_found'
     finally:

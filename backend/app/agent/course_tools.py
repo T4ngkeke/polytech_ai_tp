@@ -583,9 +583,11 @@ class CourseTools:
             result = self._limit_error(name, tick)
             if result is None:
                 row['dispatched'] = True
-                if name == 'view_image':
-                    self.visual_calls += 1
                 result = await self.tools.execute(name, arguments)
+                # Only an observation uses the visual budget; a failed call
+                # still takes a tool slot.
+                if name == 'view_image' and result.get('ok'):
+                    self.visual_calls += 1
                 if result.get('ok'):
                     ids = self._ids(name, result, UUID(arguments['document_id']) if name == 'read' else None)
                     if any(ids):

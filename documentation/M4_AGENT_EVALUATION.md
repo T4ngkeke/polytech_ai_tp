@@ -57,7 +57,12 @@ Benchmark v4, model Qwen3.8-Flash-Next (v0.30), round 1:
   is unchanged.
 - The benchmark runs without a reranker. The student chat uses one when it is
   configured.
-- About 23% of `view_image` calls failed (time-outs under load, output limits).
+- About 26% of `view_image` calls failed (434 recorded calls). Causes: a
+  fixed 18 s time limit while the GPU was shared (13%); good replies refused
+  because one uncertainty was over 250 characters or the observation over
+  1200 (11%); replies cut at 700 tokens (2%). Every failure reached the model
+  as `model_unavailable`, so it repeated the same broad question. Fixed on
+  2026-10-12 (see below).
 - The model server must support native tool calls (for vLLM:
   `--enable-auto-tool-choice` and a `--tool-call-parser`). In the experiments,
   Ornith ran without them and its tool calls were parsed by the DSH gateway,
@@ -77,6 +82,20 @@ Check on Qwen3.8-27B (W03, W07, W12, 2 rounds, relaxed_slow, before vs after,
 after; pages 12/18 and 14/18. Six trials per side, so this shows no
 regression, not an improvement. The benchmark questions have no history; the
 follow-up path was checked with the real-model chat test.
+
+## view_image fix (2026-10-12)
+
+The vision call now uses the run's call time (`AGENT_CALL_SECONDS`) and up to
+1200 output tokens, shortens long parts instead of refusing the reply, and
+reports `vision_timeout`, `vision_bad_output`, `vision_unreachable` or
+`image_unavailable`. Failed calls no longer use the visual budget. Research
+and vision use the same model (the evaluator's `M4_VISION_URL` defaults to
+`M4_UPSTREAM`).
+
+Check on Qwen3.8-27B for research and vision (W08, W03, W02, 2 rounds,
+3 in flight, relaxed_slow, `m4-agent/2026-10-12-view-image-27b`): vision calls
+succeeded 4/9 before and 7/7 after; all failures before were the 18 s
+time-out. Pages 16/18 on both sides; W03 answers were complete on both sides.
 
 ## Running the benchmark
 

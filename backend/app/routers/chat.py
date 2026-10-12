@@ -564,7 +564,8 @@ async def chat_stream(
             raise HTTPException(503, 'agent_model_not_configured')
         vlm = Endpoint(llm_config['vlm_base_url'],
                        llm_config['vlm_api_key'], llm_config['vlm_model'])
-        vision = ResearchVision(vlm) if vlm.model and vlm.base_url else None
+        vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
+                  if vlm.model and vlm.base_url else None)
         request_id = str(body.client_request_id or uuid.uuid4())
 
         async def research_events():

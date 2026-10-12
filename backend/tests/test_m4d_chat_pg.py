@@ -25,10 +25,11 @@ def models(base_url, vision_url=None):
 
 
 def local_models():
-    """The opt-in real-model tests: M4D_AGENT_URL and M4D_VLM_URL, default local Ornith."""
+    """The opt-in real-model tests: M4D_AGENT_URL (default local Ornith), and
+    M4D_VLM_URL, by default the same model."""
     import os
-    return models(os.environ.get('M4D_AGENT_URL', 'http://127.0.0.1:18001/v1'),
-                  os.environ.get('M4D_VLM_URL', 'http://127.0.0.1:18001/v1'))
+    agent = os.environ.get('M4D_AGENT_URL', 'http://127.0.0.1:18001/v1')
+    return models(agent, os.environ.get('M4D_VLM_URL', agent))
 
 
 def tool_call(name, arguments):
@@ -288,6 +289,8 @@ async def test_real_local_model_student_research_http(pg_session, tmp_path, monk
         db.add_all(local_models())
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
+        # view_image reads the page image from the test's storage.
+        monkeypatch.setattr(settings, 'DOCUMENTS_STORAGE_ROOT', str(tmp_path / 'storage'))
         import backend.app.services.research_service as research_service
         original_execute = research_service._RunningTools.execute
         async def logged_execute(self, name, arguments):

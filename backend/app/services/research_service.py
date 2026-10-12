@@ -122,8 +122,10 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
         estimate = min(3000, 512 + 384 * ((width + 511) // 512) *
                        ((height + 511) // 512)) + estimate_tokens(question)
         call_id = await usage.reserve(run_id=started.run_id, purpose='vision',
-            model=vision_model, input_tokens=estimate, max_output_tokens=700,
-            alpha=token_alpha, beta=token_beta, lifetime_seconds=60)
+            model=vision_model, input_tokens=estimate,
+            max_output_tokens=getattr(vision_fn, 'max_tokens', 1200),
+            alpha=token_alpha, beta=token_beta,
+            lifetime_seconds=getattr(vision_fn, 'timeout', limits.call_seconds) + 30)
         tick = time.monotonic()
         try:
             reply = await vision_fn(image, mime, question)

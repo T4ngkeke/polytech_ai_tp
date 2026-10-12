@@ -212,6 +212,28 @@ async def test_next_page_and_cursor_handles_resolve_without_navigate():
 
 
 @pytest.mark.asyncio
+async def test_failed_visual_calls_do_not_use_the_visual_budget():
+    tools = ViewFixture()
+    real = tools.execute
+    failures = [True, True]
+    async def execute(name, arguments):
+        if name == 'view_image' and failures:
+            failures.pop()
+            return {'ok': False, 'error': {'code': 'vision_timeout', 'message': 'ask a narrower question'}}
+        return await real(name, arguments)
+    tools.execute = execute
+    course = CourseTools(tools, max_visual_calls=1)
+    await course.call('read', {'page': 'd1.p9'})
+    for _ in range(2):
+        text, ok = await course.call('view_image', {'image': 'a1', 'question': 'Tout ?'})
+        assert not ok and text == 'error: vision_timeout (ask a narrower question)'
+    text, ok = await course.call('view_image', {'image': 'a1', 'question': 'Quelles tables ?'})
+    assert ok and course.visual_calls == 1
+    # Failed calls still take tool slots.
+    assert len(course.trace) == 4
+
+
+@pytest.mark.asyncio
 async def test_page_image_handle_supplies_page_for_view_image():
     tools = ViewFixture()
     course = CourseTools(tools)

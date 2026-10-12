@@ -320,6 +320,7 @@ class ResearchTools:
         from backend.app.config import settings
         from backend.app.services import document_storage
         from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
+        from backend.app.services.research_vision import VisionError
 
         await self._check_session()
         source = (await self.db.execute(select(DocumentSource.document_id)
@@ -371,8 +372,11 @@ class ResearchTools:
                 _render_image, path, asset.kind, page.preview_page_no)
             if len(image) > 3_000_000:
                 raise ValueError('image_too_large')
-            reply = await asyncio.wait_for(
-                self.vision_fn(image, 'image/png', args.question, width, height), 20)
+        except Exception as exc:
+            raise reader.ReaderError('image_unavailable', type(exc).__name__) from None
+        try:
+            # The vision client has its own time limit (the run's call time).
+            reply = await self.vision_fn(image, 'image/png', args.question, width, height)
             await self._revision(source)
             return reader.envelope([{
                 'document_id': str(source), 'revision_id': str(revision_id),
@@ -385,8 +389,17 @@ class ResearchTools:
             }])
         except (ResearchQuotaExceeded, ResearchRunStopped, DocumentNotFound):
             raise
-        except Exception:
-            raise reader.ReaderError('model_unavailable') from None
+        except VisionError as exc:
+            # The model is told what to change; the detail stays in the trace.
+            raise reader.ReaderError(exc.code, VISION_HINTS.get(exc.code, exc.detail)) from None
+        except Exception as exc:
+            raise reader.ReaderError('vision_unreachable', type(exc).__name__) from None
+
+
+VISION_HINTS = {
+    'vision_timeout': 'the vision model took too long; ask a narrower question about one part of the image',
+    'vision_bad_output': 'the vision reply was unusable; ask a shorter, narrower question',
+}
 
 
 def _render_image(path, kind: str, page_no: int) -> tuple[bytes, int, int]:
