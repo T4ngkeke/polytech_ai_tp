@@ -83,6 +83,20 @@ after; pages 12/18 and 14/18. Six trials per side, so this shows no
 regression, not an improvement. The benchmark questions have no history; the
 follow-up path was checked with the real-model chat test.
 
+## Prompt: citations and handles (2026-10-12)
+
+The end-to-end test showed 27B writing handles to the student ("pages 22-23
+du cours (d12)"). The prompt now says each [E#] is the link the student sees,
+that earlier answers carry no valid IDs, and never to write handles. A first
+wording ("name the file and page") made the model drop [E#] entirely (0
+citations in 8 runs); the committed wording keeps them. Check on 27B (W03,
+W07, W12, 2 rounds, `m4-agent/2026-10-12-prompt-v2-27b`): handles in answers
+6 → 0, answers without citations 1 → 0, answer points about 16/18 (17/18
+before; the difference is W12's "a view is a virtual table"). A follow-up
+after an earlier answer still gets no citations: the model copies the
+earlier answer, whose [E#] IDs are removed from the history. This needs a
+code change, not a prompt change.
+
 ## view_image fix (2026-10-12)
 
 The vision call now uses the run's call time (`AGENT_CALL_SECONDS`) and up to
