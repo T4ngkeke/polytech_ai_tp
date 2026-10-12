@@ -69,6 +69,10 @@ def limit_value(key: str, raw: str | None) -> int | None:
     return value if low <= value <= high else None
 
 
+# How often a duplicate request checks whether the original run has ended.
+DUPLICATE_POLL_SECONDS = 1.0
+
+
 class _RunningTools(PerCallTools):
     """PerCallTools that refuse every call once the run is no longer running."""
 
@@ -97,6 +101,12 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
         client_request_id=client_request_id,
         stale_after=max(STALE_RUN_SECONDS, 2 * limits.total_seconds))
     if not started.created:
+        # The same request again (a resend, a reconnect): wait for the run
+        # that is still working on it rather than report it unfinished.
+        status, deadline = started.status, time.monotonic() + limits.total_seconds + 60
+        while status in ('running', 'cancelling') and time.monotonic() < deadline:
+            await asyncio.sleep(DUPLICATE_POLL_SECONDS)
+            status = await runs.get_status(started.run_id)
         return await runs.load_result(run_id=started.run_id, user_id=scope.user_id)
     def counted_non_token(fn, purpose, model):
         if fn is None:

@@ -547,6 +547,36 @@ async def test_repeated_cancellation_still_ends_the_run(pg_session):
 
 
 @pytest.mark.asyncio
+async def test_a_duplicate_request_waits_for_the_running_run(pg_session, monkeypatch):
+    """The same request sent again while its run works (a resend or a reconnect)
+    gets that run's answer, not "did not finish"."""
+    import backend.app.services.research_service as research_service
+    from backend.app.services.research_service import run_persisted_research
+    monkeypatch.setattr(research_service, 'DUPLICATE_POLL_SECONDS', 0.05)
+    scope, factory = await _setup(pg_session, quota=5000)
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def slow_model(messages, max_output, timeout, **kwargs):
+        entered.set()
+        await release.wait()
+        return ModelReply('Bonjour !', [], 'fake', 30, 10)
+    def start(model):
+        return asyncio.create_task(run_persisted_research(
+            scope=scope, question='Bonjour ?', client_request_id='same-request',
+            model=model, model_name='fake', token_alpha=.2, token_beta=1,
+            session_factory=factory))
+    first = start(slow_model)
+    await asyncio.wait_for(entered.wait(), 5)
+    async def never_called(*args, **kwargs):
+        raise AssertionError('a duplicate request must not call the model')
+    second = start(never_called)
+    await asyncio.sleep(0.2)
+    assert not second.done()
+    release.set()
+    a, b = await asyncio.wait_for(asyncio.gather(first, second), 10)
+    assert a['status'] == b['status'] == 'finished' and a['message_id'] == b['message_id']
+
+
+@pytest.mark.asyncio
 async def test_teacher_preview_bills_only_teacher_identity(pg_session):
     teacher, _, lab, _ = await seed(pg_session)
     preview = Session(id=uuid.uuid4(), lab_id=lab.id, user_id=teacher.id,

@@ -219,6 +219,9 @@ export default function Chat() {
         body: JSON.stringify({ session_id: currentSessionId, message: text,
           client_request_id: crypto.randomUUID() }),
         signal: ctrl.signal,
+        // Keep the stream open while the tab is hidden; by default the library
+        // closes it and resends the question when the tab is shown again.
+        openWhenHidden: true,
         onmessage(ev) {
           // Named events (status/done/error/citations) are matched before the
           // content-token branch, so the opening `status` frame is never appended
