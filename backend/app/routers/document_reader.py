@@ -6,21 +6,23 @@ ownership checked). Student: /api/documents/{doc}/revisions/{rev}/...?session_id
 lab or class). Files are streamed from storage after the check; there is no
 public static URL and no storage path ever leaves the server.
 """
+import asyncio
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.auth import get_current_user, require_teacher
 from backend.app.database import get_db
-from backend.app.models import DocumentAsset, DocumentRevision, DocumentSource, User
+from backend.app.models import DocumentAsset, DocumentPage, DocumentRevision, DocumentSource, User
 from backend.app.routers.teacher import get_storage_root
 from backend.app.services import document_reader as reader
 from backend.app.services import document_storage as storage
 from backend.app.services.document_access import DocumentNotFound, readable_asset, readable_document, readable_revision
+from backend.app.services.page_render import render_page_png
 
 teacher_router = APIRouter(prefix='/api/teacher/documents', tags=['document-reader'])
 student_router = APIRouter(prefix='/api/documents', tags=['document-reader'])
@@ -209,6 +211,35 @@ async def student_asset(document_id: uuid.UUID, revision_id: uuid.UUID, asset_id
     except DocumentNotFound:
         raise _not_found() from None
     return _file(asset, root)
+
+
+@student_router.get('/{document_id}/revisions/{revision_id}/pages/{page_no}/image')
+async def student_page_image(document_id: uuid.UUID, revision_id: uuid.UUID, page_no: int,
+                             session_id: uuid.UUID, user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db),
+                             root: str = Depends(get_storage_root)):
+    """One page of a revision's PDF as a PNG, for the citation preview: the
+    chat draws the cited blocks' regions over it. Access as for the PDF."""
+    rev = await _student_rev(db, document_id, revision_id, user, session_id)
+    if rev.preview_pdf_asset_id is None:
+        raise _not_found()
+    page = await db.scalar(select(DocumentPage.page_id).where(
+        DocumentPage.revision_id == revision_id, DocumentPage.preview_page_no == page_no))
+    if page is None:
+        raise _not_found()
+    try:
+        asset = await readable_asset(db, asset_id=rev.preview_pdf_asset_id, document_id=document_id,
+                                     user_id=user.id, revision_id=revision_id, session_id=session_id)
+        path = storage.resolve(root, asset.storage_key)
+    except (DocumentNotFound, ValueError, storage.StorageError):
+        raise _not_found() from None
+    if not path.is_file():
+        raise HTTPException(410, 'source_unavailable')
+    try:
+        image, _, _ = await asyncio.to_thread(render_page_png, path, asset.kind, page_no)
+    except Exception:
+        raise HTTPException(410, 'source_unavailable') from None
+    return Response(content=image, media_type='image/png', headers=NO_STORE)
 
 
 @student_router.get('/{document_id}/pdf')

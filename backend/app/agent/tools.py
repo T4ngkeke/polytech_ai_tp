@@ -320,6 +320,7 @@ class ResearchTools:
         from backend.app.config import settings
         from backend.app.services import document_storage
         from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
+        from backend.app.services.page_render import render_page_png
         from backend.app.services.research_vision import VisionError
 
         await self._check_session()
@@ -369,7 +370,7 @@ class ResearchTools:
                 asset.storage_key, asset.sha256)
             # Rendering takes up to a few hundred ms; keep it off the event loop.
             image, width, height = await asyncio.to_thread(
-                _render_image, path, asset.kind, page.preview_page_no)
+                render_page_png, path, asset.kind, page.preview_page_no)
             if len(image) > 3_000_000:
                 raise ValueError('image_too_large')
         except Exception as exc:
@@ -400,19 +401,6 @@ VISION_HINTS = {
     'vision_timeout': 'the vision model took too long; ask a narrower question about one part of the image',
     'vision_bad_output': 'the vision reply was unusable; ask a shorter, narrower question',
 }
-
-
-def _render_image(path, kind: str, page_no: int) -> tuple[bytes, int, int]:
-    """PNG of the selected physical PDF page, or of a PNG/JPEG preview downscaled.
-    The file path is never exposed to the model."""
-    import pymupdf
-    with pymupdf.open(path) as image_doc:
-        target = image_doc[page_no - 1] if kind == 'pdf_preview' else image_doc[0]
-        factor = min(1.0, 1400 / max(target.rect.width, target.rect.height))
-        if kind == 'pdf_preview':
-            factor = min(1.5, 1400 / max(target.rect.width, target.rect.height))
-        pix = target.get_pixmap(matrix=pymupdf.Matrix(factor, factor), alpha=False)
-        return pix.tobytes('png'), pix.width, pix.height
 
 
 class PerCallTools:

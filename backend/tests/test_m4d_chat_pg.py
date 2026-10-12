@@ -101,6 +101,18 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
             pdf = await client.get(f'/api/documents/{doc.id}/pdf', params={
                 'session_id': str(chat.id), 'revision_id': str(rev.id)})
             assert pdf.status_code == 200 and pdf.content.startswith(b'%PDF-')
+            # The preview draws the cited block's region over an image of its page.
+            box = citations[0]['box']
+            assert len(box) == 4 and 0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1
+            image_url = f'/api/documents/{doc.id}/revisions/{rev.id}/pages/{page.preview_page_no}/image'
+            image = await client.get(image_url, params={'session_id': str(chat.id)})
+            assert image.status_code == 200 and image.content.startswith(b'\x89PNG')
+            assert image.headers['cache-control'] == 'private, no-store'
+            missing = await client.get(f'/api/documents/{doc.id}/revisions/{rev.id}/pages/999/image',
+                                       params={'session_id': str(chat.id)})
+            assert missing.status_code == 404
+            foreign = await client.get(image_url, params={'session_id': str(uuid.uuid4())})
+            assert foreign.status_code == 404
             # A follow-up answered from the history may cite the earlier E1:
             # within a session an ID names one stored source.
             steps.append(ModelReply('Comme dit plus haut [E1].', [], 'fixture', 50, 20))

@@ -24,6 +24,7 @@ from backend.app.models import (
 from backend.app.services.document_access import (
     DocumentNotFound, readable_asset, readable_revision,
 )
+from backend.app.services.page_render import block_box
 
 
 # A run still active after this long was left by a lost process (restart,
@@ -393,6 +394,7 @@ class ResearchRuns:
             newer_revision = bool(doc and doc.current_revision_id != c.revision_id)
             href = (f'/source/{c.document_id}?session_id={run.session_id}'
                     f'&revision_id={c.revision_id}&page={c.pdf_page_no}') if available else None
+            block = blocks.get((c.revision_id, c.block_id)) if c.block_id is not None else None
             payloads.append({'citation_id': str(c.id), 'label': c.label,
                 'document_id': str(c.document_id), 'revision_id': str(c.revision_id),
                 'page_id': str(c.page_id), 'pdf_page_no': c.pdf_page_no,
@@ -404,7 +406,10 @@ class ResearchRuns:
                 'newer_revision': newer_revision,
                 'teacher_revised': teacher_revised,
                 'asset_id': str(c.asset_id) if asset else None,
-                'asset_mime': asset.mime if asset else None})
+                'asset_mime': asset.mime if asset else None,
+                # Where the cited block sits on its page (fractions), for the
+                # preview's highlight.
+                'box': block_box(block.source_ref) if available and block is not None else None})
         return payloads
 
     async def next_evidence_number(self, session_id: uuid.UUID) -> int:
