@@ -317,7 +317,6 @@ class ResearchTools:
 
     async def view_image(self, args: ViewImageArgs) -> dict:
         import asyncio
-        import pymupdf
         from backend.app.config import settings
         from backend.app.services import document_storage
         from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
@@ -367,16 +366,9 @@ class ResearchTools:
             path = document_storage.verified_path(
                 self.storage_root or settings.DOCUMENTS_STORAGE_ROOT,
                 asset.storage_key, asset.sha256)
-            # Render only the selected physical PDF page; never expose its file
-            # path to the model. For existing PNG/JPEG previews, downscale here.
-            with pymupdf.open(path) as image_doc:
-                target = image_doc[page.preview_page_no - 1] if asset.kind == 'pdf_preview' else image_doc[0]
-                factor = min(1.0, 1400 / max(target.rect.width, target.rect.height))
-                if asset.kind == 'pdf_preview':
-                    factor = min(1.5, 1400 / max(target.rect.width, target.rect.height))
-                pix = target.get_pixmap(matrix=pymupdf.Matrix(factor, factor), alpha=False)
-                image = pix.tobytes('png')
-                width, height = pix.width, pix.height
+            # Rendering takes up to a few hundred ms; keep it off the event loop.
+            image, width, height = await asyncio.to_thread(
+                _render_image, path, asset.kind, page.preview_page_no)
             if len(image) > 3_000_000:
                 raise ValueError('image_too_large')
             reply = await asyncio.wait_for(
@@ -395,6 +387,19 @@ class ResearchTools:
             raise
         except Exception:
             raise reader.ReaderError('model_unavailable') from None
+
+
+def _render_image(path, kind: str, page_no: int) -> tuple[bytes, int, int]:
+    """PNG of the selected physical PDF page, or of a PNG/JPEG preview downscaled.
+    The file path is never exposed to the model."""
+    import pymupdf
+    with pymupdf.open(path) as image_doc:
+        target = image_doc[page_no - 1] if kind == 'pdf_preview' else image_doc[0]
+        factor = min(1.0, 1400 / max(target.rect.width, target.rect.height))
+        if kind == 'pdf_preview':
+            factor = min(1.5, 1400 / max(target.rect.width, target.rect.height))
+        pix = target.get_pixmap(matrix=pymupdf.Matrix(factor, factor), alpha=False)
+        return pix.tobytes('png'), pix.width, pix.height
 
 
 class PerCallTools:

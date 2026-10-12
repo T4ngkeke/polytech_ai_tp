@@ -19,7 +19,9 @@ from backend.app.models import (
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.app.services.document_cleanup import mark_deleted
-from backend.app.services.research_runs import CitationInvalid, ResearchRuns, RunConflict
+from backend.app.services.research_runs import (
+    STALE_RUN_SECONDS, CitationInvalid, ResearchRuns, RunConflict, _label_order,
+)
 from backend.app.services.research_usage import ResearchCallConflict, ResearchQuotaExceeded, ResearchUsage
 from backend.tests.conftest import make_user
 from backend.tests.test_m4_tools_pg import _indexed_pdf
@@ -79,6 +81,29 @@ async def test_run_idempotency_active_session_and_unique_user_message(pg_session
     stat = await pg_session.scalar(select(UsageStat).where(UsageStat.user_id == scope.user_id))
     await pg_session.refresh(stat)
     assert stat.request_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stale_active_run_does_not_block_the_session(pg_session):
+    scope, factory = await _setup(pg_session)
+    store = ResearchRuns(factory)
+    lost = await store.begin_run(scope=scope, question='Lost?', client_request_id='lost-1')
+    async with factory() as db:
+        async with db.begin():
+            run = await db.get(AgentRun, lost.run_id)
+            run.started_at = _utcnow() - timedelta(seconds=STALE_RUN_SECONDS + 1)
+    new = await store.begin_run(scope=await create_scope(pg_session,
+        user_id=scope.user_id, session_id=scope.session_id),
+        question='Again?', client_request_id='lost-2')
+    assert new.created
+    async with factory() as db:
+        run = await db.get(AgentRun, lost.run_id)
+        assert (run.status, run.stop_reason, run.settlement_status) == ('failed', 'worker_lost', 'settled')
+
+
+def test_citations_sort_by_evidence_number():
+    rows = [MessageCitation(label=x) for x in ('E10', 'E2', 'E1')]
+    assert [c.label for c in sorted(rows, key=_label_order)] == ['E1', 'E2', 'E10']
 
 
 @pytest.mark.asyncio

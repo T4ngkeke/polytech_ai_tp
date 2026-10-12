@@ -48,6 +48,7 @@ from backend.app.agent.legacy.router import _ROUTER_SCHEMA
 from backend.app.agent.legacy.graph import build_agent
 from backend.app.agent.history import trim_history
 from backend.app.agent.model import ResearchModel
+from backend.app.agent.result import ResearchQuotaExceeded
 from backend.app.agent.tools import create_scope
 from backend.app.config import settings
 from backend.app.auth import get_current_user
@@ -537,11 +538,14 @@ async def chat_stream(
             if body.selected_citation_id:
                 await runs.select_citation(scope=scope,
                                            citation_id=body.selected_citation_id)
-            safe_history = await runs.load_safe_history(scope)
+            # The research runner has 12000 input tokens; history may take a quarter.
+            safe_history = trim_history(await runs.load_safe_history(scope),
+                max_tokens=min(int(llm_config["context_max_tokens"] or 8000), 3000))
             read_state = await runs.load_read_state(scope)
         except DocumentNotFound:
             raise HTTPException(404, 'source_unavailable') from None
-        focus = read_state['focused_sources'][:1]
+        # A selected source applies to the question sent with it, not to later ones.
+        focus = read_state['focused_sources'][:1] if body.selected_citation_id else []
         research_note = ('The student explicitly selected this source for the follow-up: '
                          + json.dumps(focus, ensure_ascii=False)) if focus else ''
         teaching_rules = '\n\n'.join(
@@ -584,15 +588,12 @@ async def chat_stream(
             try:
                 while not task.done():
                     if await request.is_disconnected():
-                        task.cancel()
-                        break
+                        return  # finally cancels the run
                     try:
                         name = await asyncio.wait_for(queue.get(), timeout=0.5)
                         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': name})}\n\n"
                     except asyncio.TimeoutError:
                         pass
-                if task.cancelled():
-                    return
                 result = await task
                 if result['status'] != 'finished':
                     yield f"event: error\ndata: {json.dumps({'detail': 'Research did not finish'})}\n\n"
@@ -603,6 +604,8 @@ async def chat_stream(
                 yield f"event: done\ndata: {json.dumps({'message_id': result['message_id']})}\n\n"
             except RunConflict:
                 yield f"event: error\ndata: {json.dumps({'detail': 'Another research request is already running'})}\n\n"
+            except ResearchQuotaExceeded:
+                yield f"event: error\ndata: {json.dumps({'detail': 'Daily token quota exceeded'})}\n\n"
             except Exception:
                 logger.exception('Research request failed')
                 yield f"event: error\ndata: {json.dumps({'detail': 'Research failed'})}\n\n"

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -25,6 +25,23 @@ from backend.app.services.document_access import (
     DocumentNotFound, readable_asset, readable_revision,
 )
 
+
+# A run still active after this long was left by a lost process (restart,
+# crash). It is closed so that it does not block its session for good.
+STALE_RUN_SECONDS = 600
+
+
+def _label_order(citation: MessageCitation) -> int:
+    # E2 before E10: labels are E<number>.
+    return int(citation.label[1:])
+
+
+async def _close(db, run: AgentRun, status: str, stop_reason: str) -> None:
+    active = await db.scalar(select(func.count()).select_from(
+        UsageReservation).where(UsageReservation.run_id == run.id,
+        UsageReservation.state.in_(('active','unknown')))) or 0
+    run.status, run.stop_reason, run.finished_at = status, stop_reason, _utcnow()
+    run.settlement_status = 'settled' if active == 0 else 'open'
 
 
 class RunConflict(ValueError):
@@ -47,7 +64,8 @@ class ResearchRuns:
         self.session_factory = session_factory
 
     async def begin_run(self, *, scope: ResearchScope, question: str,
-                        client_request_id: str) -> StartOutcome:
+                        client_request_id: str,
+                        stale_after: float = STALE_RUN_SECONDS) -> StartOutcome:
         if not question.strip() or not 1 <= len(client_request_id) <= 128:
             raise ValueError('invalid_request')
         async with self.session_factory() as db:
@@ -65,6 +83,14 @@ class ResearchRuns:
                                        .with_for_update())
                 if user is None or user.is_deleted:
                     raise RunConflict('user_unavailable')
+                stale = await db.scalar(select(AgentRun).where(
+                    AgentRun.session_id == scope.session_id,
+                    AgentRun.status.in_(('running', 'cancelling')),
+                    AgentRun.started_at < _utcnow() - timedelta(seconds=stale_after))
+                    .with_for_update())
+                if stale is not None:
+                    await _close(db, stale, 'failed', 'worker_lost')
+                    await db.flush()
                 values = dict(id=scope.run_id, user_id=scope.user_id,
                     session_id=scope.session_id, client_request_id=client_request_id,
                     question=question, status='running', settlement_status='open',
@@ -126,11 +152,7 @@ class ResearchRuns:
                     raise RunConflict('run_not_found')
                 if run.status in ('finished', 'failed', 'cancelled'):
                     return run.status
-                active = await db.scalar(select(func.count()).select_from(
-                    UsageReservation).where(UsageReservation.run_id == run.id,
-                    UsageReservation.state.in_(('active','unknown')))) or 0
-                run.status, run.stop_reason, run.finished_at = status, stop_reason, _utcnow()
-                run.settlement_status = 'settled' if active == 0 else 'open'
+                await _close(db, run, status, stop_reason)
                 return run.status
 
     async def _validate_citation(self, db, run: AgentRun, item: dict) -> dict:
@@ -268,8 +290,8 @@ class ResearchRuns:
             if owner is None:
                 raise RunConflict('session_unavailable')
             answer = await db.get(Message, run.assistant_message_id) if run.assistant_message_id else None
-            rows = [] if answer is None else (await db.scalars(select(MessageCitation).where(
-                MessageCitation.message_id == answer.id).order_by(MessageCitation.label))).all()
+            rows = [] if answer is None else sorted((await db.scalars(select(MessageCitation).where(
+                MessageCitation.message_id == answer.id))).all(), key=_label_order)
             citations = [await self._citation_payload(db, run, c) for c in rows]
             return {'run_id': str(run.id), 'status': run.status,
                     'stop_reason': run.stop_reason, 'message_id': str(answer.id) if answer else None,
@@ -289,9 +311,9 @@ class ResearchRuns:
                 AgentRun.assistant_message_id.is_not(None)))).all()
             result = {}
             for run in runs:
-                rows = (await db.scalars(select(MessageCitation).where(
-                    MessageCitation.message_id == run.assistant_message_id)
-                    .order_by(MessageCitation.label))).all()
+                rows = sorted((await db.scalars(select(MessageCitation).where(
+                    MessageCitation.message_id == run.assistant_message_id))).all(),
+                    key=_label_order)
                 result[run.assistant_message_id] = [
                     await self._citation_payload(db, run, c) for c in rows]
             return result

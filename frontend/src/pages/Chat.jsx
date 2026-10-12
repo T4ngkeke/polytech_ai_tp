@@ -215,6 +215,9 @@ export default function Chat() {
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    // A selected source applies to this question only.
+    const selectedCitationId = selectedCitationRef.current;
+    selectedCitationRef.current = null;
 
     try {
       await fetchEventSource('/api/chat/stream', {
@@ -222,7 +225,7 @@ export default function Chat() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: currentSessionId, message: text,
           client_request_id: crypto.randomUUID(),
-          selected_citation_id: selectedCitationRef.current }),
+          selected_citation_id: selectedCitationId }),
         signal: ctrl.signal,
         onmessage(ev) {
           // Named events (status/done/error/citations) are matched before the
@@ -272,6 +275,12 @@ export default function Chat() {
       setIsStreaming(false);
     }
   }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage]);
+
+  const handleSelectCitation = useCallback((citationId) => {
+    selectedCitationRef.current = citationId;
+    api.post(`/api/chat/citations/${citationId}/select?session_id=${activeSessionId}`, {})
+      .catch(() => { selectedCitationRef.current = null; });
+  }, [activeSessionId]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -515,11 +524,7 @@ export default function Chat() {
               message={msg}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
               sessionId={activeSessionId}
-              onSelectCitation={(citationId) => {
-                selectedCitationRef.current = citationId;
-                api.post(`/api/chat/citations/${citationId}/select?session_id=${activeSessionId}`, {})
-                  .catch(() => { selectedCitationRef.current = null; });
-              }}
+              onSelectCitation={handleSelectCitation}
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
             />
           ))}

@@ -9,7 +9,9 @@ from sqlalchemy import select
 from backend.app.agent.model import ModelReply
 from backend.app.config import settings
 from backend.app.main import app
-from backend.app.models import AgentRun, DocumentBlock, DocumentPage, MessageCitation, ModelCallUsage, SystemConfig
+from backend.app.models import (
+    AgentRun, DocumentBlock, DocumentPage, Message, MessageCitation, ModelCallUsage, SenderType, SystemConfig,
+)
 from backend.app.routers.teacher import get_storage_root
 from backend.tests.conftest import make_client
 from backend.tests.test_m4_tools_pg import _indexed_pdf
@@ -101,6 +103,13 @@ async def test_research_http_save_reload_select_and_pdf(pg_session, tmp_path, mo
             assert followup.status_code == 200
             assert any(name == 'done' for name, _ in events(followup.text))
             assert citations[0]['citation_id'] in json.dumps(model_messages[-1])
+            # The selection applied to that question only.
+            steps.append(ModelReply('Autre réponse.', [], 'fixture', 50, 20))
+            later = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Another topic?',
+                'client_request_id': str(uuid.uuid4())})
+            assert any(name == 'done' for name, _ in events(later.text))
+            assert citations[0]['citation_id'] not in json.dumps(model_messages[-1])
             from backend.app.services.document_cleanup import mark_deleted
             await db.refresh(doc)
             await db.refresh(teacher)
@@ -162,6 +171,53 @@ async def test_direct_http_saved_and_charged_without_router(pg_session, tmp_path
             assert history.status_code == 200
             assert any(m['content'] == 'Bonjour !' and not m['citations']
                        for m in history.json()['messages'])
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_research_history_capped_and_quota_error(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+        db.add_all(models('http://example.invalid/v1'))
+        # Ten long earlier questions, about 10k estimated tokens in all.
+        db.add_all(Message(session_id=chat.id, sender=SenderType.user, content=f'Q{n} ' + 'x' * 4000)
+                   for n in range(10))
+        await db.commit()
+        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
+        import backend.app.routers.chat as chat_api
+        from backend.app.agent.history import estimate_tokens
+        model_messages = []
+        class FakeModel:
+            def __init__(self, endpoint):
+                pass
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+                model_messages.append(messages)
+                return ModelReply('Bonjour !', [], 'ornith', 25, 8)
+        monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
+        client = await make_client(db, student)
+        async with client:
+            response = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Bonjour',
+                'client_request_id': str(uuid.uuid4())})
+            assert any(name == 'done' for name, _ in events(response.text))
+            first = model_messages[0][1]['content']
+            assert 'Q9 ' in first and 'Q0 ' not in first
+            assert estimate_tokens(first) <= 3200
+            # Enough quota for the pre-check, not for one model call.
+            used = await client.get('/api/student/usage')
+            await db.refresh(student)
+            student.daily_token_quota = used.json()['used'] + 100
+            await db.commit()
+            response = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Encore ?',
+                'client_request_id': str(uuid.uuid4())})
+            assert ('error', {'detail': 'Daily token quota exceeded'}) in events(response.text)
+            run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id,
+                                                          AgentRun.question == 'Encore ?'))
+            await db.refresh(run)
+            assert run.status == 'failed'
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 
