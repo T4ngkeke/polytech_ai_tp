@@ -35,10 +35,10 @@ export default function HierarchicalSidebar({
   const { username, userRole, logout } = useAuthStore();
   const navigate = useNavigate();
 
-  const [expandedClassIds, setExpandedClassIds] = useState(() => {
-    // Auto-expand all classes by default
-    return new Set(classes.map((c) => c.id));
-  });
+  // Classes are expanded by default. Remember the ones the user collapsed: the
+  // class list loads after the first render, so an "expanded" set built then
+  // would be empty and every class would show collapsed after a reload.
+  const [collapsedClassIds, setCollapsedClassIds] = useState(() => new Set());
 
   const handleSignOut = () => {
     logout();
@@ -46,7 +46,7 @@ export default function HierarchicalSidebar({
   };
 
   const toggleClass = (classId) => {
-    setExpandedClassIds((prev) => {
+    setCollapsedClassIds((prev) => {
       const next = new Set(prev);
       if (next.has(classId)) next.delete(classId);
       else next.add(classId);
@@ -99,7 +99,7 @@ export default function HierarchicalSidebar({
               key={cls.id}
               cls={cls}
               role={role}
-              isExpanded={expandedClassIds.has(cls.id)}
+              isExpanded={!collapsedClassIds.has(cls.id)}
               onToggle={() => toggleClass(cls.id)}
               selectedLabId={selectedLabId}
               onSelectClass={onSelectClass}
@@ -162,8 +162,18 @@ function ClassNode({
     <div className="mb-0.5">
       {/* Class row */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
         onClick={() => { onToggle(); onSelectClass?.(cls); }}
-        className="group flex items-center gap-1 px-2 py-2 rounded-lg hover:bg-ink-hover transition-colors cursor-pointer text-left"
+        onKeyDown={(e) => {
+          // The row holds the actions button, so it cannot itself be a <button>.
+          if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          onToggle();
+          onSelectClass?.(cls);
+        }}
+        className="group flex items-center gap-1 px-2 py-2 rounded-lg hover:bg-ink-hover transition-colors cursor-pointer text-left focus-visible:outline focus-visible:outline-cyan"
       >
         {/* Expand toggle */}
         <span className="shrink-0 w-4 h-4 flex items-center justify-center text-cream-muted group-hover:text-cream transition-colors">

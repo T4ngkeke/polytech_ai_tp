@@ -509,6 +509,7 @@ export default function Chat() {
               key={msg.id}
               message={msg}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
+              phase={isStreaming && msg.sender === 'llm' && i === messages.length - 1 ? researchPhase : null}
               sessionId={activeSessionId}
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
             />
@@ -546,10 +547,6 @@ export default function Chat() {
               {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
             </button>
           </div>
-          {researchPhase && <p role="status" className="mt-1 text-center text-xs text-cream-muted">
-            {({ thinking: 'Thinking…', finding: 'Searching course material…', reading: 'Reading source pages…',
-              checking_image: 'Checking the image…', checking_sources: 'Checking citations…' })[researchPhase]}
-          </p>}
           {/* [v8.0] Transparency: students are told their teacher can see the chat. */}
           <p className="mt-2 text-center text-[11px] text-cream-muted">
             Your teacher can see this conversation.
@@ -635,7 +632,12 @@ function FeedbackButtons({ messageId, initial }) {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ message, streaming, canRate, sessionId }) {
+// What the research agent is doing, shown in the answer bubble while it waits.
+const PHASE_LABELS = { thinking: 'Thinking…', finding: 'Searching course material…',
+  reading: 'Reading source pages…', checking_image: 'Checking the image…',
+  checking_sources: 'Checking citations…' };
+
+const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -657,7 +659,11 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, canRate,
                   <MessageContent content={message.content} streaming={streaming} />
                 </Suspense>
               ))
-          : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
+          : <span className="inline-flex items-center gap-1">
+              <BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" />
+              {PHASE_LABELS[phase] && <span role="status" aria-live="polite"
+                className="ml-2 text-xs text-cream-muted">{PHASE_LABELS[phase]}</span>}
+            </span>}
         {!isUser && message.citations?.length > 0 && (
           <div className="mt-2.5 pt-2.5 border-t border-border-subtle flex flex-wrap gap-1.5">
             {message.citations.map((c, i) => renderCitationBadge(c, sessionId, i))}
