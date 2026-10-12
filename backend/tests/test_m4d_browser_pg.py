@@ -21,7 +21,7 @@ from backend.app.auth import create_access_token
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.main import app
-from backend.app.models import SessionReadState, SystemConfig
+from backend.app.models import SystemConfig
 from backend.app.routers.teacher import get_storage_root
 from backend.tests.conftest import make_client
 from backend.tests.test_m4_tools_pg import _indexed_pdf
@@ -286,9 +286,6 @@ async def test_real_model_to_firefox_page_and_refresh(pg_session, tmp_path, monk
         base = f'http://127.0.0.1:{static_server.server_port}'
         result = await asyncio.to_thread(browser_check, base,
             create_access_token(student.id), expected_page, report)
-        focus = await db.get(SessionReadState, chat.id, populate_existing=True)
-        assert focus and len(focus.focused_sources) == 1
-        assert focus.focused_sources[0]['pdf_page_no'] == expected_page
         (report / 'browser-result.json').write_text(json.dumps({
             'question': question, 'expected_page': expected_page, **result},
             ensure_ascii=False, indent=2) + '\n')

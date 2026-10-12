@@ -148,21 +148,6 @@ async def test_several_ids_in_one_bracket_are_all_cited():
     assert [c['evidence_id'] for c in result.citations] == ['E1', 'E2']
 
 
-@pytest.mark.asyncio
-async def test_selected_source_is_named_by_handle():
-    fixture = ViewFixture()
-    index = await fixture.page_index()
-    document_id, entry = next(iter(index.items()))
-    page = entry['pages'][1]
-    model = Script('Oui.')
-    await ResearchRunner(CourseTools(fixture), model).run('Et ici ?', focus=[
-        {'document_id': document_id, 'page_id': page['page_id'], 'block_id': None,
-         'pdf_page_no': page['pdf_page_no'], 'citation_id': str(uuid4())}])
-    question = model.seen[0][-1]['content']
-    assert question.startswith('Et ici ?\n\n') and f"page {page['pdf_page_no']}: d1.p{page['pdf_page_no']}" in question
-    assert document_id not in question
-
-
 def test_partial_answer_lists_read_pages_once_without_claims():
     doc = str(uuid4())
     state = {'handles': {'filenames': {doc: 'Algebre.pdf'}}, 'evidence': [

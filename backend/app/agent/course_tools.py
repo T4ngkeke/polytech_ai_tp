@@ -534,27 +534,10 @@ class CourseTools:
                            'model_arguments': model_arguments, 'dispatched': False,
                            'ok': False, 'result': result, 'elapsed_seconds': 0.0})
 
-    async def _view(self) -> ToolView:
-        if self.view is None:
-            self.view = ToolView(await self.tools.page_index())
-        return self.view
-
-    async def source_handle(self, source: dict) -> str | None:
-        """'file, page N: d1.pN[.bK]' for a cited source (a stored citation), or
-        None when its page is not in this run's documents."""
-        view = await self._view()
-        if source.get('page_id') not in view.page_handles:
-            return None
-        if source.get('block_id'):
-            handle = view.block(source['document_id'], source['block_id'], source['page_id'])
-        else:
-            handle = view.page_handles[source['page_id']]
-        filename = view.filenames.get(source['document_id'], 'document')
-        return f"{filename}, page {source.get('pdf_page_no')}: {handle}"
-
     async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
         """One model call with handles: translate, execute, render compact text."""
-        await self._view()
+        if self.view is None:
+            self.view = ToolView(await self.tools.page_index())
         try:
             raw = self.view.translate(name, arguments)
         except HandleError as exc:

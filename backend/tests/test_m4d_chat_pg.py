@@ -50,7 +50,7 @@ def events(raw):
 
 
 @pytest.mark.asyncio
-async def test_research_http_save_reload_select_and_pdf(pg_session, tmp_path, monkeypatch):
+async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
         doc, rev, teacher, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
@@ -97,34 +97,24 @@ async def test_research_http_save_reload_select_and_pdf(pg_session, tmp_path, mo
             assert history.status_code == 200, history.text
             assistant = next(x for x in history.json()['messages'] if x['sender'] == 'llm')
             assert assistant['citations'][0]['citation_id'] == citations[0]['citation_id']
-            selected = await client.post(
-                f"/api/chat/citations/{citations[0]['citation_id']}/select",
-                params={'session_id': str(chat.id)}, json={})
-            assert selected.status_code == 200, selected.text
             pdf = await client.get(f'/api/documents/{doc.id}/pdf', params={
                 'session_id': str(chat.id), 'revision_id': str(rev.id)})
             assert pdf.status_code == 200 and pdf.content.startswith(b'%PDF-')
             steps.append(ModelReply('Which definition do you mean?', [], 'fixture', 50, 20))
             followup = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'And this page?',
-                'client_request_id': str(uuid.uuid4()),
-                'selected_citation_id': citations[0]['citation_id']})
+                'client_request_id': str(uuid.uuid4())})
             assert followup.status_code == 200
             assert any(name == 'done' for name, _ in events(followup.text))
-            # The selected source reaches the model as a handle it can read.
-            note = model_messages[-1][-1]['content']
-            assert note.startswith('And this page?') and f'page {page.preview_page_no}: d1.p' in note
-            assert citations[0]['citation_id'] not in json.dumps(model_messages[-1])
             # Earlier turns are real messages, without their old evidence IDs.
             assert [m['role'] for m in model_messages[-1][1:]] == ['user', 'assistant', 'user']
+            assert model_messages[-1][-1]['content'] == 'And this page?'
             assert '[E1]' not in model_messages[-1][2]['content']
-            # The selection applied to that question only.
             steps.append(ModelReply('Autre réponse.', [], 'fixture', 50, 20))
             later = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'Another topic?',
                 'client_request_id': str(uuid.uuid4())})
             assert any(name == 'done' for name, _ in events(later.text))
-            assert 'read it first' not in json.dumps(model_messages[-1])
             # The uncited reply ('Which definition do you mean?') stays in the history.
             assert any(m['content'] == 'Which definition do you mean?' for m in model_messages[-1])
             from backend.app.services.document_cleanup import mark_deleted
@@ -140,10 +130,6 @@ async def test_research_http_save_reload_select_and_pdf(pg_session, tmp_path, mo
             assert prior['content'] == assistant['content']
             assert not prior['citations'][0]['available']
             assert prior['citations'][0]['href'] is None
-            denied = await client.post(
-                f"/api/chat/citations/{citations[0]['citation_id']}/select",
-                params={'session_id': str(chat.id)}, json={})
-            assert denied.status_code == 404
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 
@@ -340,11 +326,10 @@ async def test_real_local_model_student_research_http(pg_session, tmp_path, monk
             history = await client.get(f'/api/student/sessions/{chat.id}')
             assert history.status_code == 200
             assert any(m['citations'] for m in history.json()['messages'])
-            # A follow-up on a selected source: earlier turns and the source handle.
+            # A follow-up that refers to the earlier answer.
             followup = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'Et que dit exactement cette page ?',
-                'client_request_id': str(uuid.uuid4()),
-                'selected_citation_id': citations[0]['citation_id']}, timeout=90)
+                'client_request_id': str(uuid.uuid4())}, timeout=90)
             stream = events(followup.text)
             assert not any(name == 'error' for name, _ in stream), stream
             print('FOLLOWUP', json.dumps({'answer': ''.join(p for n, p in stream if n == 'token'),

@@ -102,7 +102,6 @@
 | DELETE | `/api/student/sessions/{session_id}` | get_current_user | **Soft-delete (hide)** own session: sets `is_deleted=True`. Hidden from the student; retained and teacher/admin-visible. **IDOR check required.** |
 | GET | `/api/student/usage` | get_current_user | Today's token usage vs. daily quota. |
 | POST | `/api/chat/stream` | get_current_user | Core chat endpoint. Scoped by `session_id`. SSE streaming. With `AGENTIC_SEARCH_ENABLED` and a lab session: the research agent (see below); otherwise the LangGraph agent. |
-| POST | `/api/chat/citations/{citation_id}/select?session_id=` | get_current_user | Research agent only: mark a citation as the source of the next follow-up question. 404 when the source is no longer readable. |
 | POST | `/api/chat/messages/{message_id}/feedback` | get_current_user | 👍/👎 on an assistant message (body `{feedback: up\|down}`). A student may only rate a message in a session they own. |
 
 #### Research agent (opt-in: `AGENTIC_SEARCH_ENABLED`)
@@ -116,8 +115,6 @@ Request body, besides `session_id` and `message`:
 
 - `client_request_id` (UUID, optional): the same ID returns the saved run
   again, without a second model call or charge.
-- `selected_citation_id` (UUID, optional): a citation the student selected
-  for this follow-up question. It applies to this question only.
 
 Server-sent events, in order:
 

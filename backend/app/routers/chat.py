@@ -536,19 +536,13 @@ async def chat_stream(
                                        session_id=body.session_id)
             research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
             runs = ResearchRuns(research_factory)
-            if body.selected_citation_id:
-                await runs.select_citation(scope=scope,
-                                           citation_id=body.selected_citation_id)
             # History may take a quarter of the research input tokens.
             limits = llm_config['research_limits']
             safe_history = trim_history(await runs.load_safe_history(scope),
                 max_tokens=min(int(llm_config["context_max_tokens"] or 8000),
                                limits.input_tokens // 4))
-            read_state = await runs.load_read_state(scope)
         except DocumentNotFound:
             raise HTTPException(404, 'source_unavailable') from None
-        # A selected source applies to the question sent with it, not to later ones.
-        focus = read_state['focused_sources'][:1] if body.selected_citation_id else []
         teaching_rules = '\n\n'.join(
             f'[{label.upper()} RULES]\n{rule_texts[key]}'
             for key, label in (('class_rules', 'class'), ('lab_rules', 'lab'),
@@ -580,7 +574,6 @@ async def chat_stream(
                 token_alpha=float(llm_config['token_alpha']),
                 token_beta=float(llm_config['token_beta']),
                 history=safe_history, teaching_rules=teaching_rules,
-                focus=focus,
                 embed_fn=embed_query,
                 rerank_fn=_make_rerank_fn(llm_config),
                 embed_model=llm_config['embedding_model'],
@@ -764,20 +757,6 @@ async def chat_stream(
         media_type="text/event-stream",
     )
 
-
-@router.post('/citations/{citation_id}/select')
-async def select_research_citation(
-    citation_id: uuid.UUID, session_id: uuid.UUID,
-    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
-):
-    if not settings.AGENTIC_SEARCH_ENABLED:
-        raise HTTPException(404, 'not_found')
-    try:
-        scope = await create_scope(db, user_id=current_user.id, session_id=session_id)
-        factory = async_sessionmaker(db.bind, expire_on_commit=False)
-        return await ResearchRuns(factory).select_citation(scope=scope, citation_id=citation_id)
-    except DocumentNotFound:
-        raise HTTPException(404, 'source_unavailable') from None
 
 
 @router.post("/messages/{message_id}/feedback")

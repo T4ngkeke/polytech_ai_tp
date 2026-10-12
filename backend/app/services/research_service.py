@@ -84,8 +84,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  client_request_id: str, model, model_name: str,
                                  token_alpha: float, token_beta: float,
                                  history: list[dict] | None = None,
-                                 teaching_rules: str = '', research_note: str = '',
-                                 focus: list[dict] | None = None, embed_fn=None,
+                                 teaching_rules: str = '', research_note: str = '', embed_fn=None,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
                                  tool_factory=None, on_phase=None, vision_fn=None,
@@ -160,7 +159,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
         max_input_tokens=limits.input_tokens, on_phase=on_phase)
     try:
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
-                                  research_note=research_note, focus=focus)
+                                  research_note=research_note)
         await runs.finish_run(started.run_id, result)
     except asyncio.CancelledError:
         await asyncio.shield(runs.request_cancel(started.run_id, scope.user_id))

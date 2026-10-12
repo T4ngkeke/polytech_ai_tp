@@ -209,18 +209,10 @@ async def test_atomic_answer_citations_reload_and_delete_tombstone(pg_session, t
         assert len(loaded['citations']) == 1
         assert loaded['citations'][0]['available']
         assert f'page={page.preview_page_no}' in loaded['citations'][0]['href']
-        assert (await runs.load_read_state(scope))['focused_sources'] == []
         restored = await runs.load_session_citations(
             session_id=scope.session_id, user_id=student.id)
         assert restored[message_id][0]['citation_id'] == loaded['citations'][0]['citation_id']
-        await runs.select_citation(scope=scope,
-            citation_id=uuid.UUID(loaded['citations'][0]['citation_id']))
-        assert len((await runs.load_read_state(scope))['focused_sources']) == 1
         assert any(m['role'] == 'assistant' for m in await runs.load_safe_history(scope))
-        from backend.app.agent.tools import ResearchScope
-        changed_scope = ResearchScope(scope.user_id, scope.session_id, uuid.uuid4(),
-            scope.class_id, scope.lab_id, {doc.id: uuid.uuid4()})
-        assert (await runs.load_read_state(changed_scope))['focused_sources'] == []
         async with factory() as check:
             assert await check.scalar(select(func.count()).select_from(MessageCitation)) == 1
             assert await check.scalar(select(func.count()).select_from(Message)) == 2
@@ -235,7 +227,6 @@ async def test_atomic_answer_citations_reload_and_delete_tombstone(pg_session, t
         revoked_history = await runs.load_session_citations(
             session_id=scope.session_id, user_id=student.id)
         assert revoked_history[message_id][0]['href'] is None
-        assert (await runs.load_read_state(scope))['focused_sources'] == []
         assert all(m['role'] != 'assistant' for m in await runs.load_safe_history(scope))
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

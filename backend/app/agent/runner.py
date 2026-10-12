@@ -69,7 +69,6 @@ COURSE_TOOLS = [{'type': 'function', 'function': {'name': name, 'description': D
                                                   'parameters': VIEW_SCHEMAS[name].model_json_schema()}}
                 for name in sorted(VIEW_SCHEMAS)]
 
-FOCUS_NOTE = 'The student selected this source for the question; read it first: '
 FINISH_TURN = ('Research is over: tools are no longer available. Write your final answer to the '
                'student now, in plain text, citing only evidence IDs already returned [E1]. '
                'Say which parts the evidence does not cover. Do not write any tool call.')
@@ -124,10 +123,8 @@ class ResearchRunner:
         self.on_phase = on_phase or (lambda _phase: None)
 
     async def run(self, question: str, *, history: list[dict] | None = None,
-                  teaching_rules: str = '', research_note: str = '',
-                  focus: list[dict] | None = None) -> ResearchResult:
-        """history: earlier chat turns ({'role', 'content'}), oldest first.
-        focus: sources the student selected for this question (stored citations)."""
+                  teaching_rules: str = '', research_note: str = '') -> ResearchResult:
+        """history: earlier chat turns ({'role', 'content'}), oldest first."""
         tools = self.course_tools
         usage: list[dict] = []
         trace: list[dict] = []
@@ -139,9 +136,6 @@ class ResearchRunner:
         # research and are not valid now, so they are removed.
         turns = [{'role': m['role'], 'content': CITATION_RE.sub('', m['content'])
                   if m['role'] == 'assistant' else m['content']} for m in history or []]
-        handles = [h for h in [await tools.source_handle(s) for s in focus or []] if h]
-        if handles:
-            question += '\n\n' + FOCUS_NOTE + '; '.join(handles)
         messages = [{'role': 'system', 'content': system}, *turns,
                     {'role': 'user', 'content': question}]
         tools_open, answer, stop = True, '', 'budget_exhausted'

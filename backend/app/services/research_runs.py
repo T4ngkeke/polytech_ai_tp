@@ -18,7 +18,7 @@ from backend.app.agent.tools import ResearchScope, _live_session
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import (
     AgentRun, Document, DocumentAsset, DocumentBlock, DocumentBlockAsset, DocumentPage, Message, MessageCitation,
-    ModelCallUsage, SenderType, Session, SessionReadState, UsageReservation,
+    ModelCallUsage, SenderType, Session, UsageReservation,
     UsageStat, User, _utcnow,
 )
 from backend.app.services.document_access import (
@@ -260,17 +260,6 @@ class ResearchRuns:
                              for v in validated]
                 db.add_all(citations)
                 await db.flush()
-                focus = await db.scalar(select(SessionReadState).where(
-                    SessionReadState.session_id == run.session_id).with_for_update())
-                if focus is None:
-                    focus = SessionReadState(session_id=run.session_id,
-                                             state_revision=0)
-                    db.add(focus)
-                focus.state_revision += 1
-                # Displayed citations are not a user selection.
-                focus.last_used_citation_ids = [str(c.id) for c in citations]
-                focus.open_question = {'unresolved': result.unresolved[:5]}
-                focus.updated_at = _utcnow()
                 run.assistant_message_id = assistant.id
                 run.status, run.stop_reason = 'finished', result.stop_reason
                 run.settlement_status, run.finished_at = 'settled', _utcnow()
@@ -317,37 +306,6 @@ class ResearchRuns:
                 result[run.assistant_message_id] = [
                     await self._citation_payload(db, run, c) for c in rows]
             return result
-
-    async def select_citation(self, *, scope: ResearchScope,
-                              citation_id: uuid.UUID) -> dict:
-        """Explicit click; revoked or superseded citations cannot become focus."""
-        async with self.session_factory() as db:
-            async with db.begin():
-                await _live_session(db, scope.user_id, scope.session_id)
-                row = (await db.execute(select(MessageCitation, AgentRun)
-                    .join(AgentRun, AgentRun.assistant_message_id == MessageCitation.message_id)
-                    .where(MessageCitation.id == citation_id,
-                           AgentRun.session_id == scope.session_id,
-                           AgentRun.user_id == scope.user_id))).first()
-                if row is None:
-                    raise DocumentNotFound('not_found')
-                citation, run = row
-                payload = await self._citation_payload(db, run, citation)
-                if (not payload['available'] or
-                        scope.snapshot_revisions.get(citation.document_id) != citation.revision_id):
-                    raise DocumentNotFound('not_found')
-                state = await db.scalar(select(SessionReadState).where(
-                    SessionReadState.session_id == scope.session_id).with_for_update())
-                if state is None:
-                    state = SessionReadState(session_id=scope.session_id, state_revision=0)
-                    db.add(state)
-                state.focused_sources = [dict(document_id=str(citation.document_id),
-                    revision_id=str(citation.revision_id), page_id=str(citation.page_id),
-                    block_id=str(citation.block_id) if citation.block_id else None,
-                    pdf_page_no=citation.pdf_page_no, citation_id=str(citation.id))]
-                state.state_revision += 1
-                state.updated_at = _utcnow()
-                return payload
 
     async def _citation_payload(self, db, run: AgentRun, c: MessageCitation) -> dict:
         available = c.availability == 'available'
@@ -402,33 +360,6 @@ class ResearchRuns:
                 'teacher_revised': teacher_revised,
                 'asset_id': str(c.asset_id) if asset else None,
                 'asset_mime': asset.mime if asset else None}
-
-    async def load_read_state(self, scope: ResearchScope) -> dict:
-        async with self.session_factory() as db:
-            await _live_session(db, scope.user_id, scope.session_id)
-            state = await db.get(SessionReadState, scope.session_id)
-            if state is None:
-                return {'state_revision': 0, 'focused_sources': [],
-                        'last_used_citation_ids': [], 'open_question': {}}
-            # Never transfer a physical page number to a new PDF revision.
-            valid = []
-            for source in state.focused_sources:
-                try:
-                    doc_id = uuid.UUID(source['document_id'])
-                    rev_id = uuid.UUID(source['revision_id'])
-                    if scope.snapshot_revisions.get(doc_id) != rev_id:
-                        continue
-                    await readable_revision(db, document_id=doc_id,
-                        revision_id=rev_id, user_id=scope.user_id,
-                        session_id=scope.session_id)
-                    valid.append(source)
-                except (KeyError, ValueError, DocumentNotFound):
-                    continue
-            ids = [s['citation_id'] for s in valid if s.get('citation_id')]
-            return {'state_revision': state.state_revision,
-                    'focused_sources': valid,
-                    'last_used_citation_ids': ids,
-                    'open_question': state.open_question}
 
     async def load_safe_history(self, scope: ResearchScope, *, limit: int = 20) -> list[dict]:
         async with self.session_factory() as db:

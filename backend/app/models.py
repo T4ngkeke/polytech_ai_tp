@@ -1127,6 +1127,9 @@ class MessageCitation(Base):
 
 
 class SessionReadState(Base):
+    # Unused since 2026-10-12: the follow-up "selected source" was removed and
+    # nothing reads or writes this table. It stays so the ORM matches the m4c
+    # migration; dropping it needs a new migration.
     __tablename__ = 'session_read_state'
     session_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('sessions.id', ondelete='CASCADE'), primary_key=True)
     state_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

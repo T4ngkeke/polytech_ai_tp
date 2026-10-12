@@ -48,7 +48,6 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [researchPhase, setResearchPhase] = useState(null);
-  const selectedCitationRef = useRef(null);
   const restoredLabRef = useRef(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const abortRef = useRef(null);
@@ -111,7 +110,6 @@ export default function Chat() {
     setActiveClassId(classId);
     setMessages([]);
     setActiveSessionId(null);
-    selectedCitationRef.current = null;
     navigate(`/chat/${labId}`, { replace: true });
 
     // Load or create a session for this lab
@@ -146,7 +144,6 @@ export default function Chat() {
       });
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
-      selectedCitationRef.current = null;
       setMessages([]);
     } catch (err) {
       toast.error(err.message || 'Failed to create session');
@@ -160,7 +157,6 @@ export default function Chat() {
     abortRef.current = null;
     setIsStreaming(false);
     setActiveSessionId(sessionId);
-    selectedCitationRef.current = null;
     setIsLoadingMessages(true);
     try {
       const data = await api.get(`/api/student/sessions/${sessionId}`);
@@ -215,17 +211,13 @@ export default function Chat() {
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    // A selected source applies to this question only.
-    const selectedCitationId = selectedCitationRef.current;
-    selectedCitationRef.current = null;
 
     try {
       await fetchEventSource('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: currentSessionId, message: text,
-          client_request_id: crypto.randomUUID(),
-          selected_citation_id: selectedCitationId }),
+          client_request_id: crypto.randomUUID() }),
         signal: ctrl.signal,
         onmessage(ev) {
           // Named events (status/done/error/citations) are matched before the
@@ -275,12 +267,6 @@ export default function Chat() {
       setIsStreaming(false);
     }
   }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage]);
-
-  const handleSelectCitation = useCallback((citationId) => {
-    selectedCitationRef.current = citationId;
-    api.post(`/api/chat/citations/${citationId}/select?session_id=${activeSessionId}`, {})
-      .catch(() => { selectedCitationRef.current = null; });
-  }, [activeSessionId]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -524,7 +510,6 @@ export default function Chat() {
               message={msg}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
               sessionId={activeSessionId}
-              onSelectCitation={handleSelectCitation}
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
             />
           ))}
@@ -650,7 +635,7 @@ function FeedbackButtons({ messageId, initial }) {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ message, streaming, canRate, sessionId, onSelectCitation }) {
+const MessageBubble = memo(function MessageBubble({ message, streaming, canRate, sessionId }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -675,15 +660,14 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, canRate,
           : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
         {!isUser && message.citations?.length > 0 && (
           <div className="mt-2.5 pt-2.5 border-t border-border-subtle flex flex-wrap gap-1.5">
-            {message.citations.map((c, i) => renderCitationBadge(c, sessionId, i, onSelectCitation))}
+            {message.citations.map((c, i) => renderCitationBadge(c, sessionId, i))}
           </div>
         )}
         {!isUser && message.citations?.some((c) => c.origin === 'live_visual') && (
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             {message.citations.filter((c) => c.origin === 'live_visual' && c.available &&
               c.asset_id && c.asset_mime?.startsWith('image/')).slice(0, 3).map((c) => (
-              <VisualEvidenceCard key={c.citation_id} citation={c} sessionId={sessionId}
-                onSelectCitation={onSelectCitation} />
+              <VisualEvidenceCard key={c.citation_id} citation={c} sessionId={sessionId} />
             ))}
           </div>
         )}
@@ -696,7 +680,7 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, canRate,
 });
 
 
-function VisualEvidenceCard({ citation, sessionId, onSelectCitation }) {
+function VisualEvidenceCard({ citation, sessionId }) {
   const [imageUrl, setImageUrl] = useState(null);
   useEffect(() => {
     if (!sessionId || !citation.available || !citation.asset_id) return;
@@ -719,7 +703,6 @@ function VisualEvidenceCard({ citation, sessionId, onSelectCitation }) {
   }, [citation.asset_id, citation.available, citation.document_id, citation.revision_id, sessionId]);
   if (!imageUrl) return null;
   return <Link to={citation.href} target="_blank" rel="noopener noreferrer"
-    onClick={() => { if (!citation.newer_revision) onSelectCitation?.(citation.citation_id); }}
     className="rounded-lg border border-border-subtle p-1.5 text-xs text-cream-secondary hover:border-cyan">
     <img src={imageUrl} alt={`Original course image on PDF page ${citation.pdf_page_no}`}
       className="max-h-36 w-full object-contain" />
@@ -727,7 +710,7 @@ function VisualEvidenceCard({ citation, sessionId, onSelectCitation }) {
   </Link>;
 }
 
-function renderCitationBadge(c, sessionId, index, onSelectCitation) {
+function renderCitationBadge(c, sessionId, index) {
   const key = c.citation_id || `${c.document_id}-${c.revision_id}-${c.page_no}-${index}`;
   const label = <>
     <DocIcon className="w-2.5 h-2.5 text-cyan" />
@@ -746,7 +729,6 @@ function renderCitationBadge(c, sessionId, index, onSelectCitation) {
   if (c.revision_id) query.set('revision_id', c.revision_id);
   return <Link key={key} className={`${className} hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}
     to={c.href || `/source/${encodeURIComponent(c.document_id)}?${query}`} target="_blank" rel="noopener noreferrer"
-    onClick={() => { if (c.citation_id && !c.newer_revision) onSelectCitation?.(c.citation_id); }}
     title={`Open ${c.filename || 'course PDF'} at PDF page ${c.pdf_page_no}`}>
     {label}{c.newer_revision && <span title="A newer course revision exists"> · Older version</span>}
     {c.teacher_revised && <span title="Teacher edited this source"> · Teacher edited</span>}

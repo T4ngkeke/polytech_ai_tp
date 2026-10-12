@@ -454,7 +454,6 @@ class ChatStreamRequest(BaseModel):
     session_id: uuid.UUID
     message: str = Field(..., min_length=1)
     client_request_id: uuid.UUID | None = None
-    selected_citation_id: uuid.UUID | None = None
 
 
 # ---------------------------------------------------------------------------
