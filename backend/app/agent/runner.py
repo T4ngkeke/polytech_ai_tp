@@ -80,6 +80,10 @@ COURSE_TOOLS = [{'type': 'function', 'function': {'name': name, 'description': D
 FINISH_TURN = ('Research is over: tools are no longer available. Write your final answer to the '
                'student now, in plain text, citing only evidence IDs already returned [E1]. '
                'Say which parts the evidence does not cover. Do not write any tool call.')
+NO_DOCUMENTS_TURN = ('This lab has no course documents yet, so there is nothing to search and '
+                     'no tools are available. Answer briefly from general knowledge if the question '
+                     'allows it, and say clearly that the teacher has not published course files for '
+                     'this TP yet (students cannot add them). Cite nothing.')
 FINISH_RETRY = ('Tool calls cannot run any more and were ignored. Answer the student now in plain '
                 'text with the evidence already returned, and name what is still missing.')
 SHORTENED = '(result shortened for length; its evidence IDs stay valid)'
@@ -184,6 +188,12 @@ class ResearchRunner:
             trace.append({'event': 'tools_withdrawn', 'reason': reason})
             self.on_phase('checking_sources')
 
+        # A lab without readable course files: searching would only fail,
+        # call after call, until the budget runs out.
+        no_documents = not await tools.document_count()
+        if no_documents:
+            withdraw('no_documents', NO_DOCUMENTS_TURN)
+
         while True:
             if tools_open:
                 if len(tools.trace) >= self.max_tool_calls:
@@ -221,7 +231,7 @@ class ResearchRunner:
                 continue
             answer = reply.content.strip()
             # finished: the model stopped calling tools by itself.
-            stop = 'finished' if tools_open else 'budget_exhausted'
+            stop = 'finished' if tools_open else 'no_documents' if no_documents else 'budget_exhausted'
             break
 
         # Evidence read in this run, then earlier answers' sources (their IDs

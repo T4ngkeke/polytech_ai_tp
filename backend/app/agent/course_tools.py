@@ -535,6 +535,12 @@ class CourseTools:
                            'model_arguments': model_arguments, 'dispatched': False,
                            'ok': False, 'result': result, 'elapsed_seconds': 0.0})
 
+    async def document_count(self) -> int:
+        """How many course documents this run can read."""
+        if self.view is None:
+            self.view = ToolView(await self.tools.page_index())
+        return len(self.view.documents)
+
     async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
         """One model call with handles: translate, execute, render compact text."""
         if self.view is None:

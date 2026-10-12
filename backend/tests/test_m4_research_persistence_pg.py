@@ -45,6 +45,16 @@ def scripted(*steps, log=None):
     return model
 
 
+async def _setup_with_document(db, tmp_path, monkeypatch):
+    """A student session in a lab with one indexed PDF (a run in an empty lab
+    gets no tools at all)."""
+    _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+    student.daily_token_quota = 5000
+    await db.commit()
+    scope = await create_scope(db, user_id=student.id, session_id=chat.id)
+    return scope, async_sessionmaker(db.bind, expire_on_commit=False)
+
+
 async def _setup(db, *, quota=500):
     teacher, _, lab, _ = await seed(db)
     student = make_user(quota=quota)
@@ -396,7 +406,9 @@ async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_retur
         async def _revision(self, document_id):
             pass
         async def page_index(self):
-            return {}
+            # One readable document: an empty lab would get no tools at all.
+            return {str(uuid.uuid4()): {'filename': 'Cours.pdf',
+                                        'pages': [{'page_id': str(uuid.uuid4()), 'pdf_page_no': 1}]}}
         async def execute(self, name, arguments):
             raise AssertionError('no tools expected')
 
@@ -718,9 +730,9 @@ async def test_concurrent_same_request_only_one_run_and_message(pg_session):
 
 
 @pytest.mark.asyncio
-async def test_citation_correction_has_own_model_call_usage_purpose(pg_session):
+async def test_citation_correction_has_own_model_call_usage_purpose(pg_session, tmp_path, monkeypatch):
     from backend.app.services.research_service import run_persisted_research
-    scope, factory = await _setup(pg_session, quota=5000)
+    scope, factory = await _setup_with_document(pg_session, tmp_path, monkeypatch)
     purposes = []
     result = await run_persisted_research(scope=scope, question='Which?',
         client_request_id='correction',
@@ -777,10 +789,10 @@ async def test_optional_real_model_usage_is_persisted(pg_session):
 
 
 @pytest.mark.asyncio
-async def test_embedding_call_is_counted_without_fake_token_charge(pg_session):
+async def test_embedding_call_is_counted_without_fake_token_charge(pg_session, tmp_path, monkeypatch):
     from backend.app.services.research_service import run_persisted_research
     from backend.app.models import EMBEDDING_DIM
-    scope, factory = await _setup(pg_session, quota=5000)
+    scope, factory = await _setup_with_document(pg_session, tmp_path, monkeypatch)
     async def embed(text):
         return [0.0] * EMBEDDING_DIM
     result = await run_persisted_research(scope=scope, question='Find?',

@@ -186,6 +186,18 @@ async def test_several_ids_in_one_bracket_are_all_cited():
     assert [c['evidence_id'] for c in result.citations] == ['E1', 'E2']
 
 
+@pytest.mark.asyncio
+async def test_a_lab_without_documents_gets_no_tools():
+    class EmptyLab(ViewFixture):
+        async def page_index(self):
+            return {}
+    model = Script('Ce TP n\'a pas encore de documents de cours.')
+    result = await ResearchRunner(CourseTools(EmptyLab()), model).run('Automate ?')
+    assert model.with_tools == [False] and result.tool_calls == 0
+    assert result.stop_reason == 'no_documents' and result.citations == []
+    assert 'no course documents yet' in model.seen[0][-1]['content']
+
+
 def test_partial_answer_lists_read_pages_once_without_claims():
     doc = str(uuid4())
     state = {'handles': {'filenames': {doc: 'Algebre.pdf'}}, 'evidence': [
