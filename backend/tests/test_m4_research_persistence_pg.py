@@ -2,6 +2,7 @@
 import asyncio
 import json
 import uuid
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -104,6 +105,61 @@ async def test_stale_active_run_does_not_block_the_session(pg_session):
 def test_citations_sort_by_evidence_number():
     rows = [MessageCitation(label=x) for x in ('E10', 'E2', 'E1')]
     assert [c.label for c in sorted(rows, key=_label_order)] == ['E1', 'E2', 'E10']
+
+
+@pytest.mark.asyncio
+async def test_session_reload_queries_do_not_grow_with_citations(pg_session, tmp_path, monkeypatch):
+    """Reloading a session checks access once per source, not once per citation."""
+    from sqlalchemy import event
+    try:
+        db = pg_session
+        doc, rev, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+        scope = await create_scope(db, user_id=student.id, session_id=chat.id)
+        factory = async_sessionmaker(db.bind, expire_on_commit=False)
+        runs = ResearchRuns(factory)
+        block = await db.scalar(select(DocumentBlock).where(
+            DocumentBlock.revision_id == rev.id, DocumentBlock.content != '',
+            DocumentBlock.kind == 'text').limit(1))
+        page = await db.get(DocumentPage, (rev.id, block.page_id))
+        def cite(label, end):
+            return {'evidence_id': label, 'document_id': str(doc.id), 'revision_id': str(rev.id),
+                    'page_id': str(page.page_id), 'pdf_page_no': page.preview_page_no,
+                    'block_id': str(block.block_id), 'range': {'start': 0, 'end': end},
+                    'origin': (block.source_ref or {}).get('content_origin', 'native')}
+        async def answers(count):
+            for n in range(count):
+                started = await runs.begin_run(scope=replace(scope, run_id=uuid.uuid4()),
+                    question=f'Q{n}?', client_request_id=f'reload-{n}-{count}')
+                labels = [f'E{3 * n + k}' for k in (1, 2, 3)]
+                await runs.finish_run(started.run_id, ResearchResult(
+                    'Voir ' + ' '.join(f'[{x}]' for x in labels) + '.',
+                    [cite(x, 5 + k) for k, x in enumerate(labels)], 'finished', [], 1, 1))
+        statements = []
+        def count(*_args):
+            statements.append(1)
+        async def queries(load):
+            statements.clear()
+            event.listen(db.bind.sync_engine, 'before_cursor_execute', count)
+            try:
+                result = await load()
+            finally:
+                event.remove(db.bind.sync_engine, 'before_cursor_execute', count)
+            return result, len(statements)
+        reload = lambda: runs.load_session_citations(session_id=chat.id, user_id=student.id)
+        history = lambda: runs.load_safe_history(scope)
+        await answers(2)
+        _, reload_small = await queries(reload)
+        _, history_small = await queries(history)
+        await answers(4)
+        restored, reload_large = await queries(reload)
+        kept, history_large = await queries(history)
+        assert len(restored) == 6 and all(len(v) == 3 and v[0]['available'] for v in restored.values())
+        assert sum(m['role'] == 'assistant' for m in kept) == 6
+        print('QUERIES', {'reload': (reload_small, reload_large), 'history': (history_small, history_large)})
+        # Four more answers (12 citations of the same source) add no queries.
+        assert reload_large == reload_small and history_large == history_small
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
 
 
 @pytest.mark.asyncio

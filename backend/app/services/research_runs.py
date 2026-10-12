@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -281,7 +281,7 @@ class ResearchRuns:
             answer = await db.get(Message, run.assistant_message_id) if run.assistant_message_id else None
             rows = [] if answer is None else sorted((await db.scalars(select(MessageCitation).where(
                 MessageCitation.message_id == answer.id))).all(), key=_label_order)
-            citations = [await self._citation_payload(db, run, c) for c in rows]
+            citations = await self._citation_payloads(db, [(run, c) for c in rows])
             return {'run_id': str(run.id), 'status': run.status,
                     'stop_reason': run.stop_reason, 'message_id': str(answer.id) if answer else None,
                     'answer': answer.content if answer else None, 'citations': citations}
@@ -295,60 +295,105 @@ class ResearchRuns:
                 Session.is_deleted.is_(False)))
             if owner is None:
                 raise DocumentNotFound('not_found')
-            runs = (await db.scalars(select(AgentRun).where(
+            runs = {run.assistant_message_id: run for run in (await db.scalars(select(AgentRun).where(
                 AgentRun.session_id == session_id, AgentRun.user_id == user_id,
-                AgentRun.assistant_message_id.is_not(None)))).all()
-            result = {}
-            for run in runs:
-                rows = sorted((await db.scalars(select(MessageCitation).where(
-                    MessageCitation.message_id == run.assistant_message_id))).all(),
-                    key=_label_order)
-                result[run.assistant_message_id] = [
-                    await self._citation_payload(db, run, c) for c in rows]
+                AgentRun.assistant_message_id.is_not(None)))).all()}
+            rows = sorted((await db.scalars(select(MessageCitation).where(
+                MessageCitation.message_id.in_(runs)))).all(), key=_label_order) if runs else []
+            payloads = await self._citation_payloads(db, [(runs[c.message_id], c) for c in rows])
+            result = {message_id: [] for message_id in runs}
+            for c, payload in zip(rows, payloads):
+                result[c.message_id].append(payload)
             return result
 
-    async def _citation_payload(self, db, run: AgentRun, c: MessageCitation) -> dict:
-        available = c.availability == 'available'
-        teacher_revised = False
-        if available:
-            try:
-                revision = await readable_revision(db, document_id=c.document_id,
-                    revision_id=c.revision_id, user_id=run.user_id,
-                    session_id=run.session_id)
-                teacher_revised = revision.reason == 'teacher_edit'
-                page = await db.get(DocumentPage, (c.revision_id, c.page_id))
-                if page is None or page.preview_page_no != c.pdf_page_no:
+    async def _citation_payloads(self, db, items: list[tuple[AgentRun, MessageCitation]]) -> list[dict]:
+        """Current availability and links of stored citations, in item order.
+
+        Access is checked once per source (revision, asset), and pages, blocks,
+        documents and assets are loaded in batches: a session reload costs the
+        same few queries for 3 citations or 30.
+        """
+        if not items:
+            return []
+        revisions, assets_ok, links = {}, {}, {}
+
+        async def revision(run, c):
+            key = (c.document_id, c.revision_id, run.user_id, run.session_id)
+            if key not in revisions:
+                try:
+                    revisions[key] = await readable_revision(db, document_id=c.document_id,
+                        revision_id=c.revision_id, user_id=run.user_id, session_id=run.session_id)
+                except DocumentNotFound:
+                    revisions[key] = None
+            return revisions[key]
+
+        async def asset_readable(run, c):
+            key = (c.asset_id, c.document_id, c.revision_id, run.user_id, run.session_id)
+            if key not in assets_ok:
+                try:
+                    await readable_asset(db, asset_id=c.asset_id, document_id=c.document_id,
+                        revision_id=c.revision_id, user_id=run.user_id, session_id=run.session_id)
+                    assets_ok[key] = True
+                except DocumentNotFound:
+                    assets_ok[key] = False
+            return assets_ok[key]
+
+        cs = [c for _, c in items]
+        pages = {(p.revision_id, p.page_id): p for p in (await db.scalars(select(DocumentPage).where(
+            tuple_(DocumentPage.revision_id, DocumentPage.page_id).in_(
+                {(c.revision_id, c.page_id) for c in cs})))).all()}
+        block_keys = {(c.revision_id, c.block_id) for c in cs if c.block_id is not None}
+        blocks = {(b.revision_id, b.block_id): b for b in (await db.scalars(select(DocumentBlock).where(
+            tuple_(DocumentBlock.revision_id, DocumentBlock.block_id).in_(block_keys)))).all()
+        } if block_keys else {}
+        docs = {d.id: d for d in (await db.scalars(select(Document).where(
+            Document.id.in_({c.document_id for c in cs})))).all()}
+        asset_ids = {c.asset_id for c in cs if c.asset_id is not None}
+        assets = {a.id: a for a in (await db.scalars(select(DocumentAsset).where(
+            DocumentAsset.id.in_(asset_ids)))).all()} if asset_ids else {}
+
+        payloads = []
+        for run, c in items:
+            available = c.availability == 'available'
+            teacher_revised = False
+            if available:
+                rev = await revision(run, c)
+                if rev is None:
                     available = False
-                if c.block_id is not None:
-                    block = await db.get(DocumentBlock, (c.revision_id, c.block_id))
-                    if block is None or block.page_id != c.page_id:
+                else:
+                    teacher_revised = rev.reason == 'teacher_edit'
+                    page = pages.get((c.revision_id, c.page_id))
+                    if page is None or page.preview_page_no != c.pdf_page_no:
                         available = False
-                    elif block.edited_by_teacher:
-                        teacher_revised = True
-                    elif c.origin != 'live_visual' and (
-                            c.range_start is None or c.range_end is None or
-                            c.range_end > len(block.content or '')):
-                        available = False
-                if c.asset_id is not None:
-                    await readable_asset(db, asset_id=c.asset_id,
-                        document_id=c.document_id, revision_id=c.revision_id,
-                        user_id=run.user_id, session_id=run.session_id)
-                    if (c.origin == 'live_visual' and page is not None and
-                            c.asset_id != page.preview_asset_id):
-                        linked = await db.scalar(select(DocumentBlockAsset).where(
-                            DocumentBlockAsset.revision_id == c.revision_id,
-                            DocumentBlockAsset.block_id == c.block_id,
-                            DocumentBlockAsset.asset_id == c.asset_id))
-                        if linked is None:
+                    if c.block_id is not None:
+                        block = blocks.get((c.revision_id, c.block_id))
+                        if block is None or block.page_id != c.page_id:
                             available = False
-            except DocumentNotFound:
-                available = False
-        doc = await db.get(Document, c.document_id)
-        asset = await db.get(DocumentAsset, c.asset_id) if c.asset_id and available else None
-        newer_revision = bool(doc and doc.current_revision_id != c.revision_id)
-        href = (f'/source/{c.document_id}?session_id={run.session_id}'
-                f'&revision_id={c.revision_id}&page={c.pdf_page_no}') if available else None
-        return {'citation_id': str(c.id), 'label': c.label,
+                        elif block.edited_by_teacher:
+                            teacher_revised = True
+                        elif c.origin != 'live_visual' and (
+                                c.range_start is None or c.range_end is None or
+                                c.range_end > len(block.content or '')):
+                            available = False
+                    if c.asset_id is not None:
+                        if not await asset_readable(run, c):
+                            available = False
+                        elif (c.origin == 'live_visual' and page is not None and
+                                c.asset_id != page.preview_asset_id):
+                            key = (c.revision_id, c.block_id, c.asset_id)
+                            if key not in links:
+                                links[key] = await db.scalar(select(DocumentBlockAsset).where(
+                                    DocumentBlockAsset.revision_id == c.revision_id,
+                                    DocumentBlockAsset.block_id == c.block_id,
+                                    DocumentBlockAsset.asset_id == c.asset_id)) is not None
+                            if not links[key]:
+                                available = False
+            doc = docs.get(c.document_id)
+            asset = assets.get(c.asset_id) if c.asset_id and available else None
+            newer_revision = bool(doc and doc.current_revision_id != c.revision_id)
+            href = (f'/source/{c.document_id}?session_id={run.session_id}'
+                    f'&revision_id={c.revision_id}&page={c.pdf_page_no}') if available else None
+            payloads.append({'citation_id': str(c.id), 'label': c.label,
                 'document_id': str(c.document_id), 'revision_id': str(c.revision_id),
                 'page_id': str(c.page_id), 'pdf_page_no': c.pdf_page_no,
                 'block_id': str(c.block_id) if c.block_id else None,
@@ -359,7 +404,8 @@ class ResearchRuns:
                 'newer_revision': newer_revision,
                 'teacher_revised': teacher_revised,
                 'asset_id': str(c.asset_id) if asset else None,
-                'asset_mime': asset.mime if asset else None}
+                'asset_mime': asset.mime if asset else None})
+        return payloads
 
     async def next_evidence_number(self, session_id: uuid.UUID) -> int:
         """The first evidence number for a new run of the session: after every
@@ -377,29 +423,28 @@ class ResearchRuns:
                 Message.session_id == scope.session_id).order_by(
                 Message.created_at.desc()).limit(limit))).all())
             messages.reverse()
+            answer_ids = [m.id for m in messages if m.sender != SenderType.user]
+            runs = {run.assistant_message_id: run for run in (await db.scalars(select(AgentRun).where(
+                AgentRun.assistant_message_id.in_(answer_ids),
+                AgentRun.user_id == scope.user_id))).all()} if answer_ids else {}
+            citations = (await db.scalars(select(MessageCitation).where(
+                MessageCitation.message_id.in_(runs)))).all() if runs else []
+            # Only citations of the current snapshot need the access check.
+            current = [c for c in citations
+                       if scope.snapshot_revisions.get(c.document_id) == c.revision_id]
+            payloads = await self._citation_payloads(db, [(runs[c.message_id], c) for c in current])
+            unavailable = {c.message_id for c in citations
+                           if scope.snapshot_revisions.get(c.document_id) != c.revision_id}
+            unavailable |= {c.message_id for c, p in zip(current, payloads) if not p['available']}
             history = []
             for message in messages:
                 if message.sender == SenderType.user:
                     history.append({'role': 'user', 'content': message.content})
-                    continue
                 # Legacy assistant text (no research run) may depend on revoked
-                # material. Do not put it into a new research prompt.
-                run = await db.scalar(select(AgentRun).where(
-                    AgentRun.assistant_message_id == message.id,
-                    AgentRun.user_id == scope.user_id))
-                if run is None:
-                    continue
-                # A research answer without citations (a greeting, a general
-                # answer) used no course material; one with citations is kept
-                # only while every cited source is still available.
-                citations = (await db.scalars(select(MessageCitation).where(
-                    MessageCitation.message_id == message.id))).all()
-                available = True
-                for citation in citations:
-                    if (scope.snapshot_revisions.get(citation.document_id) != citation.revision_id
-                            or not (await self._citation_payload(db, run, citation))['available']):
-                        available = False
-                        break
-                if available:
+                # material. Do not put it into a new research prompt. A research
+                # answer without citations (a greeting, a general answer) used
+                # no course material; one with citations is kept only while
+                # every cited source is still available.
+                elif message.id in runs and message.id not in unavailable:
                     history.append({'role': 'assistant', 'content': message.content})
             return history
