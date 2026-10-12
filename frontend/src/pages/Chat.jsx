@@ -11,14 +11,16 @@
  */
 
 import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
 import { createMessageId } from '../lib/messageId';
 import { interpretStreamEvent } from '../lib/streamEvents';
+import { distinctImages, groupCitations } from '../lib/citations';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
+import { PdfPreviewModal } from '../components/PdfPreview';
 // Lazy: the markdown/highlight/KaTeX stack is heavy and only needed once the
 // student opens a chat — code-split it out of the initial bundle. We warm this
 // chunk on mount (see effect below) so the first assistant message renders as
@@ -48,6 +50,10 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [researchPhase, setResearchPhase] = useState(null);
+  // The cited page shown in the preview window over the chat (null = closed).
+  const [preview, setPreview] = useState(null);
+  const openSource = useCallback((source) => setPreview(source), []);
+  const closeSource = useCallback(() => setPreview(null), []);
   const restoredLabRef = useRef(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const abortRef = useRef(null);
@@ -514,6 +520,7 @@ export default function Chat() {
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
               phase={isStreaming && msg.sender === 'llm' && i === messages.length - 1 ? researchPhase : null}
               sessionId={activeSessionId}
+              onOpenSource={openSource}
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
             />
           ))}
@@ -556,6 +563,10 @@ export default function Chat() {
           </p>
         </div>
       </div>
+
+      {preview && preview.sessionId === activeSessionId && (
+        <PdfPreviewModal source={preview} onClose={closeSource} />
+      )}
 
       {/* ── Join Class Modal ── */}
       {showJoinModal && (
@@ -640,7 +651,7 @@ const PHASE_LABELS = { thinking: 'Thinking…', finding: 'Searching course mater
   reading: 'Reading source pages…', checking_image: 'Checking the image…',
   checking_sources: 'Checking citations…' };
 
-const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId }) {
+const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource }) {
   const isUser = message.sender === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
@@ -668,15 +679,16 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, phase, c
                 className="ml-2 text-xs text-cream-muted">{PHASE_LABELS[phase]}</span>}
             </span>}
         {!isUser && message.citations?.length > 0 && (
-          <div className="mt-2.5 pt-2.5 border-t border-border-subtle flex flex-wrap gap-1.5">
-            {message.citations.map((c, i) => renderCitationBadge(c, sessionId, i))}
-          </div>
+          <CitationList citations={message.citations} sessionId={sessionId} onOpenSource={onOpenSource} />
         )}
-        {!isUser && message.citations?.some((c) => c.origin === 'live_visual') && (
+        {!isUser && distinctImages(message.citations).length > 0 && (
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {message.citations.filter((c) => c.origin === 'live_visual' && c.available &&
-              c.asset_id && c.asset_mime?.startsWith('image/')).slice(0, 3).map((c) => (
-              <VisualEvidenceCard key={c.citation_id} citation={c} sessionId={sessionId} />
+            {distinctImages(message.citations).slice(0, 3).map((c) => (
+              <VisualEvidenceCard key={c.asset_id} citation={c} sessionId={sessionId}
+                onOpen={() => onOpenSource({ documentId: c.document_id, revisionId: c.revision_id,
+                  filename: c.filename || 'Source', sessionId, page: c.pdf_page_no,
+                  pages: groupCitations(message.citations).find((f) => f.documentId === c.document_id
+                    && f.revisionId === (c.revision_id || null))?.pages || [] })} />
             ))}
           </div>
         )}
@@ -689,7 +701,7 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, phase, c
 });
 
 
-function VisualEvidenceCard({ citation, sessionId }) {
+function VisualEvidenceCard({ citation, sessionId, onOpen }) {
   const [imageUrl, setImageUrl] = useState(null);
   useEffect(() => {
     if (!sessionId || !citation.available || !citation.asset_id) return;
@@ -711,37 +723,45 @@ function VisualEvidenceCard({ citation, sessionId }) {
     };
   }, [citation.asset_id, citation.available, citation.document_id, citation.revision_id, sessionId]);
   if (!imageUrl) return null;
-  return <Link to={citation.href} target="_blank" rel="noopener noreferrer"
-    className="rounded-lg border border-border-subtle p-1.5 text-xs text-cream-secondary hover:border-cyan">
+  return <button type="button" onClick={onOpen}
+    title={`Open ${citation.filename || 'course PDF'} at PDF page ${citation.pdf_page_no}`}
+    className="rounded-lg border border-border-subtle p-1.5 text-left text-xs text-cream-secondary hover:border-cyan">
     <img src={imageUrl} alt={`Original course image on PDF page ${citation.pdf_page_no}`}
       className="max-h-36 w-full object-contain" />
     <span>Original image · p.{citation.pdf_page_no}</span>
-  </Link>;
+  </button>;
 }
 
-function renderCitationBadge(c, sessionId, index) {
-  const key = c.citation_id || `${c.document_id}-${c.revision_id}-${c.page_no}-${index}`;
-  const label = <>
-    <DocIcon className="w-2.5 h-2.5 text-cyan" />
-    <span className="max-w-[180px] truncate">{c.filename || 'Source'}</span>
-    {(c.pdf_page_no || c.page_no) != null && <span className="text-cream-muted">· p.{c.pdf_page_no || c.page_no}</span>}
-    {c.label && <span>[{c.label}]</span>}
-  </>;
-  const className = 'inline-flex items-center gap-1 rounded-md bg-cyan-muted/60 border border-cyan/20 px-1.5 py-0.5 text-[10px] text-cream-secondary';
-  if (c.citation_id && !c.available) {
-    return <span key={key} className={className} title="Source no longer available">{label} · Unavailable</span>;
-  }
-  if (!sessionId || !c.document_id || !Number.isInteger(c.pdf_page_no) || c.pdf_page_no < 1) {
-    return <span key={key} className={className} title="PDF page not available">{label}</span>;
-  }
-  const query = new URLSearchParams({ session_id: sessionId, page: String(c.pdf_page_no) });
-  if (c.revision_id) query.set('revision_id', c.revision_id);
-  return <Link key={key} className={`${className} hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}
-    to={c.href || `/source/${encodeURIComponent(c.document_id)}?${query}`} target="_blank" rel="noopener noreferrer"
-    title={`Open ${c.filename || 'course PDF'} at PDF page ${c.pdf_page_no}`}>
-    {label}{c.newer_revision && <span title="A newer course revision exists"> · Older version</span>}
-    {c.teacher_revised && <span title="Teacher edited this source"> · Teacher edited</span>}
-  </Link>;
+/** One line per cited file, one button per page; a button opens the preview window. */
+function CitationList({ citations, sessionId, onOpenSource }) {
+  const files = groupCitations(citations);
+  if (!files.length) return null;
+  const chip = 'inline-flex items-center rounded-md border border-cyan/20 px-1.5 py-0.5 text-[10px]';
+  return (
+    <div className="mt-2.5 space-y-1 border-t border-border-subtle pt-2.5">
+      {files.map((file) => (
+        <div key={file.key} className="flex flex-wrap items-center gap-1.5 text-[11px] text-cream-secondary">
+          <DocIcon className="h-3 w-3 shrink-0 text-cyan" />
+          <span className="max-w-[240px] truncate" title={file.filename}>{file.filename}</span>
+          {file.newerRevision && <span className="text-cream-muted" title="A newer course revision exists">· older version</span>}
+          {file.pages.map((page) => {
+            const labels = page.labels.length ? ` (${page.labels.join(', ')})` : '';
+            if (!page.available || !sessionId) {
+              return <span key={page.pageNo} className={`${chip} text-cream-muted`}
+                title="Source no longer available">p.{page.pageNo} · unavailable</span>;
+            }
+            return <button key={page.pageNo} type="button"
+              onClick={() => onOpenSource({ documentId: file.documentId, revisionId: file.revisionId,
+                filename: file.filename, sessionId, page: page.pageNo, pages: file.pages })}
+              title={`Open ${file.filename} at PDF page ${page.pageNo}${labels}`}
+              className={`${chip} bg-cyan-muted/60 hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}>
+              p.{page.pageNo}{page.teacherRevised && <span title="Teacher edited this source"> ✎</span>}
+            </button>;
+          })}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function BlinkDot({ delay = '0ms' }) {
