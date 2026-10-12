@@ -42,10 +42,22 @@ search. Avoid repeating an unchanged read; use the already returned content.
 A read may return only part of its content; follow the cursor it names.
 For a diagram, call view_image with an image handle and a narrow question.
 Keep visual observations and uncertainties distinct from native text.
-You have at most eight course tool calls and two visual calls. Stop early when
+You have at most {tool_calls} course tool calls and {visual_calls} visual calls. Stop early when
 the necessary sources are sufficient. If limits or evidence prevent completion,
 state the specific gap. Ordinary conversation and clarification need no citations.
 Answer in the student's language. Never expose private reasoning or tool markup.'''
+
+NUMBER_WORDS = ('zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+                'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+                'seventeen', 'eighteen', 'nineteen', 'twenty')
+
+
+def system_prompt(tool_calls: int, visual_calls: int) -> str:
+    """The prompt names the run's real limits; with 8 and 2 it is the 2026-10 benchmark text."""
+    def count(n):
+        return NUMBER_WORDS[n] if 0 <= n < len(NUMBER_WORDS) else str(n)
+    return SYSTEM_PROMPT.format(tool_calls=count(tool_calls), visual_calls=count(visual_calls))
+
 
 # Tool names and order as the 2026-10 benchmark used them (MCP server "courses").
 PREFIX = 'mcp__courses__'
@@ -115,7 +127,8 @@ class ResearchRunner:
         trace: list[dict] = []
         start = self.clock()
         model_calls = 0
-        system = SYSTEM_PROMPT + '\n' + teaching_rules + '\n' + research_note
+        system = (system_prompt(self.max_tool_calls, tools.max_visual_calls)
+                  + '\n' + teaching_rules + '\n' + research_note)
         messages = [{'role': 'system', 'content': system},
                     {'role': 'user', 'content': question if not history
                      else json.dumps({'question': question, 'history': history}, ensure_ascii=False)}]

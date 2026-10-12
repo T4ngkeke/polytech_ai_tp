@@ -117,7 +117,7 @@ Request body, besides `session_id` and `message`:
 - `client_request_id` (UUID, optional): the same ID returns the saved run
   again, without a second model call or charge.
 - `selected_citation_id` (UUID, optional): a citation the student selected
-  for this follow-up question.
+  for this follow-up question. It applies to this question only.
 
 Server-sent events, in order:
 
@@ -127,7 +127,7 @@ Server-sent events, in order:
 | (default) | The whole answer text, as one JSON string. |
 | `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`. |
 | `done` | `{"message_id": ...}` |
-| `error` | `{"detail": ...}`, for example when another research request of the session is still running. |
+| `error` | `{"detail": ...}`, for example when another research request of the session is still running, or `Daily token quota exceeded` when the quota runs out during research. |
 
 `GET /api/student/sessions/{session_id}` returns the same citations on each
 message, with `available` and `href` rechecked against current access.
@@ -140,6 +140,21 @@ Models (system configuration):
 - `VLM_BASE_URL`, `VLM_API_KEY`, `VLM_MODEL`: the vision model behind the
   `view_image` tool. Without `VLM_MODEL`, `view_image` returns
   `model_unavailable`.
+
+Limits of one research run (system configuration, whole numbers; an empty or
+invalid value means the default; the admin API rejects values out of range):
+
+| Key (`/api/admin/llm/config` field) | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `AGENT_MAX_TOOL_CALLS` (`agent_max_tool_calls`) | 8 | 1–40 | Course tool calls. |
+| `AGENT_MAX_VISUAL_CALLS` (`agent_max_visual_calls`) | 2 | 0–10 | `view_image` calls. |
+| `AGENT_RESEARCH_SECONDS` (`agent_research_seconds`) | 45 | 5–1800 | Time for research; then the tools are withdrawn. At most the total time. |
+| `AGENT_TOTAL_SECONDS` (`agent_total_seconds`) | 60 | 10–1800 | Time for the whole run, answer included. |
+| `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 20 | 5–600 | Time for one model call. |
+| `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 12000 | 4000–200000 | Estimated input tokens of one model call. Chat history may use a quarter of it. |
+
+The system prompt states the tool and visual limits. The defaults are the
+"standard" budget of the 2026-10 benchmark. A slower model needs longer times.
 
 Each model call is reserved on the student's daily quota before it starts
 and settled with the reported usage afterwards.

@@ -378,6 +378,24 @@ class TestLLMConfig:
         assert got["context_max_tokens"] == "12000"
         assert got["rerank_score_threshold"] == ""  # gate ships OFF
 
+    async def test_research_limits_roundtrip_and_range_check(self, admin_client):
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "agent_max_tool_calls": "20", "agent_total_seconds": "180",
+        })
+        assert resp.status_code == 200
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["agent_max_tool_calls"] == "20" and got["agent_total_seconds"] == "180"
+        assert got["agent_max_visual_calls"] == ""  # default
+        for bad in ("0", "41", "eight"):
+            resp = await admin_client.put("/api/admin/llm/config", json={
+                "base_url": "http://main/v1", "api_key": "k", "model": "m",
+                "agent_max_tool_calls": bad,
+            })
+            assert resp.status_code == 422
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["agent_max_tool_calls"] == "20"
+
     # --- [v7.2] full model-routing table ---------------------------------
 
     async def test_admin_sets_and_reads_routing_fields(self, admin_client):

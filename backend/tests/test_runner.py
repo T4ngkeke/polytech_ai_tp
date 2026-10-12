@@ -8,7 +8,7 @@ from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchRunStopped
 from backend.app.agent.runner import (
-    COURSE_TOOLS, FINISH_TURN, SYSTEM_PROMPT, ResearchRunner, partial_answer,
+    COURSE_TOOLS, FINISH_TURN, ResearchRunner, partial_answer, system_prompt,
 )
 from backend.tests.test_course_tools import ViewFixture
 
@@ -35,6 +35,33 @@ def test_course_tools_keep_the_benchmark_names_and_have_no_finish():
         'mcp__courses__' + n for n in ('grep', 'navigate', 'open', 'read', 'search', 'view_image')]
 
 
+def test_prompt_names_the_run_limits():
+    # The default limits give the 2026-10 benchmark text unchanged.
+    assert 'at most eight course tool calls and two visual calls.' in system_prompt(8, 2)
+    assert 'at most twenty course tool calls and four visual calls.' in system_prompt(20, 4)
+    assert 'at most 30 course tool calls' in system_prompt(30, 2)
+
+
+def test_research_limits_from_admin_values():
+    from backend.app.services.research_service import ResearchLimits
+    assert ResearchLimits.from_config({}) == ResearchLimits()
+    limits = ResearchLimits.from_config({
+        'AGENT_MAX_TOOL_CALLS': ' 20 ', 'AGENT_MAX_VISUAL_CALLS': 'four',
+        'AGENT_RESEARCH_SECONDS': '300', 'AGENT_TOTAL_SECONDS': '120',
+        'AGENT_MAX_INPUT_TOKENS': '999999'})
+    assert (limits.tool_calls, limits.visual_calls, limits.input_tokens) == (20, 2, 12000)
+    # Research time never exceeds the total time.
+    assert (limits.research_seconds, limits.total_seconds) == (120, 120)
+
+
+@pytest.mark.asyncio
+async def test_prompt_uses_the_course_tools_limits():
+    model = Script('Bonjour.')
+    await ResearchRunner(CourseTools(ViewFixture(), max_tool_calls=12, max_visual_calls=3),
+                         model, max_tool_calls=12).run('Bonjour')
+    assert 'at most twelve course tool calls and three visual calls.' in model.seen[0][0]['content']
+
+
 @pytest.mark.asyncio
 async def test_answer_is_written_in_the_research_conversation():
     model = Script([('mcp__courses__search', {'query': 'produit cartésien'})], [('read', {'page': 'd1.p10'})],
@@ -45,7 +72,7 @@ async def test_answer_is_written_in_the_research_conversation():
     assert [c['evidence_id'] for c in result.citations] == ['E1']
     assert result.model_calls == 3 and result.tool_calls == 2
     last = model.seen[-1]
-    assert last[0]['content'].startswith(SYSTEM_PROMPT) and last[0]['content'].endswith('NOTE')
+    assert last[0]['content'].startswith(system_prompt(8, 2)) and last[0]['content'].endswith('NOTE')
     assert [m['role'] for m in last] == ['system', 'user', 'assistant', 'tool', 'assistant', 'tool']
     assert 'd1.p9.b1 text: Produit cartésien' in last[3]['content']
     assert model.with_tools == [True, True, True]

@@ -74,7 +74,7 @@ from backend.app.services.billing import compute_billed_tokens
 from backend.app.services.model_routing import Endpoint, resolve_model_routing
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
-from backend.app.services.research_service import run_persisted_research
+from backend.app.services.research_service import ResearchLimits, run_persisted_research
 from backend.app.services.research_vision import ResearchVision
 from backend.app.services.trace_service import TraceBuilder
 
@@ -87,7 +87,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # Helper: Fetch LLM config from SystemConfig table with env fallback
 # ---------------------------------------------------------------------------
 
-async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
+async def _get_llm_config(db: AsyncSession) -> dict:
     """
     Read LLM connection parameters from the SystemConfig table.
 
@@ -129,6 +129,7 @@ async def _get_llm_config(db: AsyncSession) -> dict[str, str]:
         "vlm_base_url": routing.vlm.base_url,
         "vlm_api_key": routing.vlm.api_key,
         "vlm_model": routing.vlm.model,
+        "research_limits": ResearchLimits.from_config(configs),
     }
 
 
@@ -538,9 +539,11 @@ async def chat_stream(
             if body.selected_citation_id:
                 await runs.select_citation(scope=scope,
                                            citation_id=body.selected_citation_id)
-            # The research runner has 12000 input tokens; history may take a quarter.
+            # History may take a quarter of the research input tokens.
+            limits = llm_config['research_limits']
             safe_history = trim_history(await runs.load_safe_history(scope),
-                max_tokens=min(int(llm_config["context_max_tokens"] or 8000), 3000))
+                max_tokens=min(int(llm_config["context_max_tokens"] or 8000),
+                               limits.input_tokens // 4))
             read_state = await runs.load_read_state(scope)
         except DocumentNotFound:
             raise HTTPException(404, 'source_unavailable') from None
@@ -583,7 +586,7 @@ async def chat_stream(
                 rerank_fn=_make_rerank_fn(llm_config),
                 embed_model=llm_config['embedding_model'],
                 rerank_model=llm_config['rerank_model'], on_phase=phase,
-                vision_fn=vision, vision_model=vlm.model,
+                vision_fn=vision, vision_model=vlm.model, limits=limits,
                 session_factory=research_factory))
             try:
                 while not task.done():

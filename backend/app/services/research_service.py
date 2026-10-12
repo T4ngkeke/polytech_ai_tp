@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass, fields
 
 from sqlalchemy import select
 
@@ -19,8 +21,52 @@ from backend.app.agent.runner import ResearchRunner
 from backend.app.agent.tools import PerCallTools, ResearchScope
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import AgentRun
-from backend.app.services.research_runs import ResearchRuns
+from backend.app.services.research_runs import STALE_RUN_SECONDS, ResearchRuns
 from backend.app.services.research_usage import ResearchUsage
+
+
+@dataclass(frozen=True)
+class ResearchLimits:
+    """Limits of one research run. The defaults are the 2026-10 benchmark's
+    "standard" budget; an admin can change them (SystemConfig, LIMIT_KEYS)."""
+    tool_calls: int = 8
+    visual_calls: int = 2
+    research_seconds: int = 45
+    total_seconds: int = 60
+    call_seconds: int = 20
+    input_tokens: int = 12000
+
+    @classmethod
+    def from_config(cls, configs: Mapping[str, str]) -> ResearchLimits:
+        """Missing, unreadable or out-of-range values fall back to the default."""
+        values = {}
+        for key, (name, _, _) in LIMIT_KEYS.items():
+            value = limit_value(key, configs.get(key))
+            values[name] = DEFAULT_LIMITS[name] if value is None else value
+        values['research_seconds'] = min(values['research_seconds'], values['total_seconds'])
+        return cls(**values)
+
+
+# SystemConfig key -> (ResearchLimits field, minimum, maximum).
+LIMIT_KEYS = {
+    'AGENT_MAX_TOOL_CALLS': ('tool_calls', 1, 40),
+    'AGENT_MAX_VISUAL_CALLS': ('visual_calls', 0, 10),
+    'AGENT_RESEARCH_SECONDS': ('research_seconds', 5, 1800),
+    'AGENT_TOTAL_SECONDS': ('total_seconds', 10, 1800),
+    'AGENT_CALL_SECONDS': ('call_seconds', 5, 600),
+    'AGENT_MAX_INPUT_TOKENS': ('input_tokens', 4000, 200000),
+}
+DEFAULT_LIMITS = {f.name: f.default for f in fields(ResearchLimits)}
+
+
+def limit_value(key: str, raw: str | None) -> int | None:
+    """The integer an admin value stands for, or None when it is empty or invalid."""
+    _, low, high = LIMIT_KEYS[key]
+    try:
+        value = int((raw or '').strip())
+    except ValueError:
+        return None
+    return value if low <= value <= high else None
 
 
 class _RunningTools(PerCallTools):
@@ -42,12 +88,14 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
                                  tool_factory=None, on_phase=None, vision_fn=None,
-                                 vision_model: str = '') -> dict:
+                                 vision_model: str = '',
+                                 limits: ResearchLimits = ResearchLimits()) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call)."""
     runs = ResearchRuns(session_factory)
     usage = ResearchUsage(session_factory)
     started = await runs.begin_run(scope=scope, question=question,
-                                   client_request_id=client_request_id)
+        client_request_id=client_request_id,
+        stale_after=max(STALE_RUN_SECONDS, 2 * limits.total_seconds))
     if not started.created:
         return await runs.load_result(run_id=started.run_id, user_id=scope.user_id)
     def counted_non_token(fn, purpose, model):
@@ -98,10 +146,15 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                 embed_fn=counted_non_token(embed_fn, 'embedding', embed_model),
                 rerank_fn=counted_non_token(rerank_fn, 'rerank', rerank_model),
                 vision_fn=counted_vision if vision_fn else None))
-    runner = ResearchRunner(CourseTools(tools),
+    course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
+                               research_seconds=limits.research_seconds,
+                               max_visual_calls=limits.visual_calls)
+    runner = ResearchRunner(course_tools,
         usage.wrap_model(run_id=started.run_id, model=model_name,
                          alpha=token_alpha, beta=token_beta, call=model),
-        on_phase=on_phase)
+        max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
+        total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
+        max_input_tokens=limits.input_tokens, on_phase=on_phase)
     try:
         result = await runner.run(question, history=history,
                                   teaching_rules=teaching_rules, research_note=research_note)

@@ -181,6 +181,8 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
         db = pg_session
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
         db.add_all(models('http://example.invalid/v1'))
+        db.add_all([SystemConfig(key='AGENT_MAX_TOOL_CALLS', value='12'),
+                    SystemConfig(key='AGENT_MAX_INPUT_TOKENS', value='8000')])
         # Ten long earlier questions, about 10k estimated tokens in all.
         db.add_all(Message(session_id=chat.id, sender=SenderType.user, content=f'Q{n} ' + 'x' * 4000)
                    for n in range(10))
@@ -203,8 +205,10 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
                 'client_request_id': str(uuid.uuid4())})
             assert any(name == 'done' for name, _ in events(response.text))
             first = model_messages[0][1]['content']
+            # History may take a quarter of the admin's 8000 input tokens.
             assert 'Q9 ' in first and 'Q0 ' not in first
-            assert estimate_tokens(first) <= 3200
+            assert estimate_tokens(first) <= 2200
+            assert 'at most twelve course tool calls' in model_messages[0][0]['content']
             # Enough quota for the pre-check, not for one model call.
             used = await client.get('/api/student/usage')
             await db.refresh(student)

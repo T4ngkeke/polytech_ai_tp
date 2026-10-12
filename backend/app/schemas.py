@@ -152,6 +152,13 @@ class LLMConfigRequest(BaseModel):
     vlm_base_url: str | None = None
     vlm_api_key: str | None = None
     vlm_model: str | None = None
+    # Research agent limits (whole numbers; empty = default, see ResearchLimits).
+    agent_max_tool_calls: str | None = None
+    agent_max_visual_calls: str | None = None
+    agent_research_seconds: str | None = None
+    agent_total_seconds: str | None = None
+    agent_call_seconds: str | None = None
+    agent_max_input_tokens: str | None = None
     token_alpha: float | None = None
     token_beta: float | None = None
 
@@ -187,6 +194,13 @@ class LLMConfigResponse(BaseModel):
     vlm_base_url: str = ""
     vlm_api_key: str = ""
     vlm_model: str = ""
+    # Research agent limits — empty means the default.
+    agent_max_tool_calls: str = ""
+    agent_max_visual_calls: str = ""
+    agent_research_seconds: str = ""
+    agent_total_seconds: str = ""
+    agent_call_seconds: str = ""
+    agent_max_input_tokens: str = ""
     token_alpha: float = 0.2
     token_beta: float = 1.0
 

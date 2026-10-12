@@ -70,6 +70,7 @@ from backend.app.schemas import (
 )
 from backend.app.services import class_service, lab_service, analytics_service, trace_service
 from backend.app.services.model_routing import resolve_model_routing
+from backend.app.services.research_service import LIMIT_KEYS, limit_value
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -262,6 +263,13 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "vlm_base_url": "VLM_BASE_URL",
     "vlm_api_key": "VLM_API_KEY",
     "vlm_model": "VLM_MODEL",
+    # Research agent limits (see research_service.ResearchLimits).
+    "agent_max_tool_calls": "AGENT_MAX_TOOL_CALLS",
+    "agent_max_visual_calls": "AGENT_MAX_VISUAL_CALLS",
+    "agent_research_seconds": "AGENT_RESEARCH_SECONDS",
+    "agent_total_seconds": "AGENT_TOTAL_SECONDS",
+    "agent_call_seconds": "AGENT_CALL_SECONDS",
+    "agent_max_input_tokens": "AGENT_MAX_INPUT_TOKENS",
 }
 
 
@@ -308,6 +316,14 @@ async def update_llm_config(
     Only fields explicitly provided (non-None) are written, so a legacy 3-field
     PUT (base_url/api_key/model) never wipes the routing config.
     """
+    for field, key in _LLM_CONFIG_STR_FIELDS.items():
+        value = getattr(body, field)
+        if key in LIMIT_KEYS and value and limit_value(key, value) is None:
+            _, low, high = LIMIT_KEYS[key]
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{field} must be a whole number from {low} to {high}",
+            )
     for field, key in _LLM_CONFIG_STR_FIELDS.items():
         value = getattr(body, field)
         if value is not None:
