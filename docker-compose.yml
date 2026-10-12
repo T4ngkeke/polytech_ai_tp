@@ -53,15 +53,18 @@ services:
       - postgres
     restart: unless-stopped
 
-  # Optional local embedding service. CPU only; the existing chat engine stays
-  # separate. Enable with --profile local-embeddings and pull bge-m3 once.
+  # Optional local embedding service (bge-m3) on the GPU: about 0.03 s per
+  # query instead of 0.25 s on CPU, with CPU spikes of 8-11 s (2026-10-12),
+  # same vectors. The model stays loaded (about 0.7 GB of GPU memory).
+  # Enable with --profile local-embeddings and pull bge-m3 once.
   embeddings:
     image: ollama/ollama:latest
     container_name: edullm-embeddings
     profiles: ["local-embeddings"]
+    gpus: all
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
-      - OLLAMA_VULKAN=0
+      - OLLAMA_KEEP_ALIVE=-1
     volumes:
       - embedding_models:/root/.ollama
     cpus: 4
