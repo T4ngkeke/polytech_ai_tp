@@ -1,6 +1,6 @@
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
-sqlalchemy>=2.0.30
+sqlalchemy[asyncio]>=2.0.30,<2.1
 asyncpg>=0.29.0
 pgvector>=0.3.0         # [v7] pgvector SQLAlchemy Vector type for DocChunk embeddings
 langgraph>=0.2.0        # [v7] chat agent StateGraph (router → retrieve → synthesize)
