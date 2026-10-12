@@ -30,9 +30,9 @@ class Script:
                                 for n, (name, args) in enumerate(step)], 'ornith', 100, 10)
 
 
-def test_course_tools_keep_the_benchmark_names_and_have_no_finish():
+def test_course_tools_have_plain_names_and_no_finish():
     assert [t['function']['name'] for t in COURSE_TOOLS] == [
-        'mcp__courses__' + n for n in ('grep', 'navigate', 'open', 'read', 'search', 'view_image')]
+        'grep', 'navigate', 'open', 'read', 'search', 'view_image']
 
 
 def test_prompt_names_the_run_limits():
@@ -64,7 +64,7 @@ async def test_prompt_uses_the_course_tools_limits():
 
 @pytest.mark.asyncio
 async def test_answer_is_written_in_the_research_conversation():
-    model = Script([('mcp__courses__search', {'query': 'produit cartésien'})], [('read', {'page': 'd1.p10'})],
+    model = Script([('search', {'query': 'produit cartésien'})], [('read', {'page': 'd1.p10'})],
                    'Vin3 = product(Vin1, Années) [E1].')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run(
         'Produit cartésien ?', research_note='NOTE')
@@ -93,6 +93,8 @@ async def test_tools_are_withdrawn_when_the_budget_is_spent():
     result = await ResearchRunner(CourseTools(ViewFixture()), model, max_tool_calls=1).run('Q ?')
     assert model.with_tools == [True, False]
     assert model.seen[-1][-1] == {'role': 'user', 'content': FINISH_TURN}
+    # The system message is unchanged, so the model server can reuse its prefix.
+    assert model.seen[-1][0] == model.seen[0][0]
     assert result.stop_reason == 'budget_exhausted' and [c['evidence_id'] for c in result.citations] == ['E1']
 
 
@@ -119,10 +121,46 @@ async def test_bad_arguments_return_an_error_to_the_model():
     model = Script([('read', {'page': 'zz'}), ('nope', {})], 'Réponse générale.')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     tool_texts = [m['content'] for m in model.seen[-1] if m['role'] == 'tool']
-    assert len(tool_texts) == 2 and 'unknown_tool' in tool_texts[1]
+    assert tool_texts[0].startswith('error: invalid_arguments (')
+    assert tool_texts[1] == 'error: unknown_tool (nope)'
     assert result.answer == 'Réponse générale.' and result.citations == []
     # Both refused calls take a tool slot, the unknown tool name included.
     assert result.tool_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_history_is_sent_as_turns_without_old_evidence_ids():
+    model = Script('Oui.')
+    history = [{'role': 'user', 'content': 'Produit cartésien ?'},
+               {'role': 'assistant', 'content': 'Voir la page 10 [E1, E2].'}]
+    await ResearchRunner(CourseTools(ViewFixture()), model).run('Et la page 11 ?', history=history)
+    assert model.seen[0][1:] == [
+        {'role': 'user', 'content': 'Produit cartésien ?'},
+        {'role': 'assistant', 'content': 'Voir la page 10 .'},
+        {'role': 'user', 'content': 'Et la page 11 ?'}]
+
+
+@pytest.mark.asyncio
+async def test_several_ids_in_one_bracket_are_all_cited():
+    model = Script([('read', {'page': 'd1.p10'}), ('read', {'page': 'd1.p9'})], 'Réponse [E1, E2].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.stop_reason == 'finished'
+    assert [c['evidence_id'] for c in result.citations] == ['E1', 'E2']
+
+
+@pytest.mark.asyncio
+async def test_selected_source_is_named_by_handle():
+    fixture = ViewFixture()
+    index = await fixture.page_index()
+    document_id, entry = next(iter(index.items()))
+    page = entry['pages'][1]
+    model = Script('Oui.')
+    await ResearchRunner(CourseTools(fixture), model).run('Et ici ?', focus=[
+        {'document_id': document_id, 'page_id': page['page_id'], 'block_id': None,
+         'pdf_page_no': page['pdf_page_no'], 'citation_id': str(uuid4())}])
+    question = model.seen[0][-1]['content']
+    assert question.startswith('Et ici ?\n\n') and f"page {page['pdf_page_no']}: d1.p{page['pdf_page_no']}" in question
+    assert document_id not in question
 
 
 def test_partial_answer_lists_read_pages_once_without_claims():

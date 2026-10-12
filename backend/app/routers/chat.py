@@ -549,8 +549,6 @@ async def chat_stream(
             raise HTTPException(404, 'source_unavailable') from None
         # A selected source applies to the question sent with it, not to later ones.
         focus = read_state['focused_sources'][:1] if body.selected_citation_id else []
-        research_note = ('The student explicitly selected this source for the follow-up: '
-                         + json.dumps(focus, ensure_ascii=False)) if focus else ''
         teaching_rules = '\n\n'.join(
             f'[{label.upper()} RULES]\n{rule_texts[key]}'
             for key, label in (('class_rules', 'class'), ('lab_rules', 'lab'),
@@ -581,7 +579,7 @@ async def chat_stream(
                 token_alpha=float(llm_config['token_alpha']),
                 token_beta=float(llm_config['token_beta']),
                 history=safe_history, teaching_rules=teaching_rules,
-                research_note=research_note,
+                focus=focus,
                 embed_fn=embed_query,
                 rerank_fn=_make_rerank_fn(llm_config),
                 embed_model=llm_config['embedding_model'],

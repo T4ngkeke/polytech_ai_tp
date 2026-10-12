@@ -4,8 +4,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# An evidence ID cited in an answer: [E1], [E12]. One ID per bracket.
-CITATION_RE = re.compile(r'\[(E[1-9]\d*)\]')
+# An evidence ID: E1, E12.
+LABEL_RE = re.compile(r'E[1-9]\d*')
+# Evidence cited in an answer: [E1], or several IDs in one bracket: [E1, E2].
+CITATION_RE = re.compile(r'\[(E[1-9]\d*(?:\s*[,;]\s*E[1-9]\d*)*)\]')
+
+
+def cited_ids(text: str) -> set[str]:
+    """The evidence IDs an answer cites."""
+    return {label for group in CITATION_RE.findall(text) for label in LABEL_RE.findall(group)}
 
 
 class ResearchQuotaExceeded(ValueError):

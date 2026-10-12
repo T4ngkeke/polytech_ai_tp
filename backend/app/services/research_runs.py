@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from backend.app.agent.result import CITATION_RE, ResearchResult
+from backend.app.agent.result import LABEL_RE, ResearchResult, cited_ids
 from backend.app.agent.tools import ResearchScope, _live_session
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import (
@@ -167,7 +167,7 @@ class ResearchRuns:
             origin = item['origin']
             span = item.get('range')
             if (not isinstance(page_no, int) or page_no < 1 or
-                    not CITATION_RE.fullmatch(f'[{label}]') or
+                    not LABEL_RE.fullmatch(label) or
                     not isinstance(origin, str) or len(origin) > 32):
                 raise ValueError
             if run.snapshot_map.get(str(doc_id)) != str(rev_id):
@@ -223,7 +223,7 @@ class ResearchRuns:
             raise ValueError('empty_answer')
         labels = [x['evidence_id'] for x in result.citations]
         if (len(labels) != len(set(labels)) or
-                set(CITATION_RE.findall(result.answer)) != set(labels)):
+                cited_ids(result.answer) != set(labels)):
             raise CitationInvalid('answer_citation_mismatch')
         async with self.session_factory() as db:
             async with db.begin():
@@ -442,17 +442,18 @@ class ResearchRuns:
                 if message.sender == SenderType.user:
                     history.append({'role': 'user', 'content': message.content})
                     continue
-                citations = (await db.scalars(select(MessageCitation).where(
-                    MessageCitation.message_id == message.id))).all()
-                # Unattributed legacy assistant text may depend on revoked
+                # Legacy assistant text (no research run) may depend on revoked
                 # material. Do not put it into a new research prompt.
-                if not citations:
-                    continue
                 run = await db.scalar(select(AgentRun).where(
                     AgentRun.assistant_message_id == message.id,
                     AgentRun.user_id == scope.user_id))
                 if run is None:
                     continue
+                # A research answer without citations (a greeting, a general
+                # answer) used no course material; one with citations is kept
+                # only while every cited source is still available.
+                citations = (await db.scalars(select(MessageCitation).where(
+                    MessageCitation.message_id == message.id))).all()
                 available = True
                 for citation in citations:
                     if (scope.snapshot_revisions.get(citation.document_id) != citation.revision_id

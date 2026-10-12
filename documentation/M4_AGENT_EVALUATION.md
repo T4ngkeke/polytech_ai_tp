@@ -63,6 +63,21 @@ Benchmark v4, model Qwen3.8-Flash-Next (v0.30), round 1:
   Ornith ran without them and its tool calls were parsed by the DSH gateway,
   which is no longer part of the code.
 
+## Model input changes after the benchmark (2026-10-12)
+
+The benchmark runs above used tool names with the prefix `mcp__courses__`,
+appended a note to the system message when the tools were withdrawn, and sent
+chat history as JSON inside one user message. Now the tool names have no
+prefix, the system message never changes, history is sent as real turns
+(without the old [E#] IDs), a selected source is named by its handle, and an
+answer may cite several IDs in one bracket ([E1, E2]).
+
+Check on Qwen3.8-27B (W03, W07, W12, 2 rounds, relaxed_slow, before vs after,
+`m4-agent/2026-10-12-model-input-27b`): answer points 16/18 before, 17/18
+after; pages 12/18 and 14/18. Six trials per side, so this shows no
+regression, not an improvement. The benchmark questions have no history; the
+follow-up path was checked with the real-model chat test.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable

@@ -17,10 +17,18 @@ from backend.tests.conftest import make_client
 from backend.tests.test_m4_tools_pg import _indexed_pdf
 
 
-def models(base_url):
-    """The research model (AGENT_*) and the vision model (VLM_*) on one endpoint."""
+def models(base_url, vision_url=None):
+    """The research model (AGENT_*) and the vision model (VLM_*), by default on one endpoint."""
     return [SystemConfig(key='AGENT_BASE_URL', value=base_url), SystemConfig(key='AGENT_MODEL', value='ornith'),
-            SystemConfig(key='VLM_BASE_URL', value=base_url), SystemConfig(key='VLM_MODEL', value='ornith')]
+            SystemConfig(key='VLM_BASE_URL', value=vision_url or base_url),
+            SystemConfig(key='VLM_MODEL', value='ornith')]
+
+
+def local_models():
+    """The opt-in real-model tests: M4D_AGENT_URL and M4D_VLM_URL, default local Ornith."""
+    import os
+    return models(os.environ.get('M4D_AGENT_URL', 'http://127.0.0.1:18001/v1'),
+                  os.environ.get('M4D_VLM_URL', 'http://127.0.0.1:18001/v1'))
 
 
 def tool_call(name, arguments):
@@ -102,14 +110,22 @@ async def test_research_http_save_reload_select_and_pdf(pg_session, tmp_path, mo
                 'selected_citation_id': citations[0]['citation_id']})
             assert followup.status_code == 200
             assert any(name == 'done' for name, _ in events(followup.text))
-            assert citations[0]['citation_id'] in json.dumps(model_messages[-1])
+            # The selected source reaches the model as a handle it can read.
+            note = model_messages[-1][-1]['content']
+            assert note.startswith('And this page?') and f'page {page.preview_page_no}: d1.p' in note
+            assert citations[0]['citation_id'] not in json.dumps(model_messages[-1])
+            # Earlier turns are real messages, without their old evidence IDs.
+            assert [m['role'] for m in model_messages[-1][1:]] == ['user', 'assistant', 'user']
+            assert '[E1]' not in model_messages[-1][2]['content']
             # The selection applied to that question only.
             steps.append(ModelReply('Autre réponse.', [], 'fixture', 50, 20))
             later = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'Another topic?',
                 'client_request_id': str(uuid.uuid4())})
             assert any(name == 'done' for name, _ in events(later.text))
-            assert citations[0]['citation_id'] not in json.dumps(model_messages[-1])
+            assert 'read it first' not in json.dumps(model_messages[-1])
+            # The uncited reply ('Which definition do you mean?') stays in the history.
+            assert any(m['content'] == 'Which definition do you mean?' for m in model_messages[-1])
             from backend.app.services.document_cleanup import mark_deleted
             await db.refresh(doc)
             await db.refresh(teacher)
@@ -234,7 +250,7 @@ async def test_real_ornith_direct_student_http(pg_session, tmp_path, monkeypatch
     try:
         db = pg_session
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
-        db.add_all(models('http://127.0.0.1:18001/v1'))
+        db.add_all(local_models())
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         client = await make_client(db, student)
@@ -269,7 +285,7 @@ async def test_real_local_model_student_research_http(pg_session, tmp_path, monk
     try:
         db = pg_session
         doc, rev, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
-        db.add_all(models('http://127.0.0.1:18001/v1'))
+        db.add_all(local_models())
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         import backend.app.services.research_service as research_service
@@ -321,6 +337,17 @@ async def test_real_local_model_student_research_http(pg_session, tmp_path, monk
             history = await client.get(f'/api/student/sessions/{chat.id}')
             assert history.status_code == 200
             assert any(m['citations'] for m in history.json()['messages'])
+            # A follow-up on a selected source: earlier turns and the source handle.
+            followup = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Et que dit exactement cette page ?',
+                'client_request_id': str(uuid.uuid4()),
+                'selected_citation_id': citations[0]['citation_id']}, timeout=90)
+            stream = events(followup.text)
+            assert not any(name == 'error' for name, _ in stream), stream
+            print('FOLLOWUP', json.dumps({'answer': ''.join(p for n, p in stream if n == 'token'),
+                'citations': [c['pdf_page_no'] for n, p in stream if n == 'citations' for c in p]},
+                ensure_ascii=False))
+            assert any(name == 'done' for name, _ in stream)
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 
@@ -336,7 +363,7 @@ async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monke
         page = await db.scalar(select(DocumentPage).where(
             DocumentPage.revision_id == rev.id,
             DocumentPage.preview_asset_id.is_not(None)).limit(1))
-        db.add_all(models('http://127.0.0.1:18001/v1'))
+        db.add_all(local_models())
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         monkeypatch.setattr(settings, 'DOCUMENTS_STORAGE_ROOT', str(tmp_path / 'storage'))

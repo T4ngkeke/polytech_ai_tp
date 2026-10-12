@@ -134,6 +134,17 @@ def _page_furniture(item) -> bool:
     return item.get('type') == 'navigation' and (len(text) <= 3 or text.isdigit())
 
 
+def error_text(result: dict) -> str:
+    """A failed tool call as the model sees it: 'error: code (message)' and a hint."""
+    error = result.get('error') or {}
+    text = 'error: ' + str(error.get('code') or 'tool_failed')
+    if error.get('message') and error.get('message') != error.get('code'):
+        text += f' ({error["message"]})'
+    if result.get('hint'):
+        text += '\n' + result['hint']
+    return text
+
+
 class ToolView:
     """Run-local handles and the compact rendering of one run's results."""
 
@@ -340,13 +351,7 @@ class ToolView:
 
     def render(self, name: str, raw_args: dict, result: dict) -> str:
         if not result.get('ok'):
-            error = result.get('error') or {}
-            text = 'error: ' + str(error.get('code') or 'tool_failed')
-            if error.get('message') and error.get('message') != error.get('code'):
-                text += f' ({error["message"]})'
-            if result.get('hint'):
-                text += '\n' + result['hint']
-            return text
+            return error_text(result)
         render = getattr(self, '_render_' + name)
         lines = render(raw_args, result)
         notes = [str(i) for i in result.get('issues') or [] if isinstance(i, str)]
@@ -529,10 +534,27 @@ class CourseTools:
                            'model_arguments': model_arguments, 'dispatched': False,
                            'ok': False, 'result': result, 'elapsed_seconds': 0.0})
 
-    async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
-        """One model call with handles: translate, execute, render compact text."""
+    async def _view(self) -> ToolView:
         if self.view is None:
             self.view = ToolView(await self.tools.page_index())
+        return self.view
+
+    async def source_handle(self, source: dict) -> str | None:
+        """'file, page N: d1.pN[.bK]' for a cited source (a stored citation), or
+        None when its page is not in this run's documents."""
+        view = await self._view()
+        if source.get('page_id') not in view.page_handles:
+            return None
+        if source.get('block_id'):
+            handle = view.block(source['document_id'], source['block_id'], source['page_id'])
+        else:
+            handle = view.page_handles[source['page_id']]
+        filename = view.filenames.get(source['document_id'], 'document')
+        return f"{filename}, page {source.get('pdf_page_no')}: {handle}"
+
+    async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
+        """One model call with handles: translate, execute, render compact text."""
+        await self._view()
         try:
             raw = self.view.translate(name, arguments)
         except HandleError as exc:
