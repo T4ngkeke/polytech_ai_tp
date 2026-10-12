@@ -141,6 +141,33 @@ async def test_history_is_sent_as_turns_with_their_evidence_ids():
 
 
 @pytest.mark.asyncio
+async def test_a_follow_up_may_cite_an_earlier_answer_without_new_research():
+    earlier = {'E2': {'evidence_id': 'E2', 'document_id': str(uuid4()), 'revision_id': str(uuid4()),
+                      'page_id': str(uuid4()), 'pdf_page_no': 10, 'block_id': None, 'range': None,
+                      'asset_id': None, 'origin': 'native'}}
+    fixture = ViewFixture()
+    async def readable(document_id):
+        return None
+    fixture._revision = readable
+    model = Script('Comme expliqué [E2].')
+    result = await ResearchRunner(CourseTools(fixture, first_evidence=3), model).run(
+        'Et donc ?', history=[{'role': 'user', 'content': 'Q ?'},
+                              {'role': 'assistant', 'content': 'Voir [E2].'}],
+        earlier_citations=earlier)
+    assert result.stop_reason == 'finished' and result.citations == [earlier['E2']]
+
+
+def test_each_tool_call_is_logged(caplog):
+    import asyncio
+    import logging
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1].')
+    with caplog.at_level(logging.INFO, logger='backend.app.agent.runner'):
+        asyncio.run(ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?'))
+    lines = [r.getMessage() for r in caplog.records if 'research run=' in r.getMessage()]
+    assert len(lines) == 1 and 'tool=read' in lines[0] and 'ok=True' in lines[0]
+
+
+@pytest.mark.asyncio
 async def test_a_later_run_continues_the_numbering_and_corrects_old_ids():
     # The session's earlier answer cited E1-E2; this run starts at E3.
     model = Script([('read', {'page': 'd1.p10'})], 'Encore [E1].', 'Encore [E3].')

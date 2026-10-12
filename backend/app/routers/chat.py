@@ -543,7 +543,8 @@ async def chat_stream(
             runs = ResearchRuns(research_factory)
             # History may take a quarter of the research input tokens.
             limits = llm_config['research_limits']
-            safe_history = trim_history(await runs.load_safe_history(scope),
+            safe_history, earlier_citations = await runs.load_safe_context(scope)
+            safe_history = trim_history(safe_history,
                 max_tokens=min(int(llm_config["context_max_tokens"] or 8000),
                                limits.input_tokens // 4))
         except DocumentNotFound:
@@ -578,7 +579,8 @@ async def chat_stream(
                 model=ResearchModel(agent), model_name=agent.model,
                 token_alpha=float(llm_config['token_alpha']),
                 token_beta=float(llm_config['token_beta']),
-                history=safe_history, teaching_rules=teaching_rules,
+                history=safe_history, earlier_citations=earlier_citations,
+                teaching_rules=teaching_rules,
                 embed_fn=embed_query,
                 rerank_fn=_make_rerank_fn(llm_config),
                 embed_model=llm_config['embedding_model'],

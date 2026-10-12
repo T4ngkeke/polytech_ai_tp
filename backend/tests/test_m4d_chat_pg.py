@@ -101,24 +101,32 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
             pdf = await client.get(f'/api/documents/{doc.id}/pdf', params={
                 'session_id': str(chat.id), 'revision_id': str(rev.id)})
             assert pdf.status_code == 200 and pdf.content.startswith(b'%PDF-')
-            # A follow-up: the session numbers evidence after the cited E1, so
-            # the old [E1] the model copies is unknown and gets corrected.
-            steps.extend([tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
-                          ModelReply('Toujours [E1].', [], 'fixture', 50, 20),
-                          ModelReply('Toujours [E2].', [], 'fixture', 50, 20)])
+            # A follow-up answered from the history may cite the earlier E1:
+            # within a session an ID names one stored source.
+            steps.append(ModelReply('Comme dit plus haut [E1].', [], 'fixture', 50, 20))
             followup = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'And this page?',
                 'client_request_id': str(uuid.uuid4())})
             stream = events(followup.text)
-            assert ('token', 'Toujours [E2].') in stream
+            assert ('token', 'Comme dit plus haut [E1].') in stream
             cited = next(payload for name, payload in stream if name == 'citations')
-            assert [c['label'] for c in cited] == ['E2']
+            assert [c['label'] for c in cited] == ['E1'] and cited[0]['available']
             assert cited[0]['pdf_page_no'] == page.preview_page_no
             # Earlier turns are real messages and keep their evidence IDs.
-            first = model_messages[-3]
-            assert [m['role'] for m in first[1:]] == ['user', 'assistant', 'user']
-            assert first[2]['content'] == 'Voir la définition [E1].'
+            assert [m['role'] for m in model_messages[-1][1:]] == ['user', 'assistant', 'user']
+            assert model_messages[-1][2]['content'] == 'Voir la définition [E1].'
+            # New research continues the numbering after the cited E1; an ID
+            # nobody returned still gets the correction turn.
+            steps.extend([tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
+                          ModelReply('Encore [E9].', [], 'fixture', 50, 20),
+                          ModelReply('Encore [E2].', [], 'fixture', 50, 20)])
+            again = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Read it again?',
+                'client_request_id': str(uuid.uuid4())})
+            cited = next(payload for name, payload in events(again.text) if name == 'citations')
+            assert [c['label'] for c in cited] == ['E2']
             assert 'unknown evidence IDs' in model_messages[-1][-1]['content']
+            assert 'E1' in model_messages[-1][-1]['content']
             steps.append(ModelReply('Which definition do you mean?', [], 'fixture', 50, 20))
             clarify = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'And the other one?',

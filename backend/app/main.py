@@ -12,6 +12,7 @@ Running locally
     uvicorn backend.app.main:app --reload --port 8000
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,6 +20,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.database import Base, engine
 from backend.app.routers import admin, auth, chat, student, teacher, document_versions, document_reader
+
+# The research agent logs one INFO line per tool call (agent/runner.py), so a
+# run can be followed in the container log. Uvicorn configures only its own
+# loggers; without a handler here these lines would be dropped.
+_agent_log = logging.getLogger("backend.app.agent")
+if not _agent_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _agent_log.addHandler(_handler)
+    _agent_log.setLevel(logging.INFO)
 
 # ---------------------------------------------------------------------------
 # Lifespan: create tables on startup (dev convenience — use Alembic in prod)

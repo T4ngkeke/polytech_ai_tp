@@ -163,6 +163,37 @@ async def test_session_reload_queries_do_not_grow_with_citations(pg_session, tmp
 
 
 @pytest.mark.asyncio
+async def test_earlier_citations_by_label_leave_out_ambiguous_labels(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        doc, rev, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+        scope = await create_scope(db, user_id=student.id, session_id=chat.id)
+        runs = ResearchRuns(async_sessionmaker(db.bind, expire_on_commit=False))
+        block = await db.scalar(select(DocumentBlock).where(
+            DocumentBlock.revision_id == rev.id, DocumentBlock.content != '',
+            DocumentBlock.kind == 'text').limit(1))
+        page = await db.get(DocumentPage, (rev.id, block.page_id))
+        async def answer(n, labels_and_ends):
+            started = await runs.begin_run(scope=replace(scope, run_id=uuid.uuid4()),
+                question=f'Q{n}?', client_request_id=f'ambiguous-{n}')
+            await runs.finish_run(started.run_id, ResearchResult(
+                ' '.join(f'[{label}]' for label, _ in labels_and_ends), [
+                    {'evidence_id': label, 'document_id': str(doc.id), 'revision_id': str(rev.id),
+                     'page_id': str(page.page_id), 'pdf_page_no': page.preview_page_no,
+                     'block_id': str(block.block_id), 'range': {'start': 0, 'end': end},
+                     'origin': (block.source_ref or {}).get('content_origin', 'native')}
+                    for label, end in labels_and_ends], 'finished', [], 1, 1))
+        # Before session-wide numbering, two runs could both say E1 for different text.
+        await answer(1, [('E1', 5), ('E2', 6)])
+        await answer(2, [('E1', 7), ('E2', 6)])
+        history, earlier = await runs.load_safe_context(scope)
+        assert sum(m['role'] == 'assistant' for m in history) == 2
+        assert set(earlier) == {'E2'} and earlier['E2']['range'] == {'start': 0, 'end': 6}
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
 async def test_concurrent_quota_reservation_idempotent_settlement_and_unknown(pg_session):
     scope, factory = await _setup(pg_session, quota=100)
     run = await ResearchRuns(factory).begin_run(scope=scope,

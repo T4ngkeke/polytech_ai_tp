@@ -132,6 +132,20 @@ ask a follow-up, reload, say thanks. What it found and what changed:
   shielded task.
 - Query embedding on the CPU took 0.25 s with spikes of 8-11 s; on the GPU
   0.03 s with the same vectors.
+- Switching to another browser tab while waiting lost the answer (the
+  stream library closes hidden streams and resends them). Fixed in the chat
+  and by letting a duplicate request wait for its run.
+- Student questions (replayed): a vague "我不太理解automate" read the chapter
+  page by page until the 20-call limit; a follow-up answered from the
+  history cited earlier IDs, which session numbering had made invalid, and
+  the whole answer was replaced by a failure message. Now an answer may cite
+  earlier answers' IDs (validated like new ones), and the prompt asks for
+  an overview from two to four pages on a broad question. Replay on 27B:
+  vague question 44 s with 8 citations (was 69 s, call limit); follow-up
+  80 s with 7 citations on the right pages; a one-sentence summary 3 s,
+  citing two earlier IDs. Benchmark W03/W07/W12 x 2: 6.3 tool calls per
+  question (was 9.3), no call limit reached, about the same answer points.
+- Each tool call is now logged (backend.app.agent.runner, INFO).
 
 ## Running the benchmark
 

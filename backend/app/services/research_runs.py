@@ -417,6 +417,17 @@ class ResearchRuns:
         return 1 + max((int(label[1:]) for label in labels), default=0)
 
     async def load_safe_history(self, scope: ResearchScope, *, limit: int = 20) -> list[dict]:
+        return (await self.load_safe_context(scope, limit=limit))[0]
+
+    async def load_safe_context(self, scope: ResearchScope, *,
+                                limit: int = 20) -> tuple[list[dict], dict[str, dict]]:
+        """The safe chat history, and the citations of the answers in it by label.
+
+        A session numbers evidence across its runs, so a label in an earlier
+        answer names one stored source; a new answer may cite it again, and
+        finish_run validates it like a new one. A label used for two different
+        sources (sessions from before the numbering) is ambiguous and left out.
+        """
         async with self.session_factory() as db:
             await _live_session(db, scope.user_id, scope.session_id)
             messages = list((await db.scalars(select(Message).where(
@@ -447,4 +458,21 @@ class ResearchRuns:
                 # every cited source is still available.
                 elif message.id in runs and message.id not in unavailable:
                     history.append({'role': 'assistant', 'content': message.content})
-            return history
+            sources = {}
+            for c in current:
+                if c.message_id in unavailable:
+                    continue
+                sources.setdefault(c.label, []).append({
+                    'evidence_id': c.label, 'document_id': str(c.document_id),
+                    'revision_id': str(c.revision_id), 'page_id': str(c.page_id),
+                    'pdf_page_no': c.pdf_page_no,
+                    'block_id': str(c.block_id) if c.block_id else None,
+                    'range': {'start': c.range_start, 'end': c.range_end}
+                    if c.range_start is not None else None,
+                    'asset_id': str(c.asset_id) if c.asset_id else None,
+                    'origin': c.origin})
+            # A label re-cited for the same source stays; one used for two
+            # different sources is ambiguous.
+            earlier = {label: found[0] for label, found in sources.items()
+                       if all(x == found[0] for x in found)}
+            return history, earlier

@@ -88,7 +88,8 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  client_request_id: str, model, model_name: str,
                                  token_alpha: float, token_beta: float,
                                  history: list[dict] | None = None,
-                                 teaching_rules: str = '', research_note: str = '', embed_fn=None,
+                                 teaching_rules: str = '', research_note: str = '',
+                                 earlier_citations: dict[str, dict] | None = None, embed_fn=None,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
                                  tool_factory=None, on_phase=None, vision_fn=None,
@@ -170,7 +171,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
         max_input_tokens=limits.input_tokens, on_phase=on_phase)
     try:
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
-                                  research_note=research_note)
+                                  research_note=research_note, earlier_citations=earlier_citations)
         await runs.finish_run(started.run_id, result)
     except asyncio.CancelledError:
         # Both steps in one shielded task: a second cancellation (the server
