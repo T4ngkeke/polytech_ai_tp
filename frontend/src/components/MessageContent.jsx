@@ -84,7 +84,7 @@ function PlainCodeBlock({ value }) {
 
 // The components map depends on `streaming`, so it is built per-message via
 // useMemo (the inner block components are module-level + stable).
-function makeComponents(streaming) {
+function makeComponents(streaming, onCite) {
   return {
     // CodeBlock renders its own block wrapper, so collapse the default <pre>.
     pre: ({ children }) => <>{children}</>,
@@ -99,14 +99,19 @@ function makeComponents(streaming) {
         ? <PlainCodeBlock value={text} />
         : <CodeBlock language={match ? match[1] : 'text'} value={text} />;
     },
-    a: ({ children, href }) => (
-      <a href={href} target="_blank" rel="noreferrer" className="text-cyan underline">{children}</a>
-    ),
+    a: ({ children, href }) => (onCite && href?.startsWith('#cite-')
+      // An [E#] marker (lib/citations.js linkCitations): open the cited passage.
+      ? <button type="button" onClick={() => onCite(href.slice(6))}
+          title={`Show source ${href.slice(6)}`}
+          className="rounded px-0.5 text-cyan underline decoration-dotted underline-offset-2 hover:bg-cyan-muted/60">
+          {children}
+        </button>
+      : <a href={href} target="_blank" rel="noreferrer" className="text-cyan underline">{children}</a>),
   };
 }
 
-function MessageContent({ content, streaming = false }) {
-  const components = useMemo(() => makeComponents(streaming), [streaming]);
+function MessageContent({ content, streaming = false, onCite = null }) {
+  const components = useMemo(() => makeComponents(streaming, onCite), [streaming, onCite]);
   return (
     <div className="prose-chat space-y-2 break-words">
       <ReactMarkdown

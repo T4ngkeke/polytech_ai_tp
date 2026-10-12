@@ -46,3 +46,33 @@ export function sourceHref({ documentId, revisionId, sessionId, page }) {
   if (revisionId) query.set('revision_id', revisionId);
   return `/source/${encodeURIComponent(documentId)}?${query}`;
 }
+
+/** One page of a revision as an image (for the highlight view), as a blob URL. */
+export function usePageImage(documentId, revisionId, page, sessionId) {
+  const [imageUrl, setImageUrl] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    if (!documentId || !revisionId || !sessionId || !page) return;
+    const controller = new AbortController();
+    let objectUrl;
+    setImageUrl(null);
+    setError(null);
+    const url = `/api/documents/${encodeURIComponent(documentId)}/revisions/${encodeURIComponent(revisionId)}`
+      + `/pages/${encodeURIComponent(page)}/image?session_id=${encodeURIComponent(sessionId)}`;
+    api.raw(url, { signal: controller.signal }).then(async (res) => {
+      if (!res.ok) throw await responseError(res);
+      const blob = await res.blob();
+      if (controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(blob);
+      setImageUrl(objectUrl);
+    }).catch((err) => {
+      if (!controller.signal.aborted) setError(err.status === 404
+        ? 'This page is no longer available to you.' : 'Could not show the page.');
+    });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [documentId, revisionId, page, sessionId]);
+  return { imageUrl, error };
+}

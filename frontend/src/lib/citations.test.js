@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { distinctImages, groupCitations } from './citations.js';
+import { distinctImages, groupCitations, linkCitations, pageHighlights } from './citations.js';
 
 const cite = (label, page, extra = {}) => ({
   citation_id: `c-${label}`, label, document_id: 'doc-a', revision_id: 'rev-1',
@@ -49,4 +49,28 @@ test('an image cited twice gets one preview card', () => {
   const cards = distinctImages([cite('E1', 2, image), cite('E2', 2, image),
     cite('E3', 3, { ...image, asset_id: 'img-2' }), cite('E4', 3)]);
   assert.deepEqual(cards.map((c) => c.label), ['E1', 'E3']);
+});
+
+
+test('citation markers become links, groups too, code is left alone', () => {
+  const labels = new Set(['E3', 'E5', 'E11']);
+  assert.equal(linkCitations('Voir [E5].', labels), 'Voir \\[[E5](#cite-E5)\\].');
+  assert.equal(linkCitations('Ici [E3, E11]', labels), 'Ici \\[[E3](#cite-E3), [E11](#cite-E11)\\]');
+  assert.equal(linkCitations('Inconnu [E9] et [E3, E9]', labels), 'Inconnu [E9] et [E3, E9]');
+  assert.equal(linkCitations('`a[E5]` puis\n```\nx = [E5]\n```\n[E5]', labels),
+    '`a[E5]` puis\n```\nx = [E5]\n```\n\\[[E5](#cite-E5)\\]');
+});
+
+test('a page shows its cited regions; two labels on one region share a box', () => {
+  const cites = [
+    { label: 'E2', pdf_page_no: 22, box: [0.1, 0.2, 0.9, 0.5] },
+    { label: 'E4', pdf_page_no: 22, box: [0.1, 0.2, 0.9, 0.5] },
+    { label: 'E7', pdf_page_no: 22, box: [0.1, 0.6, 0.4, 0.8] },
+    { label: 'E8', pdf_page_no: 23, box: [0.1, 0.1, 0.2, 0.2] },
+    { label: 'E9', pdf_page_no: 22, box: null },
+  ];
+  assert.deepEqual(pageHighlights(cites, 22), [
+    { box: [0.1, 0.2, 0.9, 0.5], labels: ['E2', 'E4'] },
+    { box: [0.1, 0.6, 0.4, 0.8], labels: ['E7'] }]);
+  assert.deepEqual(pageHighlights(cites, 22, 'E7'), [{ box: [0.1, 0.6, 0.4, 0.8], labels: ['E7'] }]);
 });

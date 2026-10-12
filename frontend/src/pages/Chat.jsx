@@ -10,7 +10,7 @@
  * Join class flow is a modal triggered from the sidebar.
  */
 
-import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
@@ -18,7 +18,7 @@ import useAuthStore from '../store/authStore';
 import api from '../lib/api';
 import { createMessageId } from '../lib/messageId';
 import { interpretStreamEvent } from '../lib/streamEvents';
-import { distinctImages, groupCitations } from '../lib/citations';
+import { distinctImages, groupCitations, linkCitations } from '../lib/citations';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import { PdfPreviewModal } from '../components/PdfPreview';
 // Lazy: the markdown/highlight/KaTeX stack is heavy and only needed once the
@@ -651,8 +651,26 @@ const PHASE_LABELS = { thinking: 'Thinking…', finding: 'Searching course mater
   reading: 'Reading source pages…', checking_image: 'Checking the image…',
   checking_sources: 'Checking citations…' };
 
+/** What the preview window needs to show citation c's page (and its file's other cited pages). */
+function sourceOf(citations, c, sessionId, focusLabel = null) {
+  const sameFile = citations.filter((x) => x.document_id === c.document_id
+    && (x.revision_id || null) === (c.revision_id || null));
+  return { documentId: c.document_id, revisionId: c.revision_id || null,
+    filename: c.filename || 'Source', sessionId, page: c.pdf_page_no ?? c.page_no,
+    pages: groupCitations(sameFile)[0]?.pages || [], citations: sameFile, focusLabel };
+}
+
 const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource }) {
   const isUser = message.sender === 'user';
+  const citations = message.citations;
+  // [E#] in the text: open that passage alone, highlighted on its page.
+  const onCite = useCallback((label) => {
+    const c = citations?.find((x) => x.label === label);
+    if (c && c.available && sessionId) onOpenSource(sourceOf(citations, c, sessionId, label));
+  }, [citations, sessionId, onOpenSource]);
+  const content = useMemo(() => (isUser || !citations?.length ? message.content
+    : linkCitations(message.content, new Set(citations.filter((c) => c.available && c.label).map((c) => c.label)))),
+  [isUser, message.content, citations]);
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
       {!isUser && (
@@ -670,7 +688,7 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, phase, c
               ? <span className="whitespace-pre-wrap">{message.content}</span>
               : (
                 <Suspense fallback={<span className="whitespace-pre-wrap">{message.content}</span>}>
-                  <MessageContent content={message.content} streaming={streaming} />
+                  <MessageContent content={content} streaming={streaming} onCite={onCite} />
                 </Suspense>
               ))
           : <span className="inline-flex items-center gap-1">
@@ -685,10 +703,7 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, phase, c
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             {distinctImages(message.citations).slice(0, 3).map((c) => (
               <VisualEvidenceCard key={c.asset_id} citation={c} sessionId={sessionId}
-                onOpen={() => onOpenSource({ documentId: c.document_id, revisionId: c.revision_id,
-                  filename: c.filename || 'Source', sessionId, page: c.pdf_page_no,
-                  pages: groupCitations(message.citations).find((f) => f.documentId === c.document_id
-                    && f.revisionId === (c.revision_id || null))?.pages || [] })} />
+                onOpen={() => onOpenSource(sourceOf(message.citations, c, sessionId))} />
             ))}
           </div>
         )}
@@ -751,8 +766,9 @@ function CitationList({ citations, sessionId, onOpenSource }) {
                 title="Source no longer available">p.{page.pageNo} · unavailable</span>;
             }
             return <button key={page.pageNo} type="button"
-              onClick={() => onOpenSource({ documentId: file.documentId, revisionId: file.revisionId,
-                filename: file.filename, sessionId, page: page.pageNo, pages: file.pages })}
+              onClick={() => onOpenSource({ ...sourceOf(citations, citations.find((c) =>
+                c.document_id === file.documentId && (c.revision_id || null) === file.revisionId), sessionId),
+                page: page.pageNo })}
               title={`Open ${file.filename} at PDF page ${page.pageNo}${labels}`}
               className={`${chip} bg-cyan-muted/60 hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}>
               p.{page.pageNo}{page.teacherRevised && <span title="Teacher edited this source"> ✎</span>}
