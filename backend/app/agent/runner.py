@@ -78,6 +78,8 @@ COURSE_TOOLS = [{'type': 'function', 'function': {'name': name, 'description': D
                                                   'parameters': VIEW_SCHEMAS[name].model_json_schema()}}
                 for name in sorted(VIEW_SCHEMAS)]
 
+CATALOGUE_NOTE = ('Course files of this lab (handle, file, pages). When the student names a file '
+                  'and a page, read that page directly, e.g. d2.p23; otherwise search first.')
 FINISH_TURN = ('Research is over: tools are no longer available. Write your final answer to the '
                'student now, in plain text, citing only evidence IDs already returned [E1]. '
                'Say which parts the evidence does not cover. Do not write any tool call.')
@@ -160,7 +162,12 @@ class ResearchRunner:
         trace: list[dict] = []
         start = self.clock()
         model_calls = 0
+        # The lab's files with their handles, so a question naming a course and
+        # a page needs no guess (the same text for every run of the lab, so the
+        # model server can reuse the cached prefix).
+        catalogue = await tools.catalogue()
         system = (system_prompt(self.max_tool_calls, tools.max_visual_calls)
+                  + (('\n' + CATALOGUE_NOTE + '\n' + catalogue) if catalogue else '')
                   + '\n' + teaching_rules + '\n' + research_note)
         # Earlier answers are real turns and keep their [E#] IDs, so the model
         # sees how to cite. The session numbers evidence across runs
@@ -296,6 +303,9 @@ class ResearchRunner:
                              + (', '.join(sorted(permitted, key=lambda x: int(x[1:]))) or '(none)')
                              + '. Never write handles. Correct the answer without inventing sources.'})
             trace.append({'event': 'citation_correction'})
+            # Its IDs were all valid, only some references were malformed: an
+            # unusable correction keeps it rather than lose the whole answer.
+            fallback = answer if not cited - permitted.keys() else ''
             try:
                 answer = (await call('citation_correction', False)).content.strip()
             except (ResearchQuotaExceeded, ResearchRunStopped):
@@ -303,6 +313,8 @@ class ResearchRunner:
             except Exception as exc:
                 trace.append({'event': 'model_error', 'type': type(exc).__name__})
                 answer = ''
+            if not answer or _has_tool_markup(answer):
+                answer = fallback
             cited = cited_ids(answer)
             if cited - permitted.keys():
                 answer, stop = '', 'invalid_evidence_ids'

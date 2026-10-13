@@ -76,6 +76,27 @@ async def test_answer_is_written_in_the_research_conversation():
     assert [m['role'] for m in last] == ['system', 'user', 'assistant', 'tool', 'assistant', 'tool']
     assert 'd1.p9.b1 text: Produit cartésien' in last[3]['content']
     assert model.with_tools == [True, True, True]
+    # The lab's files with their handles, so a named page needs no guess.
+    assert 'Course files of this lab' in last[0]['content'] and '\nd1 Algebre.pdf (2 pages)\n' in last[0]['content']
+
+
+def test_the_catalogue_lists_files_in_handle_order_and_stops_at_the_limit():
+    from backend.app.agent.course_tools import ToolView
+    index = {f'id{n}': {'filename': f'Cours{n:02}.pdf', 'pages': [
+        {'page_id': f'p{n}-{k}', 'pdf_page_no': k} for k in range(1, n + 2)]} for n in range(3)}
+    view = ToolView(index)
+    assert view.catalogue() == 'd1 Cours00.pdf (1 pages)\nd2 Cours01.pdf (2 pages)\nd3 Cours02.pdf (3 pages)'
+    assert view.catalogue(limit=2).endswith('… and 1 more files; search finds them.')
+
+
+def test_sampling_is_greedy_unless_given():
+    from backend.app.agent.model import QWEN_NON_THINKING, ResearchModel
+    from backend.app.services.model_routing import Endpoint
+    endpoint = Endpoint('http://x/v1', 'k', 'm')
+    assert ResearchModel(endpoint).sampling == {'temperature': 0} and ResearchModel(endpoint).top_k is None
+    qwen = ResearchModel(endpoint, sampling=QWEN_NON_THINKING)
+    assert qwen.sampling == {'temperature': 0.7, 'top_p': 0.8} and qwen.top_k == 20
+    assert QWEN_NON_THINKING['top_k'] == 20  # the shared setting is not changed
 
 
 @pytest.mark.asyncio
@@ -150,6 +171,16 @@ async def test_a_malformed_reference_left_after_correction_keeps_the_answer():
     model = Script([('read', {'page': 'd1.p10'})], 'Réponse [d1.p10] [E1].', 'Réponse [d1.p10] [E1].')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     assert result.stop_reason == 'finished' and result.answer == 'Réponse [d1.p10] [E1].'
+
+
+@pytest.mark.asyncio
+async def test_an_unusable_correction_keeps_an_answer_whose_ids_were_valid():
+    # Seen with Flash-Next (W17): the correction turn has no tools, the model
+    # wrote a tool call, and a good answer became the failure text.
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1], voir [d1.p10].', '<tool_call>read</tool_call>')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.answer == 'Vin3 [E1], voir [d1.p10].' and result.stop_reason == 'finished'
+    assert [c['evidence_id'] for c in result.citations] == ['E1']
 
 
 @pytest.mark.asyncio

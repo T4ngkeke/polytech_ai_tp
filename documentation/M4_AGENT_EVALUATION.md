@@ -176,6 +176,41 @@ pages 14/18 (10/18 in the 2026-10-13 baseline run), no partial answer; neither
 turn was needed. Calls use temperature 0, which Qwen advises against (it can
 repeat endlessly); changing it would change every benchmark and is not done.
 
+## File list, sampling and model (2026-10-13)
+
+Before a search the model did not know which handle is which file, and it
+sometimes guessed (d1.p23 for "page 23 of the theory course" read another
+course). The system message now lists the lab's files with their handles and
+page counts (at most 40 lines; the same text for every run of a lab, so the
+prefix stays cached).
+
+Calls use greedy decoding (temperature 0). Qwen advises temperature 0.7,
+top_p 0.8, top_k 20 for non-thinking mode, because greedy decoding can repeat
+endlessly (seen once on 27B: one sentence for 830 tokens). The evaluator can
+now run both (`M4_SAMPLING=greedy|qwen`); the product still uses greedy.
+
+Benchmark v4, 17 questions x 2 rounds, relaxed_slow, 3 in flight, all with the
+file list (`m4-agent/2026-10-13-cmp-*`; pages computed by the scorer, not a
+content review; times are indicative: Flash-Next also served the v6 beta):
+
+| Model, sampling | Pages | Complete questions | Citation precision | Partial | Median / p95 s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 27B, no file list (baseline of the same day) | 74/106 (70%) | 11/34 | 69% | 0 | 54 / 119 |
+| 27B, greedy | 77/106 (73%) | 13/34 | 80% | 0 | 61 / 124 |
+| 27B, Qwen sampling | 83/106 (78%) | 16/34 | 76% | 0 | 72 / 146 |
+| Flash-Next, greedy | 91/106 (86%) | 23/34 | 71% | 1 | 79 / 190 |
+| Flash-Next, Qwen sampling | 94/106 (89%) | 22/34 | 68% | 0 | 80 / 164 |
+
+No answer repeated text in any of the 152 trials. Flash-Next reads more
+(about 10.5 tool calls per question against 8.9 on 27B) and finds more pages.
+The one partial answer (Flash-Next greedy, W17) was a good answer with a
+malformed reference: the correction turn has no tools, the model wrote a
+tool call, and the whole answer was replaced. Since then an unusable
+correction keeps an answer whose IDs were all valid. The sampling difference
+is within one run's spread (one question can move by a facet between rounds).
+On 2026-10-13 the user moved every environment (v6 beta, dev, e2e) to
+Flash-Next.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable

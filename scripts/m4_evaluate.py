@@ -16,6 +16,7 @@ Environment:
   M4_MODEL_NAME    served model name (default: ornith)
   M4_MODEL_LABEL   model name written to the manifest
   M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
+  M4_SAMPLING      greedy (temperature 0, default) | qwen (Qwen's non-thinking advice)
   M4_BUDGET        standard | relaxed | relaxed_slow (see BUDGETS)
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
   M4_QUESTIONS     comma-separated question IDs to keep
@@ -200,7 +201,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker
     from backend.app.agent.course_tools import CourseTools
-    from backend.app.agent.model import ResearchModel
+    from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.agent.result import ResearchResult
     from backend.app.agent.runner import ResearchRunner
     from backend.app.agent.tools import PerCallTools, create_scope
@@ -224,7 +225,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     call_seconds = limits['call_seconds']
     upstream = os.getenv('M4_UPSTREAM', 'http://127.0.0.1:18001/v1')
     model_name = os.getenv('M4_MODEL_NAME', 'ornith')
-    model = ResearchModel(Endpoint(upstream, 'local', model_name))
+    sampling_name = os.getenv('M4_SAMPLING', 'greedy')
+    sampling = {'greedy': GREEDY, 'qwen': QWEN_NON_THINKING}[sampling_name]
+    model = ResearchModel(Endpoint(upstream, 'local', model_name), sampling=sampling)
     # One model for research and vision unless M4_VISION_URL names another.
     vision_url = os.getenv('M4_VISION_URL', upstream)
     tool_config = {'storage_root': str(storage_root), 'embedding_url': embedding_url,
@@ -353,7 +356,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'model': os.getenv('M4_MODEL_LABEL', 'Ornith-1.5-35B-A3B-NVFP4'), 'upstream': upstream,
             'vision_model': os.getenv('M4_VISION_LABEL', os.getenv('M4_MODEL_LABEL', 'Ornith-1.5-35B-A3B-NVFP4')),
             'vision_url': vision_url,
-            'thinking_enabled': False, 'temperature': 0, 'budget': budget, 'limits': limits,
+            'thinking_enabled': False, 'sampling': {'name': sampling_name, **sampling},
+            'budget': budget, 'limits': limits,
             'concurrency': concurrency, 'reranker': None,
             'index': 'frozen M3-C mineru-text/BGE-M3',
             'query_embedding': 'shared frozen cache plus common BGE-M3 service',

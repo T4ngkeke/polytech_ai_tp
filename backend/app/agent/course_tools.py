@@ -156,6 +156,7 @@ class ToolView:
         self.pages: dict[str, tuple[str, str]] = {}  # d1.p20 -> (document_id, page_id)
         self.page_handles: dict[str, str] = {}       # page_id -> d1.p20
         self.neighbours: dict[str, tuple[str | None, str | None, int, int]] = {}
+        self.page_counts: dict[str, int] = {}        # d1 -> pages
         for number, (document_id, entry) in enumerate(
                 sorted(index.items(), key=lambda kv: (kv[1]['filename'], kv[0])), 1):
             doc = f'd{number}'
@@ -171,6 +172,7 @@ class ToolView:
                 self.neighbours[handle] = (handles[position - 1] if position else None,
                                            handles[position + 1] if position + 1 < len(handles) else None,
                                            position + 1, len(handles))
+            self.page_counts[doc] = len(handles)
         self.doc_handles = {v: k for k, v in self.documents.items()}
         self.blocks: dict[str, tuple[str, str]] = {}   # b3 -> (document_id, block_id)
         self.block_handles: dict[str, str] = {}
@@ -178,6 +180,14 @@ class ToolView:
         self.images: dict[str, tuple[str, str | None]] = {}  # a2 -> (asset_id, page_id for a preview)
         self.image_handles: dict[tuple[str, str | None], str] = {}
         self.cursors: dict[str, tuple[str, dict]] = {}  # c1 -> (tool, raw arguments with cursor)
+
+    def catalogue(self, limit: int = 40) -> str:
+        """The run's documents for the prompt, one line each: 'd1 file.pdf (27 pages)'."""
+        lines = [f'{doc} {self.filenames[document_id]} ({self.page_counts[doc]} pages)'
+                 for doc, document_id in list(self.documents.items())[:limit]]
+        if len(self.documents) > limit:
+            lines.append(f'… and {len(self.documents) - limit} more files; search finds them.')
+        return '\n'.join(lines)
 
     # -- handles -------------------------------------------------------------
 
@@ -541,6 +551,12 @@ class CourseTools:
         if self.view is None:
             self.view = ToolView(await self.tools.page_index())
         return len(self.view.documents)
+
+    async def catalogue(self) -> str:
+        """The course documents of this run with their handles (ToolView.catalogue)."""
+        if self.view is None:
+            self.view = ToolView(await self.tools.page_index())
+        return self.view.catalogue()
 
     async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
         """One model call with handles: translate, execute, render compact text."""
