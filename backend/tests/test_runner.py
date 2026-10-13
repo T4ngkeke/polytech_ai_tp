@@ -116,6 +116,29 @@ async def test_unknown_evidence_id_twice_gives_the_pages_read():
     assert result.unresolved == ['research_incomplete']
 
 
+def test_malformed_references_are_found_outside_code():
+    from backend.app.agent.result import malformed_refs
+    text = 'Voir [E8.p14.b1] et [d6.p24.b14], puis [E1, E2] et [E3]. `t[d1]` ```\nx[E2.b]\n```'
+    assert malformed_refs(text) == ['[E8.p14.b1]', '[d6.p24.b14]']
+    assert malformed_refs('Rien [E1]; une liste [Exemple] ou [dessin].') == []
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_reference_gets_the_correction_turn():
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1.p10.b2].', 'Réponse [E1].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    correction = model.seen[-1][-1]['content']
+    assert '[E1.p10.b2]' in correction and 'E1' in correction and model.with_tools[-1] is False
+    assert result.answer == 'Réponse [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_reference_left_after_correction_keeps_the_answer():
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [d1.p10] [E1].', 'Réponse [d1.p10] [E1].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.stop_reason == 'finished' and result.answer == 'Réponse [d1.p10] [E1].'
+
+
 @pytest.mark.asyncio
 async def test_bad_arguments_return_an_error_to_the_model():
     model = Script([('read', {'page': 'zz'}), ('nope', {})], 'Réponse générale.')

@@ -52,7 +52,7 @@ class Evidence:
 class EvidenceStore:
     def __init__(self, snapshot_revisions: Mapping[UUID, UUID], *, first_number: int = 1):
         # first_number: a chat session numbers evidence across its runs, so an
-        # ID copied from an earlier answer is never valid in a later run.
+        # ID in an earlier answer never names a different source in a later run.
         self.snapshot_revisions = snapshot_revisions
         self.first_number = first_number
         self._items: dict[str, Evidence] = {}

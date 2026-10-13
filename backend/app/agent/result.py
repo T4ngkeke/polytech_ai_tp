@@ -15,6 +15,18 @@ def cited_ids(text: str) -> set[str]:
     return {label for group in CITATION_RE.findall(text) for label in LABEL_RE.findall(group)}
 
 
+# A bracket that starts like an evidence ID or a handle: [E8.p14.b1], [d6.p24].
+_REFERENCE_RE = re.compile(r'\[[Ed]\s?\d[^\[\]\n]{0,40}\]')
+_CODE_RE = re.compile(r'```[\s\S]*?```|`[^`\n]*`')
+
+
+def malformed_refs(text: str) -> list[str]:
+    """References outside code that are not valid [E#] citations, such as a
+    handle or an ID with extra parts; the student could not open them."""
+    return [m.group(0) for m in _REFERENCE_RE.finditer(_CODE_RE.sub('', text))
+            if not CITATION_RE.fullmatch(m.group(0))]
+
+
 class ResearchQuotaExceeded(ValueError):
     """The student's daily token quota does not cover the next model call."""
 

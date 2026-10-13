@@ -234,6 +234,26 @@ async def test_failed_visual_calls_do_not_use_the_visual_budget():
 
 
 @pytest.mark.asyncio
+async def test_a_visual_call_ends_with_the_research_time():
+    import asyncio
+    import time
+    tools = ViewFixture()
+    real = tools.execute
+    async def execute(name, arguments):
+        if name == 'view_image':
+            await asyncio.sleep(30)
+        return await real(name, arguments)
+    tools.execute = execute
+    course = CourseTools(tools, research_seconds=0.3)
+    await course.call('read', {'page': 'd1.p9'})
+    tick = time.monotonic()
+    text, ok = await course.call('view_image', {'image': 'a1', 'question': 'Tout ?'})
+    # The rest of the run is left for the answer.
+    assert not ok and text.startswith('error: vision_timeout') and 'research time is over' in text
+    assert time.monotonic() - tick < 1 and course.visual_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_page_image_handle_supplies_page_for_view_image():
     tools = ViewFixture()
     course = CourseTools(tools)

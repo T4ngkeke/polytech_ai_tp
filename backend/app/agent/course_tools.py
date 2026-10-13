@@ -22,6 +22,7 @@ Handles:
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from typing import Literal
@@ -573,7 +574,18 @@ class CourseTools:
             result = self._limit_error(name, tick)
             if result is None:
                 row['dispatched'] = True
-                result = await self.tools.execute(name, arguments)
+                if name == 'view_image':
+                    # A vision call may take the whole call time. It must end
+                    # with the research time: the rest of the run is for the answer.
+                    left = self.started + self.research_seconds - time.monotonic()
+                    try:
+                        result = await asyncio.wait_for(self.tools.execute(name, arguments), max(left, 0.1))
+                    except TimeoutError:
+                        result = {'ok': False, 'error': {'code': 'vision_timeout'},
+                                  'hint': 'The research time is over; answer with the evidence '
+                                          'already returned.'}
+                else:
+                    result = await self.tools.execute(name, arguments)
                 # Only an observation uses the visual budget; a failed call
                 # still takes a tool slot.
                 if name == 'view_image' and result.get('ok'):

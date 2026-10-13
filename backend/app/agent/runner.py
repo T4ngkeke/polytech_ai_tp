@@ -27,7 +27,7 @@ from typing import Callable
 from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.result import (
-    ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, cited_ids,
+    ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, cited_ids, malformed_refs,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,8 +149,8 @@ class ResearchRunner:
                   + '\n' + teaching_rules + '\n' + research_note)
         # Earlier answers are real turns and keep their [E#] IDs, so the model
         # sees how to cite. The session numbers evidence across runs
-        # (CourseTools first_evidence): an old ID is unknown in this run and
-        # gets the one correction turn.
+        # (CourseTools first_evidence), so an old ID still names its own
+        # source and may be cited again (earlier_citations).
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
         messages = [{'role': 'system', 'content': system}, *turns,
                     {'role': 'user', 'content': question}]
@@ -239,13 +239,18 @@ class ResearchRunner:
         permitted = {e.id: e.citation() for e in tools.evidence.all()}
         permitted.update({k: v for k, v in (earlier_citations or {}).items() if k not in permitted})
         cited = cited_ids(answer)
-        if answer and cited - permitted.keys():
-            # One turn to correct unknown evidence IDs.
+        malformed = malformed_refs(answer)
+        if answer and (cited - permitted.keys() or malformed):
+            # One turn to correct unknown IDs and references that are not IDs.
+            # A malformed reference left after it stays in the text.
             messages.append({'role': 'assistant', 'content': answer})
             messages.append({'role': 'user', 'content':
-                             'Your answer cites unknown evidence IDs. Use only these existing IDs: '
+                             ('Your answer writes references that are not evidence IDs: '
+                              + ', '.join(malformed[:5]) + '. ' if malformed else '')
+                             + ('Your answer cites unknown evidence IDs. ' if cited - permitted.keys() else '')
+                             + 'Cite exactly as [E3], using only these existing IDs: '
                              + (', '.join(sorted(permitted, key=lambda x: int(x[1:]))) or '(none)')
-                             + '. Correct the answer without inventing sources.'})
+                             + '. Never write handles. Correct the answer without inventing sources.'})
             trace.append({'event': 'citation_correction'})
             try:
                 answer = (await call('citation_correction', False)).content.strip()

@@ -391,15 +391,19 @@ class ResearchTools:
         except (ResearchQuotaExceeded, ResearchRunStopped, DocumentNotFound):
             raise
         except VisionError as exc:
-            # The model is told what to change; the detail stays in the trace.
-            raise reader.ReaderError(exc.code, VISION_HINTS.get(exc.code, exc.detail)) from None
-        except Exception as exc:
-            raise reader.ReaderError('vision_unreachable', type(exc).__name__) from None
+            # The model is told what to do next, not the technical detail.
+            raise reader.ReaderError(exc.code, VISION_HINTS[exc.code]) from None
+        except Exception:
+            raise reader.ReaderError('vision_unreachable', VISION_HINTS['vision_unreachable']) from None
 
 
 VISION_HINTS = {
     'vision_timeout': 'the vision model took too long; ask a narrower question about one part of the image',
     'vision_bad_output': 'the vision reply was unusable; ask a shorter, narrower question',
+    # Failed calls do not use the visual budget, so a retry would only spend
+    # tool calls and time.
+    'vision_unreachable': 'the vision model is not available now; do not call view_image again, '
+                          'answer from the text evidence',
 }
 
 

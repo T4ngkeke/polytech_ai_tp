@@ -249,6 +249,9 @@ async def test_live_visual_page_is_scoped_and_failures_are_not_evidence(pg_sessi
         other = await ResearchTools(db, scope, vision_fn=broken, storage_root=tmp_path / 'storage'
             ).execute('view_image', {'asset_id': str(page.preview_asset_id), 'question': 'What?'})
         assert other['error']['code'] == 'vision_unreachable'
+        # No retry: a failed call does not use the visual budget, only time.
+        assert 'do not call view_image again' in other['error']['message']
+        assert 'socket' not in other['error']['message']
         # A missing image file is not reported as a model problem.
         missing = await ResearchTools(db, scope, vision_fn=vision, storage_root=tmp_path / 'elsewhere'
             ).execute('view_image', {'asset_id': str(page.preview_asset_id), 'question': 'What?'})
