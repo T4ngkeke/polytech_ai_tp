@@ -147,6 +147,35 @@ ask a follow-up, reload, say thanks. What it found and what changed:
   question (was 9.3), no call limit reached, about the same answer points.
 - Each tool call is now logged (backend.app.agent.runner, INFO).
 
+## Replies without research (2026-10-13)
+
+In the end-to-end chat, Qwen3.8-27B sometimes ended a run without any tool
+call: a promise ("Laissez-moi la lire"), a sentence repeated for 830 tokens,
+or a made-up line ("[assistant stopped: content filter false positive]").
+Asked to summarise a page, it also wrote the summary from memory with
+invented [E#] IDs; the correction turn after the loop has no tools, so the
+answer became an apology or the failure text. Replayed on the e2e stack
+(4 conversations of 4 questions), 2 of 4 page-summary answers failed this
+way, and one read page 23 of another course: the model guessed that d1 was
+the course asked about (handles are not explained before a search; not
+changed).
+
+The runner now adds two turns, each at most once per run:
+
+- A reply that cites IDs nothing returned, while the tools are still open,
+  is sent back with "read the pages you need, then answer"; the correction
+  without tools stays for the end of the research.
+- A reply with no tool call in the run and no citation gets a check: the
+  model reads or cites now, or answers DONE and the reply is kept. A
+  greeting or a thanks costs one short extra call (5-7 s in all on 27B).
+
+Replay after the change (4 conversations, a thanks added): 16 of 16 course
+answers cite pages, the page-23 summaries read page 23, and no answer
+mentions the check. Benchmark W03/W07/W12 x 2 (`m4-agent/2026-10-13-answer-check-27b`):
+pages 14/18 (10/18 in the 2026-10-13 baseline run), no partial answer; neither
+turn was needed. Calls use temperature 0, which Qwen advises against (it can
+repeat endlessly); changing it would change every benchmark and is not done.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable

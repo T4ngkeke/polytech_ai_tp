@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Callable
@@ -84,6 +85,20 @@ NO_DOCUMENTS_TURN = ('This lab has no course documents yet, so there is nothing 
                      'no tools are available. Answer briefly from general knowledge if the question '
                      'allows it, and say clearly that the teacher has not published course files for '
                      'this TP yet (students cannot add them). Cite nothing.')
+# Sent once when the model ends a run without any tool call and without a
+# citation: the reply may be a promise ("let me read page 23") or broken text
+# rather than an answer. A greeting or a clarification is kept with "DONE".
+CHECK_TURN = ('The student has not seen this reply yet. If it states or promises course content, '
+              'it needs [E#] citations: read with the tools now, or cite the IDs of earlier answers, '
+              'and write the reply again for the student without mentioning this check. If it '
+              'needs no course material (a greeting, a question back), reply only with the word DONE.')
+DONE_RE = re.compile(r'\W*DONE\W*', re.IGNORECASE)
+# Sent once, while the tools are open, when an answer cites IDs that neither
+# this research nor an earlier answer returned.
+READ_TURN = ('Your answer cites {ids}, which no tool returned in this research. The student has '
+             'not seen it. Read the pages you need with the tools now, then write the answer for '
+             'the student, citing only IDs that tools return or that earlier answers in this '
+             'conversation cite. Do not mention the first version.')
 FINISH_RETRY = ('Tool calls cannot run any more and were ignored. Answer the student now in plain '
                 'text with the evidence already returned, and name what is still missing.')
 SHORTENED = '(result shortened for length; its evidence IDs stay valid)'
@@ -156,6 +171,8 @@ class ResearchRunner:
                     {'role': 'user', 'content': question}]
         tools_open, answer, stop = True, '', 'budget_exhausted'
         retried = False
+        unchecked = None  # the reply that got CHECK_TURN, until the model replies to it
+        read_turn_sent = False
 
         async def call(purpose, with_tools):
             nonlocal model_calls
@@ -202,16 +219,23 @@ class ResearchRunner:
                     withdraw('research_time')
                 elif self._tokens(messages) > self.max_input_tokens - self.final_reserve:
                     withdraw('input_room')
+            checking, checked_reply = unchecked is not None, unchecked
             try:
-                reply = await call('agent' if tools_open else 'answer', tools_open)
+                reply = await call('answer_check' if checking else 'agent' if tools_open else 'answer',
+                                   tools_open)
             except (ResearchQuotaExceeded, ResearchRunStopped):
                 raise
             except TimeoutError:
-                stop = 'deadline_exceeded'
+                answer, stop = (checked_reply, 'finished') if checking else (answer, 'deadline_exceeded')
                 break
             except Exception as exc:
-                stop = 'model_unavailable'
                 trace.append({'event': 'model_error', 'type': type(exc).__name__})
+                # A failed check keeps the reply it was about.
+                answer, stop = (checked_reply, 'finished') if checking else (answer, 'model_unavailable')
+                break
+            unchecked = None
+            if checking and not reply.tool_calls and DONE_RE.fullmatch(reply.content or ''):
+                answer, stop = checked_reply, 'finished'
                 break
             if tools_open and reply.tool_calls:
                 messages.append({'role': 'assistant', 'content': reply.content, 'tool_calls': [
@@ -228,6 +252,26 @@ class ResearchRunner:
                 retried = True
                 messages.append({'role': 'user', 'content': FINISH_RETRY})
                 trace.append({'event': 'tool_markup_after_withdrawal'})
+                continue
+            unknown = (cited_ids(reply.content) - {e.id for e in tools.evidence.all()}
+                       - set(earlier_citations or {}))
+            if tools_open and unknown and not read_turn_sent:
+                # IDs nothing returned: the model wrote from memory. While the
+                # tools are open it can still read; the correction turn after
+                # the loop has no tools.
+                read_turn_sent = True
+                messages.append({'role': 'assistant', 'content': reply.content})
+                messages.append({'role': 'user', 'content': READ_TURN.format(
+                    ids=', '.join(sorted(unknown, key=lambda x: int(x[1:]))))})
+                trace.append({'event': 'unknown_ids_read_turn'})
+                continue
+            if (tools_open and not checking and not read_turn_sent and not tools.trace
+                    and not cited_ids(reply.content) and not malformed_refs(reply.content)):
+                # No research and no citation: ask once whether this is really the answer.
+                unchecked = reply.content.strip()
+                messages.append({'role': 'assistant', 'content': reply.content})
+                messages.append({'role': 'user', 'content': CHECK_TURN})
+                trace.append({'event': 'answer_check'})
                 continue
             answer = reply.content.strip()
             # finished: the model stopped calling tools by itself.

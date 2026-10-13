@@ -56,7 +56,7 @@ def test_research_limits_from_admin_values():
 
 @pytest.mark.asyncio
 async def test_prompt_uses_the_course_tools_limits():
-    model = Script('Bonjour.')
+    model = Script('Bonjour.', 'DONE')
     await ResearchRunner(CourseTools(ViewFixture(), max_tool_calls=12, max_visual_calls=3),
                          model, max_tool_calls=12).run('Bonjour')
     assert 'at most twelve course tool calls and three visual calls.' in model.seen[0][0]['content']
@@ -100,15 +100,28 @@ async def test_tools_are_withdrawn_when_the_budget_is_spent():
 
 @pytest.mark.asyncio
 async def test_unknown_evidence_id_gets_one_correction():
-    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E7].', 'Réponse [E1].')
+    # First a turn with the tools to read; then one correction without them.
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E7].', 'Toujours [E7].', 'Réponse [E1].')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     assert 'E1' in model.seen[-1][-1]['content'] and model.with_tools[-1] is False
     assert result.answer == 'Réponse [E1].' and result.stop_reason == 'finished'
 
 
 @pytest.mark.asyncio
+async def test_an_answer_written_from_memory_is_sent_back_to_read():
+    # Seen with Qwen3.8-27B: a summary of page 23 with invented IDs, no tool call.
+    model = Script('Résumé de la page 10 [E5][E6].', [('read', {'page': 'd1.p10'})],
+                   'Vin3 = product(Vin1, Années) [E1].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Résume la page 10')
+    read_turn = model.seen[1][-1]['content']
+    assert read_turn.startswith('Your answer cites E5, E6, which no tool returned') and model.with_tools[1]
+    assert result.answer == 'Vin3 = product(Vin1, Années) [E1].' and result.stop_reason == 'finished'
+    assert [c['evidence_id'] for c in result.citations] == ['E1']
+
+
+@pytest.mark.asyncio
 async def test_unknown_evidence_id_twice_gives_the_pages_read():
-    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E7].', 'Toujours [E8].')
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E7].', 'Encore [E7].', 'Toujours [E8].')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     assert result.stop_reason == 'partial_invalid_evidence_ids' and '[E1]' in result.answer
     # The listed pages are real citations, so the student can open them.
@@ -152,8 +165,46 @@ async def test_bad_arguments_return_an_error_to_the_model():
 
 
 @pytest.mark.asyncio
+async def test_a_greeting_is_checked_once_and_kept():
+    model = Script('Bonjour ! Que cherches-tu ?', 'DONE')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Bonjour')
+    assert result.answer == 'Bonjour ! Que cherches-tu ?' and result.stop_reason == 'finished'
+    assert model.purposes == ['agent', 'answer_check'] and model.with_tools == [True, True]
+    assert model.seen[1][-1]['content'].startswith('The student has not seen this reply yet.')
+
+
+@pytest.mark.asyncio
+async def test_a_promise_without_a_tool_call_leads_to_research():
+    # Seen with Qwen3.8-27B: "Laissez-moi la lire..." and no tool call.
+    model = Script('Je dois vérifier la page 10. Laissez-moi la lire.',
+                   [('read', {'page': 'd1.p10'})], 'Vin3 = product(Vin1, Années) [E1].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Que dit la page 10 ?')
+    assert result.answer == 'Vin3 = product(Vin1, Années) [E1].'
+    assert [c['evidence_id'] for c in result.citations] == ['E1'] and result.tool_calls == 1
+    assert model.purposes == ['agent', 'answer_check', 'agent']
+
+
+@pytest.mark.asyncio
+async def test_a_new_reply_to_the_check_is_the_answer_and_is_not_checked_again():
+    model = Script('[assistant stopped]', 'Je ne peux pas répondre sans le cours.')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.answer == 'Je ne peux pas répondre sans le cours.' and len(model.purposes) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_failed_check_keeps_the_reply():
+    class Failing(Script):
+        async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+            if purpose == 'answer_check':
+                raise ConnectionError('down')
+            return await super().__call__(messages, max_output, timeout, tools=tools, purpose=purpose)
+    result = await ResearchRunner(CourseTools(ViewFixture()), Failing('Merci, à bientôt !')).run('Merci')
+    assert result.answer == 'Merci, à bientôt !' and result.stop_reason == 'finished'
+
+
+@pytest.mark.asyncio
 async def test_history_is_sent_as_turns_with_their_evidence_ids():
-    model = Script('Oui.')
+    model = Script('Oui.', 'DONE')
     history = [{'role': 'user', 'content': 'Produit cartésien ?'},
                {'role': 'assistant', 'content': 'Voir la page 10 [E1, E2].'}]
     await ResearchRunner(CourseTools(ViewFixture()), model).run('Et la page 11 ?', history=history)
@@ -197,7 +248,8 @@ async def test_a_later_run_continues_the_numbering_and_corrects_old_ids():
     result = await ResearchRunner(CourseTools(ViewFixture(), first_evidence=3), model).run(
         'Et la page 10 ?', history=[{'role': 'user', 'content': 'Q ?'},
                                     {'role': 'assistant', 'content': 'Voir [E1, E2].'}])
-    assert 'unknown evidence IDs' in model.seen[-1][-1]['content'] and 'E3' in model.seen[-1][-1]['content']
+    # E1 is not this run's, and no earlier citation was passed: back to the tools.
+    assert 'cites E1, which no tool returned' in model.seen[-1][-1]['content'] and model.with_tools[-1]
     assert result.answer == 'Encore [E3].' and [c['evidence_id'] for c in result.citations] == ['E3']
 
 

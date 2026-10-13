@@ -128,7 +128,7 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
             assert [m['role'] for m in model_messages[-1][1:]] == ['user', 'assistant', 'user']
             assert model_messages[-1][2]['content'] == 'Voir la définition [E1].'
             # New research continues the numbering after the cited E1; an ID
-            # nobody returned still gets the correction turn.
+            # nobody returned sends the model back to the tools.
             steps.extend([tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
                           ModelReply('Encore [E9].', [], 'fixture', 50, 20),
                           ModelReply('Encore [E2].', [], 'fixture', 50, 20)])
@@ -137,8 +137,7 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
                 'client_request_id': str(uuid.uuid4())})
             cited = next(payload for name, payload in events(again.text) if name == 'citations')
             assert [c['label'] for c in cited] == ['E2']
-            assert 'unknown evidence IDs' in model_messages[-1][-1]['content']
-            assert 'E1' in model_messages[-1][-1]['content']
+            assert 'cites E9, which no tool returned' in model_messages[-1][-1]['content']
             steps.append(ModelReply('Which definition do you mean?', [], 'fixture', 50, 20))
             clarify = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'And the other one?',
@@ -184,7 +183,8 @@ async def test_direct_http_saved_and_charged_without_router(pg_session, tmp_path
             def __init__(self, endpoint):
                 endpoints.append(endpoint.model)
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
-                return ModelReply('Bonjour !', [], 'ornith', 25, 8)
+                # A reply without research gets one check; DONE keeps it.
+                return ModelReply('DONE' if purpose == 'answer_check' else 'Bonjour !', [], 'ornith', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
         client = await make_client(db, student)
         request_id = str(uuid.uuid4())
@@ -203,7 +203,8 @@ async def test_direct_http_saved_and_charged_without_router(pg_session, tmp_path
             assert run.stop_reason == 'finished'
             calls = (await db.scalars(select(ModelCallUsage).where(
                 ModelCallUsage.run_id == run.id))).all()
-            assert len(calls) == 1 and {c.model for c in calls} == {'ornith'}
+            assert sorted(c.purpose for c in calls) == ['agent', 'answer_check']
+            assert {c.model for c in calls} == {'ornith'}
             history = await client.get(f'/api/student/sessions/{chat.id}')
             assert history.status_code == 200
             assert any(m['content'] == 'Bonjour !' and not m['citations']
@@ -338,7 +339,9 @@ async def test_real_ornith_direct_student_http(pg_session, tmp_path, monkeypatch
             assert run.stop_reason == 'finished'
             calls = (await db.scalars(select(ModelCallUsage).where(
                 ModelCallUsage.run_id == run.id))).all()
-            assert len(calls) == 1 and {c.model for c in calls} == {'ornith'}
+            # The greeting and its check (no research, no citation).
+            assert [c.purpose for c in calls][:1] == ['agent'] and len(calls) <= 2
+            assert {c.model for c in calls} == {'ornith'}
             assert all(c.usage_source == 'actual' for c in calls)
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

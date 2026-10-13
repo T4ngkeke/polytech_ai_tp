@@ -471,6 +471,8 @@ async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_retur
 
     async def clarify(messages, max_output, timeout, **kwargs):
         calls.append(kwargs['purpose'])
+        if kwargs['purpose'] == 'answer_check':
+            return ModelReply('DONE', model='fake', input_tokens=50, output_tokens=1)
         return ModelReply('Which course do you mean?', model='fake', input_tokens=42, output_tokens=13)
     kwargs = dict(scope=scope, question='Which?', client_request_id='orchestrated',
         model=clarify, model_name='fake',
@@ -479,13 +481,14 @@ async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_retur
     first = await run_persisted_research(**kwargs)
     second = await run_persisted_research(**kwargs)
     assert first == second and first['status'] == 'finished'
-    assert calls == ['agent']
+    # The clarification has no research and no citation, so it gets one check.
+    assert calls == ['agent', 'answer_check'] and first['answer'] == 'Which course do you mean?'
     async with factory() as db:
         run = await db.get(AgentRun, uuid.UUID(first['run_id']))
         assistant = await db.get(Message, run.assistant_message_id)
-        assert assistant.billed_tokens == 21  # round(42*.2+13)
+        assert assistant.billed_tokens == 32  # round(42*.2+13) + round(50*.2+1)
         assert await db.scalar(select(func.count()).select_from(Message)) == 2
-        assert await db.scalar(select(func.count()).select_from(ModelCallUsage)) == 1
+        assert await db.scalar(select(func.count()).select_from(ModelCallUsage)) == 2
 
     # The model can cite a fake but syntactically valid reader item. The final
     # DB check rejects it, so no successful result escapes the orchestrator.
@@ -514,7 +517,7 @@ async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_retur
         failed = await db.scalar(select(AgentRun).where(AgentRun.client_request_id == 'forged'))
         assert failed.status == 'failed' and failed.assistant_message_id is None
         assert await db.scalar(select(func.count()).select_from(Message)) == 3
-        assert await db.scalar(select(func.count()).select_from(ModelCallUsage)) == 3
+        assert await db.scalar(select(func.count()).select_from(ModelCallUsage)) == 4
 
 
 @pytest.mark.asyncio
@@ -793,15 +796,16 @@ async def test_citation_correction_has_own_model_call_usage_purpose(pg_session, 
     purposes = []
     result = await run_persisted_research(scope=scope, question='Which?',
         client_request_id='correction',
-        model=scripted('Answer [E9].', 'Which course do you mean?', log=purposes), model_name='fake',
-        token_alpha=.2, token_beta=1, session_factory=factory)
-    assert result['status'] == 'finished' and purposes == ['agent', 'citation_correction']
+        model=scripted('Answer [E9].', 'Still [E9].', 'Which course do you mean?', log=purposes),
+        model_name='fake', token_alpha=.2, token_beta=1, session_factory=factory)
+    # A turn with the tools to read first, then the correction without them.
+    assert result['status'] == 'finished' and purposes == ['agent', 'agent', 'citation_correction']
     async with factory() as db:
         stored = (await db.scalars(select(ModelCallUsage.purpose)
             .order_by(ModelCallUsage.created_at))).all()
-        assert stored == ['agent', 'citation_correction']
+        assert stored == ['agent', 'agent', 'citation_correction']
         message = await db.get(Message, uuid.UUID(result['message_id']))
-        assert message.billed_tokens == 32
+        assert message.billed_tokens == 48
 
 
 @pytest.mark.asyncio
