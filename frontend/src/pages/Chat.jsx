@@ -691,6 +691,8 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, phase, c
                   <MessageContent content={content} streaming={streaming} onCite={onCite} />
                 </Suspense>
               ))
+          // Stopped or failed before any text: say so instead of waiting dots.
+          : !streaming ? <span className="text-xs italic text-cream-muted">No answer: the research stopped before it finished. You can ask again.</span>
           : <span className="inline-flex items-center gap-1">
               <BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" />
               {PHASE_LABELS[phase] && <span role="status" aria-live="polite"
