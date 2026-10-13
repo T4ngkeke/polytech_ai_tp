@@ -2,10 +2,11 @@
 # The v6 stable stack uses port 80, so v9 keeps port 8080.
 #
 # The research agent and structured documents are on in this test stack. The
-# model server joins the external network edullm-models with an alias that
-# the admin settings use (2026-10-13: Qwen3.8-27B as "qwen27b"):
+# model server joins the external network edullm-models, and the admin
+# settings use its container name (2026-10-13: Qwen3.8-Flash-Next, served as
+# "ornith", at http://m4-flashnext-v030:8000/v1 for the LLM, agent and VLM):
 #   docker network create edullm-models
-#   docker network connect --alias qwen27b edullm-models m4-qwen27b-agent
+#   docker network connect edullm-models m4-flashnext-v030
 services:
   postgres:
     # This test database still uses default credentials; keep it local.
