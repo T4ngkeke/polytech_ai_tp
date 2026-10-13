@@ -27,14 +27,16 @@ from backend.app.services.research_usage import ResearchUsage
 
 @dataclass(frozen=True)
 class ResearchLimits:
-    """Limits of one research run. The defaults are the 2026-10 benchmark's
-    "standard" budget; an admin can change them (SystemConfig, LIMIT_KEYS)."""
-    tool_calls: int = 8
-    visual_calls: int = 2
-    research_seconds: int = 45
-    total_seconds: int = 60
-    call_seconds: int = 20
-    input_tokens: int = 12000
+    """Limits of one research run; an admin can change them (SystemConfig,
+    LIMIT_KEYS). The defaults suit Qwen3.8-27B and Qwen3.8-Flash-Next on one
+    DGX Spark (the 2026-10-12 end-to-end test): a long answer can take two
+    minutes, so the run keeps total - research seconds for it."""
+    tool_calls: int = 20
+    visual_calls: int = 4
+    research_seconds: int = 300
+    total_seconds: int = 420
+    call_seconds: int = 120
+    input_tokens: int = 28000
 
     @classmethod
     def from_config(cls, configs: Mapping[str, str]) -> ResearchLimits:

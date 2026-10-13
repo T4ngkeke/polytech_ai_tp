@@ -70,7 +70,7 @@ from backend.app.schemas import (
 )
 from backend.app.services import class_service, lab_service, analytics_service, trace_service
 from backend.app.services.model_routing import resolve_model_routing
-from backend.app.services.research_service import LIMIT_KEYS, limit_value
+from backend.app.services.research_service import DEFAULT_LIMITS, LIMIT_KEYS, limit_value
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -297,6 +297,10 @@ async def get_llm_config(
     routing = resolve_model_routing(configs)
     payload["token_alpha"] = routing.token_alpha
     payload["token_beta"] = routing.token_beta
+    payload["research_limits"] = {
+        field: {"default": DEFAULT_LIMITS[LIMIT_KEYS[key][0]],
+                "min": LIMIT_KEYS[key][1], "max": LIMIT_KEYS[key][2]}
+        for field, key in _LLM_CONFIG_STR_FIELDS.items() if key in LIMIT_KEYS}
     return LLMConfigResponse(**payload)
 
 

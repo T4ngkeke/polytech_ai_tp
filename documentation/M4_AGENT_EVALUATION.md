@@ -53,7 +53,7 @@ Benchmark v4, model Qwen3.8-Flash-Next (v0.30), round 1:
 - The system prompt said "at most eight course tool calls and two visual
   calls" in every run, also under the relaxed budgets (20 and 4 calls). The
   prompt now states the run's real limits, so new relaxed runs are not
-  comparable with the old ones. With the default limits (8 and 2) the prompt
+  comparable with the old ones. With 8 and 2 (the defaults until 2026-10-13) the prompt
   is unchanged.
 - The benchmark runs without a reranker. The student chat uses one when it is
   configured.

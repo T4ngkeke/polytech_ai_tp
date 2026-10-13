@@ -46,10 +46,10 @@ def test_research_limits_from_admin_values():
     from backend.app.services.research_service import ResearchLimits
     assert ResearchLimits.from_config({}) == ResearchLimits()
     limits = ResearchLimits.from_config({
-        'AGENT_MAX_TOOL_CALLS': ' 20 ', 'AGENT_MAX_VISUAL_CALLS': 'four',
+        'AGENT_MAX_TOOL_CALLS': ' 12 ', 'AGENT_MAX_VISUAL_CALLS': 'four',
         'AGENT_RESEARCH_SECONDS': '300', 'AGENT_TOTAL_SECONDS': '120',
         'AGENT_MAX_INPUT_TOKENS': '999999'})
-    assert (limits.tool_calls, limits.visual_calls, limits.input_tokens) == (20, 2, 12000)
+    assert (limits.tool_calls, limits.visual_calls, limits.input_tokens) == (12, 4, 28000)
     # Research time never exceeds the total time.
     assert (limits.research_seconds, limits.total_seconds) == (120, 120)
 

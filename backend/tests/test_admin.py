@@ -395,6 +395,15 @@ class TestLLMConfig:
             assert resp.status_code == 422
         got = (await admin_client.get("/api/admin/llm/config")).json()
         assert got["agent_max_tool_calls"] == "20"
+        # The form shows each default and range from the backend.
+        assert got["research_limits"]["agent_max_tool_calls"] == {"default": 20, "min": 1, "max": 40}
+        assert got["research_limits"]["agent_max_input_tokens"]["default"] == 28000
+        assert len(got["research_limits"]) == 6
+        # An empty value goes back to the default.
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m", "agent_max_tool_calls": "",
+        })
+        assert resp.status_code == 200 and resp.json()["agent_max_tool_calls"] == ""
 
     # --- [v7.2] full model-routing table ---------------------------------
 

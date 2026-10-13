@@ -156,15 +156,19 @@ invalid value means the default; the admin API rejects values out of range):
 
 | Key (`/api/admin/llm/config` field) | Default | Range | Meaning |
 | --- | --- | --- | --- |
-| `AGENT_MAX_TOOL_CALLS` (`agent_max_tool_calls`) | 8 | 1–40 | Course tool calls. |
-| `AGENT_MAX_VISUAL_CALLS` (`agent_max_visual_calls`) | 2 | 0–10 | `view_image` calls. |
-| `AGENT_RESEARCH_SECONDS` (`agent_research_seconds`) | 45 | 5–1800 | Time for research; then the tools are withdrawn. At most the total time. |
-| `AGENT_TOTAL_SECONDS` (`agent_total_seconds`) | 60 | 10–1800 | Time for the whole run, answer included. |
-| `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 20 | 5–600 | Time for one model call, `view_image` included. |
-| `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 12000 | 4000–200000 | Estimated input tokens of one model call. Chat history may use a quarter of it. |
+| `AGENT_MAX_TOOL_CALLS` (`agent_max_tool_calls`) | 20 | 1–40 | Course tool calls. |
+| `AGENT_MAX_VISUAL_CALLS` (`agent_max_visual_calls`) | 4 | 0–10 | `view_image` calls. |
+| `AGENT_RESEARCH_SECONDS` (`agent_research_seconds`) | 300 | 5–1800 | Time for research; then the tools are withdrawn. At most the total time. |
+| `AGENT_TOTAL_SECONDS` (`agent_total_seconds`) | 420 | 10–1800 | Time for the whole run, answer included. |
+| `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 120 | 5–600 | Time for one model call, `view_image` included. A `view_image` call also ends with the research time. |
+| `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 28000 | 4000–200000 | Estimated input tokens of one model call. Chat history may use a quarter of it. |
 
-The system prompt states the tool and visual limits. The defaults are the
-"standard" budget of the 2026-10 benchmark. A slower model needs longer times.
+The system prompt states the tool and visual limits. The defaults suit
+Qwen3.8-27B and Qwen3.8-Flash-Next on one DGX Spark (2026-10-12 end-to-end
+test): a long answer can take two minutes, so the time between research and
+total should be at least one model call. The 2026-10 benchmark's "standard"
+budget was 8, 2, 45, 60, 20 and 12000. `GET /api/admin/llm/config` also
+returns `research_limits`: the default, minimum and maximum of each field.
 
 Each model call is reserved on the student's daily quota before it starts
 and settled with the reported usage afterwards.

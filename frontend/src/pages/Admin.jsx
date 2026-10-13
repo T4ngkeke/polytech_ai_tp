@@ -682,13 +682,20 @@ const MAP_NODES = [
   },
   {
     id: 'agent', x: 67, y: 79, icon: '🧠', name: 'Agent', source: 'chat',
-    tag: 'The reasoning behind retrieval. The BIG model — quality over latency.',
+    tag: 'The reasoning behind retrieval. The BIG model — quality over latency. It searches and reads the course for each student question, within the research limits below.',
     status: (c) => (c.agent_model ? 'set' : 'inherits'),
     fields: [
       { key: 'agent_model', label: 'Model Name', placeholder: 'inherits main LLM' },
       { key: 'agent_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
       { key: 'agent_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
       { key: 'ingest_token_budget', label: 'Token budget / document', placeholder: '200000' },
+      // Research limits: default and range come from the backend (research_limits).
+      { key: 'agent_max_tool_calls', label: 'Course tool calls', limit: true },
+      { key: 'agent_max_visual_calls', label: 'Image views', limit: true },
+      { key: 'agent_research_seconds', label: 'Research time (s)', limit: true },
+      { key: 'agent_total_seconds', label: 'Total time, answer included (s)', limit: true },
+      { key: 'agent_call_seconds', label: 'One model call (s)', limit: true },
+      { key: 'agent_max_input_tokens', label: 'Input tokens per model call', limit: true },
     ],
   },
   {
@@ -779,13 +786,29 @@ function NodePanel({ node, config, set, onSave, saving }) {
         <h3 className="text-sm font-semibold text-cream">{node.icon} {node.name}</h3>
         <p className="mt-1 text-xs leading-relaxed text-cream-muted">{node.tag}</p>
       </div>
-      {node.fields.map((f) => (
-        f.secret
-          ? <SecretField key={f.key} label={f.label} value={config[f.key]}
-              onChange={set(f.key)} placeholder={f.placeholder} />
-          : <Field key={f.key} label={f.label} value={config[f.key]}
-              onChange={set(f.key)} placeholder={f.placeholder} />
-      ))}
+      {node.fields.map((f, i) => {
+        if (f.secret) {
+          return <SecretField key={f.key} label={f.label} value={config[f.key]}
+            onChange={set(f.key)} placeholder={f.placeholder} />;
+        }
+        const limit = f.limit ? config.research_limits?.[f.key] : null;
+        const field = <Field key={f.key} value={config[f.key]} onChange={set(f.key)}
+          label={limit ? `${f.label} · ${limit.min}–${limit.max}` : f.label}
+          placeholder={limit ? `default ${limit.default}` : f.placeholder} />;
+        // A heading before the first research limit.
+        return f.limit && !node.fields[i - 1]?.limit ? (
+          <div key={f.key} className="space-y-3">
+            <div className="border-t border-border-subtle pt-3">
+              <p className="text-xs font-semibold text-cream">Research limits, per student question</p>
+              <p className="mt-1 text-xs leading-relaxed text-cream-muted">
+                Empty uses the default. The time between research and total is left for the
+                answer: keep it at least one model call long.
+              </p>
+            </div>
+            {field}
+          </div>
+        ) : field;
+      })}
       {node.warnEmpty && st === 'inherits' ? (
         <p className="text-xs text-amber-400">⚠ {node.warnEmpty}</p>
       ) : null}
