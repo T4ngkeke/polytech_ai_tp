@@ -220,9 +220,21 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
         db.add_all(models('http://example.invalid/v1'))
         db.add_all([SystemConfig(key='AGENT_MAX_TOOL_CALLS', value='12'),
                     SystemConfig(key='AGENT_MAX_INPUT_TOKENS', value='8000')])
-        # Ten long earlier questions, about 10k estimated tokens in all.
-        db.add_all(Message(session_id=chat.id, sender=SenderType.user, content=f'Q{n} ' + 'x' * 4000)
-                   for n in range(10))
+        # Ten long earlier questions with their research answers, about 13k
+        # estimated tokens in all.
+        from datetime import datetime, timedelta, timezone
+        base = datetime.now(timezone.utc) - timedelta(hours=1)
+        for n in range(10):
+            question = Message(session_id=chat.id, sender=SenderType.user, content=f'Q{n} ' + 'x' * 2000,
+                               created_at=base + timedelta(minutes=2 * n))
+            answer = Message(session_id=chat.id, sender=SenderType.llm, content=f'A{n} ' + 'y' * 2000,
+                             created_at=base + timedelta(minutes=2 * n + 1))
+            db.add_all([question, answer])
+            await db.flush()
+            db.add(AgentRun(user_id=student.id, session_id=chat.id, client_request_id=f'history-{n}',
+                            question=question.content, status='finished', stop_reason='finished',
+                            settlement_status='settled', snapshot_map={},
+                            user_message_id=question.id, assistant_message_id=answer.id))
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         import backend.app.routers.chat as chat_api
@@ -241,10 +253,13 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
                 'session_id': str(chat.id), 'message': 'Bonjour',
                 'client_request_id': str(uuid.uuid4())})
             assert any(name == 'done' for name, _ in events(response.text))
-            first = model_messages[0][1]['content']
-            # History may take a quarter of the admin's 8000 input tokens.
-            assert 'Q9 ' in first and 'Q0 ' not in first
-            assert estimate_tokens(first) <= 2200
+            history = model_messages[0][1:-1]
+            # History may take a quarter of the admin's 8000 input tokens; it
+            # starts with a question and alternates.
+            text = json.dumps(history)
+            assert 'Q9 ' in text and 'A9 ' in text and 'Q0 ' not in text
+            assert sum(estimate_tokens(m['content']) for m in history) <= 2200
+            assert [m['role'] for m in history] == ['user', 'assistant'] * (len(history) // 2)
             assert 'at most twelve course tool calls' in model_messages[0][0]['content']
             # Enough quota for the pre-check, not for one model call.
             used = await client.get('/api/student/usage')

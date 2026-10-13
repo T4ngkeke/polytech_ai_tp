@@ -204,6 +204,63 @@ async def test_earlier_citations_by_label_leave_out_ambiguous_labels(pg_session,
 
 
 @pytest.mark.asyncio
+async def test_safe_history_alternates_and_drops_uncited_answers_after_a_change(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        doc, rev, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+        scope = await create_scope(db, user_id=student.id, session_id=chat.id)
+        runs = ResearchRuns(async_sessionmaker(db.bind, expire_on_commit=False))
+        block = await db.scalar(select(DocumentBlock).where(
+            DocumentBlock.revision_id == rev.id, DocumentBlock.content != '',
+            DocumentBlock.kind == 'text').limit(1))
+        page = await db.get(DocumentPage, (rev.id, block.page_id))
+        async def run(n, answer, citations=(), run_scope=scope):
+            started = await runs.begin_run(scope=replace(run_scope, run_id=uuid.uuid4()),
+                                           question=f'Q{n}?', client_request_id=f'alternate-{n}')
+            if answer is None:
+                await runs.mark_terminal(started.run_id, status='failed', stop_reason='model_unavailable')
+            else:
+                await runs.finish_run(started.run_id, ResearchResult(answer, list(citations), 'finished', [], 1, 1))
+        await run(1, 'Cited [E1].', [{
+            'evidence_id': 'E1', 'document_id': str(doc.id), 'revision_id': str(rev.id),
+            'page_id': str(page.page_id), 'pdf_page_no': page.preview_page_no,
+            'block_id': str(block.block_id), 'range': {'start': 0, 'end': 5},
+            'origin': (block.source_ref or {}).get('content_origin', 'native')}])
+        await run(2, None)
+        await run(3, 'Bonjour !')
+        # The last answer was written while one more document was readable.
+        gone = {**scope.snapshot_revisions, uuid.uuid4(): uuid.uuid4()}
+        await run(4, 'Sans citation.', run_scope=replace(scope, snapshot_revisions=gone))
+        await run(5, None)
+        history, _ = await runs.load_safe_context(scope)
+        # Q2 and Q5 have no answer; A4 may repeat a document that is gone.
+        assert [m['content'] for m in history] == ['Q1?', 'Cited [E1].', 'Q3?', 'Bonjour !']
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_a_failure_before_the_model_call_closes_the_run(pg_session, monkeypatch):
+    from backend.app.services.research_service import run_persisted_research
+    scope, factory = await _setup(pg_session, quota=5000)
+
+    async def broken(self, session_id):
+        raise RuntimeError('database gone')
+    monkeypatch.setattr(ResearchRuns, 'next_evidence_number', broken)
+    with pytest.raises(RuntimeError):
+        await run_persisted_research(scope=scope, question='Q?', client_request_id='early-failure',
+            model=scripted('Never.'), model_name='fake', token_alpha=.2, token_beta=1,
+            session_factory=factory)
+    async with factory() as db:
+        run = await db.scalar(select(AgentRun).where(AgentRun.client_request_id == 'early-failure'))
+        # Closed, so the session can take the next question at once.
+        assert run.status == 'failed' and run.stop_reason == 'research_or_save_failed'
+    started = await ResearchRuns(factory).begin_run(scope=replace(scope, run_id=uuid.uuid4()),
+                                                    question='Next?', client_request_id='next')
+    assert started.created
+
+
+@pytest.mark.asyncio
 async def test_concurrent_quota_reservation_idempotent_settlement_and_unknown(pg_session):
     scope, factory = await _setup(pg_session, quota=100)
     run = await ResearchRuns(factory).begin_run(scope=scope,

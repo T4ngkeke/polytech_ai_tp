@@ -159,17 +159,19 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                 embed_fn=counted_non_token(embed_fn, 'embedding', embed_model),
                 rerank_fn=counted_non_token(rerank_fn, 'rerank', rerank_model),
                 vision_fn=counted_vision if vision_fn else None))
-    course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
-                               research_seconds=limits.research_seconds,
-                               max_visual_calls=limits.visual_calls,
-                               first_evidence=await runs.next_evidence_number(scope.session_id))
-    runner = ResearchRunner(course_tools,
-        usage.wrap_model(run_id=started.run_id, model=model_name,
-                         alpha=token_alpha, beta=token_beta, call=model),
-        max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
-        total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
-        max_input_tokens=limits.input_tokens, on_phase=on_phase)
+    # The run exists from here on: every failure, also before the model is
+    # called, must close it, or the session stays blocked.
     try:
+        course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
+                                   research_seconds=limits.research_seconds,
+                                   max_visual_calls=limits.visual_calls,
+                                   first_evidence=await runs.next_evidence_number(scope.session_id))
+        runner = ResearchRunner(course_tools,
+            usage.wrap_model(run_id=started.run_id, model=model_name,
+                             alpha=token_alpha, beta=token_beta, call=model),
+            max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
+            total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
+            max_input_tokens=limits.input_tokens, on_phase=on_phase)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations)
         await runs.finish_run(started.run_id, result)

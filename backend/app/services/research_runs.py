@@ -300,7 +300,7 @@ class ResearchRuns:
                 AgentRun.session_id == session_id, AgentRun.user_id == user_id,
                 AgentRun.assistant_message_id.is_not(None)))).all()}
             rows = sorted((await db.scalars(select(MessageCitation).where(
-                MessageCitation.message_id.in_(runs)))).all(), key=_label_order) if runs else []
+                MessageCitation.message_id.in_(runs.keys())))).all(), key=_label_order) if runs else []
             payloads = await self._citation_payloads(db, [(runs[c.message_id], c) for c in rows])
             result = {message_id: [] for message_id in runs}
             for c, payload in zip(rows, payloads):
@@ -414,7 +414,7 @@ class ResearchRuns:
 
     async def next_evidence_number(self, session_id: uuid.UUID) -> int:
         """The first evidence number for a new run of the session: after every
-        ID its earlier answers cite, so a copied old ID is never valid again."""
+        ID its earlier answers cite, so an old ID never names a new source."""
         async with self.session_factory() as db:
             labels = (await db.scalars(select(MessageCitation.label)
                 .join(AgentRun, AgentRun.assistant_message_id == MessageCitation.message_id)
@@ -444,7 +444,7 @@ class ResearchRuns:
                 AgentRun.assistant_message_id.in_(answer_ids),
                 AgentRun.user_id == scope.user_id))).all()} if answer_ids else {}
             citations = (await db.scalars(select(MessageCitation).where(
-                MessageCitation.message_id.in_(runs)))).all() if runs else []
+                MessageCitation.message_id.in_(runs.keys())))).all() if runs else []
             # Only citations of the current snapshot need the access check.
             current = [c for c in citations
                        if scope.snapshot_revisions.get(c.document_id) == c.revision_id]
@@ -452,17 +452,34 @@ class ResearchRuns:
             unavailable = {c.message_id for c in citations
                            if scope.snapshot_revisions.get(c.document_id) != c.revision_id}
             unavailable |= {c.message_id for c, p in zip(current, payloads) if not p['available']}
+            # An answer without citations may still repeat pages it read
+            # (nothing forces the model to cite). It is kept only while every
+            # document its run could read is still readable at the same
+            # revision; a greeting or a clarification usually is.
+            snapshot = {str(k): str(v) for k, v in scope.snapshot_revisions.items()}
+            cited = {c.message_id for c in citations}
+            unavailable |= {message_id for message_id, run in runs.items() if message_id not in cited
+                            and any(snapshot.get(d) != r for d, r in run.snapshot_map.items())}
             history = []
             for message in messages:
                 if message.sender == SenderType.user:
+                    # A question whose answer is missing (failed, cancelled) or
+                    # left out is dropped with it: turns must alternate.
+                    if history and history[-1]['role'] == 'user':
+                        history.pop()
                     history.append({'role': 'user', 'content': message.content})
                 # Legacy assistant text (no research run) may depend on revoked
                 # material. Do not put it into a new research prompt. A research
-                # answer without citations (a greeting, a general answer) used
-                # no course material; one with citations is kept only while
-                # every cited source is still available.
+                # answer with citations is kept only while every cited source
+                # is still available.
                 elif message.id in runs and message.id not in unavailable:
-                    history.append({'role': 'assistant', 'content': message.content})
+                    if history and history[-1]['role'] == 'user':
+                        history.append({'role': 'assistant', 'content': message.content})
+                elif history and history[-1]['role'] == 'user':
+                    history.pop()
+            # The current question follows; an earlier one without an answer goes.
+            if history and history[-1]['role'] == 'user':
+                history.pop()
             sources = {}
             for c in current:
                 if c.message_id in unavailable:
