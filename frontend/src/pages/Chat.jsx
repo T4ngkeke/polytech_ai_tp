@@ -16,7 +16,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
-import { createMessageId } from '../lib/messageId';
+import { createMessageId, createRequestId } from '../lib/messageId';
 import { interpretStreamEvent } from '../lib/streamEvents';
 import { distinctImages, groupCitations, linkCitations } from '../lib/citations';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
@@ -224,7 +224,7 @@ export default function Chat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: currentSessionId, message: text,
-          client_request_id: crypto.randomUUID() }),
+          client_request_id: createRequestId() }),
         signal: ctrl.signal,
         // Keep the stream open while the tab is hidden; by default the library
         // closes it and resends the question when the tab is shown again.
