@@ -126,6 +126,19 @@ ASK_STUDENT = {'type': 'function', 'function': {
                     'alone, never for a question the course answers.'),
     'parameters': AskStudentArgs.model_json_schema()}}
 ASK_ALONE = 'error: call ask_student alone, after the other tools have returned'
+# Handles a student cannot use, removed from an answer without a model call:
+# "(d1/d7)", "(d6.p19)", and "d1 – " written before a file name.
+_HANDLE_GROUP = re.compile(r'\s*\(\s*d\d+(?:\.[pox]\d+)?(?:\s*[/,;]\s*d\d+(?:\.[pox]\d+)?)*\s*\)')
+_HANDLE_BEFORE_FILE = re.compile(r'\bd\d+\s*[–—:-]\s*(?=[`*_]*[\w.-]+\.pdf)')
+
+
+def _without_document_handles(text: str) -> str:
+    """The answer without handles next to file names, code blocks unchanged."""
+    parts = re.split(r'(```[\s\S]*?```)', text)
+    return ''.join(part if part.startswith('```') else
+                   _HANDLE_BEFORE_FILE.sub('', _HANDLE_GROUP.sub('', part)) for part in parts)
+
+
 # The evidence ID at the start of a malformed reference: "[E21 in d1.p21]".
 _LEADING_ID = re.compile(r'\[(E[1-9]\d*)(?![\d])')
 
@@ -404,6 +417,7 @@ class ResearchRunner:
         # never repeat within a session, see CourseTools first_evidence).
         permitted = {e.id: e.citation() for e in tools.evidence.all()}
         permitted.update({k: v for k, v in (earlier_citations or {}).items() if k not in permitted})
+        answer = _without_document_handles(answer)
         # "[E21 in d1.p21]", "[E8.p14.b1]": a valid ID with extra parts is
         # rewritten as that ID, without a model call.
         for ref in malformed_refs(answer):
@@ -435,6 +449,7 @@ class ResearchRunner:
             except Exception as exc:
                 note('model_error', type=type(exc).__name__)
                 answer = ''
+            answer = _without_document_handles(answer)
             invented = bool(cited_ids(answer) - permitted.keys())
             # A correction that drops every citation of an answer whose IDs
             # were valid is a note about the correction, not the answer.

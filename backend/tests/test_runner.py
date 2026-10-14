@@ -532,10 +532,10 @@ async def test_a_valid_id_with_extra_parts_is_repaired_without_a_correction_turn
 @pytest.mark.asyncio
 async def test_a_correction_that_drops_every_citation_keeps_the_answer():
     # Seen with Flash-Next (B7): the correction turn replied with a note.
-    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1], voir (d1.p10).',
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1], voir d1.p10.',
                    'Voici la correction (la faute était une référence mal formée).')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
-    assert result.answer == 'Vin3 [E1], voir (d1.p10).' and result.stop_reason == 'finished'
+    assert result.answer == 'Vin3 [E1], voir d1.p10.' and result.stop_reason == 'finished'
 
 
 @pytest.mark.asyncio
@@ -544,3 +544,18 @@ async def test_a_file_and_page_instead_of_an_id_gets_the_correction_turn():
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     assert model.purposes[-1] == 'citation_correction' and '[Algebre.pdf, page 10]' in model.seen[-1][-1]['content']
     assert result.answer == 'Vin3 [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']
+
+
+def test_handles_next_to_file_names_are_removed_outside_code():
+    from backend.app.agent.runner import _without_document_handles as clean
+    assert clean('d1 – Algebre_relationnelle_2020.pdf (27 pages) : le cours') == 'Algebre_relationnelle_2020.pdf (27 pages) : le cours'
+    assert clean('Voir **d2: `SQL.pdf`** et la vue (d6.p19), ou (d1/d7).') == 'Voir **`SQL.pdf`** et la vue, ou.'
+    assert clean('La distance d1 - d2 vaut 3 (d1 est le départ).') == 'La distance d1 - d2 vaut 3 (d1 est le départ).'
+    assert clean('```\nd1 - a.pdf (d2)\n```') == '```\nd1 - a.pdf (d2)\n```'
+
+
+@pytest.mark.asyncio
+async def test_an_answer_with_handles_in_parentheses_needs_no_correction():
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1] (d1.p10), cours d1 – Algebre.pdf.')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.answer == 'Vin3 [E1], cours Algebre.pdf.' and model.purposes == ['agent', 'agent']
