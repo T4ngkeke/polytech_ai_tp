@@ -160,6 +160,34 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
             assert any(name == 'done' for name, _ in events(later.text))
             # The uncited reply ('Which definition do you mean?') stays in the history.
             assert any(m['content'] == 'Which definition do you mean?' for m in model_messages[-1])
+            # The teacher's audit: which file and page the answers cite, by whom.
+            rated = await client.post(f'/api/chat/messages/{assistant["id"]}/feedback',
+                                      json={'feedback': 'down'})
+            assert rated.status_code == 200, rated.text
+            assert (await client.get(f'/api/teacher/labs/{chat.lab_id}/citation-report')).status_code == 403
+            teacher_client = await make_client(db, teacher)
+            async with teacher_client:
+                report = (await teacher_client.get(
+                    f'/api/teacher/labs/{chat.lab_id}/citation-report')).json()
+                empty = (await teacher_client.get(f'/api/teacher/labs/{chat.lab_id}/citation-report',
+                                                  params={'start': '2000-01-01', 'end': '2000-01-31'})).json()
+                backwards = await teacher_client.get(f'/api/teacher/labs/{chat.lab_id}/citation-report',
+                                                     params={'start': '2000-01-31', 'end': '2000-01-01'})
+            assert report['totals'] == {'questions': 5, 'students': 1, 'answers_with_sources': 3,
+                                        'unverified': 0, 'marked_wrong': 1}
+            [file] = report['files']
+            assert file['document_id'] == str(doc.id) and file['in_lab'] and file['share'] == 1.0
+            assert (file['answers'], file['students']) == (3, 1)
+            [cited_page] = file['pages']
+            assert cited_page['pdf_page_no'] == page.preview_page_no and cited_page['passages']
+            assert cited_page['passages'][0]['excerpt']
+            asked = {e['question'] for e in cited_page['examples']}
+            assert 'Où est définie θ₁ ?' in asked and {e['student'] for e in cited_page['examples']} == {student.username}
+            assert report['uncited_files'] == [] and report['unverified'] == []
+            assert report['marked_wrong'][0]['question'] == 'Où est définie θ₁ ?'
+            assert empty['totals']['questions'] == 0 and empty['files'] == []
+            assert empty['uncited_files'][0]['document_id'] == str(doc.id)
+            assert backwards.status_code == 422
             from backend.app.services.document_cleanup import mark_deleted
             await db.refresh(doc)
             await db.refresh(teacher)

@@ -14,6 +14,7 @@ import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
 import SkillPresetManager from '../components/SkillPresetManager';
+import CitationReport from '../components/CitationReport';
 
 // Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
 // it in when a test-drive is actually opened.
@@ -323,7 +324,7 @@ export default function Teacher() {
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
               {level === 'lab' && activeTab === 2 && <AnalyticsPanel analytics={analytics} filterLabId={selectedLab.id} />}
-              {level === 'lab' && activeTab === 3 && <AuditPanel sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
+              {level === 'lab' && activeTab === 3 && <AuditPanel lab={selectedLab} sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
               {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} />}
@@ -699,11 +700,40 @@ function AnalyticsPanel({ analytics, filterLabId }) {
   );
 }
 
-function AuditPanel({ sessions, students, expandedStudentId, setExpandedStudentId, expandedSession, setExpandedSession }) {
+function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStudentId, expandedSession, setExpandedSession }) {
+  // Two views of the same conversations: per student, or which course
+  // material the answers cite ("open conversation" leads back to a student).
+  const [view, setView] = useState('students');
+  const openConversation = useCallback((studentId, sessionId) => {
+    setView('students');
+    setExpandedStudentId(studentId);
+    setExpandedSession(sessionId);
+  }, [setExpandedStudentId, setExpandedSession]);
+  const views = (
+    <div className="flex gap-1 mb-4" role="tablist" aria-label="Audit view">
+      {[['students', 'By student'], ['course', 'Course use']].map(([key, label]) => (
+        <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setView(key)}
+          className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
+            view === key ? 'bg-cyan-muted text-cream border border-cyan/20' : 'text-cream-muted hover:bg-ink-hover'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  if (view === 'course') {
+    return (
+      <div>
+        <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+        {views}
+        <CitationReport labId={lab.id} labName={lab.name} onOpenConversation={openConversation} />
+      </div>
+    );
+  }
   if (!students || students.length === 0) return <p className="text-cream-muted text-sm">No students in this class yet.</p>;
   return (
     <div className="space-y-3 max-w-3xl">
       <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+      {views}
       {students.map((student) => {
         const studentSessions = sessions.filter(s => s.user_id === student.id);
         const isStudentExpanded = expandedStudentId === student.id;

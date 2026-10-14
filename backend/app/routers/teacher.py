@@ -28,7 +28,7 @@ GET    /api/teacher/analytics/classes/{class_id}
 import contextlib
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status,
@@ -78,6 +78,7 @@ from backend.app.services import (
     skill_preset_service,
     analytics_service,
 )
+from backend.app.services.citation_report import lab_citation_report
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 
@@ -658,6 +659,31 @@ async def get_chat_history(
     result = await db.execute(query)
     sessions = result.scalars().all()
     return [SessionWithMessagesResponse.model_validate(s) for s in sessions]
+
+
+# ===================================================================
+# GET /api/teacher/labs/{lab_id}/citation-report
+# ===================================================================
+
+
+@router.get("/labs/{lab_id}/citation-report")
+async def get_citation_report(
+    lab_id: uuid.UUID,
+    start: date | None = Query(None, description="First day included (UTC)."),
+    end: date | None = Query(None, description="Last day included (UTC)."),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Which course files, pages and passages the lab's research answers cite,
+    with the students and their questions (audit; ownership enforced).
+    Shape: backend/app/services/citation_report.py."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    if start and end and end < start:
+        raise HTTPException(status_code=422, detail="end is before start")
+    day = lambda d: datetime.combine(d, time.min, tzinfo=timezone.utc)
+    return await lab_citation_report(db, lab, start=day(start) if start else None,
+                                     end=day(end) + timedelta(days=1) if end else None)
 
 
 # ===================================================================
