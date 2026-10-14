@@ -165,6 +165,10 @@ def test_malformed_references_are_found_outside_code():
     text = 'Voir [E8.p14.b1] et [d6.p24.b14], puis [E1, E2] et [E3]. `t[d1]` ```\nx[E2.b]\n```'
     assert malformed_refs(text) == ['[E8.p14.b1]', '[d6.p24.b14]']
     assert malformed_refs('Rien [E1]; une liste [Exemple] ou [dessin].') == []
+    # A file and page instead of an ID, as Flash-Next once wrote (A7).
+    assert malformed_refs('Shannon [EASI951_CM_2025.pdf, page 42] et [SQL, p. 3].') == [
+        '[EASI951_CM_2025.pdf, page 42]', '[SQL, p. 3]']
+    assert malformed_refs('Un tableau [1, 2, 3] et une liste [a, b].') == []
     # Handles outside brackets, as an answer once wrote them.
     assert malformed_refs('Vues (d6.p19), puis d6.p43–d6.p48 et d1.p20.b3.') == ['d6.p19', 'd6.p43', 'd6.p48', 'd1.p20.b3']
     assert malformed_refs('Le fichier cd1.p2x et `d1.p20` en code, version 2.d1.p3 ne comptent pas.') == []
@@ -532,3 +536,11 @@ async def test_a_correction_that_drops_every_citation_keeps_the_answer():
                    'Voici la correction (la faute était une référence mal formée).')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     assert result.answer == 'Vin3 [E1], voir (d1.p10).' and result.stop_reason == 'finished'
+
+
+@pytest.mark.asyncio
+async def test_a_file_and_page_instead_of_an_id_gets_the_correction_turn():
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [Algebre.pdf, page 10].', 'Vin3 [E1].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert model.purposes[-1] == 'citation_correction' and '[Algebre.pdf, page 10]' in model.seen[-1][-1]['content']
+    assert result.answer == 'Vin3 [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']

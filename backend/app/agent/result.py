@@ -15,8 +15,11 @@ def cited_ids(text: str) -> set[str]:
     return {label for group in CITATION_RE.findall(text) for label in LABEL_RE.findall(group)}
 
 
-# A bracket that starts like an evidence ID or a handle: [E8.p14.b1], [d6.p24].
-_REFERENCE_RE = re.compile(r'\[[Ed]\s?\d[^\[\]\n]{0,40}\]')
+# A bracket that starts like an evidence ID or a handle: [E8.p14.b1], [d6.p24];
+# or that names a file or a page: [EASI951_CM_2025.pdf, page 42], [cours, p. 3].
+_REFERENCE_RE = re.compile(r'\[[Ed]\s?\d[^\[\]\n]{0,40}\]'
+                           r'|\[[^\[\]\n]{0,80}(?:\.pdf\b|\bpages?\s*\d|\bp\.\s*\d)[^\[\]\n]{0,40}\]',
+                           re.IGNORECASE)
 _CODE_RE = re.compile(r'```[\s\S]*?```|`[^`\n]*`')
 
 
