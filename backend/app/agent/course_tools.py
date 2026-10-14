@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, ValidationError, model_validator
@@ -59,14 +58,9 @@ class OpenView(ViewArgs):
         return self
 
 
-class NavigateView(ViewArgs):
-    block: StrictStr = Field(description='Block handle to start from, e.g. d1.p20.b3.')
-    direction: Literal['next', 'previous']
-    unit: Literal['block', 'page'] = 'block'
-    count: int = Field(default=1, ge=1, le=3, strict=True)
-
-
 class ReadView(ViewArgs):
+    # document is redundant with a page or block handle; models often add it.
+    document: StrictStr | None = Field(default=None, description='Optional; the document of the page or block.')
     page: StrictStr | None = Field(default=None, description='Page handle, e.g. d1.p20.')
     block: StrictStr | None = Field(default=None, description='Block handle, e.g. d1.p20.b3.')
     start: int | None = Field(default=None, ge=0, strict=True, description='Block reads only.')
@@ -75,16 +69,22 @@ class ReadView(ViewArgs):
 
     @model_validator(mode='after')
     def one_target(self):
+        # block="d1.p20.b3" with page="d1.p20" names one target twice: read the block.
+        if self.block and self.page and self.block.strip().startswith(self.page.strip() + '.'):
+            self.page = None
         if sum(x is not None for x in (self.page, self.block, self.cursor)) != 1:
             raise ValueError('give exactly one of page, block or cursor; '
                              'a block on a page is written block="d1.p20.b3"')
         if (self.start is not None or self.end is not None) and self.block is None:
             raise ValueError('start and end only work with block')
+        if self.document and self.cursor:
+            raise ValueError('a cursor needs no document')
         return self
 
 
 class GrepView(ViewArgs):
-    document: StrictStr | None = Field(default=None, description='Document handle, e.g. d1.')
+    document: StrictStr | None = Field(default=None, description='Document handle, e.g. d1; '
+                                       'without it, every course document is searched.')
     pattern: StrictStr | None = Field(default=None, min_length=1, max_length=200)
     case_sensitive: StrictBool = False
     cursor: StrictStr | None = Field(default=None, description='Continuation handle, e.g. c1.')
@@ -92,9 +92,9 @@ class GrepView(ViewArgs):
     @model_validator(mode='after')
     def query_or_cursor(self):
         if self.cursor and (self.document or self.pattern):
-            raise ValueError('give either cursor alone, or document and pattern')
-        if not self.cursor and not (self.document and self.pattern):
-            raise ValueError('give document and pattern')
+            raise ValueError('give either cursor alone, or a pattern')
+        if not self.cursor and not self.pattern:
+            raise ValueError('give a pattern')
         return self
 
 
@@ -104,18 +104,20 @@ class ViewImageView(ViewArgs):
 
 
 VIEW_SCHEMAS: dict[str, type[ViewArgs]] = {
-    'search': SearchView, 'open': OpenView, 'navigate': NavigateView,
+    'search': SearchView, 'open': OpenView,
     'read': ReadView, 'grep': GrepView, 'view_image': ViewImageView,
 }
 
 DESCRIPTIONS = {
     'search': 'Find relevant course PDF locations using French course terms. Results are leads, not verified evidence. Read promising pages or blocks before citing them. Reformulate if necessary.',
     'open': 'List the pages of a course PDF with a short summary each, from its start or from a page handle. Use the returned cursor to continue.',
-    'navigate': 'List the blocks or pages before or after a known block. Each page read already names its previous and next page.',
     'read': 'Read verified course text of one page (page="d1.p20") or one block (block="d1.p20.b3"), or continue with a cursor (cursor="c1"); give exactly one of them. start/end apply only to block reads. Each returned line starts with its evidence ID, cite it as [E1]. A read can be incomplete; follow the cursor it names.',
-    'grep': 'Find a literal pattern in one course document; returns blocks to read. Matches are leads; read them before citing.',
+    'grep': 'Find a literal pattern in one course document, or in all of them without a document; returns blocks to read. Matches are leads; read them before citing.',
     'view_image': 'Ask a vision model a narrow question about an image handle (a figure or a page image). The answer is visual evidence with uncertainties, not native PDF text.',
 }
+
+
+GREP_ALL_MATCHES = 20
 
 
 class HandleError(ValueError):
@@ -292,15 +294,15 @@ class ToolView:
                     raise HandleError(f'page {args.page!r} is not in {args.document!r}')
                 return {'document_id': document_id, 'page_id': page_id}
             return {'document_id': self._doc(args.document)}
-        if name == 'navigate':
-            document_id, block_id = self._block(args.block)
-            return {'document_id': document_id, 'anchor_block_id': block_id,
-                    'direction': args.direction, 'unit': args.unit, 'count': args.count}
         if name == 'read':
             if args.page:
                 document_id, page_id = self._page(args.page)
+            else:
+                document_id, block_id = self._block(args.block)
+            if args.document and self._doc(args.document) != document_id:
+                raise HandleError(f'{args.page or args.block!r} is not in {args.document!r}')
+            if args.page:
                 return {'document_id': document_id, 'page_id': page_id}
-            document_id, block_id = self._block(args.block)
             raw = {'document_id': document_id, 'block_id': block_id}
             if args.start is not None:
                 raw['start'] = args.start
@@ -308,8 +310,10 @@ class ToolView:
                 raw['end'] = args.end
             return raw
         if name == 'grep':
-            return {'document_id': self._doc(args.document), 'pattern': args.pattern,
-                    'case_sensitive': args.case_sensitive}
+            # Without a document: every document of the run (CourseTools.execute).
+            where = ({'document_id': self._doc(args.document)} if args.document
+                     else {'documents': list(self.documents.values())})
+            return {**where, 'pattern': args.pattern, 'case_sensitive': args.case_sensitive}
         if args.image not in self.images:
             raise HandleError(f'unknown image {args.image!r}; use an image handle from an earlier result')
         asset_id, page_id = self.images[args.image]
@@ -444,34 +448,21 @@ class ToolView:
             lines.append(f'more pages: open(cursor="{cursor}")')
         return lines
 
-    def _render_navigate(self, raw_args, result):
-        document_id = raw_args['document_id']
-        lines = []
-        for item in result.get('items') or []:
-            if 'block_id' in item:
-                lines.append(f'{self.block(document_id, item["block_id"], item["page"]["page_id"])} '
-                             f'{item.get("type") or "block"}: {item.get("summary") or "(no text)"}')
-            else:
-                line = self.page(item['page_id'], document_id)
-                if item.get('title'):
-                    line += f' "{item["title"]}"'
-                lines.append(f'{line}: {item.get("summary") or "(no text)"}')
-        if result.get('at_start'):
-            lines.append('start of document reached')
-        if result.get('at_end'):
-            lines.append('end of document reached')
-        return lines or ['nothing in that direction']
-
     def _render_grep(self, raw_args, result):
-        document_id = raw_args['document_id']
         items = result.get('items') or []
         lines = [f'{len(items)} matches (leads; read them before citing)']
+        if 'documents' in raw_args and items:
+            lines.append(self._legend([i['document_id'] for i in items]))
         for item in items:
+            document_id = item.get('document_id') or raw_args['document_id']
             lines.append(f'{self.block(document_id, item["block_id"], item["page"]["page_id"])} '
                          f'{item.get("type") or "block"}: …{item.get("context") or ""}…')
         cursor = self._cursor('grep', raw_args, result.get('next_cursor'))
         if cursor:
             lines.append(f'more matches: grep(cursor="{cursor}")')
+        if result.get('more_in'):
+            lines.append('more matches in ' + ', '.join(self.doc_handles.get(d, 'd?') for d in result['more_in'])
+                         + '; grep one of them with its document handle')
         return lines
 
     def _render_view_image(self, raw_args, result):
@@ -588,6 +579,26 @@ class CourseTools:
         row['view'] = text = self.view.render(name, raw, result)
         return text, bool(result.get('ok'))
 
+    async def _grep_all(self, arguments: dict) -> dict:
+        """grep over every document of the run as one tool call: the first
+        GREP_ALL_MATCHES matches in document order, and which documents have more."""
+        items, more_in, failure = [], [], None
+        for document_id in arguments['documents']:
+            result = await self.tools.execute('grep', {
+                'document_id': document_id, 'pattern': arguments['pattern'],
+                'case_sensitive': arguments['case_sensitive']})
+            if not result.get('ok'):
+                failure = failure or result
+                continue
+            found = [{**item, 'document_id': document_id} for item in result.get('items') or []]
+            room = GREP_ALL_MATCHES - len(items)
+            items.extend(found[:max(room, 0)])
+            if len(found) > room or result.get('next_cursor'):
+                more_in.append(document_id)
+        if failure and not items and not more_in:
+            return failure
+        return {'ok': True, 'issues': [], 'items': items, 'more_in': more_in}
+
     async def execute(self, name: str, arguments: dict):
         """One call with backend arguments (UUIDs), counted in the budget."""
         tick = time.monotonic()
@@ -607,6 +618,8 @@ class CourseTools:
                         result = {'ok': False, 'error': {'code': 'vision_timeout'},
                                   'hint': 'The research time is over; answer with the evidence '
                                           'already returned.'}
+                elif name == 'grep' and 'documents' in arguments:
+                    result = await self._grep_all(arguments)
                 else:
                     result = await self.tools.execute(name, arguments)
                 # Only an observation uses the visual budget; a failed call

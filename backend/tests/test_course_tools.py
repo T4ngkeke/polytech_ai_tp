@@ -318,3 +318,73 @@ async def test_copied_location_resolves_only_to_the_block_shown_there():
         text, ok = await course.call('read', bad)
         assert not ok and text.startswith('error: invalid_arguments')
     assert len(tools.calls) == calls
+
+
+@pytest.mark.asyncio
+async def test_read_accepts_the_document_of_its_page_or_block():
+    tools = ViewFixture()
+    course = CourseTools(tools, max_tool_calls=20)
+    await course.call('search', {'query': 'produit cartésien'})  # shows d1.p9.b1
+    text, ok = await course.call('read', {'document': 'd1', 'page': 'd1.p10'})
+    assert ok and tools.calls[-1] == ('read', {'document_id': str(tools.doc), 'page_id': str(tools.p10)})
+    text, ok = await course.call('read', {'document': 'd1', 'block': 'd1.p9.b1'})
+    assert ok and tools.calls[-1] == ('read', {'document_id': str(tools.doc), 'block_id': str(tools.text)})
+    # The block's page given as well names the same target.
+    text, ok = await course.call('read', {'document': 'd1', 'page': 'd1.p9', 'block': 'd1.p9.b1'})
+    assert ok and tools.calls[-1] == ('read', {'document_id': str(tools.doc), 'block_id': str(tools.text)})
+    calls = len(tools.calls)
+    for bad in ({'document': 'd2', 'page': 'd1.p10'}, {'document': 'd1', 'cursor': 'c1'},
+                {'page': 'd1.p10', 'block': 'd1.p9.b1'}):
+        text, ok = await course.call('read', bad)
+        assert not ok and text.startswith('error: invalid_arguments')
+    assert len(tools.calls) == calls
+
+
+class GrepFixture(ViewFixture):
+    """Three documents; grep finds a match in the first two, many in the second."""
+    def __init__(self, matches=(1, 25, 0)):
+        super().__init__()
+        self.docs = [self.doc, uuid4(), uuid4()]
+        self.matches = dict(zip(map(str, self.docs), matches))
+        self.pages = {str(d): uuid4() for d in self.docs}
+
+    async def page_index(self):
+        return {str(d): {'filename': f'Cours{n}.pdf', 'pages': [
+            {'page_id': str(self.pages[str(d)]), 'pdf_page_no': 4}]} for n, d in enumerate(self.docs, 1)}
+
+    async def execute(self, name, arguments):
+        self.calls.append((name, arguments))
+        assert name == 'grep' and 'documents' not in arguments
+        count = self.matches[arguments['document_id']]
+        page = self.pages[arguments['document_id']]
+        items = [{'block_id': str(uuid4()), 'type': 'text', 'page': self._ref(page, 4),
+                  'range': {'start': 0, 'end': 5}, 'context': f'fuite {n}'} for n in range(min(count, 20))]
+        return {'ok': True, 'issues': [], 'items': items,
+                'next_cursor': 'signed-grep-cursor' if count > 20 else None}
+
+
+@pytest.mark.asyncio
+async def test_grep_without_a_document_searches_every_document_as_one_call():
+    tools = GrepFixture()
+    course = CourseTools(tools)
+    text, ok = await course.call('grep', {'pattern': 'fuite'})
+    assert ok and [a['document_id'] for _, a in tools.calls] == [str(d) for d in tools.docs]
+    lines = text.splitlines()
+    # The first 20 matches in document order; one tool slot.
+    assert lines[0] == '20 matches (leads; read them before citing)'
+    assert lines[1] == 'documents: d1 = Cours1.pdf, d2 = Cours2.pdf'
+    assert lines[2].startswith('d1.p4.b1 text: …fuite 0…') and lines[3].startswith('d2.p4.b2 text: …fuite 0…')
+    assert lines[-1] == 'more matches in d2; grep one of them with its document handle'
+    assert 'cursor' not in text and len(course.trace) == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_in_one_document_keeps_its_cursor():
+    tools = GrepFixture()
+    course = CourseTools(tools)
+    text, ok = await course.call('grep', {'document': 'd2', 'pattern': 'fuite'})
+    assert ok and tools.calls == [('grep', {'document_id': str(tools.docs[1]), 'pattern': 'fuite',
+                                            'case_sensitive': False})]
+    assert text.splitlines()[-1] == 'more matches: grep(cursor="c1")'
+    text, ok = await course.call('grep', {'document': 'd1'})
+    assert not ok and 'give a pattern' in text

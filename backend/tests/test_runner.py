@@ -32,7 +32,7 @@ class Script:
 
 def test_course_tools_have_plain_names_and_no_finish():
     assert [t['function']['name'] for t in COURSE_TOOLS] == [
-        'grep', 'navigate', 'open', 'read', 'search', 'view_image']
+        'grep', 'open', 'read', 'search', 'view_image']
 
 
 def test_prompt_names_the_run_limits():
