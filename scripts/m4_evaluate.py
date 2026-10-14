@@ -23,6 +23,8 @@ Environment:
   M4_QUESTIONS     comma-separated question IDs to keep
   M4_CONCURRENCY   trials of one variant and round running at once (default 1)
   M4_CORPUS        corpus label written to the manifest
+  M4_RERANK_URL    rerank endpoint (vLLM /rerank) for the search tool; unset: no reranker.
+                   M4_RERANK_MODEL names its model (default BAAI/bge-reranker-v2-m3)
 """
 from __future__ import annotations
 
@@ -150,6 +152,27 @@ def make_tool_dependencies(config):
                 stream.write(json.dumps({'text_sha256': digest, 'embedding': vector}) + '\n')
         return vectors[digest]
 
+    rerank_usage = {'calls': 0, 'failed': 0, 'seconds': 0.0}
+
+    async def rerank(query, documents):
+        # Like routers/chat.py _make_rerank_fn; failures are counted because
+        # the search silently falls back to fusion order.
+        rerank_usage['calls'] += 1
+        started = time.monotonic()
+        try:
+            response = await embedding_client.post(config['rerank_url'], json={
+                'model': config['rerank_model'], 'query': query, 'documents': documents}, timeout=30)
+            response.raise_for_status()
+            scores = [0.0] * len(documents)
+            for item in response.json().get('results', []):
+                scores[item['index']] = item['relevance_score']
+            return scores
+        except Exception:
+            rerank_usage['failed'] += 1
+            raise
+        finally:
+            rerank_usage['seconds'] += time.monotonic() - started
+
     async def observe(image, mime, question, *dimensions):
         started = time.monotonic()
         row = {'model': 'ornith', 'status': 'started'}
@@ -172,8 +195,9 @@ def make_tool_dependencies(config):
         await vision.client.close()
 
     return {'options': {'embed_fn': embed, 'vision_fn': observe,
+                        'rerank_fn': rerank if config['rerank_url'] else None,
                         'storage_root': Path(config['storage_root'])},
-            'visual_usage': visual_usage, 'close': close}
+            'visual_usage': visual_usage, 'rerank_usage': rerank_usage, 'close': close}
 
 
 def load_tasks(benchmark, split):
@@ -233,7 +257,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     vision_url = os.getenv('M4_VISION_URL', upstream)
     tool_config = {'storage_root': str(storage_root), 'embedding_url': embedding_url,
                    'query_cache': str(query_cache), 'vision_url': vision_url,
-                   'model_name': model_name, 'call_seconds': call_seconds, 'sampling': sampling}
+                   'model_name': model_name, 'call_seconds': call_seconds, 'sampling': sampling,
+                   'rerank_url': os.getenv('M4_RERANK_URL', ''),
+                   'rerank_model': os.getenv('M4_RERANK_MODEL', 'BAAI/bge-reranker-v2-m3')}
     concurrency = int(os.getenv('M4_CONCURRENCY', '1'))
     results = []
     dependencies = []
@@ -328,7 +354,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                'all_gold_cited': gold <= set(cited) if gold else None,
                'stop_reason': result.stop_reason, 'tool_calls': result.tool_calls,
                'model_calls': result.model_calls, 'trace': result.trace, 'usage': result.usage,
-               'visual_usage': visual, 'tool_state': tool_state,
+               'visual_usage': visual, 'rerank_usage': deps['rerank_usage'], 'tool_state': tool_state,
                'elapsed_seconds': round(time.monotonic() - started, 3)}
         results.append(row)
         (output / 'results.json').write_text(json.dumps(results, indent=2, ensure_ascii=False) + '\n')
@@ -359,7 +385,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'vision_url': vision_url,
             'thinking_enabled': False, 'sampling': {'name': sampling_name, **sampling},
             'budget': budget, 'limits': limits,
-            'concurrency': concurrency, 'reranker': None,
+            'concurrency': concurrency,
+            'reranker': ({'url': tool_config['rerank_url'], 'model': tool_config['rerank_model']}
+                         if tool_config['rerank_url'] else None),
             'index': 'frozen M3-C mineru-text/BGE-M3',
             'query_embedding': 'shared frozen cache plus common BGE-M3 service',
             'source_hashes': {

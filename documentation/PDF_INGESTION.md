@@ -47,6 +47,43 @@ in a separate interpreter with MinerU 3.4.5 and locally provisioned models.
 `PDF_MINERU_PAGE_TIMEOUT_SECONDS` defaults to 240. Missing configuration or a
 version mismatch is an explicit failure.
 
+### MinerU setup (v9 test stack, 2026-10-14)
+
+Three parts, all outside the backend image:
+
+1. **Server.** vLLM with MinerU2.5-Pro-2605-1.2B, next to the agent model on
+   one DGX Spark. Memory is set by size, not by fraction: the profiling check
+   of a fraction fails when other processes change the shared memory during
+   start-up. It takes about 4.3 GB; a smaller KV cache only limits how many
+   pages run at once. `mineru-vl-utils` 1.x (the version MinerU 3.4.5 asks for)
+   is installed with `pip install --no-deps --target` into the mounted folder.
+
+   ```sh
+   docker run -d --name edullm-mineru-vlm --gpus all --ipc=host \
+     --network edullm-models -p 127.0.0.1:18003:8000 \
+     -e PYTHONPATH=/extra -e OMP_NUM_THREADS=1 \
+     -v /home/spark-1/edullm-mineru/extra:/extra:ro \
+     -v /home/spark-1/.cache/huggingface:/root/.cache/huggingface \
+     nvcr.io/nvidia/vllm:26.07-py3 \
+     vllm serve opendatalab/MinerU2.5-Pro-2605-1.2B --host 0.0.0.0 --port 8000 \
+     --served-model-name opendatalab/MinerU2.5-Pro-2605-1.2B \
+     --gpu-memory-utilization 0.05 --kv-cache-memory-bytes 600000000 \
+     --hf-overrides '{"tie_word_embeddings": true}' \
+     --logits-processors mineru_vl_utils:MinerULogitsProcessor
+   ```
+
+2. **Client.** The worker image built with `--build-arg WITH_MINERU=1` has
+   MinerU 3.4.5 at `/opt/mineru/bin/python`, with CPU torch for the local
+   layout and OCR models. One page takes 15–20 s and at most 0.8 GB.
+3. **Models and config.** `mineru-models-download -s huggingface -m pipeline`
+   run once with `HOME` and `HF_HOME` in `/home/spark-1/edullm-mineru/home`
+   (2.5 GB), then `mineru.json` with the pipeline path as the worker sees it
+   (`/opt/mineru-data/...`) and `"model-source": "local"`. The worker mounts
+   the folder read-only at `/opt/mineru-data` (see docker-compose.override.yml).
+
+Check: four rich pages (tables, a figure) gave the same content list, bounding
+boxes included, as the September 2026 run.
+
 ODP parsing and an isolated LibreOffice renderer remain available for historical
 fixtures and source-to-PDF experiments. ODP feature development is frozen;
 there is no requirement to implement a custom reader for every source format.

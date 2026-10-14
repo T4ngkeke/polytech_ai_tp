@@ -7,6 +7,8 @@
 # "ornith", at http://m4-flashnext-v030:8000/v1 for the LLM, agent and VLM):
 #   docker network create edullm-models
 #   docker network connect edullm-models m4-flashnext-v030
+# The reranker (edullm-reranker, vLLM, BAAI/bge-reranker-v2-m3) and the MinerU
+# server (edullm-mineru-vlm, vLLM) run on the same network.
 services:
   postgres:
     # This test database still uses default credentials; keep it local.
@@ -24,9 +26,20 @@ services:
     networks: [default, models]
 
   worker:
+    # PDF extraction: MinerU 3.4.5 in the worker image (WITH_MINERU), its
+    # server edullm-mineru-vlm on edullm-models, and the local models and
+    # mineru.json in /home/spark-1/edullm-mineru (see PDF_INGESTION.md).
+    build:
+      args:
+        WITH_MINERU: "1"
     environment:
       - STRUCTURED_INGEST_ENABLED=true
       - PDF_STRUCTURED_INGEST_ENABLED=true
+      - PDF_MINERU_PYTHON=/opt/mineru/bin/python
+      - PDF_MINERU_SERVER_URL=http://edullm-mineru-vlm:8000/v1
+      - PDF_MINERU_CONFIG=/opt/mineru-data/mineru.json
+    volumes:
+      - /home/spark-1/edullm-mineru:/opt/mineru-data:ro
     # The worker reads the same model settings (LLM, VLM) as the backend.
     networks: [default, models]
 

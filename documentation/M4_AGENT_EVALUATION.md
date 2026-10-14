@@ -230,6 +230,36 @@ citations. No change to the product. Precision on this benchmark should be
 read with a content check; adding these pages to the lists after seeing the
 answers would favour this model.
 
+## Reranker (2026-10-14)
+
+The search tool can rerank its fused candidates (about 40) with a cross
+encoder before it keeps the top ones. BAAI/bge-reranker-v2-m3 runs on vLLM
+(`edullm-reranker`, about 2.8 GB next to Flash-Next) and the evaluator takes
+`M4_RERANK_URL`. Benchmark v4, 17 questions x 2 rounds, Flash-Next, Qwen
+sampling, the same day and setup for both runs
+(`m4-agent/2026-10-14-rerank-off`, `-on`):
+
+| Reranker | Pages | Complete questions | Citation precision | Zero-citation | Median / p95 s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| off | 90/106 (85%) | 23/34 | 70% | 1 | 84 / 190 |
+| on | 93/106 (88%) | 22/34 | 75% | 0 | 81 / 154 |
+
+99 rerank calls, none failed, 0.16 s each. Tool calls per trial 10.7 against
+11.1. Pages and complete questions move within one run's spread (nine
+questions changed by one facet or more, in both directions); citation
+precision gains five points. The reranker is on in the v9 test stack.
+
+```sh
+docker run -d --name edullm-reranker --gpus all --ipc=host --restart unless-stopped \
+  --network edullm-models -p 127.0.0.1:18004:8000 \
+  -v /home/spark-1/.cache/huggingface:/root/.cache/huggingface \
+  nvcr.io/nvidia/vllm:26.07-py3 \
+  vllm serve BAAI/bge-reranker-v2-m3 --host 0.0.0.0 --port 8000 \
+  --runner pooling --gpu-memory-utilization 0.03 --max-model-len 8192 --max-num-seqs 32
+```
+
+Admin setting: `RERANK_URL=http://edullm-reranker:8000/rerank`.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable
