@@ -328,6 +328,47 @@ the reference check did not see; bare handles now get the correction turn.
 Runner events (turns, read and check turns, corrections, outcome) are now
 logged next to the tool lines, so a run can be followed in the backend log.
 
+## ask_student: a question back with options (2026-10-14)
+
+Method, fixed before the runs: the 36 probe questions as a benchmark
+(`M4_BENCHMARK=clarify`, product budget, Flash-Next, reranker on, 2 rounds);
+the 14 questions that need a question back carry the student's next message,
+run as a second turn of the same conversation. Scores:
+`scripts/m4_clarify_score.py`. Criteria: questions back on at least 70% of
+the "clarify" trials with a median of at most 20 s, no uncited guess, at most
+one question back over the 16 clear questions and v4, v4 pages at least 85%,
+at least 12 of 14 follow-ups citing an expected file per round.
+
+| Run | Clarify: asked | Median s when asked | Uncited guesses | Clear: asked | Follow-ups right |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Before (no tool) | 9/28 | 11 | 2 | 0/32 | 27/28 |
+| With ask_student | 25/28 | 9.4 | 0 | 0/32 | 27/28 |
+
+"Before" was counted by hand: the scorer's text rule (a reply without
+citations under 1200 characters with a "?") missed three long questions back.
+Its round 2 stopped at 65 of 72 trials when the session ended; the 7 missing
+trials ran on the new code with `M4_ASK=0` (`2026-10-14-clarify-baseline-merged`).
+With the tool, the three trials that did not ask covered the readings instead
+(B2 twice: an overview of the database courses; B6 once: the four tree
+courses). The one wrong follow-up (B6) gave the right page count from the file
+list without a citation. Options are written without research in 6 to 15 s,
+from the file list: mostly clear topics, sometimes mislabelled (two titles
+swapped once) or missing the right file (the C course for "CM1" and for a
+segfault).
+
+Benchmark v4 with the tool offered: no question back in 34 trials; pages 83%
+(criterion 85%). The same code without the tool, the same evening: 87%. The
+gap is four facets of 106, one facet each on six questions in both
+directions; the five other v4 runs of the day gave 85, 88, 91, 85 and 87%.
+One pair cannot tell this from noise.
+
+Found on the way and fixed: a correction turn that replied with a note about
+the correction ("Voici la correction…", no citation) replaced a good answer;
+"[E21 in d1.p21]" is now rewritten as [E21] without a model call, and a
+correction that drops every citation keeps the original answer. An answer
+citing "[EASI951_CM_2025.pdf, page 42]" had no valid reference and no
+correction; brackets naming a file or a page now count as malformed.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable
