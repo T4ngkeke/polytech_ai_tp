@@ -174,6 +174,12 @@ test): a long answer can take two minutes, so the time between research and
 total should be at least one model call. The 2026-10 benchmark's "standard"
 budget was 8, 2, 45, 60, 20 and 12000. `GET /api/admin/llm/config` also
 returns `research_limits`: the default, minimum and maximum of each field.
+It also returns, read-only, `features` (`research_agent`,
+`structured_documents`, `pdf_documents`: the deployment flags) and
+`mineru_default_url` (the backend's `PDF_MINERU_SERVER_URL`). The field
+`mineru_server_url` (SystemConfig `PDF_MINERU_SERVER_URL`) switches the PDF
+worker to another MinerU server at its next tick; empty uses the worker's own
+`PDF_MINERU_SERVER_URL`.
 
 Each model call is reserved on the student's daily quota before it starts
 and settled with the reported usage afterwards.

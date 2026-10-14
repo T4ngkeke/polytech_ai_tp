@@ -100,3 +100,15 @@ def test_classifier_plumbing_is_gone():
 
     assert not hasattr(worker_main, "_parse_classified_lines")
     assert not hasattr(worker_main, "run_hint_job")
+
+
+def test_the_admin_mineru_server_replaces_the_deployment_one_for_a_tick(tmp_path):
+    from backend.worker.main import with_mineru_server
+    from backend.worker.structured_ingest import StructuredSettings
+    deployed = StructuredSettings.from_env(tmp_path, {'PDF_MINERU_SERVER_URL': 'http://mineru-a:8000/v1',
+                                                      'PDF_MINERU_PYTHON': '/opt/mineru/bin/python'})
+    assert with_mineru_server(deployed, '').pdf_server_url == 'http://mineru-a:8000/v1'
+    switched = with_mineru_server(deployed, 'http://mineru-b:8000/v1')
+    assert switched.pdf_server_url == 'http://mineru-b:8000/v1' and switched.pdf_python == '/opt/mineru/bin/python'
+    assert deployed.pdf_server_url == 'http://mineru-a:8000/v1'  # the deployment value is kept
+    assert with_mineru_server(None, 'http://mineru-b:8000/v1') is None

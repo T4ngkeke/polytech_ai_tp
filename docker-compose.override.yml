@@ -23,6 +23,8 @@ services:
       - AGENTIC_SEARCH_ENABLED=true
       - STRUCTURED_INGEST_ENABLED=true
       - PDF_STRUCTURED_INGEST_ENABLED=true
+      # Shown in the admin map as the MinerU server the worker uses by default.
+      - PDF_MINERU_SERVER_URL=http://edullm-mineru-vlm:8000/v1
     networks: [default, models]
 
   worker:

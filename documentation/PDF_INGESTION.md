@@ -84,6 +84,11 @@ Three parts, all outside the backend image:
 Check: four rich pages (tables, a figure) gave the same content list, bounding
 boxes included, as the September 2026 run.
 
+The server can change without a restart: the MinerU node of the admin model
+map stores `PDF_MINERU_SERVER_URL` in SystemConfig, and the worker uses it from
+its next tick (empty: the worker's environment value). The client, its models
+and `mineru.json` stay deployment settings.
+
 ODP parsing and an isolated LibreOffice renderer remain available for historical
 fixtures and source-to-PDF experiments. ODP feature development is frozen;
 there is no requirement to implement a custom reader for every source format.

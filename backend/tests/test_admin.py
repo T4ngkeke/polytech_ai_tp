@@ -378,6 +378,16 @@ class TestLLMConfig:
         assert got["context_max_tokens"] == "12000"
         assert got["rerank_score_threshold"] == ""  # gate ships OFF
 
+    async def test_mineru_server_roundtrip_and_read_only_deployment_info(self, admin_client, monkeypatch):
+        monkeypatch.setenv("PDF_MINERU_SERVER_URL", "http://edullm-mineru-vlm:8000/v1")
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["mineru_server_url"] == "" and got["mineru_default_url"] == "http://edullm-mineru-vlm:8000/v1"
+        assert set(got["features"]) == {"research_agent", "structured_documents", "pdf_documents"}
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "mineru_server_url": "http://other-mineru:8000/v1"})
+        assert resp.status_code == 200 and resp.json()["mineru_server_url"] == "http://other-mineru:8000/v1"
+
     async def test_research_limits_roundtrip_and_range_check(self, admin_client):
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",

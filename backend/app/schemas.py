@@ -152,6 +152,8 @@ class LLMConfigRequest(BaseModel):
     vlm_base_url: str | None = None
     vlm_api_key: str | None = None
     vlm_model: str | None = None
+    # MinerU server of the PDF worker (hot-switched; empty = deployment setting).
+    mineru_server_url: str | None = None
     # Research agent limits (whole numbers; empty = default, see ResearchLimits).
     agent_max_tool_calls: str | None = None
     agent_max_visual_calls: str | None = None
@@ -194,6 +196,10 @@ class LLMConfigResponse(BaseModel):
     vlm_base_url: str = ""
     vlm_api_key: str = ""
     vlm_model: str = ""
+    mineru_server_url: str = ""
+    # Feature flags of the deployment and the worker's own MinerU server (read-only).
+    features: dict[str, bool] = Field(default_factory=dict)
+    mineru_default_url: str = ""
     # Research agent limits — empty means the default.
     agent_max_tool_calls: str = ""
     agent_max_visual_calls: str = ""

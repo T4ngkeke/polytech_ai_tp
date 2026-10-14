@@ -165,6 +165,17 @@ class WorkerFns:
     # [v8.1] VLM garbled-formula repair — None unless VLM_MODEL is configured.
     repair_fn: RepairFn | None = None
     page_reader_fn: PageReaderFn | None = None
+    # MinerU server set in the admin map; empty = PDF_MINERU_SERVER_URL.
+    mineru_server_url: str = ""
+
+
+def with_mineru_server(structured, url: str):
+    """The structured settings of this tick: the admin's MinerU server when one
+    is set, so it can change without a worker restart."""
+    if structured is None or not url:
+        return structured
+    from dataclasses import replace
+    return replace(structured, pdf_server_url=url)
 
 
 def make_fn_builder(load_config=None, build_fns=None):
@@ -209,7 +220,8 @@ async def run_forever(
             db, gate, embed_fn=fns.embed_fn, context_fn=fns.context_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
             token_budget=fns.token_budget, repair_fn=fns.repair_fn,
-            page_reader_fn=fns.page_reader_fn, structured=structured,
+            page_reader_fn=fns.page_reader_fn,
+            structured=with_mineru_server(structured, fns.mineru_server_url),
         )
 
 
@@ -343,6 +355,7 @@ async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
         "vlm_base_url": routing.vlm.base_url,
         "vlm_api_key": routing.vlm.api_key,
         "vlm_model": routing.vlm.model,
+        "mineru_server_url": next((r.value.strip() for r in rows if r.key == "PDF_MINERU_SERVER_URL"), ""),
     }
 
 
@@ -395,6 +408,7 @@ def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
         embed_fn=embed_fn, context_fn=context_fn,
         token_budget=cfg.get("ingest_token_budget"),
         repair_fn=repair_fn, page_reader_fn=page_reader_fn,
+        mineru_server_url=cfg.get("mineru_server_url") or "",
     )
 
 

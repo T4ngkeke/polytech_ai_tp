@@ -617,78 +617,28 @@ function AnalyticsTab() {
 // node to edit just that slot — each panel saves independently (the backend
 // PUT is a partial upsert).
 
+// Who calls the models. Each node lists its callers in `sources`: a source
+// or another node (the research agent calls embedding, reranker and vision).
 const MAP_SOURCES = [
-  { id: 'students', x: 10, y: 26, label: 'Students', sub: 'live chat' },
-  { id: 'worker', x: 10, y: 79, label: 'Worker', sub: 'off-peak jobs' },
+  { id: 'students', x: 10, y: 14, label: 'Students', sub: 'questions in a lab' },
+  { id: 'teachers', x: 10, y: 48, label: 'Teachers', sub: 'figure descriptions' },
+  { id: 'worker', x: 10, y: 82, label: 'Worker', sub: 'document uploads' },
 ];
 
-// status(config): 'live' (the main LLM itself) · 'set' (own model/endpoint) ·
-// 'inherits' (falls back to the main LLM) · 'off' (feature disabled).
+// status(config): 'live' (the default model itself) · 'set' (own model/endpoint) ·
+// 'inherits' (empty: uses the default model) · 'off' (feature disabled) ·
+// 'deployment' (empty: uses the deployment setting) · 'legacy' (unused while
+// the research agent is on).
 const MAP_NODES = [
   {
-    id: 'chat', x: 37, y: 13, icon: '💬', name: 'Chat LLM', source: 'students',
-    tag: 'The big model students talk to. Also carries the billing weights and the history OOM cap.',
-    status: () => 'live',
-    fields: [
-      { key: 'model', label: 'Model Name', placeholder: 'qwen3' },
-      { key: 'base_url', label: 'Base URL', placeholder: 'http://localhost:11434/v1' },
-      { key: 'api_key', label: 'API Key', placeholder: "sk-… or 'ollama'", secret: true },
-      { key: 'context_max_tokens', label: 'Max history tokens (OOM cap)', placeholder: '8000' },
-      { key: 'token_alpha', label: 'α — prefill weight', placeholder: '0.2', numeric: true },
-      { key: 'token_beta', label: 'β — decode weight', placeholder: '1.0', numeric: true },
-    ],
-  },
-  {
-    id: 'aux', x: 67, y: 13, icon: '🧭', name: 'Auxiliary', source: 'students',
-    tag: 'Router · self-eval · rewrite — every live auxiliary call. Point it at a small fast model (e.g. a 9B).',
-    status: (c) => (c.router_model ? 'set' : 'inherits'),
-    warnEmpty: 'Empty — auxiliary calls run on the big chat model and compete with students for its capacity.',
-    fields: [
-      { key: 'router_model', label: 'Model Name', placeholder: 'inherits main LLM — e.g. ministral-8b' },
-      { key: 'router_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
-      { key: 'router_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
-    ],
-  },
-  {
-    id: 'embedding', x: 37, y: 46, icon: '🧲', name: 'Embedding', source: 'students',
-    tag: 'bge-m3 — RAG vectors. Indexing and querying must use the same model.',
-    status: (c) => (c.embedding_url ? 'set' : 'inherits'),
-    fields: [
-      { key: 'embedding_model', label: 'Model Name', placeholder: 'BAAI/bge-m3' },
-      { key: 'embedding_url', label: 'Base URL', placeholder: 'inherits main LLM' },
-      { key: 'embedding_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
-    ],
-  },
-  {
-    id: 'rerank', x: 67, y: 46, icon: '⚖️', name: 'Reranker', source: 'students',
-    tag: 'bge-reranker behind a real /rerank endpoint — not the chat base URL. Empty URL = disabled (fusion order only).',
-    status: (c) => (c.rerank_url ? 'set' : 'off'),
-    fields: [
-      { key: 'rerank_model', label: 'Model Name', placeholder: 'bge-reranker-v2-m3' },
-      { key: 'rerank_url', label: 'Rerank URL', placeholder: 'https://…/v1/rerank (empty = off)' },
-      { key: 'rerank_api_key', label: 'API Key', placeholder: '', secret: true },
-      { key: 'rerank_score_threshold', label: 'Score threshold (empty = gate off)', placeholder: 'e.g. 0.35 once calibrated' },
-    ],
-  },
-  {
-    id: 'ingest', x: 37, y: 79, icon: '📥', name: 'Ingest model', source: 'worker',
-    tag: 'Contextual Retrieval — a small cheap model, off-peak only.',
-    status: (c) => (c.ingest_model ? 'set' : 'inherits'),
-    fields: [
-      { key: 'ingest_model', label: 'Model Name', placeholder: 'inherits main LLM — e.g. qwen3:30b' },
-      { key: 'ingest_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
-      { key: 'ingest_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
-    ],
-  },
-  {
-    id: 'agent', x: 67, y: 79, icon: '🧠', name: 'Agent', source: 'chat',
-    tag: 'The reasoning behind retrieval. The BIG model — quality over latency. It searches and reads the course for each student question, within the research limits below.',
+    id: 'agent', x: 34, y: 14, icon: '🧠', name: 'Research agent', sources: ['students'],
+    tag: 'Answers every student question in a lab: it searches and reads the course PDFs, '
+      + 'may ask the student back, then answers with citations. The limits below apply to each question.',
     status: (c) => (c.agent_model ? 'set' : 'inherits'),
     fields: [
-      { key: 'agent_model', label: 'Model Name', placeholder: 'inherits main LLM' },
-      { key: 'agent_base_url', label: 'Base URL', placeholder: 'inherits main LLM' },
-      { key: 'agent_api_key', label: 'API Key', placeholder: 'inherits main LLM', secret: true },
-      { key: 'ingest_token_budget', label: 'Token budget / document', placeholder: '200000' },
+      { key: 'agent_model', label: 'Model Name', placeholder: 'inherits the default model' },
+      { key: 'agent_base_url', label: 'Base URL', placeholder: 'inherits the default model' },
+      { key: 'agent_api_key', label: 'API Key', placeholder: 'inherits the default model', secret: true },
       // Research limits: default and range come from the backend (research_limits).
       { key: 'agent_max_tool_calls', label: 'Course tool calls', limit: true },
       { key: 'agent_max_visual_calls', label: 'Image views', limit: true },
@@ -699,43 +649,118 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'vlm', x: 90, y: 79, icon: '👁️', name: 'VLM', source: 'worker',
-    tag: 'Garbled-formula transcription from page images (vision). Empty model = off — vision is opt-in, it never falls back.',
+    id: 'vlm', x: 34, y: 48, icon: '👁️', name: 'Vision (VLM)', sources: ['agent', 'teachers', 'worker'],
+    tag: 'Looks at images: page images and figures the research agent views, figure descriptions '
+      + 'teachers ask for, and the worker’s repair of garbled formulas. Empty model = off; it never '
+      + 'falls back to a text-only model.',
     status: (c) => (c.vlm_model ? 'set' : 'off'),
     fields: [
-      { key: 'vlm_model', label: 'Model Name', placeholder: 'empty = off — e.g. qwen3.5-122b-a10b' },
-      { key: 'vlm_base_url', label: 'Base URL', placeholder: 'inherits main LLM URL' },
-      { key: 'vlm_api_key', label: 'API Key', placeholder: 'inherits main LLM key', secret: true },
+      { key: 'vlm_model', label: 'Model Name', placeholder: 'empty = off' },
+      { key: 'vlm_base_url', label: 'Base URL', placeholder: 'inherits the default model URL' },
+      { key: 'vlm_api_key', label: 'API Key', placeholder: 'inherits the default model key', secret: true },
+    ],
+  },
+  {
+    id: 'chat', x: 85, y: 48, icon: '💬', name: 'Default model', sources: [],
+    tag: 'Every empty model slot uses this model (dashed lines). It also answers chats outside a lab '
+      + '(the old chat path) and holds the billing weights α/β applied to every model call.',
+    status: () => 'live',
+    fields: [
+      { key: 'model', label: 'Model Name', placeholder: 'served model name' },
+      { key: 'base_url', label: 'Base URL', placeholder: 'http://model-server:8000/v1' },
+      { key: 'api_key', label: 'API Key', placeholder: "sk-… or 'local'", secret: true },
+      { key: 'context_max_tokens', label: 'Max history tokens sent to the model', placeholder: '8000' },
+      { key: 'token_alpha', label: 'α — prefill weight', placeholder: '0.2', numeric: true },
+      { key: 'token_beta', label: 'β — decode weight', placeholder: '1.0', numeric: true },
+    ],
+  },
+  {
+    id: 'embedding', x: 58, y: 48, icon: '🧲', name: 'Embedding', sources: ['agent', 'worker'],
+    tag: 'bge-m3 vectors. The worker indexes documents with it and the research search queries with it: '
+      + 'both must use the same model.',
+    status: (c) => (c.embedding_url ? 'set' : 'inherits'),
+    fields: [
+      { key: 'embedding_model', label: 'Model Name', placeholder: 'bge-m3' },
+      { key: 'embedding_url', label: 'Base URL', placeholder: 'inherits the default model' },
+      { key: 'embedding_api_key', label: 'API Key', placeholder: 'inherits the default model', secret: true },
+    ],
+  },
+  {
+    id: 'rerank', x: 58, y: 14, icon: '⚖️', name: 'Reranker', sources: ['agent'],
+    tag: 'Reorders the research search results (bge-reranker behind a /rerank endpoint, not the chat '
+      + 'base URL). Empty URL = off: fusion order only. The score threshold applies only to the old chat path.',
+    status: (c) => (c.rerank_url ? 'set' : 'off'),
+    fields: [
+      { key: 'rerank_model', label: 'Model Name', placeholder: 'BAAI/bge-reranker-v2-m3' },
+      { key: 'rerank_url', label: 'Rerank URL', placeholder: 'http://reranker:8000/rerank (empty = off)' },
+      { key: 'rerank_api_key', label: 'API Key', placeholder: '', secret: true },
+      { key: 'rerank_score_threshold', label: 'Score threshold, old chat path only (empty = off)', placeholder: 'e.g. 0.35 once calibrated' },
+    ],
+  },
+  {
+    id: 'aux', x: 85, y: 82, icon: '🧭', name: 'Old chat path', sources: [],
+    tag: 'Router, self-evaluation and rewrite of the chat path without the research agent (chats outside '
+      + 'a lab, or the agent turned off). Not used while the research agent is on.',
+    status: (c) => (c.features?.research_agent ? 'legacy' : c.router_model ? 'set' : 'inherits'),
+    fields: [
+      { key: 'router_model', label: 'Model Name', placeholder: 'inherits the default model' },
+      { key: 'router_base_url', label: 'Base URL', placeholder: 'inherits the default model' },
+      { key: 'router_api_key', label: 'API Key', placeholder: 'inherits the default model', secret: true },
+    ],
+  },
+  {
+    id: 'ingest', x: 34, y: 82, icon: '📥', name: 'Ingest model', sources: ['worker'],
+    tag: 'Writes one line of context for each chunk when a document is indexed (worker, off-peak). '
+      + 'The token budget per document is recorded in the ingest report.',
+    status: (c) => (c.ingest_model ? 'set' : 'inherits'),
+    fields: [
+      { key: 'ingest_model', label: 'Model Name', placeholder: 'inherits the default model' },
+      { key: 'ingest_base_url', label: 'Base URL', placeholder: 'inherits the default model' },
+      { key: 'ingest_api_key', label: 'API Key', placeholder: 'inherits the default model', secret: true },
+      { key: 'ingest_token_budget', label: 'Token budget / document', placeholder: '200000' },
+    ],
+  },
+  {
+    id: 'mineru', x: 58, y: 82, icon: '📄', name: 'MinerU (PDF)', sources: ['worker'],
+    tag: 'Reads each page of an uploaded PDF (layout, text, tables, formulas) through a MinerU vision '
+      + 'server. Only the server can change here, without a restart; the MinerU client, its local models '
+      + 'and mineru.json are part of the worker deployment.',
+    status: (c) => (c.mineru_server_url ? 'set' : c.features?.pdf_documents ? 'deployment' : 'off'),
+    shows: (c) => c.mineru_server_url || c.mineru_default_url,
+    fields: [
+      { key: 'mineru_server_url', label: 'MinerU server URL', placeholder: 'empty = the deployment setting',
+        hint: (c) => (c.mineru_default_url ? `Deployment setting: ${c.mineru_default_url}` : 'No deployment setting.') },
     ],
   },
 ];
 
 const NODE_STATUS_META = {
-  live: { chip: 'main', cls: 'bg-cyan-muted text-cyan' },
-  set: { chip: 'own model', cls: 'bg-emerald-500/15 text-emerald-300' },
+  live: { chip: 'default', cls: 'bg-cyan-muted text-cyan' },
+  set: { chip: 'own setting', cls: 'bg-emerald-500/15 text-emerald-300' },
   inherits: { chip: 'inherits', cls: 'bg-gold-muted text-gold' },
+  deployment: { chip: 'deployment', cls: 'bg-emerald-500/10 text-emerald-200' },
+  legacy: { chip: 'not used', cls: 'bg-ink-surface text-cream-muted' },
   off: { chip: 'off', cls: 'bg-ink-surface text-cream-muted' },
 };
 
 function MapEdges({ config }) {
-  const chat = MAP_NODES[0];
   const byId = Object.fromEntries([...MAP_SOURCES, ...MAP_NODES].map((s) => [s.id, s]));
+  const fallback = byId.chat;
   return (
     <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100"
       preserveAspectRatio="none" aria-hidden="true">
-      {MAP_NODES.map((n) => {
-        const s = byId[n.source];
-        if (!s) return null;
+      {MAP_NODES.flatMap((n) => n.sources.map((sourceId) => {
+        const s = byId[sourceId];
         const st = n.status(config);
         return (
-          <line key={`call-${n.id}`} x1={s.x} y1={s.y} x2={n.x} y2={n.y}
-            stroke={st === 'off' ? 'rgba(148,148,140,0.18)' : 'rgba(34,211,238,0.35)'}
+          <line key={`call-${sourceId}-${n.id}`} x1={s.x} y1={s.y} x2={n.x} y2={n.y}
+            stroke={st === 'off' || st === 'legacy' ? 'rgba(148,148,140,0.18)' : 'rgba(34,211,238,0.35)'}
             strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         );
-      })}
+      }))}
       {MAP_NODES.filter((n) => n.status(config) === 'inherits').map((n) => (
-        <line key={`fb-${n.id}`} x1={n.x} y1={n.y} x2={chat.x} y2={chat.y}
-          stroke={n.warnEmpty ? 'rgba(248,113,113,0.7)' : 'rgba(212,175,55,0.55)'}
+        <line key={`fb-${n.id}`} x1={n.x} y1={n.y} x2={fallback.x} y2={fallback.y}
+          stroke="rgba(212,175,55,0.55)"
           strokeWidth="1.5" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
       ))}
     </svg>
@@ -745,7 +770,7 @@ function MapEdges({ config }) {
 function MapNode({ node, config, selected, onSelect }) {
   const st = node.status(config);
   const meta = NODE_STATUS_META[st];
-  const model = config[node.fields[0].key];
+  const model = node.shows ? node.shows(config) : config[node.fields[0].key];
   return (
     <button type="button" onClick={onSelect}
       style={{ left: `${node.x}%`, top: `${node.y}%` }}
@@ -759,7 +784,7 @@ function MapNode({ node, config, selected, onSelect }) {
         ) : null}
       </div>
       <p className="mt-1 truncate font-mono text-[10px] text-cream-muted">
-        {model || (st === 'off' ? '—' : 'main LLM')}
+        {model || (st === 'off' || st === 'legacy' ? '—' : 'default model')}
       </p>
       <span className={`mt-1 inline-block rounded px-1 py-px text-[9px] font-medium ${meta.cls}`}>
         {meta.chip}
@@ -795,6 +820,14 @@ function NodePanel({ node, config, set, onSave, saving }) {
         const field = <Field key={f.key} value={config[f.key]} onChange={set(f.key)}
           label={limit ? `${f.label} · ${limit.min}–${limit.max}` : f.label}
           placeholder={limit ? `default ${limit.default}` : f.placeholder} />;
+        if (f.hint) {
+          return (
+            <div key={f.key} className="space-y-1">
+              {field}
+              <p className="text-[11px] text-cream-muted">{f.hint(config)}</p>
+            </div>
+          );
+        }
         // A heading before the first research limit.
         return f.limit && !node.fields[i - 1]?.limit ? (
           <div key={f.key} className="space-y-3">
@@ -824,7 +857,7 @@ function LLMConfigTab() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedId, setSelectedId] = useState('chat');
+  const [selectedId, setSelectedId] = useState('agent');
   const [loadError, setLoadError] = useState('');
 
   const loadConfig = useCallback(async () => {
@@ -885,12 +918,19 @@ function LLMConfigTab() {
           subtitle="Changes take effect immediately — no server restart required." />
         <p className="text-xs text-cream-muted mb-4">
           <span className="text-cyan">━━</span> calls ·{' '}
-          <span className="text-gold">╌╌</span> empty slot inherits the main LLM ·
+          <span className="text-gold">╌╌</span> empty slot uses the default model ·
           click a node to configure it.
+          {config.features && (
+            <span className="ml-2">
+              Research agent: <span className="text-cream-secondary">{config.features.research_agent ? 'on' : 'off'}</span>{' · '}
+              PDF documents: <span className="text-cream-secondary">{config.features.pdf_documents ? 'on' : 'off'}</span>
+              <span> (deployment settings)</span>
+            </span>
+          )}
         </p>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="relative h-[430px] overflow-hidden rounded-xl border border-border-default bg-ink-deep/40">
+          <div className="relative h-[470px] overflow-hidden rounded-xl border border-border-default bg-ink-deep/40">
             <MapEdges config={config} />
             {MAP_SOURCES.map((s) => <MapSource key={s.id} source={s} />)}
             {MAP_NODES.map((n) => (

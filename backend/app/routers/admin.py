@@ -30,12 +30,14 @@ POST   /api/admin/maintenance/prune
 
 import csv
 import io
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.config import settings
 from backend.app.auth import hash_password, require_admin
 from backend.app.database import get_db
 from backend.app.models import (
@@ -263,6 +265,8 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "vlm_base_url": "VLM_BASE_URL",
     "vlm_api_key": "VLM_API_KEY",
     "vlm_model": "VLM_MODEL",
+    # MinerU server of the PDF worker; empty = the worker's PDF_MINERU_SERVER_URL.
+    "mineru_server_url": "PDF_MINERU_SERVER_URL",
     # Research agent limits (see research_service.ResearchLimits).
     "agent_max_tool_calls": "AGENT_MAX_TOOL_CALLS",
     "agent_max_visual_calls": "AGENT_MAX_VISUAL_CALLS",
@@ -297,6 +301,14 @@ async def get_llm_config(
     routing = resolve_model_routing(configs)
     payload["token_alpha"] = routing.token_alpha
     payload["token_beta"] = routing.token_beta
+    # What the map can show but not change: the deployment's feature flags and
+    # the MinerU server the worker uses when the field is empty.
+    payload["features"] = {
+        "research_agent": settings.AGENTIC_SEARCH_ENABLED,
+        "structured_documents": settings.STRUCTURED_INGEST_ENABLED,
+        "pdf_documents": settings.PDF_STRUCTURED_INGEST_ENABLED,
+    }
+    payload["mineru_default_url"] = os.environ.get("PDF_MINERU_SERVER_URL", "")
     payload["research_limits"] = {
         field: {"default": DEFAULT_LIMITS[LIMIT_KEYS[key][0]],
                 "min": LIMIT_KEYS[key][1], "max": LIMIT_KEYS[key][2]}
