@@ -85,6 +85,25 @@ logger = logging.getLogger(__name__)
 # (proxies such as nginx close a stream after 60 s of silence by default).
 KEEPALIVE_SECONDS = 15
 
+
+def _research_frames(items):
+    """SSE frames for queued research events: a phase name is a status event;
+    ('draft', text) adds draft text, ('draft', None) withdraws the draft.
+    Consecutive draft text goes out as one frame."""
+    frames, text = [], ''
+    for item in [*items, None]:
+        if isinstance(item, tuple) and item[1] is not None:
+            text += item[1]
+            continue
+        if text:
+            frames.append(f"event: draft\ndata: {json.dumps(text)}\n\n")
+            text = ''
+        if isinstance(item, tuple):
+            frames.append("event: draft_reset\ndata: {}\n\n")
+        elif item is not None:
+            frames.append(f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': item})}\n\n")
+    return frames
+
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
@@ -573,6 +592,10 @@ async def chat_stream(
             def phase(name):
                 if name in {'finding', 'reading', 'checking_image', 'checking_sources'}:
                     queue.put_nowait(name)
+
+            def draft(text):
+                # None withdraws the draft shown so far.
+                queue.put_nowait(('draft', text))
             yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking'})}\n\n"
             task = asyncio.create_task(run_persisted_research(
                 scope=scope, question=body.message, client_request_id=request_id,
@@ -586,15 +609,18 @@ async def chat_stream(
                 embed_model=llm_config['embedding_model'],
                 rerank_model=llm_config['rerank_model'], on_phase=phase,
                 vision_fn=vision, vision_model=vlm.model, limits=limits,
-                session_factory=research_factory))
+                on_draft=draft, session_factory=research_factory))
             last_sent = time.monotonic()
             try:
                 while not task.done():
                     if await request.is_disconnected():
                         return  # finally cancels the run
                     try:
-                        name = await asyncio.wait_for(queue.get(), timeout=0.5)
-                        yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': name})}\n\n"
+                        items = [await asyncio.wait_for(queue.get(), timeout=0.5)]
+                        while not queue.empty():
+                            items.append(queue.get_nowait())
+                        for frame in _research_frames(items):
+                            yield frame
                         last_sent = time.monotonic()
                     except asyncio.TimeoutError:
                         # A model call can be silent for minutes; an SSE comment

@@ -94,7 +94,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  earlier_citations: dict[str, dict] | None = None, embed_fn=None,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
-                                 tool_factory=None, on_phase=None, vision_fn=None,
+                                 tool_factory=None, on_phase=None, on_draft=None, vision_fn=None,
                                  vision_model: str = '',
                                  limits: ResearchLimits = ResearchLimits()) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call)."""
@@ -173,7 +173,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                              alpha=token_alpha, beta=token_beta, call=model),
             max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
             total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
-            max_input_tokens=limits.input_tokens, on_phase=on_phase)
+            max_input_tokens=limits.input_tokens, on_phase=on_phase, on_draft=on_draft)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations)
         await runs.finish_run(started.run_id, result)

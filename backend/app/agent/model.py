@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 from openai import AsyncOpenAI
 
@@ -50,25 +51,56 @@ class ResearchModel:
                                   max_retries=0)
 
     async def __call__(self, messages: list[dict], max_output: int, timeout: float, *,
-                       tools: list[dict] | None = None, purpose: str = '') -> ModelReply:
+                       tools: list[dict] | None = None, purpose: str = '',
+                       on_text: Callable[[str], None] | None = None) -> ModelReply:
         # purpose (agent, answer, citation_correction) is for usage accounting
         # by a billing wrapper; the call itself does not depend on it.
-        response = await self.client.chat.completions.create(
+        # on_text, when given, receives the visible text as it is generated
+        # (a draft: the caller still checks the whole reply).
+        request = dict(
             model=self.endpoint.model, messages=messages, **self.sampling,
-            max_tokens=max_output, timeout=timeout, stream=False,
+            max_tokens=max_output, timeout=timeout,
             extra_body={'chat_template_kwargs': {'enable_thinking': False}, **self.extra_body},
             **({'tools': tools} if tools else {}))
-        message = response.choices[0].message if response.choices else None
-        calls = [{'id': c.id, 'name': c.function.name, 'arguments': c.function.arguments}
-                 for c in (message.tool_calls or [])] if message else []
-        content = (message.content or '') if message else ''
+        if on_text is None:
+            response = await self.client.chat.completions.create(**request, stream=False)
+            message = response.choices[0].message if response.choices else None
+            calls = [{'id': c.id, 'name': c.function.name, 'arguments': c.function.arguments}
+                     for c in (message.tool_calls or [])] if message else []
+            content = (message.content or '') if message else ''
+            model, usage = response.model, response.usage
+        else:
+            content, calls, model, usage = await self._stream(request, on_text)
         # Some compatible servers put a thinking preamble in the visible text.
         # Never pass it on to the student or back into the conversation.
         if '</think>' in content:
             content = content.rsplit('</think>', 1)[1].strip()
         if '<think>' in content:
             content = ''
-        tokens = response.usage
-        return ModelReply(content, calls, response.model or self.endpoint.model,
-                          tokens.prompt_tokens if tokens else None,
-                          tokens.completion_tokens if tokens else None)
+        return ModelReply(content, calls, model or self.endpoint.model,
+                          usage.prompt_tokens if usage else None,
+                          usage.completion_tokens if usage else None)
+
+    async def _stream(self, request: dict, on_text: Callable[[str], None]):
+        """One streamed call: the text goes to on_text as it arrives; tool calls
+        are assembled from their fragments."""
+        stream = await self.client.chat.completions.create(
+            **request, stream=True, stream_options={'include_usage': True})
+        text, calls, model, usage = '', {}, '', None
+        async for chunk in stream:
+            model = chunk.model or model
+            usage = chunk.usage or usage
+            for choice in chunk.choices:
+                delta = choice.delta
+                if delta.content:
+                    text += delta.content
+                    # A thinking preamble is never shown, not even as a draft.
+                    if '<think>' not in text:
+                        on_text(delta.content)
+                for part in delta.tool_calls or []:
+                    call = calls.setdefault(part.index, {'id': '', 'name': '', 'arguments': ''})
+                    call['id'] = call['id'] or part.id or ''
+                    if part.function:
+                        call['name'] = call['name'] or part.function.name or ''
+                        call['arguments'] += part.function.arguments or ''
+        return text, [calls[i] for i in sorted(calls)], model, usage

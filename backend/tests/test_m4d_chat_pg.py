@@ -75,9 +75,15 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
         class FakeModel:
             def __init__(self, endpoint):
                 pass
-            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='',
+                               on_text=None):
                 model_messages.append(messages)
-                return steps.pop(0)
+                reply = steps.pop(0)
+                # A streamed call sends its text as it is written.
+                if on_text and reply.content:
+                    for word in reply.content.split(' '):
+                        on_text(word + ' ')
+                return reply
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
         client = await make_client(db, student)
         request_id = str(uuid.uuid4())
@@ -88,6 +94,10 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
             assert response.status_code == 200, response.text
             stream = events(response.text)
             assert [name for name, _ in stream][-3:] == ['token', 'citations', 'done']
+            # The draft comes first; the checked answer follows as the token.
+            drafts = ''.join(payload for name, payload in stream if name == 'draft')
+            assert drafts.strip() == 'Voir la définition [E1].'
+            assert [name for name, _ in stream].index('draft') < [name for name, _ in stream].index('token')
             citations = next(payload for name, payload in stream if name == 'citations')
             assert len(citations) == 1 and citations[0]['available']
             assert citations[0]['pdf_page_no'] == page.preview_page_no
@@ -182,7 +192,7 @@ async def test_direct_http_saved_and_charged_without_router(pg_session, tmp_path
         class FakeModel:
             def __init__(self, endpoint):
                 endpoints.append(endpoint.model)
-            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
                 # A reply without research gets one check; DONE keeps it.
                 return ModelReply('DONE' if purpose == 'answer_check' else 'Bonjour !', [], 'ornith', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
@@ -244,7 +254,7 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
         class FakeModel:
             def __init__(self, endpoint):
                 pass
-            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
                 model_messages.append(messages)
                 return ModelReply('Bonjour !', [], 'ornith', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
@@ -295,7 +305,7 @@ async def test_silent_research_sends_keep_alive_comments(pg_session, tmp_path, m
         class SlowModel:
             def __init__(self, endpoint):
                 pass
-            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
                 await asyncio.sleep(1.2)
                 return ModelReply('Bonjour !', [], 'ornith', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', SlowModel)
@@ -448,7 +458,7 @@ async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monke
         class FakeModel:
             def __init__(self, endpoint):
                 pass
-            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
                 if steps:
                     return steps.pop(0)
                 # Cite only the visual observation just returned.

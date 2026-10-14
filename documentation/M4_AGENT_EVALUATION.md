@@ -260,6 +260,40 @@ docker run -d --name edullm-reranker --gpus all --ipc=host --restart unless-stop
 
 Admin setting: `RERANK_URL=http://edullm-reranker:8000/rerank`.
 
+## Tool changes and answer drafts (2026-10-14)
+
+Tool calls of the last 150 trials (Flash-Next): read 1757, search 685,
+view_image 166, grep 122, open 20 (no errors), navigate 3. Argument errors:
+grep without a document (9), read with a redundant `document` (2). The model
+already sends two reads in one turn in most turns (305 of 517), so a
+multi-page read was not added.
+
+- grep without a document searches every document of the run, as one tool
+  call: the first 20 matches in file order, and which files have more.
+- read accepts `document` when it is the page's or block's own, and a block
+  with its own page (`block="d4.p9.b3", page="d4.p9"`).
+- navigate is gone from the model's tools (the reader endpoint stays).
+
+Benchmark v4, 17 questions x 2 rounds, Flash-Next, reranker on, against the
+reranker run of the same day (`m4-agent/2026-10-14-tools-grep-all`):
+
+| Tools | Pages | Complete questions | Citation precision | Tool calls / trial | Median / p95 s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| before | 93/106 (88%) | 22/34 | 75% | 10.7 | 81 / 154 |
+| after | 96/106 (91%) | 24/34 | 80% | 9.7 | 77 / 143 |
+
+The model now greps more (81 calls, 44 over all files) and searches less (44
+against 100). Four read errors of that run were a block given with its own
+page, accepted since.
+
+Answer drafts: the calls that may write the answer (`agent`, `answer`) are
+streamed when the chat passes `on_draft`; the SSE stream sends the text as
+`draft` events and `draft_reset` when the model goes on researching; the
+checked answer still ends the stream. In the reranker run the last model call
+took a median 38 s of 75 s. On the v9 stack a WHERE/HAVING question showed its
+first draft text at 69 s and the checked answer at 118 s, the same text. The
+benchmark does not stream (no `on_draft`).
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable

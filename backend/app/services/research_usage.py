@@ -188,7 +188,8 @@ class ResearchUsage:
         The call's purpose (agent, answer, citation_correction) is recorded.
         """
         async def wrapped(messages: list[dict], max_output: int, timeout: float, *,
-                          tools: list[dict] | None = None, purpose: str = 'agent') -> ModelReply:
+                          tools: list[dict] | None = None, purpose: str = 'agent',
+                          on_text=None) -> ModelReply:
             estimate = estimated_input(messages, tools)
             call_id = await self.reserve(run_id=run_id, purpose=purpose, model=model,
                 input_tokens=estimate, max_output_tokens=max_output,
@@ -196,7 +197,8 @@ class ResearchUsage:
                 lifetime_seconds=max(30, int(timeout) + 30))
             tick = time.monotonic()
             try:
-                reply = await call(messages, max_output, timeout, tools=tools, purpose=purpose)
+                reply = await call(messages, max_output, timeout, tools=tools, purpose=purpose,
+                                   **({'on_text': on_text} if on_text else {}))
             except BaseException as exc:
                 # Provider may have consumed the prompt before returning an
                 # error. Record the conservative estimate, not a fictitious 10.

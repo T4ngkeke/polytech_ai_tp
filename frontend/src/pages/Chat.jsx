@@ -251,6 +251,7 @@ export default function Chat() {
               // Server-side mid-stream failure: stop the spinner and surface it,
               // never append the error payload as if it were model output.
               setIsStreaming(false);
+              setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, draft: '' } : m));
               toast.error(action.detail);
               return;
             case 'citations':
@@ -258,9 +259,19 @@ export default function Chat() {
                 m.id === assistantMsgId ? { ...m, citations: action.citations } : m
               ));
               return;
+            // The research agent's reply as it is written, before its sources
+            // are checked; the checked answer (token) replaces it.
+            case 'draft':
+              setMessages((prev) => prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, draft: (m.draft || '') + action.text } : m
+              ));
+              return;
+            case 'draft_reset':
+              setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, draft: '' } : m));
+              return;
             case 'token':
               setMessages((prev) => prev.map((m) =>
-                m.id === assistantMsgId ? { ...m, content: m.content + action.text } : m
+                m.id === assistantMsgId ? { ...m, content: m.content + action.text, draft: '' } : m
               ));
               return;
             default:
@@ -272,6 +283,8 @@ export default function Chat() {
     } catch (err) {
       if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
+      // An unchecked draft never stays on screen once the stream ends.
+      setMessages((prev) => prev.map((m) => m.id === assistantMsgId && m.draft ? { ...m, draft: '' } : m));
       setResearchPhase(null);
       setIsStreaming(false);
     }
@@ -691,6 +704,18 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, phase, c
                   <MessageContent content={content} streaming={streaming} onCite={onCite} />
                 </Suspense>
               ))
+          // The reply as it is written, dimmed until its sources are checked.
+          : streaming && message.draft ? (
+            <div>
+              <div className="opacity-70">
+                <Suspense fallback={<span className="whitespace-pre-wrap">{message.draft}</span>}>
+                  <MessageContent content={message.draft} streaming />
+                </Suspense>
+              </div>
+              <p role="status" aria-live="polite" className="mt-2 text-xs italic text-cream-muted">
+                {PHASE_LABELS[phase] || 'Writing…'} Sources are checked when the answer is complete.
+              </p>
+            </div>)
           // Stopped or failed before any text: say so instead of waiting dots.
           : !streaming ? <span className="text-xs italic text-cream-muted">No answer: the research stopped before it finished. You can ask again.</span>
           : <span className="inline-flex items-center gap-1">

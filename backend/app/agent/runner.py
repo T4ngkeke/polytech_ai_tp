@@ -142,6 +142,7 @@ class ResearchRunner:
                  model_timeout: float = 20.0, max_input_tokens: int = 12000,
                  final_reserve: int = FINAL_RESERVE,
                  on_phase: Callable[[str], None] | None = None,
+                 on_draft: Callable[[str | None], None] | None = None,
                  clock: Callable[[], float] = time.monotonic):
         # model: model.ResearchModel, or a wrapper with the same call (billing, tests).
         self.course_tools, self.model = course_tools, model
@@ -150,6 +151,10 @@ class ResearchRunner:
         self.model_timeout, self.max_input_tokens = model_timeout, max_input_tokens
         self.final_reserve, self.clock = final_reserve, clock
         self.on_phase = on_phase or (lambda _phase: None)
+        # on_draft(text) receives the reply text as the model writes it, and
+        # on_draft(None) when that draft is withdrawn. A draft is not checked;
+        # the student sees the checked answer once the run ends.
+        self.on_draft = on_draft
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
@@ -180,9 +185,15 @@ class ResearchRunner:
         retried = False
         unchecked = None  # the reply that got CHECK_TURN, until the model replies to it
         read_turn_sent = False
+        drafted = False  # draft text was sent and not withdrawn
+
+        def draft(text):
+            nonlocal drafted
+            drafted = True
+            self.on_draft(text)
 
         async def call(purpose, with_tools):
-            nonlocal model_calls
+            nonlocal model_calls, drafted
             # A research call ends with the research time, so the time after it
             # stays for the answer; the answer may use the total time.
             end = start + (min(self.research_timeout, self.total_timeout) if with_tools
@@ -192,10 +203,16 @@ class ResearchRunner:
                 raise TimeoutError('deadline_exceeded')
             model_calls += 1
             tick = self.clock()
+            # Calls that may write the answer are streamed as a draft; a new
+            # one first withdraws the draft of the previous call.
+            streamed = self.on_draft is not None and purpose in ('agent', 'answer')
+            if streamed and drafted:
+                drafted = False
+                self.on_draft(None)
             try:
                 reply = await asyncio.wait_for(self.model(
                     self._fit(messages), 2048, remaining, tools=COURSE_TOOLS if with_tools else None,
-                    purpose=purpose), remaining)
+                    purpose=purpose, **({'on_text': draft} if streamed else {})), remaining)
                 usage.append({'purpose': purpose, 'model': reply.model,
                               'input_tokens': reply.input_tokens, 'output_tokens': reply.output_tokens,
                               'usage_source': 'actual' if reply.input_tokens is not None

@@ -58,3 +58,8 @@ test('a research status carries its phase; done carries the saved message id', (
   assert.equal(done.messageId, 'm-1');
   assert.equal(interpretStreamEvent({ event: 'done', data: '{}' }).messageId, null);
 });
+
+test('draft text and its withdrawal are never content tokens', () => {
+  assert.deepEqual(interpretStreamEvent({ event: 'draft', data: '"Bonjour\\n"' }), { type: 'draft', text: 'Bonjour\n' });
+  assert.deepEqual(interpretStreamEvent({ event: 'draft_reset', data: '{}' }), { type: 'draft_reset' });
+});

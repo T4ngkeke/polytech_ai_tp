@@ -417,3 +417,29 @@ async def test_cancellation_during_a_model_call_stops_the_run():
         raise ResearchRunStopped('run_not_running')
     with pytest.raises(ResearchRunStopped):
         await ResearchRunner(CourseTools(ViewFixture()), cancelled).run('Q ?')
+
+
+@pytest.mark.asyncio
+async def test_calls_that_may_answer_stream_a_draft_and_a_tool_turn_withdraws_it():
+    drafts = []
+
+    class Streaming(Script):
+        async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+            reply = await super().__call__(messages, max_output, timeout, tools=tools, purpose=purpose)
+            self.streamed = getattr(self, 'streamed', []) + [on_text is not None]
+            if on_text:
+                on_text('Je regarde. ' if reply.tool_calls else reply.content)
+            return reply
+    model = Streaming([('read', {'page': 'd1.p10'})], 'Vin3 [E1], voir [d1.p10].', 'Vin3 [E1].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model, on_draft=drafts.append).run('Q ?')
+    assert result.answer == 'Vin3 [E1].'
+    # agent calls stream; the citation correction does not.
+    assert model.purposes == ['agent', 'agent', 'citation_correction'] and model.streamed == [True, True, False]
+    assert drafts == ['Je regarde. ', None, 'Vin3 [E1], voir [d1.p10].']
+
+
+@pytest.mark.asyncio
+async def test_without_a_draft_callback_no_call_streams():
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1].')  # Script takes no on_text
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.answer == 'Vin3 [E1].'
