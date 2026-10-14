@@ -94,7 +94,7 @@ CHECK_TURN = ('The student has not seen this reply yet. If it states or promises
               'it needs [E#] citations: read with the tools now, or cite the IDs of earlier answers, '
               'and write the reply again for the student without mentioning this check. If it '
               'needs no course material (a greeting, a question back), reply only with the word DONE.')
-DONE_RE = re.compile(r'\W*DONE\W*', re.IGNORECASE)
+DONE_RE = re.compile(r'\W*DONE\b', re.IGNORECASE)  # matched at the start: 'DONE — a greeting' too
 # Sent once, while the tools are open, when an answer cites IDs that neither
 # this research nor an earlier answer returned.
 READ_TURN = ('Your answer cites {ids}, which no tool returned in this research. The student has '
@@ -183,7 +183,11 @@ class ResearchRunner:
 
         async def call(purpose, with_tools):
             nonlocal model_calls
-            remaining = min(self.model_timeout, start + self.total_timeout - self.clock())
+            # A research call ends with the research time, so the time after it
+            # stays for the answer; the answer may use the total time.
+            end = start + (min(self.research_timeout, self.total_timeout) if with_tools
+                           else self.total_timeout)
+            remaining = min(self.model_timeout, end - self.clock())
             if remaining <= 0:
                 raise TimeoutError('deadline_exceeded')
             model_calls += 1
@@ -233,7 +237,15 @@ class ResearchRunner:
             except (ResearchQuotaExceeded, ResearchRunStopped):
                 raise
             except TimeoutError:
-                answer, stop = (checked_reply, 'finished') if checking else (answer, 'deadline_exceeded')
+                if checking:
+                    answer, stop = checked_reply, 'finished'
+                    break
+                if tools_open and self.clock() < start + self.total_timeout:
+                    # The research time ran out during a call: answer with
+                    # the evidence already returned.
+                    withdraw('research_time')
+                    continue
+                stop = 'deadline_exceeded'
                 break
             except Exception as exc:
                 trace.append({'event': 'model_error', 'type': type(exc).__name__})
@@ -241,7 +253,10 @@ class ResearchRunner:
                 answer, stop = (checked_reply, 'finished') if checking else (answer, 'model_unavailable')
                 break
             unchecked = None
-            if checking and not reply.tool_calls and DONE_RE.fullmatch(reply.content or ''):
+            content = (reply.content or '').strip()
+            if checking and not reply.tool_calls and (
+                    DONE_RE.match(content) or not content or _has_tool_markup(content)):
+                # DONE, or nothing usable: the reply it was about stays.
                 answer, stop = checked_reply, 'finished'
                 break
             if tools_open and reply.tool_calls:
@@ -304,7 +319,8 @@ class ResearchRunner:
                              + '. Never write handles. Correct the answer without inventing sources.'})
             trace.append({'event': 'citation_correction'})
             # Its IDs were all valid, only some references were malformed: an
-            # unusable correction keeps it rather than lose the whole answer.
+            # unusable correction (empty, a tool call, unknown IDs) keeps it
+            # rather than lose the whole answer.
             fallback = answer if not cited - permitted.keys() else ''
             try:
                 answer = (await call('citation_correction', False)).content.strip()
@@ -313,11 +329,12 @@ class ResearchRunner:
             except Exception as exc:
                 trace.append({'event': 'model_error', 'type': type(exc).__name__})
                 answer = ''
-            if not answer or _has_tool_markup(answer):
+            invented = bool(cited_ids(answer) - permitted.keys())
+            if not answer or _has_tool_markup(answer) or invented:
                 answer = fallback
+                if invented and not fallback:
+                    stop = 'invalid_evidence_ids'
             cited = cited_ids(answer)
-            if cited - permitted.keys():
-                answer, stop = '', 'invalid_evidence_ids'
 
         def result(text, citations, reason, unresolved):
             return ResearchResult(text, citations, reason, unresolved, len(tools.trace), model_calls,

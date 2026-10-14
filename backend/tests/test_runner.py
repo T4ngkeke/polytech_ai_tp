@@ -87,17 +87,26 @@ def test_the_catalogue_lists_files_in_handle_order_and_stops_at_the_limit():
     view = ToolView(index)
     assert view.catalogue() == 'd1 Cours00.pdf (1 pages)\nd2 Cours01.pdf (2 pages)\nd3 Cours02.pdf (3 pages)'
     assert view.catalogue(limit=2).endswith('… and 1 more files; search finds them.')
+    # Parts without a PDF page number have dN.oK handles; the line names them.
+    slides = ToolView({'s': {'filename': 'cours.odp', 'pages': [
+        {'page_id': 'x1', 'pdf_page_no': None}, {'page_id': 'x2', 'pdf_page_no': None}]}})
+    assert slides.catalogue() == 'd1 cours.odp (2 parts, d1.o1–d1.o2)'
 
 
 def test_sampling_is_qwen_advice_unless_given():
     from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.services.model_routing import Endpoint
     endpoint = Endpoint('http://x/v1', 'k', 'm')
+    from backend.app.services.research_vision import ResearchVision
     qwen = ResearchModel(endpoint)
-    assert qwen.sampling == {'temperature': 0.7, 'top_p': 0.8} and qwen.top_k == 20
+    assert qwen.sampling == {'temperature': 0.7, 'top_p': 0.8} and qwen.extra_body == {'top_k': 20}
     assert QWEN_NON_THINKING['top_k'] == 20  # the shared setting is not changed
     greedy = ResearchModel(endpoint, sampling=GREEDY)
-    assert greedy.sampling == {'temperature': 0} and greedy.top_k is None
+    assert greedy.sampling == {'temperature': 0} and greedy.extra_body == {}
+    # Vision calls follow the same setting.
+    assert (ResearchVision(endpoint).sampling, ResearchVision(endpoint).extra_body) == (
+        qwen.sampling, qwen.extra_body)
+    assert ResearchVision(endpoint, sampling=GREEDY).sampling == {'temperature': 0}
 
 
 @pytest.mark.asyncio
@@ -185,6 +194,13 @@ async def test_an_unusable_correction_keeps_an_answer_whose_ids_were_valid():
 
 
 @pytest.mark.asyncio
+async def test_a_correction_with_new_unknown_ids_keeps_an_answer_whose_ids_were_valid():
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1], voir [d1.p10].', 'Vin3 [E1][E4].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.answer == 'Vin3 [E1], voir [d1.p10].' and result.stop_reason == 'finished'
+
+
+@pytest.mark.asyncio
 async def test_bad_arguments_return_an_error_to_the_model():
     model = Script([('read', {'page': 'zz'}), ('nope', {})], 'Réponse générale.')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
@@ -203,6 +219,15 @@ async def test_a_greeting_is_checked_once_and_kept():
     assert result.answer == 'Bonjour ! Que cherches-tu ?' and result.stop_reason == 'finished'
     assert model.purposes == ['agent', 'answer_check'] and model.with_tools == [True, True]
     assert model.seen[1][-1]['content'].startswith('The student has not seen this reply yet.')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('check_reply', ['DONE — a greeting, no course material.', 'done.', '',
+                                         '<tool_call>{"name": "search"}</tool_call>'])
+async def test_done_with_words_or_an_unusable_check_reply_keeps_the_reply(check_reply):
+    model = Script('Bonjour ! Que cherches-tu ?', check_reply)
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Bonjour')
+    assert result.answer == 'Bonjour ! Que cherches-tu ?' and result.stop_reason == 'finished'
 
 
 @pytest.mark.asyncio
@@ -362,6 +387,28 @@ async def test_deadline_lists_the_pages_read_without_claiming_absence():
     assert result.stop_reason == 'partial_deadline_exceeded'
     assert 'page 10 [E1]' in result.answer and 'pas de réponse vérifiée' in result.answer
     assert [c['evidence_id'] for c in result.citations] == ['E1']
+
+
+@pytest.mark.asyncio
+async def test_a_research_call_ends_with_the_research_time_and_the_answer_follows():
+    # research 300 s, total 420 s, one call 120 s: a research call that starts
+    # at 295 s gets 5 s, so the answer keeps its time.
+    now, timeouts = [0.0], []
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1].')
+
+    async def timed(messages, max_output, timeout, *, tools=None, purpose=''):
+        timeouts.append(timeout)
+        if len(timeouts) == 2:
+            now[0] = 300.0
+            raise TimeoutError
+        reply = await model(messages, max_output, timeout, tools=tools, purpose=purpose)
+        now[0] = 295.0
+        return reply
+    result = await ResearchRunner(CourseTools(ViewFixture()), timed, clock=lambda: now[0],
+                                  research_timeout=300, total_timeout=420, model_timeout=120).run('Q ?')
+    assert timeouts == [120, 5, 120]
+    assert result.answer == 'Vin3 [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']
+    assert {'event': 'tools_withdrawn', 'reason': 'research_time'} in result.trace
 
 
 @pytest.mark.asyncio

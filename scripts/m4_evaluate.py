@@ -14,9 +14,10 @@ Variants:
 Environment:
   M4_UPSTREAM      model server (OpenAI-compatible, native tool calls), default Flash-Next
   M4_MODEL_NAME    served model name (default: ornith)
-  M4_MODEL_LABEL   model name written to the manifest
+  M4_MODEL_LABEL   model name written to the manifest (default Flash-Next)
   M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
-  M4_SAMPLING      qwen (Qwen's non-thinking advice, default, as the product) | greedy (temperature 0)
+  M4_SAMPLING      qwen (Qwen's non-thinking advice, default, as the product) | greedy (temperature 0),
+                   for research and view_image
   M4_BUDGET        standard | relaxed | relaxed_slow (see BUDGETS)
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
   M4_QUESTIONS     comma-separated question IDs to keep
@@ -132,7 +133,7 @@ def make_tool_dependencies(config):
                         for row in map(json.loads, shared.read_text().splitlines())})
     embedding_client = httpx.AsyncClient(timeout=20)
     vision = ResearchVision(Endpoint(config['vision_url'], 'local', config['model_name']),
-                            timeout=config['call_seconds'])
+                            timeout=config['call_seconds'], sampling=config['sampling'])
     visual_usage = []
 
     async def embed(text):
@@ -232,7 +233,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     vision_url = os.getenv('M4_VISION_URL', upstream)
     tool_config = {'storage_root': str(storage_root), 'embedding_url': embedding_url,
                    'query_cache': str(query_cache), 'vision_url': vision_url,
-                   'model_name': model_name, 'call_seconds': call_seconds}
+                   'model_name': model_name, 'call_seconds': call_seconds, 'sampling': sampling}
     concurrency = int(os.getenv('M4_CONCURRENCY', '1'))
     results = []
     dependencies = []
@@ -353,8 +354,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
         manifest = {'kind': 'isolated_development_comparison', 'question_sha256': digest,
             'benchmark': benchmark, 'split': split if benchmark in ('v2', 'v3', 'v4') else None,
             'corpus': os.getenv('M4_CORPUS', 'm3c-4pdf'), 'variants': variants,
-            'model': os.getenv('M4_MODEL_LABEL', 'Ornith-1.5-35B-A3B-NVFP4'), 'upstream': upstream,
-            'vision_model': os.getenv('M4_VISION_LABEL', os.getenv('M4_MODEL_LABEL', 'Ornith-1.5-35B-A3B-NVFP4')),
+            'model': os.getenv('M4_MODEL_LABEL', 'Flash-Next'), 'upstream': upstream,
+            'vision_model': os.getenv('M4_VISION_LABEL', os.getenv('M4_MODEL_LABEL', 'Flash-Next')),
             'vision_url': vision_url,
             'thinking_enabled': False, 'sampling': {'name': sampling_name, **sampling},
             'budget': budget, 'limits': limits,

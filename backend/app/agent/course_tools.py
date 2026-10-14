@@ -156,7 +156,7 @@ class ToolView:
         self.pages: dict[str, tuple[str, str]] = {}  # d1.p20 -> (document_id, page_id)
         self.page_handles: dict[str, str] = {}       # page_id -> d1.p20
         self.neighbours: dict[str, tuple[str | None, str | None, int, int]] = {}
-        self.page_counts: dict[str, int] = {}        # d1 -> pages
+        self.doc_pages: dict[str, list[str]] = {}    # d1 -> [d1.p1, d1.p2, …]
         for number, (document_id, entry) in enumerate(
                 sorted(index.items(), key=lambda kv: (kv[1]['filename'], kv[0])), 1):
             doc = f'd{number}'
@@ -172,7 +172,7 @@ class ToolView:
                 self.neighbours[handle] = (handles[position - 1] if position else None,
                                            handles[position + 1] if position + 1 < len(handles) else None,
                                            position + 1, len(handles))
-            self.page_counts[doc] = len(handles)
+            self.doc_pages[doc] = handles
         self.doc_handles = {v: k for k, v in self.documents.items()}
         self.blocks: dict[str, tuple[str, str]] = {}   # b3 -> (document_id, block_id)
         self.block_handles: dict[str, str] = {}
@@ -182,8 +182,15 @@ class ToolView:
         self.cursors: dict[str, tuple[str, dict]] = {}  # c1 -> (tool, raw arguments with cursor)
 
     def catalogue(self, limit: int = 40) -> str:
-        """The run's documents for the prompt, one line each: 'd1 file.pdf (27 pages)'."""
-        lines = [f'{doc} {self.filenames[document_id]} ({self.page_counts[doc]} pages)'
+        """The run's documents for the prompt, one line each: 'd1 file.pdf (27 pages)'.
+        A document whose parts have no PDF page number names its handles, which
+        are not dN.pK: 'd3 cours.odp (12 parts, d3.o1–d3.o12)'."""
+        def size(doc):
+            handles = self.doc_pages[doc]
+            if all('.p' in h for h in handles):
+                return f'{len(handles)} pages'
+            return f'{len(handles)} parts, {handles[0]}–{handles[-1]}'
+        lines = [f'{doc} {self.filenames[document_id]} ({size(doc)})'
                  for doc, document_id in list(self.documents.items())[:limit]]
         if len(self.documents) > limit:
             lines.append(f'… and {len(self.documents) - limit} more files; search finds them.')

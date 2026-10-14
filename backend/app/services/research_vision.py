@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
-from backend.app.agent.model import QWEN_NON_THINKING
+from backend.app.agent.model import sampling_request
 from backend.app.services.model_routing import Endpoint
 
 
@@ -55,10 +55,13 @@ def _clip(text: str, limit: int) -> str:
 
 
 class ResearchVision:
-    def __init__(self, endpoint: Endpoint, *, timeout: float = 45.0, max_tokens: int = 1200):
+    def __init__(self, endpoint: Endpoint, *, timeout: float = 45.0, max_tokens: int = 1200,
+                 sampling: dict | None = None):
         if not endpoint.base_url or not endpoint.model:
             raise ValueError('vision_model_not_configured')
         self.endpoint, self.timeout, self.max_tokens = endpoint, timeout, max_tokens
+        # The same sampling as the research calls (QWEN_NON_THINKING when None).
+        self.sampling, self.extra_body = sampling_request(sampling)
         self.client = AsyncOpenAI(base_url=endpoint.base_url,
                                   api_key=endpoint.api_key or 'local', max_retries=0)
 
@@ -97,11 +100,10 @@ class ResearchVision:
 
     async def _create(self, mime: str, data: str, question: str):
         return await self.client.chat.completions.create(
-            model=self.endpoint.model, max_tokens=self.max_tokens,
-            temperature=QWEN_NON_THINKING['temperature'], top_p=QWEN_NON_THINKING['top_p'],
+            model=self.endpoint.model, max_tokens=self.max_tokens, **self.sampling,
             timeout=self.timeout, response_format=_SCHEMA,
-            extra_body={'chat_template_kwargs': {'enable_thinking': False},
-                        'top_k': QWEN_NON_THINKING['top_k']}, messages=[{
+            extra_body={'chat_template_kwargs': {'enable_thinking': False}, **self.extra_body},
+            messages=[{
                 'role': 'user', 'content': [
                     {'type': 'text', 'text': (
                         'Answer the narrow question about this course image. '

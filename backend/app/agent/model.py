@@ -8,12 +8,21 @@ from openai import AsyncOpenAI
 from backend.app.services.model_routing import Endpoint
 
 
-# Sampling for the research calls. QWEN_NON_THINKING, Qwen's advice for
+# Sampling for the research and vision calls. QWEN_NON_THINKING, Qwen's advice for
 # non-thinking mode, is the default: it avoids the endless repetition greedy
 # decoding can fall into. GREEDY gives the same reply to the same input, for
 # benchmark runs that must repeat an older one.
 GREEDY = {'temperature': 0}
 QWEN_NON_THINKING = {'temperature': 0.7, 'top_p': 0.8, 'top_k': 20}
+
+
+def sampling_request(sampling: dict | None) -> tuple[dict, dict]:
+    """The OpenAI arguments and the extra request body of a sampling setting
+    (QWEN_NON_THINKING when None). top_k is not an OpenAI parameter; vLLM reads
+    it from the body."""
+    arguments = dict(QWEN_NON_THINKING if sampling is None else sampling)
+    top_k = arguments.pop('top_k', None)
+    return arguments, ({} if top_k is None else {'top_k': top_k})
 
 
 @dataclass
@@ -36,10 +45,7 @@ class ResearchModel:
         if not endpoint.base_url or not endpoint.model:
             raise ValueError('model_unavailable')
         self.endpoint = endpoint
-        sampling = dict(QWEN_NON_THINKING if sampling is None else sampling)
-        # top_k is not an OpenAI parameter; vLLM reads it from the request body.
-        self.top_k = sampling.pop('top_k', None)
-        self.sampling = sampling
+        self.sampling, self.extra_body = sampling_request(sampling)
         self.client = AsyncOpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key or 'local',
                                   max_retries=0)
 
@@ -50,8 +56,7 @@ class ResearchModel:
         response = await self.client.chat.completions.create(
             model=self.endpoint.model, messages=messages, **self.sampling,
             max_tokens=max_output, timeout=timeout, stream=False,
-            extra_body={'chat_template_kwargs': {'enable_thinking': False},
-                        **({'top_k': self.top_k} if self.top_k is not None else {})},
+            extra_body={'chat_template_kwargs': {'enable_thinking': False}, **self.extra_body},
             **({'tools': tools} if tools else {}))
         message = response.choices[0].message if response.choices else None
         calls = [{'id': c.id, 'name': c.function.name, 'arguments': c.function.arguments}

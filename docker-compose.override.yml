@@ -27,6 +27,8 @@ services:
     environment:
       - STRUCTURED_INGEST_ENABLED=true
       - PDF_STRUCTURED_INGEST_ENABLED=true
+    # The worker reads the same model settings (LLM, VLM) as the backend.
+    networks: [default, models]
 
   frontend:
     ports: !override
