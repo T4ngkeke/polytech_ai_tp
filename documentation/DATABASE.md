@@ -142,6 +142,8 @@ token tracking, and hybrid retrieval over course documents.
 Tracks tokens used per user and per message. `Messages` carries `feedback`
 (Enum `up` / `down`, nullable) — a student 👍/👎 on an assistant reply. These are
 free golden-set labels; a 👎 links back to that message's `AgentTraceLog`.
+`clarification` (JSON, nullable, migration `m4e_clarification_v1`) is set when a
+research answer is a question back to the student: `{"question", "options"}`.
 
 ---
 
@@ -280,12 +282,13 @@ change lands cleanly. Teacher-edited chunks survive the rebuild.*
 ### 16. Research agent tables (opt-in, migration `m4c_research_persistence_v1`)
 
 Written only by the research agent (`AGENTIC_SEARCH_ENABLED`). Apply
-`scripts/ingestion_agent_schema_m4c.sql` with
-`scripts/migrate_document_snapshots.py`; with the flag on, startup checks it.
+`scripts/ingestion_agent_schema_m4c.sql` and `scripts/ingestion_agent_schema_m4e.sql`
+(`messages.clarification`) with `scripts/migrate_document_snapshots.py`; with the
+flag on, startup checks both.
 
 | Table | One row per | Main columns |
 | --- | --- | --- |
-| `agent_runs` | research request | `user_id`, `session_id`, `client_request_id` (unique per user), `question`, `status` (`running`, `cancelling`, `finished`, `failed`, `cancelled`), `snapshot_map` (document → revision used), `user_message_id`, `assistant_message_id`, `stop_reason`, `settlement_status`. At most one running run per session. |
+| `agent_runs` | research request | `user_id`, `session_id`, `client_request_id` (unique per user), `question`, `status` (`running`, `cancelling`, `finished`, `failed`, `cancelled`), `snapshot_map` (document → revision used), `user_message_id`, `assistant_message_id`, `stop_reason` (`clarification` for a question back), `settlement_status`. At most one running run per session. |
 | `message_citations` | cited source of an answer | `message_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range_start`/`range_end` (null for a visual observation), `asset_id`, `origin`, `availability`. No foreign key to the document: deleting it marks the citation `unavailable` and keeps the row. |
 | `session_read_state` | session | Unused since 2026-10-12 (the follow-up source selection was removed). Kept because the m4c migration creates it. |
 | `usage_reservations` | model call | The tokens held on the student's daily quota before the call (`reserved_tokens`, `state`: `active`, `unknown`, `settled`). An `unknown` reservation still counts against the quota until reconciled. |

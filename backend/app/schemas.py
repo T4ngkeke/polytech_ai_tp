@@ -446,6 +446,8 @@ class MessageResponse(BaseModel):
     total_tokens: int | None
     created_at: datetime
     citations: list[dict] = []
+    # A question back to the student: {"question": ..., "options": [...]}.
+    clarification: dict | None = None
 
 
 # ---------------------------------------------------------------------------

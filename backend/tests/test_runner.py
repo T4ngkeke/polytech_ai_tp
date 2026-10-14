@@ -450,3 +450,66 @@ async def test_without_a_draft_callback_no_call_streams():
     model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1].')  # Script takes no on_text
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     assert result.answer == 'Vin3 [E1].'
+
+
+class Offered(Script):
+    """A Script that also records the tool names offered to each call."""
+    async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+        self.offered = getattr(self, 'offered', []) + [[t['function']['name'] for t in tools or []]]
+        return await super().__call__(messages, max_output, timeout, tools=tools, purpose=purpose)
+
+
+ASK = ('ask_student', {'question': "Quel exercice 3 ?", 'options': ['Graphes, p. 12', 'SQL, p. 30']})
+
+
+@pytest.mark.asyncio
+async def test_a_question_back_ends_the_run_without_check_or_correction():
+    model = Offered([ASK])
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run("j'ai pas compris l'exo 3", allow_ask=True)
+    assert (result.answer, result.stop_reason, result.citations) == ("Quel exercice 3 ?", 'clarification', [])
+    assert result.clarification == {'question': "Quel exercice 3 ?", 'options': ['Graphes, p. 12', 'SQL, p. 30']}
+    # One call: no answer check, no tool slot used.
+    assert model.purposes == ['agent'] and result.tool_calls == 0
+    assert 'ask_student' in model.offered[0]
+    assert {'event': 'ask_student', **result.clarification} in result.trace
+
+
+@pytest.mark.asyncio
+async def test_ask_student_is_offered_only_when_allowed():
+    model = Offered('Bonjour !', 'DONE')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Bonjour')
+    assert 'ask_student' not in model.offered[0] and result.clarification is None
+    # Not offered: a call to it is an unknown tool, as any other name.
+    model = Offered([ASK], 'Réponse générale.')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.stop_reason == 'finished' and result.clarification is None
+    assert 'unknown_tool (ask_student)' in model.seen[1][-1]['content']
+
+
+@pytest.mark.asyncio
+async def test_research_may_come_first_and_ask_must_be_alone():
+    model = Offered([('read', {'page': 'd1.p10'}), ASK], [ASK])
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?', allow_ask=True)
+    tool_texts = [m['content'] for m in model.seen[1] if m['role'] == 'tool']
+    assert tool_texts[1] == 'error: call ask_student alone, after the other tools have returned'
+    assert result.stop_reason == 'clarification' and result.tool_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_a_question_back_with_bad_options_is_returned_to_the_model():
+    bad = ('ask_student', {'question': 'Lequel ?', 'options': ['SQL']})
+    model = Offered([bad], 'Réponse générale.')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?', allow_ask=True)
+    assert model.seen[1][-1]['content'].startswith('error: invalid_arguments (')
+    assert result.stop_reason == 'finished' and result.answer == 'Réponse générale.'
+
+
+def test_a_question_back_names_no_handles():
+    from backend.app.agent.runner import AskStudentArgs
+    ask = AskStudentArgs.model_validate({'question': 'Quelle formule (d1) ?', 'options': [
+        "la formule d'algèbre relationnelle (d1/d7)", 'une formule sur les graphes (d2/d10/d11)', 'SQL d6']})
+    assert ask.question == 'Quelle formule ?'
+    assert ask.options == ["la formule d'algèbre relationnelle", 'une formule sur les graphes', 'SQL']
+    # Options that are only handles are empty, hence refused.
+    with pytest.raises(ValueError):
+        AskStudentArgs.model_validate({'question': 'Lequel ?', 'options': ['d1', 'd2']})

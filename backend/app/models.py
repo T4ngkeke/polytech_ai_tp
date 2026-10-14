@@ -511,6 +511,8 @@ class Message(Base):
     feedback: Mapped[MessageFeedback | None] = mapped_column(
         Enum(MessageFeedback, name="messagefeedback"), nullable=True
     )
+    # [M4-E] An answer that is a question back (ask_student): {question, options}.
+    clarification: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

@@ -95,6 +95,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
                                  tool_factory=None, on_phase=None, on_draft=None, vision_fn=None,
+                                 allow_ask: bool = False,
                                  vision_model: str = '',
                                  limits: ResearchLimits = ResearchLimits()) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call)."""
@@ -175,7 +176,8 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
             total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
             max_input_tokens=limits.input_tokens, on_phase=on_phase, on_draft=on_draft)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
-                                  research_note=research_note, earlier_citations=earlier_citations)
+                                  research_note=research_note, earlier_citations=earlier_citations,
+                                  allow_ask=allow_ask)
         await runs.finish_run(started.run_id, result)
     except asyncio.CancelledError:
         # Both steps in one shielded task: a second cancellation (the server

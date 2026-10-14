@@ -563,6 +563,8 @@ async def chat_stream(
             # History may take a quarter of the research input tokens.
             limits = llm_config['research_limits']
             safe_history, earlier_citations = await runs.load_safe_context(scope)
+            # Right after a question back the model must answer, not ask again.
+            allow_ask = not await runs.last_answer_asked(scope.session_id)
             safe_history = trim_history(safe_history,
                 max_tokens=min(int(llm_config["context_max_tokens"] or 8000),
                                limits.input_tokens // 4))
@@ -609,7 +611,7 @@ async def chat_stream(
                 embed_model=llm_config['embedding_model'],
                 rerank_model=llm_config['rerank_model'], on_phase=phase,
                 vision_fn=vision, vision_model=vlm.model, limits=limits,
-                on_draft=draft, session_factory=research_factory))
+                on_draft=draft, allow_ask=allow_ask, session_factory=research_factory))
             last_sent = time.monotonic()
             try:
                 while not task.done():
@@ -634,6 +636,8 @@ async def chat_stream(
                     return
                 # Commit and reload are complete before any answer bytes leave.
                 yield f"data: {json.dumps(result['answer'])}\n\n"
+                if result.get('clarification'):
+                    yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
                 yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
                 yield f"event: done\ndata: {json.dumps({'message_id': result['message_id']})}\n\n"
             except RunConflict:

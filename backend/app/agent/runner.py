@@ -25,6 +25,8 @@ import time
 import uuid
 from typing import Callable
 
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
+
 from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.result import (
@@ -34,7 +36,8 @@ from backend.app.agent.result import (
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = '''You help students locate the relevant original course PDF pages.
-Decide yourself whether to use tools, answer generally, or ask a clarification.
+Decide yourself whether to use tools, answer generally, or ask a clarification
+(with ask_student when it is offered).
 For questions about a specific course, obtain verified evidence with read or
 view_image before attributing an answer to that course. Search, open and grep
 results are leads, not verified evidence. Tools name documents, pages, blocks,
@@ -77,6 +80,52 @@ def system_prompt(tool_calls: int, visual_calls: int) -> str:
 COURSE_TOOLS = [{'type': 'function', 'function': {'name': name, 'description': DESCRIPTIONS[name],
                                                   'parameters': VIEW_SCHEMAS[name].model_json_schema()}}
                 for name in sorted(VIEW_SCHEMAS)]
+
+
+# Handles mean nothing to the student: "(d1/d7)", "d2", "d6.p23".
+_HANDLES = re.compile(r'\s*\(\s*d\d+(?:\.[pox]\d+)?(?:\s*[/,;]\s*d\d+(?:\.[pox]\d+)?)*\s*\)'
+                      r'|\bd\d+(?:\.[pox]\d+)?(?:\s*/\s*d\d+(?:\.[pox]\d+)?)*\b')
+
+
+def _without_handles(text: str) -> str:
+    return ' '.join(_HANDLES.sub('', text).split())
+
+
+class AskStudentArgs(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    question: StrictStr = Field(min_length=1, max_length=500)
+    options: list[StrictStr] = Field(min_length=2, max_length=4,
+                                     description='2 to 4 short possible answers, from the course files.')
+
+    @field_validator('question')
+    @classmethod
+    def question_without_handles(cls, question):
+        question = _without_handles(question)
+        if not question:
+            raise ValueError('the question is empty')
+        return question
+
+    @field_validator('options')
+    @classmethod
+    def short_and_distinct(cls, options):
+        options = [_without_handles(o) for o in options]
+        if any(not 1 <= len(o) <= 80 for o in options) or len(set(options)) != len(options):
+            raise ValueError('options must be distinct, 1 to 80 characters each')
+        return options
+
+
+# Not a course tool: it ends the run with a question to the student, whose
+# answer comes as the next message of the conversation.
+ASK_STUDENT = {'type': 'function', 'function': {
+    'name': 'ask_student',
+    'description': ('Ask the student one short question, when the request cannot be answered '
+                    'without knowing which exercise, slide, page, course or notion is meant and '
+                    'the possible readings cannot each be answered briefly. Give 2 to 4 short '
+                    'options taken from the course files, named by their title or topic, never '
+                    'by handle (d1); the student may also type another answer. This ends your turn; the answer comes as the next message. Call it '
+                    'alone, never for a question the course answers.'),
+    'parameters': AskStudentArgs.model_json_schema()}}
+ASK_ALONE = 'error: call ask_student alone, after the other tools have returned'
 
 CATALOGUE_NOTE = ('Course files of this lab (handle, file, pages). When the student names a file '
                   'and a page, read that page directly, e.g. d2.p23; otherwise search first.')
@@ -158,8 +207,10 @@ class ResearchRunner:
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
-                  earlier_citations: dict[str, dict] | None = None) -> ResearchResult:
+                  earlier_citations: dict[str, dict] | None = None,
+                  allow_ask: bool = False) -> ResearchResult:
         """history: earlier chat turns ({'role', 'content'}), oldest first.
+        allow_ask: offer ask_student (the chat does, except right after a question back).
         earlier_citations: the stored citations of those answers by [E#] label;
         an answer may cite them again (a follow-up answered from the history)."""
         tools = self.course_tools
@@ -186,6 +237,8 @@ class ResearchRunner:
         unchecked = None  # the reply that got CHECK_TURN, until the model replies to it
         read_turn_sent = False
         drafted = False  # draft text was sent and not withdrawn
+        offered = COURSE_TOOLS + [ASK_STUDENT] if allow_ask else COURSE_TOOLS
+        clarification = None
 
         def note(event, **details):
             # Runner events go to the trace and to the log, next to the tool
@@ -218,7 +271,7 @@ class ResearchRunner:
                 self.on_draft(None)
             try:
                 reply = await asyncio.wait_for(self.model(
-                    self._fit(messages), 2048, remaining, tools=COURSE_TOOLS if with_tools else None,
+                    self._fit(messages), 2048, remaining, tools=offered if with_tools else None,
                     purpose=purpose, **({'on_text': draft} if streamed else {})), remaining)
                 usage.append({'purpose': purpose, 'model': reply.model,
                               'input_tokens': reply.input_tokens, 'output_tokens': reply.output_tokens,
@@ -284,12 +337,29 @@ class ResearchRunner:
                 answer, stop = checked_reply, 'finished'
                 break
             if tools_open and reply.tool_calls:
+                asks = [c for c in reply.tool_calls if c['name'] == 'ask_student'] if allow_ask else []
+                problem = ''
+                if asks and len(reply.tool_calls) == 1:
+                    try:
+                        ask = AskStudentArgs.model_validate_json(asks[0]['arguments'] or '{}')
+                    except ValidationError as exc:
+                        ask, problem = None, '; '.join(e['msg'] for e in exc.errors(include_url=False))[:200]
+                    if ask is not None:
+                        # A question back ends the run; it states no course
+                        # content, so neither the check nor the correction applies.
+                        clarification = {'question': ask.question.strip(), 'options': ask.options}
+                        answer, stop = clarification['question'], 'clarification'
+                        note('ask_student', **clarification)
+                        break
                 messages.append({'role': 'assistant', 'content': reply.content, 'tool_calls': [
                     {'id': c['id'], 'type': 'function',
                      'function': {'name': c['name'], 'arguments': c['arguments'] or '{}'}}
                     for c in reply.tool_calls]})
                 for c in reply.tool_calls:
-                    text = await self._tool(c['name'], c['arguments'])
+                    if c in asks:
+                        text = ASK_ALONE if len(reply.tool_calls) > 1 else f'error: invalid_arguments ({problem})'
+                    else:
+                        text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
                 note('turn', tools=[c['name'] for c in reply.tool_calls], text=reply.content[:200])
                 continue
@@ -322,6 +392,11 @@ class ResearchRunner:
             # finished: the model stopped calling tools by itself.
             stop = 'finished' if tools_open else 'no_documents' if no_documents else 'budget_exhausted'
             break
+
+        if clarification is not None:
+            note('finished', stop=stop, answer_chars=len(answer), cited=0)
+            return ResearchResult(answer, [], stop, [], len(tools.trace), model_calls,
+                                  tools.trace + trace, usage, clarification=clarification)
 
         # Evidence read in this run, then earlier answers' sources (their IDs
         # never repeat within a session, see CourseTools first_evidence).

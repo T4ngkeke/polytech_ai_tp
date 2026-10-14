@@ -37,6 +37,15 @@ def _label_order(citation: MessageCitation) -> int:
     return int(citation.label[1:])
 
 
+def _with_options(message: Message) -> str:
+    """An answer as the model sees it in the history: a question back keeps
+    the options the student saw, so "the second one" can be understood."""
+    options = (message.clarification or {}).get('options') or []
+    if not options:
+        return message.content
+    return message.content + '\nOptions: ' + ' | '.join(options)
+
+
 async def _close(db, run: AgentRun, status: str, stop_reason: str) -> None:
     active = await db.scalar(select(func.count()).select_from(
         UsageReservation).where(UsageReservation.run_id == run.id,
@@ -253,7 +262,7 @@ class ResearchRuns:
                     content=result.answer, prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
-                    billed_tokens=billed_tokens)
+                    billed_tokens=billed_tokens, clarification=result.clarification)
                 db.add(assistant)
                 await db.flush()
                 citations = [MessageCitation(message_id=assistant.id,
@@ -285,7 +294,8 @@ class ResearchRuns:
             citations = await self._citation_payloads(db, [(run, c) for c in rows])
             return {'run_id': str(run.id), 'status': run.status,
                     'stop_reason': run.stop_reason, 'message_id': str(answer.id) if answer else None,
-                    'answer': answer.content if answer else None, 'citations': citations}
+                    'answer': answer.content if answer else None, 'citations': citations,
+                    'clarification': answer.clarification if answer else None}
 
     async def load_session_citations(self, *, session_id: uuid.UUID,
                                      user_id: uuid.UUID) -> dict[uuid.UUID, list[dict]]:
@@ -412,6 +422,15 @@ class ResearchRuns:
                 'box': block_box(block.source_ref) if available and block is not None else None})
         return payloads
 
+    async def last_answer_asked(self, session_id: uuid.UUID) -> bool:
+        """Whether the session's latest answer is a question back: the next run
+        must answer, so the chat does not offer ask_student twice in a row."""
+        async with self.session_factory() as db:
+            latest = await db.scalar(select(Message).where(
+                Message.session_id == session_id, Message.sender == SenderType.llm)
+                .order_by(Message.created_at.desc()).limit(1))
+            return bool(latest is not None and latest.clarification)
+
     async def next_evidence_number(self, session_id: uuid.UUID) -> int:
         """The first evidence number for a new run of the session: after every
         ID its earlier answers cite, so an old ID never names a new source."""
@@ -458,7 +477,9 @@ class ResearchRuns:
             # revision; a greeting or a clarification usually is.
             snapshot = {str(k): str(v) for k, v in scope.snapshot_revisions.items()}
             cited = {c.message_id for c in citations}
+            # A question back (ask_student) states no course content: it stays.
             unavailable |= {message_id for message_id, run in runs.items() if message_id not in cited
+                            and run.stop_reason != 'clarification'
                             and any(snapshot.get(d) != r for d, r in run.snapshot_map.items())}
             history = []
             for message in messages:
@@ -474,7 +495,7 @@ class ResearchRuns:
                 # is still available.
                 elif message.id in runs and message.id not in unavailable:
                     if history and history[-1]['role'] == 'user':
-                        history.append({'role': 'assistant', 'content': message.content})
+                        history.append({'role': 'assistant', 'content': _with_options(message)})
                 elif history and history[-1]['role'] == 'user':
                     history.pop()
             # The current question follows; an earlier one without an answer goes.

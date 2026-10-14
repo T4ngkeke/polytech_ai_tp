@@ -174,7 +174,7 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
                 backwards = await teacher_client.get(f'/api/teacher/labs/{chat.lab_id}/citation-report',
                                                      params={'start': '2000-01-31', 'end': '2000-01-01'})
             assert report['totals'] == {'questions': 5, 'students': 1, 'answers_with_sources': 3,
-                                        'unverified': 0, 'marked_wrong': 1}
+                                        'unverified': 0, 'marked_wrong': 1, 'questions_back': 0}
             [file] = report['files']
             assert file['document_id'] == str(doc.id) and file['in_lab'] and file['share'] == 1.0
             assert (file['answers'], file['students']) == (3, 1)
@@ -511,5 +511,57 @@ async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monke
             print(json.dumps({'visual_citation': citations[0],
                               'vision_input_tokens': visual_call.input_tokens,
                               'vision_output_tokens': visual_call.output_tokens}, ensure_ascii=False))
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_a_question_back_is_saved_shown_and_answered_in_the_next_turn(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        doc, rev, teacher, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+        page = await db.scalar(select(DocumentPage).where(DocumentPage.revision_id == rev.id))
+        db.add_all(models('http://example.invalid/v1'))
+        await db.commit()
+        import backend.app.routers.chat as chat_api
+        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
+        async def router(_messages):
+            return '{"route":"rag"}'
+        monkeypatch.setattr(chat_api, '_make_router_llm_fn', lambda _config: router)
+        ask = {'question': 'Quelle définition ?', 'options': ['θ₁', 'θ₂']}
+        steps = [tool_call('ask_student', ask),
+                 tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
+                 ModelReply('Voir la définition [E1].', [], 'fixture', 50, 20),
+                 ModelReply('Autre chose ?', [], 'fixture', 50, 20), ModelReply('DONE', [], 'fixture', 5, 1)]
+        offered, seen = [], []
+        class FakeModel:
+            def __init__(self, endpoint):
+                pass
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                offered.append([t['function']['name'] for t in tools or []])
+                seen.append(messages)
+                return steps.pop(0)
+        monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
+        client = await make_client(db, student)
+        async with client:
+            first = events((await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'la définition ?'})).text)
+            assert ('token', 'Quelle définition ?') in first and ('clarification', ask) in first
+            assert [n for n, _ in first][-2:] == ['citations', 'done'] and 'ask_student' in offered[0]
+            run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id))
+            await db.refresh(run)
+            assert run.stop_reason == 'clarification'
+            stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
+            assert stored[-1]['clarification'] == ask and stored[-1]['content'] == 'Quelle définition ?'
+            # The student picks an option: the model sees the question and its
+            # options, and must answer (no second question back in a row).
+            second = events((await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'θ₁'})).text)
+            assert ('token', 'Voir la définition [E1].') in second and 'clarification' not in [n for n, _ in second]
+            assert 'ask_student' not in offered[1]
+            assert {'role': 'assistant', 'content': 'Quelle définition ?\nOptions: θ₁ | θ₂'} in seen[1]
+            # After an answer, the tool is offered again.
+            await client.post('/api/chat/stream', json={'session_id': str(chat.id), 'message': 'Merci'})
+            assert 'ask_student' in offered[3]
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

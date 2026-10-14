@@ -166,7 +166,8 @@ async def lab_citation_report(db: AsyncSession, lab: Lab, *, start: datetime | N
         'totals': {'questions': len(runs),
                    'students': len({username for _, _, username in runs}),
                    'answers_with_sources': len(answers_with_sources),
-                   'unverified': len(unverified), 'marked_wrong': len(wrong)},
+                   'unverified': len(unverified), 'marked_wrong': len(wrong),
+                   'questions_back': sum(run.stop_reason == 'clarification' for run, _, _ in runs)},
         'files': report_files,
         'uncited_files': sorted(({'document_id': str(d), 'filename': name}
                                  for d, name in files.items() if d not in by_file),

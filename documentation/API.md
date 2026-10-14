@@ -125,13 +125,15 @@ Server-sent events, in order:
 | `draft` | Reply text as the model writes it, as a JSON string; append it. Its sources are not checked yet; show it as a draft. |
 | `draft_reset` | `{}`: the draft so far is withdrawn (the model went on researching). |
 | (default) | The whole checked answer text, as one JSON string. It replaces the draft. |
+| `clarification` | Only when the answer is a question back to the student (the `ask_student` tool): `{"question": ..., "options": [2 to 4 short answers]}`. The client shows the options as buttons; the picked option, or any typed answer, is the next message. The next run of the session cannot ask again. |
 | `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`, `box` (the cited block's region as `[x0, y0, x1, y1]` fractions of the page, or `null`). |
 | `done` | `{"message_id": ...}` |
 | `error` | `{"detail": ...}`, for example when another research request of the session is still running, or `Daily token quota exceeded` when the quota runs out during research. |
 | (comment) | `: keep-alive`, every 15 s without another event, so proxies keep the stream open. SSE clients ignore it. |
 
 `GET /api/student/sessions/{session_id}` returns the same citations on each
-message, with `available` and `href` rechecked against current access.
+message, with `available` and `href` rechecked against current access, and
+`clarification` on a question back.
 
 The chat shows a cited page with its passages highlighted from
 `GET /api/documents/{document_id}/revisions/{revision_id}/pages/{page_no}/image?session_id=`:

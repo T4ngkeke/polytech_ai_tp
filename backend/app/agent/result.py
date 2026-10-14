@@ -51,3 +51,5 @@ class ResearchResult:
     model_calls: int
     trace: list[dict] = field(default_factory=list)
     usage: list[dict] = field(default_factory=list)
+    # A question back to the student (ask_student): {'question', 'options'}.
+    clarification: dict | None = None

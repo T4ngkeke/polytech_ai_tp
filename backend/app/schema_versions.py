@@ -11,7 +11,10 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm3a_pdf_parse_v1',
     'm3b_pdf_index_v1',
     'm4c_research_persistence_v1',
+    'm4e_clarification_v1',
 )
 
-REQUIRED_STRUCTURED_SCHEMA_VERSIONS = REQUIRED_SCHEMA_VERSIONS[:-1]
+# Structured ingestion alone needs the versions before the research ones.
+REQUIRED_STRUCTURED_SCHEMA_VERSIONS = REQUIRED_SCHEMA_VERSIONS[
+    :REQUIRED_SCHEMA_VERSIONS.index('m4c_research_persistence_v1')]
 
