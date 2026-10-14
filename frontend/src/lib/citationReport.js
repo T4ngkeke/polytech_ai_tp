@@ -25,6 +25,7 @@ export function reportMarkdown(report, labName = '') {
     '',
     `- Questions: ${t.questions} from ${t.students} student(s)`,
     `- Answers citing the course: ${t.answers_with_sources}`,
+    `- Answered with a question back to the student: ${t.questions_back ?? 0}`,
     `- Questions without a verified answer: ${t.unverified}`,
     `- Answers marked wrong by a student: ${t.marked_wrong}`,
     '',

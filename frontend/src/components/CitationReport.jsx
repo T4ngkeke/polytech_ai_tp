@@ -119,7 +119,8 @@ export default function CitationReport({ labId, labName, onOpenConversation }) {
         <>
           <p className="text-xs text-cream-muted">
             {count(t.questions, 'question')} from {count(t.students, 'student')} · {count(t.answers_with_sources, 'answer')} citing
-            the course · {t.unverified} without a verified answer · {t.marked_wrong} marked wrong. Teacher test drives are not counted.
+            the course · {t.questions_back ?? 0} answered with a question back · {t.unverified} without a verified
+            answer · {t.marked_wrong} marked wrong. Teacher test drives are not counted.
           </p>
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-widest text-cream-muted">Cited files</h4>

@@ -572,6 +572,11 @@ function TestDrivePanel({ labId, labName }) {
             case 'citations':
               setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, citations: action.citations } : m));
               return;
+            case 'clarification':
+              // The student sees buttons; the test drive lists the options.
+              setMessages((prev) => prev.map((m) => m.id === assistantMsgId
+                ? { ...m, content: `${m.content}\n\n*Options: ${action.clarification.options.join(' · ')}*` } : m));
+              return;
             case 'token':
               setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, content: m.content + action.text } : m));
               return;

@@ -63,3 +63,10 @@ test('draft text and its withdrawal are never content tokens', () => {
   assert.deepEqual(interpretStreamEvent({ event: 'draft', data: '"Bonjour\\n"' }), { type: 'draft', text: 'Bonjour\n' });
   assert.deepEqual(interpretStreamEvent({ event: 'draft_reset', data: '{}' }), { type: 'draft_reset' });
 });
+
+test('a question back carries its string options, never as a token', () => {
+  const action = interpretStreamEvent({ event: 'clarification',
+    data: '{"question": "Quel cours ?", "options": ["SQL", 3, "Graphes"]}' });
+  assert.deepEqual(action, { type: 'clarification', clarification: { question: 'Quel cours ?', options: ['SQL', 'Graphes'] } });
+  assert.deepEqual(interpretStreamEvent({ event: 'clarification', data: 'oops' }).clarification.options, []);
+});

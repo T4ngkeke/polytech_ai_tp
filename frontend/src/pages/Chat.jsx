@@ -183,8 +183,9 @@ export default function Chat() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // ── Send message ──
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  // text: an option the student picked under a question back; otherwise the input box.
+  const handleSend = useCallback(async (picked) => {
+    const text = (typeof picked === 'string' ? picked : input).trim();
     if (!text || !activeSessionId || isStreaming) return;
 
     let currentSessionId = activeSessionId;
@@ -210,7 +211,7 @@ export default function Chat() {
     streamedIdsRef.current.add(assistantMsgId);
     const userMsg = { id: userMsgId, sender: 'user', content: text, created_at: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
-    setInput('');
+    if (typeof picked !== 'string') setInput('');
     setIsStreaming(true);
 
     setMessages((prev) => [...prev, { id: assistantMsgId, sender: 'llm', content: '', created_at: new Date().toISOString() }]);
@@ -257,6 +258,12 @@ export default function Chat() {
             case 'citations':
               setMessages((prev) => prev.map((m) =>
                 m.id === assistantMsgId ? { ...m, citations: action.citations } : m
+              ));
+              return;
+            // A question back to the student, with options to pick.
+            case 'clarification':
+              setMessages((prev) => prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, clarification: action.clarification } : m
               ));
               return;
             // The research agent's reply as it is written, before its sources
@@ -535,6 +542,8 @@ export default function Chat() {
               sessionId={activeSessionId}
               onOpenSource={openSource}
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
+              // Only the latest question back can still be answered with a click.
+              onPick={!isStreaming && i === messages.length - 1 && msg.clarification ? handleSend : null}
             />
           ))}
           <div ref={messagesEndRef} />
@@ -673,7 +682,7 @@ function sourceOf(citations, c, sessionId, focusLabel = null) {
     pages: groupCitations(sameFile)[0]?.pages || [], citations: sameFile, focusLabel };
 }
 
-const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource }) {
+const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource, onPick }) {
   const isUser = message.sender === 'user';
   const citations = message.citations;
   // [E#] in the text: open that passage alone, highlighted on its page.
@@ -723,6 +732,17 @@ const MessageBubble = memo(function MessageBubble({ message, streaming, phase, c
               {PHASE_LABELS[phase] && <span role="status" aria-live="polite"
                 className="ml-2 text-xs text-cream-muted">{PHASE_LABELS[phase]}</span>}
             </span>}
+        {!isUser && message.clarification?.options?.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Possible answers">
+            {message.clarification.options.map((option) => (
+              <button key={option} type="button" disabled={!onPick} onClick={() => onPick?.(option)}
+                className="px-3 py-1.5 rounded-lg border border-cyan/30 text-xs text-cream hover:bg-cyan-muted disabled:opacity-50 disabled:cursor-default cursor-pointer transition-colors">
+                {option}
+              </button>
+            ))}
+            {onPick && <span className="self-center text-[11px] text-cream-muted">or type your answer</span>}
+          </div>
+        )}
         {!isUser && message.citations?.length > 0 && (
           <CitationList citations={message.citations} sessionId={sessionId} onOpenSource={onOpenSource} />
         )}
