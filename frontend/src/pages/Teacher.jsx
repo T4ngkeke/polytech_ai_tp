@@ -786,7 +786,12 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
                                 m.sender === 'user' ? 'bg-cyan-muted text-cream' : 'bg-ink-base border border-border-default text-cream-secondary'
                               }`}>
                                 <p className="text-[9px] text-cream-muted mb-1 font-mono uppercase">{m.sender}</p>
-                                {m.content}
+                                {/* Answers are Markdown (tables, code, formulas), as the student saw them. */}
+                                {m.sender === 'user'
+                                  ? <span className="whitespace-pre-wrap">{m.content}</span>
+                                  : <Suspense fallback={<span className="whitespace-pre-wrap">{m.content}</span>}>
+                                      <MessageContent content={m.content} />
+                                    </Suspense>}
                               </div>
                             </div>
                           ))}
