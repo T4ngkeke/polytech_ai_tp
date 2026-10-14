@@ -20,11 +20,17 @@ _REFERENCE_RE = re.compile(r'\[[Ed]\s?\d[^\[\]\n]{0,40}\]')
 _CODE_RE = re.compile(r'```[\s\S]*?```|`[^`\n]*`')
 
 
+# A handle written outside brackets: "(d6.p19)", "d6.p43–d6.p48", "d1.p20.b3".
+_BARE_HANDLE_RE = re.compile(r'(?<![\w.\[])d\d+\.[pox]\d+(?:\.b\d+)?(?![\w\]])')
+
+
 def malformed_refs(text: str) -> list[str]:
     """References outside code that are not valid [E#] citations, such as a
     handle or an ID with extra parts; the student could not open them."""
-    return [m.group(0) for m in _REFERENCE_RE.finditer(_CODE_RE.sub('', text))
-            if not CITATION_RE.fullmatch(m.group(0))]
+    prose = _CODE_RE.sub('', text)
+    return ([m.group(0) for m in _REFERENCE_RE.finditer(prose)
+             if not CITATION_RE.fullmatch(m.group(0))]
+            + _BARE_HANDLE_RE.findall(_REFERENCE_RE.sub('', prose)))
 
 
 class ResearchQuotaExceeded(ValueError):

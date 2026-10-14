@@ -187,6 +187,13 @@ class ResearchRunner:
         read_turn_sent = False
         drafted = False  # draft text was sent and not withdrawn
 
+        def note(event, **details):
+            # Runner events go to the trace and to the log, next to the tool
+            # lines (a run's turns can be followed in the backend log).
+            trace.append({'event': event, **details})
+            logger.info('research run=%s event=%s %s', tools.scope.run_id, event,
+                        json.dumps(details, ensure_ascii=False)[:300])
+
         def draft(text):
             nonlocal drafted
             drafted = True
@@ -230,7 +237,7 @@ class ResearchRunner:
             nonlocal tools_open
             tools_open = False
             messages.append({'role': 'user', 'content': reminder})
-            trace.append({'event': 'tools_withdrawn', 'reason': reason})
+            note('tools_withdrawn', reason=reason)
             self.on_phase('checking_sources')
 
         # A lab without readable course files: searching would only fail,
@@ -265,7 +272,7 @@ class ResearchRunner:
                 stop = 'deadline_exceeded'
                 break
             except Exception as exc:
-                trace.append({'event': 'model_error', 'type': type(exc).__name__})
+                note('model_error', type=type(exc).__name__)
                 # A failed check keeps the reply it was about.
                 answer, stop = (checked_reply, 'finished') if checking else (answer, 'model_unavailable')
                 break
@@ -284,13 +291,12 @@ class ResearchRunner:
                 for c in reply.tool_calls:
                     text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
-                trace.append({'event': 'turn', 'tools': [c['name'] for c in reply.tool_calls],
-                              'text': reply.content[:200]})
+                note('turn', tools=[c['name'] for c in reply.tool_calls], text=reply.content[:200])
                 continue
             if not tools_open and (reply.tool_calls or _has_tool_markup(reply.content)) and not retried:
                 retried = True
                 messages.append({'role': 'user', 'content': FINISH_RETRY})
-                trace.append({'event': 'tool_markup_after_withdrawal'})
+                note('tool_markup_after_withdrawal')
                 continue
             unknown = (cited_ids(reply.content) - {e.id for e in tools.evidence.all()}
                        - set(earlier_citations or {}))
@@ -302,7 +308,7 @@ class ResearchRunner:
                 messages.append({'role': 'assistant', 'content': reply.content})
                 messages.append({'role': 'user', 'content': READ_TURN.format(
                     ids=', '.join(sorted(unknown, key=lambda x: int(x[1:]))))})
-                trace.append({'event': 'unknown_ids_read_turn'})
+                note('unknown_ids_read_turn', ids=sorted(unknown))
                 continue
             if (tools_open and not checking and not read_turn_sent and not tools.trace
                     and not cited_ids(reply.content) and not malformed_refs(reply.content)):
@@ -310,7 +316,7 @@ class ResearchRunner:
                 unchecked = reply.content.strip()
                 messages.append({'role': 'assistant', 'content': reply.content})
                 messages.append({'role': 'user', 'content': CHECK_TURN})
-                trace.append({'event': 'answer_check'})
+                note('answer_check', reply_chars=len(unchecked))
                 continue
             answer = reply.content.strip()
             # finished: the model stopped calling tools by itself.
@@ -334,7 +340,7 @@ class ResearchRunner:
                              + 'Cite exactly as [E3], using only these existing IDs: '
                              + (', '.join(sorted(permitted, key=lambda x: int(x[1:]))) or '(none)')
                              + '. Never write handles. Correct the answer without inventing sources.'})
-            trace.append({'event': 'citation_correction'})
+            note('citation_correction', unknown=sorted(cited - permitted.keys()), malformed=malformed[:5])
             # Its IDs were all valid, only some references were malformed: an
             # unusable correction (empty, a tool call, unknown IDs) keeps it
             # rather than lose the whole answer.
@@ -344,7 +350,7 @@ class ResearchRunner:
             except (ResearchQuotaExceeded, ResearchRunStopped):
                 raise
             except Exception as exc:
-                trace.append({'event': 'model_error', 'type': type(exc).__name__})
+                note('model_error', type=type(exc).__name__)
                 answer = ''
             invented = bool(cited_ids(answer) - permitted.keys())
             if not answer or _has_tool_markup(answer) or invented:
@@ -373,6 +379,7 @@ class ResearchRunner:
         except Exception:
             return result('Course access changed. Please retry.', [], 'access_revoked', ['access changed'])
         citations = [permitted[x] for x in sorted(cited, key=lambda x: int(x[1:]))]
+        note('finished', stop=stop, answer_chars=len(answer), cited=len(citations))
         return result(answer, citations, stop, unresolved)
 
     async def _tool(self, name: str, arguments: str) -> str:

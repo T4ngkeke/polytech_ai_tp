@@ -294,6 +294,40 @@ took a median 38 s of 75 s. On the v9 stack a WHERE/HAVING question showed its
 first draft text at 69 s and the checked answer at 118 s, the same text. The
 benchmark does not stream (no `on_draft`).
 
+## Unclear questions and clarification (2026-10-14)
+
+36 student-style French questions on the TP agent lab of the v9 stack (14
+PDFs), each in a new session, written with the expected handling before any
+run (`m4-agent/2026-10-14-clarify-probe/questions.json`): 8 clear, 12 that fit
+several course files, 10 vague ("l'exo 3", "ce qu'on a vu mardi", "la diapo
+avec le schéma", "la différence entre les deux"), 6 terms with several
+meanings. Flash-Next, Qwen sampling, reranker on.
+
+- Clear questions and terms: all answered with citations.
+- Several files: mostly the right behaviour, an answer for each reading and
+  an offer to go deeper (CM1 in two courses, four tree courses). Weak: "la
+  page 12" read two of the 14 files; "le cours de 2022" took one of two.
+- Vague: half asked back in plain text within 10–20 s, without research.
+  Two guessed instead (the slide with the diagram: 122 s of uncited
+  speculation; "the two": a long comparison of a guessed pair); two searched
+  80–100 s before asking.
+- Asking back already works over turns: the student's next message is
+  answered from the history (4 of 4 follow-ups answered with citations, one
+  found the exercise's own answer, SQL p. 17).
+- The same question asked twice often gets a different choice (ask, guess,
+  or cover all): sampling makes this judgment unstable.
+
+A prompt rule ("ask which one first, naming two to four candidate files; do
+not guess") was tried and removed: in a second run the quick questions back
+moved to other questions (5 before, 5 after); candidate file names in a
+question back made the answer check send it to research (C2, C7); benchmark
+v4 gave pages 85% against 91% the same day, within spread but no gain.
+
+Found and fixed: an answer wrote handles in parentheses, "(d6.p19)", which
+the reference check did not see; bare handles now get the correction turn.
+Runner events (turns, read and check turns, corrections, outcome) are now
+logged next to the tool lines, so a run can be followed in the backend log.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable

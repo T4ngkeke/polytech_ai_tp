@@ -165,6 +165,9 @@ def test_malformed_references_are_found_outside_code():
     text = 'Voir [E8.p14.b1] et [d6.p24.b14], puis [E1, E2] et [E3]. `t[d1]` ```\nx[E2.b]\n```'
     assert malformed_refs(text) == ['[E8.p14.b1]', '[d6.p24.b14]']
     assert malformed_refs('Rien [E1]; une liste [Exemple] ou [dessin].') == []
+    # Handles outside brackets, as an answer once wrote them.
+    assert malformed_refs('Vues (d6.p19), puis d6.p43–d6.p48 et d1.p20.b3.') == ['d6.p19', 'd6.p43', 'd6.p48', 'd1.p20.b3']
+    assert malformed_refs('Le fichier cd1.p2x et `d1.p20` en code, version 2.d1.p3 ne comptent pas.') == []
 
 
 @pytest.mark.asyncio
@@ -288,14 +291,18 @@ async def test_a_follow_up_may_cite_an_earlier_answer_without_new_research():
     assert result.stop_reason == 'finished' and result.citations == [earlier['E2']]
 
 
-def test_each_tool_call_is_logged(caplog):
+def test_each_tool_call_and_runner_event_is_logged(caplog):
     import asyncio
     import logging
-    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1].')
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E7].', 'Réponse [E1].', 'Réponse [E1].')
     with caplog.at_level(logging.INFO, logger='backend.app.agent.runner'):
         asyncio.run(ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?'))
     lines = [r.getMessage() for r in caplog.records if 'research run=' in r.getMessage()]
-    assert len(lines) == 1 and 'tool=read' in lines[0] and 'ok=True' in lines[0]
+    assert 'tool=read' in lines[0] and 'ok=True' in lines[0]
+    # The turns between the tool calls can be followed too.
+    events = [line.split('event=')[1].split()[0] for line in lines[1:]]
+    assert events == ['turn', 'unknown_ids_read_turn', 'finished']
+    assert '["E7"]' in lines[2] and '"stop": "finished"' in lines[3]
 
 
 @pytest.mark.asyncio
