@@ -8,8 +8,11 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
-import { createMessageId } from '../lib/messageId';
+import { createMessageId, createRequestId } from '../lib/messageId';
 import { interpretStreamEvent } from '../lib/streamEvents';
+import { applyToMessage } from '../lib/streamMessage';
+import { MessageBubble } from '../components/ChatMessage';
+import { PdfPreviewModal } from '../components/PdfPreview';
 import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
@@ -497,12 +500,17 @@ function LabSettingsPanel({ lab, onToggle }) {
 // and LearnerProfile, and the token cost is charged to the teacher, not a
 // student.
 function TestDrivePanel({ labId, labName }) {
+  // The same agent, stream and message bubbles as the student chat: research
+  // phases, the answer draft, a question back with clickable options, and
+  // cited pages that open in the source preview.
   const { token } = useAuthStore();
   const [sessionId, setSessionId] = useState(null);
   const [starting, setStarting] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [phase, setPhase] = useState(null);
+  const [preview, setPreview] = useState(null);
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
 
@@ -512,6 +520,8 @@ function TestDrivePanel({ labId, labName }) {
     setMessages([]);
     setInput('');
     setIsStreaming(false);
+    setPhase(null);
+    setPreview(null);
     return () => abortRef.current?.abort();
   }, [labId]);
 
@@ -532,8 +542,9 @@ function TestDrivePanel({ labId, labName }) {
     }
   }, [labId]);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
+  // picked: an option clicked under a question back; otherwise the input box.
+  const send = useCallback(async (picked) => {
+    const text = (typeof picked === 'string' ? picked : input).trim();
     if (!text || isStreaming || !sessionId) return;
 
     const assistantMsgId = createMessageId();
@@ -542,7 +553,7 @@ function TestDrivePanel({ labId, labName }) {
       { id: createMessageId(), sender: 'user', content: text },
       { id: assistantMsgId, sender: 'llm', content: '' },
     ]);
-    setInput('');
+    if (typeof picked !== 'string') setInput('');
     setIsStreaming(true);
 
     const ctrl = new AbortController();
@@ -553,35 +564,26 @@ function TestDrivePanel({ labId, labName }) {
       await fetchEventSource('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId, message: text }),
+        body: JSON.stringify({ session_id: sessionId, message: text, client_request_id: createRequestId() }),
         signal: ctrl.signal,
+        openWhenHidden: true,
         onmessage(ev) {
-          // Shares the student stream interpreter so the opening `status` frame
-          // is handled, not appended as "[object Object]" to the reply.
           const action = interpretStreamEvent(ev);
           switch (action.type) {
             case 'status':
+              setPhase(action.phase);
               return;
             case 'done':
+              setPhase(null);
               setIsStreaming(false);
               return;
             case 'error':
               setIsStreaming(false);
+              setMessages((prev) => prev.map((m) => (m.id === assistantMsgId ? { ...m, draft: '' } : m)));
               toast.error(action.detail);
               return;
-            case 'citations':
-              setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, citations: action.citations } : m));
-              return;
-            case 'clarification':
-              // The student sees buttons; the test drive lists the options.
-              setMessages((prev) => prev.map((m) => m.id === assistantMsgId
-                ? { ...m, content: `${m.content}\n\n*Options: ${action.clarification.options.join(' · ')}*` } : m));
-              return;
-            case 'token':
-              setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, content: m.content + action.text } : m));
-              return;
             default:
-              return;
+              setMessages((prev) => prev.map((m) => (m.id === assistantMsgId ? applyToMessage(m, action) : m)));
           }
         },
         onerror(err) { throw err; },
@@ -589,6 +591,9 @@ function TestDrivePanel({ labId, labName }) {
     } catch (err) {
       if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
+      // An unchecked draft never stays on screen once the stream ends.
+      setMessages((prev) => prev.map((m) => (m.id === assistantMsgId && m.draft ? { ...m, draft: '' } : m)));
+      setPhase(null);
       setIsStreaming(false);
     }
   }, [input, isStreaming, sessionId, token]);
@@ -622,26 +627,16 @@ function TestDrivePanel({ labId, labName }) {
         {messages.length === 0 && (
           <p className="text-sm text-cream-muted">Ask as if you were a student — e.g. “comment faire l'exercice 3 ?”.</p>
         )}
-        {messages.map((m) => (
-          <div key={m.id} className={m.sender === 'user' ? 'text-right' : ''}>
-            <div className={`inline-block max-w-[85%] text-left px-3 py-2 rounded-lg text-sm ${
-              m.sender === 'user' ? 'bg-cyan/15 text-cream' : 'bg-ink-deep text-cream-secondary'
-            }`}>
-              {m.sender === 'llm'
-                ? <Suspense fallback={<span className="text-cream-muted">…</span>}><MessageContent content={m.content} streaming={isStreaming} /></Suspense>
-                : m.content}
-              {m.sender === 'llm' && m.citations?.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {m.citations.map((c, i) => (
-                    <span key={i} className="px-1.5 py-0.5 rounded bg-ink-raised text-[10px] text-cream-muted">
-                      {c.filename}{c.page_no ? ` p.${c.page_no}` : ''}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+        {messages.map((m, i) => {
+          const last = i === messages.length - 1;
+          return (
+            <MessageBubble key={m.id} message={m} sessionId={sessionId} onOpenSource={setPreview}
+              streaming={isStreaming && m.sender === 'llm' && last}
+              phase={isStreaming && m.sender === 'llm' && last ? phase : null}
+              canRate={false}
+              onPick={!isStreaming && last && m.clarification ? send : null} />
+          );
+        })}
       </div>
       <div className="flex gap-2 p-3 border-t border-border-subtle">
         <input
@@ -659,6 +654,7 @@ function TestDrivePanel({ labId, labName }) {
           Send
         </button>
       </div>
+      {preview && <PdfPreviewModal source={preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }
