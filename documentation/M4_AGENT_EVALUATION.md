@@ -187,7 +187,8 @@ prefix stays cached).
 Calls use greedy decoding (temperature 0). Qwen advises temperature 0.7,
 top_p 0.8, top_k 20 for non-thinking mode, because greedy decoding can repeat
 endlessly (seen once on 27B: one sentence for 830 tokens). The evaluator can
-now run both (`M4_SAMPLING=greedy|qwen`); the product still uses greedy.
+now run both (`M4_SAMPLING=greedy|qwen`). On 2026-10-14 the product and the
+evaluator moved to Qwen's settings (`M4_SAMPLING=greedy` repeats older runs).
 
 Benchmark v4, 17 questions x 2 rounds, relaxed_slow, 3 in flight, all with the
 file list (`m4-agent/2026-10-13-cmp-*`; pages computed by the scorer, not a

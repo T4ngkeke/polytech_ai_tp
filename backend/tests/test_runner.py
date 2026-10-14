@@ -89,14 +89,15 @@ def test_the_catalogue_lists_files_in_handle_order_and_stops_at_the_limit():
     assert view.catalogue(limit=2).endswith('… and 1 more files; search finds them.')
 
 
-def test_sampling_is_greedy_unless_given():
-    from backend.app.agent.model import QWEN_NON_THINKING, ResearchModel
+def test_sampling_is_qwen_advice_unless_given():
+    from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.services.model_routing import Endpoint
     endpoint = Endpoint('http://x/v1', 'k', 'm')
-    assert ResearchModel(endpoint).sampling == {'temperature': 0} and ResearchModel(endpoint).top_k is None
-    qwen = ResearchModel(endpoint, sampling=QWEN_NON_THINKING)
+    qwen = ResearchModel(endpoint)
     assert qwen.sampling == {'temperature': 0.7, 'top_p': 0.8} and qwen.top_k == 20
     assert QWEN_NON_THINKING['top_k'] == 20  # the shared setting is not changed
+    greedy = ResearchModel(endpoint, sampling=GREEDY)
+    assert greedy.sampling == {'temperature': 0} and greedy.top_k is None
 
 
 @pytest.mark.asyncio

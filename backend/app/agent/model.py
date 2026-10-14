@@ -8,10 +8,10 @@ from openai import AsyncOpenAI
 from backend.app.services.model_routing import Endpoint
 
 
-# Sampling for the research calls. GREEDY gives the same reply to the same
-# input (benchmarks compare runs); QWEN_NON_THINKING is Qwen's advice for
-# non-thinking mode, which avoids the endless repetition greedy decoding can
-# fall into.
+# Sampling for the research calls. QWEN_NON_THINKING, Qwen's advice for
+# non-thinking mode, is the default: it avoids the endless repetition greedy
+# decoding can fall into. GREEDY gives the same reply to the same input, for
+# benchmark runs that must repeat an older one.
 GREEDY = {'temperature': 0}
 QWEN_NON_THINKING = {'temperature': 0.7, 'top_p': 0.8, 'top_k': 20}
 
@@ -36,7 +36,7 @@ class ResearchModel:
         if not endpoint.base_url or not endpoint.model:
             raise ValueError('model_unavailable')
         self.endpoint = endpoint
-        sampling = dict(GREEDY if sampling is None else sampling)
+        sampling = dict(QWEN_NON_THINKING if sampling is None else sampling)
         # top_k is not an OpenAI parameter; vLLM reads it from the request body.
         self.top_k = sampling.pop('top_k', None)
         self.sampling = sampling

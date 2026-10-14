@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
+from backend.app.agent.model import QWEN_NON_THINKING
 from backend.app.services.model_routing import Endpoint
 
 
@@ -96,9 +97,11 @@ class ResearchVision:
 
     async def _create(self, mime: str, data: str, question: str):
         return await self.client.chat.completions.create(
-            model=self.endpoint.model, max_tokens=self.max_tokens, temperature=0,
+            model=self.endpoint.model, max_tokens=self.max_tokens,
+            temperature=QWEN_NON_THINKING['temperature'], top_p=QWEN_NON_THINKING['top_p'],
             timeout=self.timeout, response_format=_SCHEMA,
-            extra_body={'chat_template_kwargs': {'enable_thinking': False}}, messages=[{
+            extra_body={'chat_template_kwargs': {'enable_thinking': False},
+                        'top_k': QWEN_NON_THINKING['top_k']}, messages=[{
                 'role': 'user', 'content': [
                     {'type': 'text', 'text': (
                         'Answer the narrow question about this course image. '
