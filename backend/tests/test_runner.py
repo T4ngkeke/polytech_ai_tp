@@ -172,10 +172,11 @@ def test_malformed_references_are_found_outside_code():
 
 @pytest.mark.asyncio
 async def test_a_malformed_reference_gets_the_correction_turn():
-    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1.p10.b2].', 'Réponse [E1].')
+    # A handle cannot be rewritten as an ID: the model corrects it.
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [d1.p10.b2].', 'Réponse [E1].')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     correction = model.seen[-1][-1]['content']
-    assert '[E1.p10.b2]' in correction and 'E1' in correction and model.with_tools[-1] is False
+    assert '[d1.p10.b2]' in correction and 'E1' in correction and model.with_tools[-1] is False
     assert result.answer == 'Réponse [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']
 
 
@@ -513,3 +514,21 @@ def test_a_question_back_names_no_handles():
     # Options that are only handles are empty, hence refused.
     with pytest.raises(ValueError):
         AskStudentArgs.model_validate({'question': 'Lequel ?', 'options': ['d1', 'd2']})
+
+
+@pytest.mark.asyncio
+async def test_a_valid_id_with_extra_parts_is_repaired_without_a_correction_turn():
+    # Seen with Flash-Next (B7): "[E21 in d1.p21]".
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1 in d1.p10] et [E1.p10.b2].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.answer == 'Vin3 [E1] et [E1].' and model.purposes == ['agent', 'agent']
+    assert [c['evidence_id'] for c in result.citations] == ['E1']
+
+
+@pytest.mark.asyncio
+async def test_a_correction_that_drops_every_citation_keeps_the_answer():
+    # Seen with Flash-Next (B7): the correction turn replied with a note.
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1], voir (d1.p10).',
+                   'Voici la correction (la faute était une référence mal formée).')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert result.answer == 'Vin3 [E1], voir (d1.p10).' and result.stop_reason == 'finished'

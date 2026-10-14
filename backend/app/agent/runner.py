@@ -126,6 +126,8 @@ ASK_STUDENT = {'type': 'function', 'function': {
                     'alone, never for a question the course answers.'),
     'parameters': AskStudentArgs.model_json_schema()}}
 ASK_ALONE = 'error: call ask_student alone, after the other tools have returned'
+# The evidence ID at the start of a malformed reference: "[E21 in d1.p21]".
+_LEADING_ID = re.compile(r'\[(E[1-9]\d*)(?![\d])')
 
 CATALOGUE_NOTE = ('Course files of this lab (handle, file, pages). When the student names a file '
                   'and a page, read that page directly, e.g. d2.p23; otherwise search first.')
@@ -402,6 +404,12 @@ class ResearchRunner:
         # never repeat within a session, see CourseTools first_evidence).
         permitted = {e.id: e.citation() for e in tools.evidence.all()}
         permitted.update({k: v for k, v in (earlier_citations or {}).items() if k not in permitted})
+        # "[E21 in d1.p21]", "[E8.p14.b1]": a valid ID with extra parts is
+        # rewritten as that ID, without a model call.
+        for ref in malformed_refs(answer):
+            head = _LEADING_ID.match(ref)
+            if head and head.group(1) in permitted:
+                answer = answer.replace(ref, f'[{head.group(1)}]')
         cited = cited_ids(answer)
         malformed = malformed_refs(answer)
         if answer and (cited - permitted.keys() or malformed):
@@ -428,7 +436,10 @@ class ResearchRunner:
                 note('model_error', type=type(exc).__name__)
                 answer = ''
             invented = bool(cited_ids(answer) - permitted.keys())
-            if not answer or _has_tool_markup(answer) or invented:
+            # A correction that drops every citation of an answer whose IDs
+            # were valid is a note about the correction, not the answer.
+            lost = bool(fallback and cited_ids(fallback) and not cited_ids(answer))
+            if not answer or _has_tool_markup(answer) or invented or lost:
                 answer = fallback
                 if invented and not fallback:
                     stop = 'invalid_evidence_ids'
