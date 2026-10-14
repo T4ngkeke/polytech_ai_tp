@@ -212,6 +212,24 @@ is within one run's spread (one question can move by a facet between rounds).
 On 2026-10-13 the user moved every environment (v6 beta, dev, e2e) to
 Flash-Next.
 
+## Citation precision of Flash-Next (2026-10-14)
+
+Citation precision counts a cited page as good only when the benchmark lists
+it (a facet's acceptable pages or the question's related pages). Flash-Next
+cites more pages per run than 27B (163 and 177 against 110 and 126) and more
+listed pages too (116 and 120 against 88 and 96). Of its unlisted pages, most
+are within two pages of a listed one (22 of 47 greedy, 36 of 57 with Qwen
+sampling); 7 to 10 are in another file.
+
+A check of 24 unlisted citations, chosen at random from both Flash-Next runs,
+against the page text: 22 support the sentence that cites them (other
+examples on the same subject, the next slide of the same section, a page with
+the same text as the listed one). One is a title page and one is unclear.
+The lower precision is mostly pages the benchmark does not list, not wrong
+citations. No change to the product. Precision on this benchmark should be
+read with a content check; adding these pages to the lists after seeing the
+answers would favour this model.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable
