@@ -23,6 +23,7 @@ Environment:
   M4_QUESTIONS     comma-separated question IDs to keep
   M4_CONCURRENCY   trials of one variant and round running at once (default 1)
   M4_CORPUS        corpus label written to the manifest
+  M4_ASK           1 (default, as the student chat) offers ask_student; 0 does not
   M4_RERANK_URL    rerank endpoint (vLLM /rerank) for the search tool; unset: no reranker.
                    M4_RERANK_MODEL names its model (default BAAI/bge-reranker-v2-m3)
 """
@@ -49,6 +50,10 @@ BENCHMARK_V3 = ROOT / 'documentation/ingestion-agent-acceptance/m4-agent/2026-10
 V3_SHA256 = '1c13a00855784fd3fd687f3d71191dc0828fa6c88447953350e0ab2ad32e217c'
 BENCHMARK_V4 = ROOT / 'documentation/ingestion-agent-acceptance/m4-agent/2026-10-06-benchmark-v4'
 V4_SHA256 = '656592794ff37c48bcddc1cd8856e7c1bb39c2c1deab01c4ae5c55909f4d2927'
+# Student-style French questions, clear and unclear, with the expected handling
+# (answer / clarify / either) and, for "clarify", the student's next message.
+CLARIFY = ROOT / 'documentation/ingestion-agent-acceptance/m4-agent/2026-10-14-clarify-probe'
+CLARIFY_SHA256 = '1398afcdbc6e444664c238d330cccf7c3484c3049b2a3993dc70fb116e2b16e6'
 VARIANTS = ('agent', 'strong_rag')
 # One budget for every variant of a run (M4_BUDGET). "standard" is the budget of
 # the student chat; "relaxed" uses most of a 32768-token model window.
@@ -64,6 +69,10 @@ BUDGETS = {
     'relaxed_slow': {'input_tokens': 28000, 'final_reserve': 4000, 'tool_calls': 20, 'visual_calls': 4,
                      'research_seconds': 600, 'total_seconds': 720, 'call_seconds': 240,
                      'rag_top_k': 10, 'rag_context_chars': 60000},
+    # The student chat's defaults (services/research_service.py ResearchLimits).
+    'product': {'input_tokens': 28000, 'final_reserve': 2500, 'tool_calls': 20, 'visual_calls': 4,
+                'research_seconds': 300, 'total_seconds': 420, 'call_seconds': 120,
+                'rag_top_k': 10, 'rag_context_chars': 60000},
 }
 BENCHMARK_NOTE = ('This is a course-source benchmark. Academic questions ask for '
                   'support from the available PDFs even when the wording does not explicitly '
@@ -202,6 +211,15 @@ def make_tool_dependencies(config):
 
 def load_tasks(benchmark, split):
     """The questions of a frozen benchmark split, plus the two behavior probes."""
+    if benchmark == 'clarify':
+        question_file = CLARIFY / 'questions.json'
+        digest = hashlib.sha256(question_file.read_bytes()).hexdigest()
+        assert digest == CLARIFY_SHA256, 'clarify questions changed after freezing'
+        tasks = [{**q, 'question_id': q['id'], 'question': q['q']}
+                 for q in json.loads(question_file.read_text())['questions']]
+        if os.getenv('M4_QUESTIONS'):
+            tasks = [q for q in tasks if q['question_id'] in os.getenv('M4_QUESTIONS').split(',')]
+        return tasks, digest
     question_file = HISTORICAL / 'questions.json'
     digest = hashlib.sha256(question_file.read_bytes()).hexdigest()
     assert digest == '6a4db51bd67cc37dcf6f828e803f85bbf226a8445fb1ca01ad9b3a497944df60'
@@ -261,6 +279,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                    'rerank_url': os.getenv('M4_RERANK_URL', ''),
                    'rerank_model': os.getenv('M4_RERANK_MODEL', 'BAAI/bge-reranker-v2-m3')}
     concurrency = int(os.getenv('M4_CONCURRENCY', '1'))
+    allow_ask = os.getenv('M4_ASK', '1') == '1'
     results = []
     dependencies = []
 
@@ -330,23 +349,51 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
         dependencies.append(deps)
         base_tools = PerCallTools(trial_scope, factory, **deps['options'])
         started = time.monotonic()
+        follow_up = None
         if variant == 'agent':
-            course_tools = CourseTools(base_tools, max_tool_calls=limits['tool_calls'],
-                                       research_seconds=limits['research_seconds'],
-                                       max_visual_calls=limits['visual_calls'])
-            result = await ResearchRunner(course_tools, model, max_tool_calls=limits['tool_calls'],
-                                          research_timeout=limits['research_seconds'],
-                                          total_timeout=limits['total_seconds'], model_timeout=call_seconds,
-                                          max_input_tokens=limits['input_tokens'],
-                                          final_reserve=limits['final_reserve']).run(
-                q['question'], research_note=BENCHMARK_NOTE)
+            def runner(first_evidence=1):
+                tools = CourseTools(base_tools, max_tool_calls=limits['tool_calls'],
+                                    research_seconds=limits['research_seconds'],
+                                    max_visual_calls=limits['visual_calls'], first_evidence=first_evidence)
+                return tools, ResearchRunner(tools, model, max_tool_calls=limits['tool_calls'],
+                                             research_timeout=limits['research_seconds'],
+                                             total_timeout=limits['total_seconds'], model_timeout=call_seconds,
+                                             max_input_tokens=limits['input_tokens'],
+                                             final_reserve=limits['final_reserve'])
+            course_tools, research = runner()
+            # The clarify questions are asked as in the student chat, without the
+            # benchmark note that asks for course support.
+            note = '' if benchmark == 'clarify' else BENCHMARK_NOTE
+            result = await research.run(q['question'], research_note=note, allow_ask=allow_ask)
+            answered = time.monotonic()
             tool_state, visual = course_tools.state(), deps['visual_usage']
+            if q.get('follow_up'):
+                # The student's next message, in the same conversation: the
+                # first answer is history and its citations stay valid.
+                read = [int(e.id[1:]) for e in course_tools.evidence.all()]
+                _, research = runner(first_evidence=max(read, default=0) + 1)
+                tick = time.monotonic()
+                second = await research.run(
+                    q['follow_up'], research_note=note,
+                    history=[{'role': 'user', 'content': q['question']},
+                             {'role': 'assistant', 'content': result.answer}],
+                    earlier_citations={c['evidence_id']: c for c in result.citations},
+                    # As the chat: no second question back in a row.
+                    allow_ask=allow_ask and result.clarification is None)
+                follow_up = {'question': q['follow_up'], 'answer': second.answer,
+                             'stop_reason': second.stop_reason,
+                             'cited_pages': cited_pages(second.citations, by_doc),
+                             'tool_calls': second.tool_calls,
+                             'elapsed_seconds': round(time.monotonic() - tick, 3)}
         else:
             result = await strong_rag(q['question'], base_tools)
+            answered = time.monotonic()
             tool_state, visual = {}, []
         gold = {(Path(e['pdf_path']).name, e['pdf_page_no']) for e in q.get('required_evidence', [])}
         cited = cited_pages(result.citations, by_doc)
         row = {'question_id': q['question_id'], 'round': round_no, 'variant': variant,
+               'expected': q.get('expected'), 'kind': q.get('kind'),
+               'clarification': getattr(result, 'clarification', None), 'follow_up': follow_up,
                'split': q.get('split'), 'unresolved': result.unresolved,
                'question': q['question'], 'answer': result.answer, 'citations': result.citations,
                'cited_pages': cited, 'gold_pages': sorted(gold),
@@ -355,7 +402,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                'stop_reason': result.stop_reason, 'tool_calls': result.tool_calls,
                'model_calls': result.model_calls, 'trace': result.trace, 'usage': result.usage,
                'visual_usage': visual, 'rerank_usage': deps['rerank_usage'], 'tool_state': tool_state,
-               'elapsed_seconds': round(time.monotonic() - started, 3)}
+               'elapsed_seconds': round(answered - started, 3)}
         results.append(row)
         (output / 'results.json').write_text(json.dumps(results, indent=2, ensure_ascii=False) + '\n')
         print(f'{trial_id}: {result.stop_reason}, cited={cited}, tools={result.tool_calls}, '
@@ -385,7 +432,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'vision_url': vision_url,
             'thinking_enabled': False, 'sampling': {'name': sampling_name, **sampling},
             'budget': budget, 'limits': limits,
-            'concurrency': concurrency,
+            'concurrency': concurrency, 'ask_student': allow_ask,
             'reranker': ({'url': tool_config['rerank_url'], 'model': tool_config['rerank_model']}
                          if tool_config['rerank_url'] else None),
             'index': 'frozen M3-C mineru-text/BGE-M3',
