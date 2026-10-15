@@ -22,6 +22,7 @@ import { applyToMessage } from '../lib/streamMessage';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import { PdfPreviewModal } from '../components/PdfPreview';
 import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
+import useMediaQuery from '../lib/useMediaQuery';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
 // assistant message renders as real markdown instead of the raw-text
@@ -56,6 +57,7 @@ export default function Chat() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   // Phones: classes and sessions live in a drawer opened from the header.
   const [navOpen, setNavOpen] = useState(!urlLabId);
+  const isWide = useMediaQuery('(min-width: 768px)');
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -345,6 +347,89 @@ export default function Chat() {
   const quotaPct = usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
+  // Desktop: its own column next to the classes. Phones: inside the drawer.
+  const sessionsPanel = (
+    <>
+      <div className="px-3 pt-4 pb-2 border-b border-border-subtle">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
+        <button
+          id="new-session-btn"
+          onClick={handleNewSession}
+          className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
+        >
+          + New Session
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto py-1">
+        {sessions.map((s) => (
+          <div key={s.id} className="group relative">
+            {renamingSessionId === s.id ? (
+              <input
+                autoFocus
+                value={renameTitle}
+                onChange={(e) => setRenameTitle(e.target.value)}
+                onBlur={() => handleRenameSession(s.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSession(s.id); if (e.key === 'Escape') setRenamingSessionId(null); }}
+                className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
+              />
+            ) : confirmingDeleteId === s.id ? (
+              <div className="flex items-center gap-2 px-3 py-2 text-xs bg-danger-deep">
+                <span className="flex-1 truncate text-danger">Delete this chat?</span>
+                <button
+                  onClick={() => handleDeleteSession(s.id)}
+                  className="w-5 h-5 flex items-center justify-center text-danger hover:text-danger-hover transition-colors cursor-pointer"
+                  title="Confirm delete"
+                >
+                  <CheckIcon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setConfirmingDeleteId(null)}
+                  className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
+                  title="Cancel"
+                >
+                  <XIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleSelectSession(s.id)}
+                  className={`w-full text-left px-3 py-2 pr-14 text-xs transition-all cursor-pointer ${
+                    activeSessionId === s.id
+                      ? 'bg-cyan-muted text-cyan'
+                      : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
+                  }`}
+                >
+                  <span className="block truncate">{s.title || 'Untitled Session'}</span>
+                  <span className="block text-[9px] text-cream-muted mt-0.5">
+                    {new Date(s.created_at).toLocaleDateString()}
+                  </span>
+                </button>
+                {/* Hover actions: rename + soft-delete */}
+                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
+                    className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
+                    title="Rename session"
+                  >
+                    <PencilIcon className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDeleteId(s.id)}
+                    className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-danger transition-colors cursor-pointer"
+                    title="Delete session"
+                  >
+                    <TrashIcon className="w-3 h-3" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
   return (
     <div className="flex h-dvh bg-ink-deep overflow-hidden">
       {/* Phones: the two sidebars below form one drawer over the chat. */}
@@ -354,7 +439,7 @@ export default function Chat() {
       <div className={`${navOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm flex-col shadow-elevated
         md:static md:z-auto md:flex md:w-auto md:max-w-none md:flex-row md:shadow-none`}>
       {/* ── Left: Hierarchical Sidebar ── */}
-      <div className={`${activeLabId ? 'max-h-[50%]' : 'flex-1'} min-h-0 md:max-h-none md:w-60 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border-subtle bg-ink-base`}>
+      <div className="flex-1 min-h-0 md:flex-none md:w-60 shrink-0 flex flex-col md:border-r border-border-subtle bg-ink-base">
         <HierarchicalSidebar
           role="student"
           classes={classes}
@@ -362,7 +447,14 @@ export default function Chat() {
           onSelectLab={handleSelectLab}
           onJoinClass={() => setShowJoinModal(true)}
           loading={classesLoading}
-        />
+        >
+          {/* Phones: the sessions sit under the classes, above the account footer. */}
+          {activeLabId && !isWide && (
+            <div className="flex-[1.5] min-h-0 flex flex-col border-t border-border-subtle">
+              {sessionsPanel}
+            </div>
+          )}
+        </HierarchicalSidebar>
 
         {/* Token quota at bottom */}
         <div className="shrink-0 px-4 py-3 border-t border-border-subtle">
@@ -381,89 +473,12 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* ── Middle: Session list (when lab selected) ── */}
-      {activeLabId && (
-        <div className="flex-1 min-h-0 md:flex-none md:w-48 shrink-0 flex flex-col md:border-r border-border-subtle bg-ink-base">
-          <div className="px-3 pt-4 pb-2 border-b border-border-subtle">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
-            <button
-              id="new-session-btn"
-              onClick={handleNewSession}
-              className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
-            >
-              + New Session
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto py-1">
-            {sessions.map((s) => (
-              <div key={s.id} className="group relative">
-                {renamingSessionId === s.id ? (
-                  <input
-                    autoFocus
-                    value={renameTitle}
-                    onChange={(e) => setRenameTitle(e.target.value)}
-                    onBlur={() => handleRenameSession(s.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSession(s.id); if (e.key === 'Escape') setRenamingSessionId(null); }}
-                    className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
-                  />
-                ) : confirmingDeleteId === s.id ? (
-                  <div className="flex items-center gap-2 px-3 py-2 text-xs bg-danger-deep">
-                    <span className="flex-1 truncate text-danger">Delete this chat?</span>
-                    <button
-                      onClick={() => handleDeleteSession(s.id)}
-                      className="w-5 h-5 flex items-center justify-center text-danger hover:text-danger-hover transition-colors cursor-pointer"
-                      title="Confirm delete"
-                    >
-                      <CheckIcon className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setConfirmingDeleteId(null)}
-                      className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
-                      title="Cancel"
-                    >
-                      <XIcon className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => handleSelectSession(s.id)}
-                      className={`w-full text-left px-3 py-2 pr-14 text-xs transition-all cursor-pointer ${
-                        activeSessionId === s.id
-                          ? 'bg-cyan-muted text-cyan'
-                          : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
-                      }`}
-                    >
-                      <span className="block truncate">{s.title || 'Untitled Session'}</span>
-                      <span className="block text-[9px] text-cream-muted mt-0.5">
-                        {new Date(s.created_at).toLocaleDateString()}
-                      </span>
-                    </button>
-                    {/* Hover actions: rename + soft-delete */}
-                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
-                        className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
-                        title="Rename session"
-                      >
-                        <PencilIcon className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => setConfirmingDeleteId(s.id)}
-                        className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-danger transition-colors cursor-pointer"
-                        title="Delete session"
-                      >
-                        <TrashIcon className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+      {/* ── Middle: Session list (desktop, when a lab is selected) ── */}
+      {activeLabId && isWide && (
+        <div className="w-48 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base">
+          {sessionsPanel}
         </div>
       )}
-
       </div>
 
       {/* ── Right: Chat panel ── */}

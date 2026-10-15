@@ -2,8 +2,9 @@
 
 Each main page (student chat, teacher lab, admin model map) is opened in both
 themes at desktop (1440 px) and phone (390 px) width. The check fails when the
-page scrolls sideways, the theme is not applied, or the phone menu does not
-open the navigation drawer.
+page scrolls sideways, the theme is not applied, the phone menu does not open
+the navigation drawer, the student drawer is not ordered classes, sessions,
+account, or the admin model map is missing.
 
 UI_TEST_URL must be a loopback frontend; it defaults to v9's mapped port 8080.
 PLAYWRIGHT_CHROMIUM may name a Chromium executable when Playwright's own build
@@ -94,6 +95,9 @@ def check_view(browser, target, shots, role, path, ready, steps, menu, theme, si
 
         overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
         assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+        if role == 'admin':
+            # The model map itself, with its sources, at every width.
+            expect(page.get_by_text('Students', exact=True)).to_be_visible()
 
         button = page.get_by_role('button', name=menu)
         if phone:
@@ -101,7 +105,13 @@ def check_view(browser, target, shots, role, path, ready, steps, menu, theme, si
             if shots:
                 page.screenshot(path=str(shots / f'{name}.png'))
             button.click()
-            expect(page.get_by_role('button', name='Sign out')).to_be_visible()
+            sign_out = page.get_by_role('button', name='Sign out')
+            expect(sign_out).to_be_visible()
+            if role == 'student':
+                # Drawer order: classes, then sessions, then the account footer.
+                tops = [page.get_by_text(t, exact=True).first.bounding_box()['y']
+                        for t in ('My Classes', 'Sessions')] + [sign_out.bounding_box()['y']]
+                assert tops == sorted(tops), f'{name}: drawer order {tops}'
             if shots:
                 page.screenshot(path=str(shots / f'{name}-menu.png'))
         else:

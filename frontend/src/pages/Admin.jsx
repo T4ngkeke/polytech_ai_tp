@@ -782,15 +782,14 @@ function MapEdges({ config }) {
   );
 }
 
-// inList: a plain grid cell on small screens instead of a positioned map node.
-function MapNode({ node, config, selected, onSelect, inList = false }) {
+function MapNode({ node, config, selected, onSelect }) {
   const st = node.status(config);
   const meta = NODE_STATUS_META[st];
   const model = node.shows ? node.shows(config) : config[node.fields[0].key];
   return (
     <button type="button" onClick={onSelect}
-      style={inList ? undefined : { left: `${node.x}%`, top: `${node.y}%` }}
-      className={`${inList ? 'w-full min-w-0' : 'absolute w-36 -translate-x-1/2 -translate-y-1/2'} rounded-xl border p-2 text-left transition-all cursor-pointer bg-ink-raised hover:border-cyan/50 ${selected
+      style={{ left: `${node.x}%`, top: `${node.y}%` }}
+      className={`absolute w-36 -translate-x-1/2 -translate-y-1/2 rounded-xl border p-2 text-left transition-all cursor-pointer bg-ink-raised hover:border-cyan/50 ${selected
         ? 'border-cyan ring-2 ring-cyan/30 shadow-glow'
         : 'border-border-default'}`}>
       <div className="flex items-center justify-between gap-1">
@@ -946,19 +945,19 @@ function LLMConfigTab() {
         </p>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="grid grid-cols-2 gap-2 md:hidden">
-            {MAP_NODES.map((n) => (
-              <MapNode key={n.id} node={n} config={config} inList
-                selected={n.id === selectedId} onSelect={() => setSelectedId(n.id)} />
-            ))}
-          </div>
-          <div className="relative hidden md:block h-[470px] overflow-hidden rounded-xl border border-border-default bg-ink-deep/40">
-            <MapEdges config={config} />
-            {MAP_SOURCES.map((s) => <MapSource key={s.id} source={s} />)}
-            {MAP_NODES.map((n) => (
-              <MapNode key={n.id} node={n} config={config}
-                selected={n.id === selectedId} onSelect={() => setSelectedId(n.id)} />
-            ))}
+          {/* Narrow screens keep the map at full size and scroll it sideways. */}
+          <div className="min-w-0">
+            <div className="overflow-x-auto rounded-xl border border-border-default bg-ink-deep/40">
+              <div className="relative h-[470px] min-w-[720px] overflow-hidden">
+                <MapEdges config={config} />
+                {MAP_SOURCES.map((s) => <MapSource key={s.id} source={s} />)}
+                {MAP_NODES.map((n) => (
+                  <MapNode key={n.id} node={n} config={config}
+                    selected={n.id === selectedId} onSelect={() => setSelectedId(n.id)} />
+                ))}
+              </div>
+            </div>
+            <p className="mt-1.5 text-[11px] text-cream-muted md:hidden">Swipe sideways to see the whole map.</p>
           </div>
 
           <NodePanel node={selected} config={config} set={set}

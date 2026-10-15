@@ -10,6 +10,7 @@
  *   onCreateClass()           — (teacher) triggers class creation
  *   onClassAction(action, cls) — (teacher/admin) rename/delete/reset-code
  *   onLabAction(action, lab)  — (teacher/admin) toggle/rename/delete
+ *   children                  — shown between the tree and the footer (student sessions on phones)
  *   loading: bool
  *
  * ClassNode shape: { id, name, invite_code, labs: LabNode[] }
@@ -32,6 +33,7 @@ export default function HierarchicalSidebar({
   onClassAction,
   onLabAction,
   loading = false,
+  children,
 }) {
   const { username, userRole, logout } = useAuthStore();
   const navigate = useNavigate();
@@ -111,6 +113,8 @@ export default function HierarchicalSidebar({
           ))
         )}
       </div>
+
+      {children}
 
       {/* Footer (User Profile & Sign Out) */}
       <div className="shrink-0 p-4 border-t border-border-subtle bg-ink-base">
