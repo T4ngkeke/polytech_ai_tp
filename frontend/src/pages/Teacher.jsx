@@ -20,6 +20,7 @@ import SkillPresetManager from '../components/SkillPresetManager';
 import CitationReport from '../components/CitationReport';
 import ModeSwitch from '../components/ModeSwitch';
 import { DEFAULT_MODE, modeLabel, offersResearch } from '../lib/answerModes';
+import { useChatScroll } from '../lib/chatScroll';
 
 // Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
 // it in when a test-drive is actually opened.
@@ -573,6 +574,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
   const [mode, setMode] = useState(DEFAULT_MODE);
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
+  const { onScroll, update: updateScroll, follow } = useChatScroll(scrollRef);
 
   // Reset (and abort any in-flight stream) when the selected lab changes.
   useEffect(() => {
@@ -586,8 +588,8 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
   }, [labId]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages]);
+    updateScroll();
+  }, [messages, updateScroll]);
 
   const start = useCallback(async () => {
     setStarting(true);
@@ -614,6 +616,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
       { id: createMessageId(), sender: 'user', content: text },
       { id: assistantMsgId, sender: 'llm', content: '' },
     ]);
+    follow('pin');
     if (typeof picked !== 'string') setInput('');
     setIsStreaming(true);
 
@@ -688,14 +691,15 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
         <span className="text-sm font-semibold text-cream">Test drive · {labName}</span>
         <button onClick={start} className="text-xs text-cream-muted hover:text-cyan">Restart</button>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} onScroll={onScroll} className="relative flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
           <p className="text-sm text-cream-muted">Ask as if you were a student — e.g. “comment faire l'exercice 3 ?”.</p>
         )}
         {messages.map((m, i) => {
           const last = i === messages.length - 1;
           return (
-            <MessageBubble key={m.id} message={m} sessionId={sessionId} onOpenSource={setPreview}
+            <div key={m.id} data-latest-answer={last && m.sender === 'llm' ? '' : undefined}>
+            <MessageBubble message={m} sessionId={sessionId} onOpenSource={setPreview}
               streaming={isStreaming && m.sender === 'llm' && last}
               phase={isStreaming && m.sender === 'llm' && last ? phase : null}
               canRate={false}
@@ -704,6 +708,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
                 const question = messages.slice(0, i).reverse().find((x) => x.sender === 'user');
                 if (question) send(question.content, 'research');
               } : null} />
+            </div>
           );
         })}
       </div>

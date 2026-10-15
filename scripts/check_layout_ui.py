@@ -11,6 +11,7 @@ PLAYWRIGHT_CHROMIUM may name a Chromium executable when Playwright's own build
 is not installed. UI_SHOTS_DIR, when set, receives a screenshot of each view
 for a human look.
 """
+import json
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -51,11 +52,21 @@ PAGES = [
 ]
 
 
+LONG_REPLY = '\n\n'.join(f'Paragraphe {n} : ' + 'une condition sur les groupes. ' * 12 for n in range(1, 31))
+
+
 def handler(role):
     def api(route):
         path = urlsplit(route.request.url).path
         if path == '/api/auth/me':
             route.fulfill(json={'id': role, 'username': role, 'role': role})
+        elif path == '/api/chat/stream':
+            route.fulfill(content_type='text/event-stream', body=(
+                'event: status\ndata: {"route": "agent", "phase": "thinking", "mode": "research"}\n\n'
+                + ''.join(f'event: draft\ndata: {json.dumps(part + chr(10) + chr(10))}\n\n'
+                          for part in LONG_REPLY.split('\n\n'))
+                + f'data: {json.dumps(LONG_REPLY)}\n\n'
+                'event: citations\ndata: []\n\nevent: done\ndata: {}\n\n'))
         else:
             route.fulfill(json=MOCKS.get(path, []))
     return api
@@ -130,6 +141,29 @@ def check_view(browser, target, shots, role, path, ready, steps, menu, theme, si
         context.close()
 
 
+def check_long_answer_stays_at_its_start(browser, target):
+    """While a long answer is written, the view stops at the answer's first
+    line instead of following the newest text to the bottom."""
+    for size in (DESKTOP, PHONE):
+        context, page, _ = open_page(browser, target, 'student', '/chat/lab', 'light', size)
+        try:
+            expect(page.get_by_text('Quelle différence entre WHERE et HAVING ?', exact=True)).to_be_visible()
+            page.locator('#chat-input').fill('Et GROUP BY ?')
+            page.locator('#chat-input').press('Enter')
+            expect(page.get_by_text('Paragraphe 30', exact=False)).to_have_count(1)
+            page.wait_for_timeout(300)
+            start = page.evaluate("""() => {
+                const answer = document.querySelector('[data-latest-answer]');
+                const list = answer.parentElement;
+                return answer.getBoundingClientRect().top - list.getBoundingClientRect().top;
+            }""")
+            assert 0 <= start <= 40, f'{size[0]}: the answer starts {start:.0f}px from the top of the list'
+            expect(page.get_by_text('Paragraphe 1 :', exact=False)).to_be_in_viewport()
+            print(f'PASS: a long answer stays at its first line ({size[0]} px)')
+        finally:
+            context.close()
+
+
 def check_toggle(browser, target):
     context, page, _ = open_page(browser, target, 'student', '/chat/lab', 'light', DESKTOP)
     try:
@@ -157,6 +191,7 @@ def main():
                     for size in (DESKTOP, PHONE):
                         check_view(browser, target, shots, role, path, ready, steps, menu, theme, size)
             check_toggle(browser, target)
+            check_long_answer_stays_at_its_start(browser, target)
         finally:
             browser.close()
 

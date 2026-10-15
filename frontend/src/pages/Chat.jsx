@@ -25,6 +25,7 @@ import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
 import ModeSwitch from '../components/ModeSwitch';
 import useMediaQuery from '../lib/useMediaQuery';
 import { DEFAULT_MODE, MODES, offersResearch, saveMode, storedMode } from '../lib/answerModes';
+import { useChatScroll } from '../lib/chatScroll';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
 // assistant message renders as real markdown instead of the raw-text
@@ -68,7 +69,8 @@ export default function Chat() {
   const activeClass = classes.find((c) => c.labs?.some((l) => l.id === activeLabId));
   const examMode = !!activeClass?.exam_mode;
   const abortRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const listRef = useRef(null);
+  const { onScroll, update: updateScroll, follow } = useChatScroll(listRef);
   const inputRef = useRef(null);
   const streamedIdsRef = useRef(new Set()); // temp ids not yet persisted server-side
 
@@ -135,6 +137,7 @@ export default function Chat() {
       if (existing.length > 0) {
         const latest = existing[0];
         setActiveSessionId(latest.id);
+        follow('tail');
         setSessions(existing);
         // Load messages
         const sessionData = await api.get(`/api/student/sessions/${latest.id}`);
@@ -175,6 +178,7 @@ export default function Chat() {
     abortRef.current = null;
     setIsStreaming(false);
     setActiveSessionId(sessionId);
+    follow('tail');
     setNavOpen(false);
     setIsLoadingMessages(true);
     try {
@@ -187,10 +191,8 @@ export default function Chat() {
     }
   }, []);
 
-  // ── Scroll to bottom ──
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  // ── Scroll while an answer is written (lib/chatScroll.js) ──
+  useEffect(() => { updateScroll(); }, [messages, updateScroll]);
 
   // ── Abort the SSE stream on unmount (no leaked EventSource / setState) ──
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -226,6 +228,7 @@ export default function Chat() {
     streamedIdsRef.current.add(assistantMsgId);
     const userMsg = { id: userMsgId, sender: 'user', content: text, created_at: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
+    follow('pin');
     if (typeof picked !== 'string') setInput('');
     setIsStreaming(true);
 
@@ -529,7 +532,7 @@ export default function Chat() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6 space-y-5">
+        <div ref={listRef} onScroll={onScroll} className="relative flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6 space-y-5">
           {!activeLabId && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-xs">
@@ -564,8 +567,9 @@ export default function Chat() {
           )}
 
           {messages.map((msg, i) => (
+            // The latest answer: scrolling stops when its first line reaches the top.
+            <div key={msg.id} data-latest-answer={i === messages.length - 1 && msg.sender === 'llm' ? '' : undefined}>
             <MessageBubble
-              key={msg.id}
               message={msg}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
               phase={isStreaming && msg.sender === 'llm' && i === messages.length - 1 ? researchPhase : null}
@@ -581,8 +585,8 @@ export default function Chat() {
                   if (question) handleSend(question.content, 'research');
                 } : null}
             />
+            </div>
           ))}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
