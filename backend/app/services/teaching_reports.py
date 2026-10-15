@@ -173,38 +173,53 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
 LAB_PROMPT = """You write a short report for a teacher about how students used the course assistant in one lab ({lab}).
 Use only the facts and the student questions below. Never invent numbers: take them from the facts.
 Students are named S1, S2, ...; keep those names. Write in {language}, in Markdown, at most 450 words,
-with exactly these sections:
-## Summary
+with exactly these sections, headings as written here:
+## {h[0]}
 Two or three sentences with the main numbers.
-## What students asked about
+## {h[1]}
 The main topics, grouped, most frequent first, each with an approximate number of questions and one short quoted example.
-## Course documents and pages
+## {h[2]}
 Which PDFs and pages the questions concern most, and documents no question concerns. Say that pages
 come from the answers' citations, or from a course search when an answer cited nothing.
-## Difficulties
+## {h[3]}
 Recurring misunderstandings, vague or off-topic questions, and questions the assistant answered badly
 (thumbs down, answers not finished).
-## How to prepare the next session
+## {h[4]}
 Three to five concrete suggestions for the teacher (what to explain again, which page to show, which exercise to give)."""
 
 STUDENT_PROMPT = """You write a short report for a teacher about one student ({student}) in one lab ({lab}), from the
 questions this student asked the course assistant. Use only the facts and questions below; never invent
 numbers. Describe what the questions show; do not grade the student. When there are few questions, say
-that the evidence is thin. Write in {language}, in Markdown, at most 350 words, with exactly these sections:
-## Summary
-## How the student asks
+that the evidence is thin. Write in {language}, in Markdown, at most 350 words, with exactly these sections,
+headings as written here:
+## {h[0]}
+## {h[1]}
 Precise or vague, asks for explanations or for solutions, sends code, language and tone.
-## Topics
-## What seems understood and what seems difficult
-## Suggestions for the teacher
+## {h[2]}
+## {h[3]}
+## {h[4]}
 Two or three concrete ideas."""
+
+# The headings in the report's language: the model copies headings as given.
+HEADINGS = {
+    "lab": {"English": ["Summary", "What students asked about", "Course documents and pages", "Difficulties",
+                        "How to prepare the next session"],
+            "French": ["Résumé", "Ce que les étudiants ont demandé", "Documents et pages du cours", "Difficultés",
+                       "Préparer la prochaine séance"]},
+    "student": {"English": ["Summary", "How the student asks", "Topics",
+                            "What seems understood and what seems difficult", "Suggestions for the teacher"],
+                "French": ["Résumé", "Comment l'étudiant pose ses questions", "Sujets",
+                           "Ce qui semble acquis et ce qui semble difficile", "Pistes pour l'enseignant"]},
+}
 
 
 def build_messages(facts: dict, *, student: str | None = None) -> list[dict]:
     listed = facts["question_list"]
     shown = {k: v for k, v in facts.items() if k not in ("question_list", "language")}
-    system = (STUDENT_PROMPT.format(student=student, lab=facts["lab"], language=facts["language"])
-              if student else LAB_PROMPT.format(lab=facts["lab"], language=facts["language"]))
+    language = facts["language"]
+    headings = HEADINGS["student" if student else "lab"].get(language, HEADINGS["lab"]["English"])
+    system = (STUDENT_PROMPT.format(student=student, lab=facts["lab"], language=language, h=headings)
+              if student else LAB_PROMPT.format(lab=facts["lab"], language=language, h=headings))
     lines = [f'- [{q["student"]}, {q["date"]}, {q["mode"] or "?"}] {q["text"]}'
              + (f' (pages: {", ".join(q["pages"])})' if q["pages"] else "")
              + (" [thumbs down]" if q.get("thumbs_down") else "")

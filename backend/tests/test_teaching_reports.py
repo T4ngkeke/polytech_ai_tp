@@ -149,3 +149,11 @@ async def test_only_the_lab_teacher_asks_and_one_runs_at_a_time(db_session, monk
     other = await make_client(db_session, stranger)
     async with other:
         assert (await other.get(f"/api/teacher/labs/{lab.id}/reports")).status_code in (403, 404)
+
+
+def test_headings_are_in_the_language_of_the_questions():
+    facts = {"lab": "TP", "questions": 1, "language": "French", "question_list": []}
+    assert "## Résumé" in teaching_reports.build_messages(facts)[0]["content"]
+    assert "## Pistes pour l'enseignant" in teaching_reports.build_messages(facts, student="S1")[0]["content"]
+    english = teaching_reports.build_messages({**facts, "language": "English"})[0]["content"]
+    assert "## Summary" in english and "Résumé" not in english
