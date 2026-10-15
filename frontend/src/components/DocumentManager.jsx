@@ -39,7 +39,7 @@ const LANGUAGES = [{ value: 'fr', label: 'Français' }, { value: 'en', label: 'E
 const STATUS_BADGE = {
   pending: 'bg-ink-surface text-cream-muted',
   processing: 'bg-cyan-muted text-cyan',
-  indexed: 'bg-emerald-500/15 text-emerald-300',
+  indexed: 'bg-success-muted text-success',
   partially_indexed: 'bg-gold-muted text-gold',
   failed: 'bg-danger-muted text-danger',
   needs_review: 'bg-gold-muted text-gold',
@@ -177,7 +177,7 @@ export default function DocumentManager({ labId }) {
         <button
           type="submit"
           disabled={uploading}
-          className="rounded gradient-cyan px-3 py-1.5 text-sm font-medium text-cream hover:brightness-110 disabled:opacity-50"
+          className="rounded gradient-cyan px-3 py-1.5 text-sm font-medium text-on-accent hover:brightness-110 disabled:opacity-50"
         >
           {uploading ? 'Uploading…' : 'Upload'}
         </button>
@@ -399,7 +399,7 @@ function EditableChunk({ docId, chunk, onSaved }) {
           />
           <div className="flex gap-2">
             <button type="button" onClick={save} disabled={saving}
-              className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-cream hover:brightness-110 disabled:opacity-50">
+              className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-on-accent hover:brightness-110 disabled:opacity-50">
               {saving ? 'Saving…' : 'Save & re-index'}
             </button>
             <button type="button" onClick={cancel} disabled={saving}

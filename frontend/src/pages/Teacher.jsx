@@ -375,7 +375,7 @@ export default function Teacher() {
             </div>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setStudentRuleModal(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-cream-secondary hover:text-cream hover:bg-ink-hover transition-colors">Cancel</button>
-              <button onClick={handleSaveStudentRule} className="px-4 py-2 rounded-lg gradient-cyan text-cream text-sm font-semibold hover:brightness-110 transition-colors">Save</button>
+              <button onClick={handleSaveStudentRule} className="px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-colors">Save</button>
             </div>
           </div>
         </div>
@@ -391,7 +391,7 @@ function EmptyState() {
     <div className="flex items-center justify-center h-full">
       <div className="text-center max-w-xs">
         <div className="w-16 h-16 rounded-2xl gradient-cyan mx-auto mb-4 flex items-center justify-center shadow-glow">
-          <svg className="w-8 h-8 text-cream" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+          <svg className="w-8 h-8 text-on-accent" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8M4 18h8" />
           </svg>
         </div>
@@ -467,7 +467,7 @@ function RulesPanel({ ruleText, setRuleText, ruleActive, setRuleActive, onSave, 
           <span className="text-xs text-cream-secondary">{ruleActive ? 'Active' : 'Disabled'}</span>
         </label>
         <button onClick={onSave} disabled={!ruleText.trim()}
-          className="px-5 py-2 rounded-lg gradient-cyan text-cream text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40">
+          className="px-5 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40">
           Save Rule
         </button>
       </div>
@@ -486,7 +486,7 @@ function LabSettingsPanel({ lab, onToggle }) {
         </div>
         <button onClick={onToggle}
           className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-            lab.is_active ? 'bg-danger-muted text-danger hover:bg-danger-muted/80' : 'bg-success-muted text-success hover:bg-success-muted/80'
+            lab.is_active ? 'bg-danger-muted text-danger hover:bg-danger/20' : 'bg-success-muted text-success hover:bg-success/25'
           }`}>
           {lab.is_active ? '🔒 Lock' : '🔓 Unlock'}
         </button>
@@ -609,7 +609,7 @@ function TestDrivePanel({ labId, labName }) {
         <button
           onClick={start}
           disabled={starting}
-          className="mt-4 px-4 py-2 rounded-lg gradient-cyan text-ink-deep text-sm font-medium disabled:opacity-50"
+          className="mt-4 px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-medium disabled:opacity-50"
         >
           {starting ? 'Starting…' : 'Start test drive'}
         </button>
@@ -649,7 +649,7 @@ function TestDrivePanel({ labId, labName }) {
         <button
           onClick={send}
           disabled={isStreaming || !input.trim()}
-          className="px-4 py-2 rounded-lg gradient-cyan text-ink-deep text-sm font-medium disabled:opacity-50"
+          className="px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-medium disabled:opacity-50"
         >
           Send
         </button>
@@ -767,7 +767,7 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
                           <p className="text-xs font-medium text-cream">
                             <span className={s.is_deleted ? 'line-through opacity-70' : ''}>{s.title || 'Untitled Session'}</span>
                             {s.is_deleted && (
-                              <span className="ml-2 align-middle rounded bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-300">
+                              <span className="ml-2 align-middle rounded bg-danger-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-danger">
                                 deleted by student
                               </span>
                             )}
@@ -830,7 +830,7 @@ function SimpleModal({ title, value, setValue, placeholder, onConfirm, onClose, 
           className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 mb-4 transition-colors" />
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-border-default text-cream-secondary text-sm hover:bg-ink-hover transition-all cursor-pointer">Cancel</button>
-          <button onClick={onConfirm} disabled={!value.trim()} className="flex-1 py-2.5 rounded-lg gradient-cyan text-cream text-sm font-semibold disabled:opacity-40 cursor-pointer hover:brightness-110 transition-all">{confirmLabel}</button>
+          <button onClick={onConfirm} disabled={!value.trim()} className="flex-1 py-2.5 rounded-lg gradient-cyan text-on-accent text-sm font-semibold disabled:opacity-40 cursor-pointer hover:brightness-110 transition-all">{confirmLabel}</button>
         </div>
       </div>
     </div>

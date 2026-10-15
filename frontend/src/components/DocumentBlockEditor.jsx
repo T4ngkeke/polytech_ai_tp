@@ -294,7 +294,7 @@ function BlockCard({ block, busy, change, docId }) {
             placeholder="What this block is for (optional, max 400 characters)"
             className="w-full rounded border border-border-default bg-ink-deep p-1 text-xs text-cream" />
           <div className="flex gap-2">
-            <button type="button" onClick={save} disabled={busy} className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-cream disabled:opacity-50">Save as new draft</button>
+            <button type="button" onClick={save} disabled={busy} className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50">Save as new draft</button>
             <button type="button" disabled={busy} onClick={() => { setEditing(false); setContent(block.content); setKind(block.type); setDescription(block.content_description || ''); }}
               className="rounded border border-border-default px-3 py-1 text-xs text-cream-secondary">Cancel</button>
           </div>

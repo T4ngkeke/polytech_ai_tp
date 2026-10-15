@@ -397,11 +397,11 @@ export default function Chat() {
                     className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
                   />
                 ) : confirmingDeleteId === s.id ? (
-                  <div className="flex items-center gap-2 px-3 py-2 text-xs bg-rose-500/10">
-                    <span className="flex-1 truncate text-rose-300">Delete this chat?</span>
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs bg-danger-deep">
+                    <span className="flex-1 truncate text-danger">Delete this chat?</span>
                     <button
                       onClick={() => handleDeleteSession(s.id)}
-                      className="w-5 h-5 flex items-center justify-center text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
+                      className="w-5 h-5 flex items-center justify-center text-danger hover:text-danger-hover transition-colors cursor-pointer"
                       title="Confirm delete"
                     >
                       <CheckIcon className="w-3.5 h-3.5" />
@@ -440,7 +440,7 @@ export default function Chat() {
                       </button>
                       <button
                         onClick={() => setConfirmingDeleteId(s.id)}
-                        className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-rose-400 transition-colors cursor-pointer"
+                        className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-danger transition-colors cursor-pointer"
                         title="Delete session"
                       >
                         <TrashIcon className="w-3 h-3" />
@@ -484,7 +484,7 @@ export default function Chat() {
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-xs">
                 <div className="w-16 h-16 rounded-2xl gradient-cyan mx-auto mb-4 flex items-center justify-center shadow-glow">
-                  <svg className="w-8 h-8 text-cream" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                  <svg className="w-8 h-8 text-on-accent" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
                   </svg>
                 </div>
@@ -500,7 +500,7 @@ export default function Chat() {
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <p className="text-cream-secondary text-sm mb-3">No sessions yet for this lab.</p>
-                <button onClick={handleNewSession} className="px-4 py-2 rounded-lg gradient-cyan text-cream text-sm font-medium cursor-pointer hover:brightness-110 transition-all">
+                <button onClick={handleNewSession} className="px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-medium cursor-pointer hover:brightness-110 transition-all">
                   Start First Session
                 </button>
               </div>
@@ -552,8 +552,8 @@ export default function Chat() {
               disabled={!activeSessionId}
               className={`shrink-0 p-2 rounded-lg transition-all cursor-pointer ${
                 isStreaming
-                  ? 'bg-danger-muted text-danger hover:bg-danger-muted/80'
-                  : 'gradient-cyan text-cream hover:brightness-110 shadow-glow disabled:opacity-40 disabled:cursor-not-allowed'
+                  ? 'bg-danger-muted text-danger hover:bg-danger/20'
+                  : 'gradient-cyan text-on-accent hover:brightness-110 shadow-glow disabled:opacity-40 disabled:cursor-not-allowed'
               }`}
             >
               {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
@@ -602,7 +602,7 @@ export default function Chat() {
               <button
                 onClick={handleJoinSubmit}
                 disabled={isJoining || joinCode.join('').length !== 6}
-                className="flex-1 py-2.5 rounded-lg gradient-cyan text-cream text-sm font-semibold disabled:opacity-50 cursor-pointer hover:brightness-110 transition-all">
+                className="flex-1 py-2.5 rounded-lg gradient-cyan text-on-accent text-sm font-semibold disabled:opacity-50 cursor-pointer hover:brightness-110 transition-all">
                 {isJoining ? 'Joining…' : 'Join Class'}
               </button>
             </div>

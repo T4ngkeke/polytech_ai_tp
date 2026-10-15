@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import useAuthStore from '../store/authStore';
+import ThemeToggle from '../components/ThemeToggle';
 
 const NAV = [
   { key: 'users', label: 'Users', icon: UsersIcon },
@@ -54,6 +55,7 @@ export default function Admin() {
               {(username || 'A').charAt(0).toUpperCase()}
             </div>
             <span className="flex-1 min-w-0 text-sm font-medium text-cream truncate">{username || 'Admin'}</span>
+            <ThemeToggle className="!p-1.5 !bg-transparent !border-transparent" />
             <button onClick={handleSignOut} title="Sign out"
               className="p-1.5 rounded-lg text-cream-muted hover:text-danger hover:bg-danger-muted transition-colors cursor-pointer">
               <LogoutIcon className="w-4 h-4" />
@@ -272,7 +274,7 @@ function UsersTab() {
               onChange={(e) => setResetPw(e.target.value)} placeholder="New password (min 6 chars)"
               className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm font-mono placeholder:text-cream-muted focus:outline-none focus:border-cyan/40" />
             <button onClick={handleResetPassword} disabled={resetPw.length < 6 || resetting}
-              className="w-full py-3 rounded-lg gradient-cyan text-cream text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+              className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
               {resetting ? 'Resetting…' : 'Reset password'}
             </button>
           </div>
@@ -313,7 +315,7 @@ function UsersTab() {
               </button>
             ) : (
               <button onClick={handleCsvConfirm} disabled={importing}
-                className="flex-1 py-2 rounded-lg gradient-cyan text-cream text-sm font-semibold cursor-pointer hover:brightness-110 disabled:opacity-40">
+                className="flex-1 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-semibold cursor-pointer hover:brightness-110 disabled:opacity-40">
                 {importing ? 'Importing…' : `Confirm Import (${csvPreview.to_create + csvPreview.to_update})`}
               </button>
             )}
@@ -521,7 +523,7 @@ function OversightTab() {
               {teachers.map((t) => <option key={t.id} value={t.id}>{t.username} ({t.role})</option>)}
             </select>
             <button onClick={doTransferClass} disabled={!transferTo || busy}
-              className="w-full py-3 rounded-lg gradient-cyan text-cream text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+              className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
               {busy ? 'Transferring…' : 'Transfer ownership'}
             </button>
           </div>
@@ -736,9 +738,9 @@ const MAP_NODES = [
 
 const NODE_STATUS_META = {
   live: { chip: 'default', cls: 'bg-cyan-muted text-cyan' },
-  set: { chip: 'own setting', cls: 'bg-emerald-500/15 text-emerald-300' },
+  set: { chip: 'own setting', cls: 'bg-success-muted text-success' },
   inherits: { chip: 'inherits', cls: 'bg-gold-muted text-gold' },
-  deployment: { chip: 'deployment', cls: 'bg-emerald-500/10 text-emerald-200' },
+  deployment: { chip: 'deployment', cls: 'bg-success/10 text-success' },
   legacy: { chip: 'not used', cls: 'bg-ink-surface text-cream-muted' },
   off: { chip: 'off', cls: 'bg-ink-surface text-cream-muted' },
 };
@@ -754,13 +756,13 @@ function MapEdges({ config }) {
         const st = n.status(config);
         return (
           <line key={`call-${sourceId}-${n.id}`} x1={s.x} y1={s.y} x2={n.x} y2={n.y}
-            stroke={st === 'off' || st === 'legacy' ? 'rgba(148,148,140,0.18)' : 'rgba(34,211,238,0.35)'}
+            className={st === 'off' || st === 'legacy' ? 'stroke-cream-muted/30' : 'stroke-cyan/40'}
             strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         );
       }))}
       {MAP_NODES.filter((n) => n.status(config) === 'inherits').map((n) => (
         <line key={`fb-${n.id}`} x1={n.x} y1={n.y} x2={fallback.x} y2={fallback.y}
-          stroke="rgba(212,175,55,0.55)"
+          className="stroke-gold/60"
           strokeWidth="1.5" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
       ))}
     </svg>
@@ -775,7 +777,7 @@ function MapNode({ node, config, selected, onSelect }) {
     <button type="button" onClick={onSelect}
       style={{ left: `${node.x}%`, top: `${node.y}%` }}
       className={`absolute w-36 -translate-x-1/2 -translate-y-1/2 rounded-xl border p-2 text-left transition-all cursor-pointer bg-ink-raised hover:border-cyan/50 ${selected
-        ? 'border-cyan ring-2 ring-cyan/30 shadow-[0_0_24px_rgba(34,211,238,0.25)]'
+        ? 'border-cyan ring-2 ring-cyan/30 shadow-glow'
         : 'border-border-default'}`}>
       <div className="flex items-center justify-between gap-1">
         <span className="text-sm">{node.icon} <span className="text-xs font-semibold text-cream">{node.name}</span></span>
@@ -843,10 +845,10 @@ function NodePanel({ node, config, set, onSave, saving }) {
         ) : field;
       })}
       {node.warnEmpty && st === 'inherits' ? (
-        <p className="text-xs text-amber-400">⚠ {node.warnEmpty}</p>
+        <p className="text-xs text-gold">⚠ {node.warnEmpty}</p>
       ) : null}
       <button type="button" onClick={onSave} disabled={saving}
-        className="w-full rounded-lg gradient-cyan py-2 text-sm font-semibold text-cream transition-all hover:brightness-110 disabled:opacity-40">
+        className="w-full rounded-lg gradient-cyan py-2 text-sm font-semibold text-on-accent transition-all hover:brightness-110 disabled:opacity-40">
         {saving ? 'Saving…' : `Save ${node.name}`}
       </button>
     </div>
@@ -974,7 +976,7 @@ function HealthPanel() {
         Fallbacks fired in the last {data?.window_minutes ?? 60} min.
       </p>
       {entries.length === 0 ? (
-        <p className="mt-3 text-sm text-emerald-300">✓ No degradations — all systems nominal.</p>
+        <p className="mt-3 text-sm text-success">✓ No degradations — all systems nominal.</p>
       ) : (
         <ul className="mt-3 space-y-1.5">
           {entries.map(([k, n]) => (
@@ -1021,7 +1023,7 @@ function MaintenanceTab() {
             <span className="text-sm text-cream-secondary">days</span>
           </div>
           <button onClick={() => setConfirmOpen(true)} disabled={pruning}
-            className="w-full py-2.5 rounded-lg bg-danger text-cream text-sm font-semibold hover:bg-danger-hover transition-all cursor-pointer disabled:opacity-40">
+            className="w-full py-2.5 rounded-lg bg-danger text-on-accent text-sm font-semibold hover:bg-danger-hover transition-all cursor-pointer disabled:opacity-40">
             Run Prune
           </button>
         </div>
@@ -1159,7 +1161,7 @@ function ConfirmModal({ title, message, confirmLabel = 'Confirm', danger, busy, 
             Cancel
           </button>
           <button onClick={onConfirm} disabled={busy}
-            className={`flex-1 py-2.5 rounded-lg text-cream text-sm font-semibold transition-all cursor-pointer disabled:opacity-40 ${
+            className={`flex-1 py-2.5 rounded-lg text-on-accent text-sm font-semibold transition-all cursor-pointer disabled:opacity-40 ${
               danger ? 'bg-danger hover:bg-danger-hover' : 'gradient-cyan hover:brightness-110'
             }`}>
             {busy ? 'Working…' : confirmLabel}

@@ -36,7 +36,7 @@ function FeedbackButtons({ messageId, initial }) {
     <div className="mt-2 flex gap-1.5">
       <button type="button" disabled={busy} onClick={() => rate('up')} aria-label="Helpful"
         className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
-          value === 'up' ? 'bg-emerald-500/20 text-emerald-300' : 'text-cream-muted hover:bg-ink-hover'}`}>
+          value === 'up' ? 'bg-success-muted text-success' : 'text-cream-muted hover:bg-ink-hover'}`}>
         👍
       </button>
       <button type="button" disabled={busy} onClick={() => rate('down')} aria-label="Not helpful"
@@ -77,7 +77,7 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, p
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
       {!isUser && (
         <div className="w-7 h-7 rounded-lg gradient-cyan flex items-center justify-center shrink-0 mt-0.5 shadow-glow">
-          <span className="text-cream text-[10px] font-bold">AI</span>
+          <span className="text-on-accent text-[10px] font-bold">AI</span>
         </div>
       )}
       <div className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -197,7 +197,7 @@ function CitationList({ citations, sessionId, onOpenSource }) {
                 c.document_id === file.documentId && (c.revision_id || null) === file.revisionId), sessionId),
                 page: page.pageNo })}
               title={`Open ${file.filename} at PDF page ${page.pageNo}${labels}`}
-              className={`${chip} bg-cyan-muted/60 hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}>
+              className={`${chip} bg-cyan/10 hover:border-cyan hover:text-cream focus-visible:outline focus-visible:outline-cyan`}>
               p.{page.pageNo}{page.teacherRevised && <span title="Teacher edited this source"> ✎</span>}
             </button>;
           })}

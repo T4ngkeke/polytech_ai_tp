@@ -19,6 +19,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
+import ThemeToggle from './ThemeToggle';
 
 export default function HierarchicalSidebar({
   role = 'student',
@@ -119,6 +120,7 @@ export default function HierarchicalSidebar({
             <p className="text-[10px] uppercase tracking-wider text-cyan">{userRole}</p>
           </div>
           <div className="shrink-0 ml-3 flex items-center gap-2">
+            <ThemeToggle />
             <button
               onClick={() => navigate('/account')}
               title="Account"

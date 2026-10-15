@@ -32,7 +32,7 @@ function HighlightedPage({ source, page }) {
     <div className="relative min-h-0 flex-1">
       {!shown && boxes.length > 0 && (
         <button type="button" onClick={() => setShown(true)}
-          className="absolute right-4 top-3 z-10 rounded-md bg-yellow-300 px-2 py-1 text-xs font-medium text-ink-deep shadow">
+          className="absolute right-4 top-3 z-10 rounded-md bg-yellow-300 px-2 py-1 text-xs font-medium text-neutral-900 shadow">
           Show highlights
         </button>
       )}
@@ -46,7 +46,7 @@ function HighlightedPage({ source, page }) {
               style={{ left: `${box[0] * 100}%`, top: `${box[1] * 100}%`,
                 width: `${(box[2] - box[0]) * 100}%`, height: `${(box[3] - box[1]) * 100}%` }}>
               {labels.length > 0 && (
-                <span className="absolute -top-2.5 left-1 rounded bg-yellow-400 px-1 text-[10px] font-semibold leading-4 text-ink-deep">
+                <span className="absolute -top-2.5 left-1 rounded bg-yellow-400 px-1 text-[10px] font-semibold leading-4 text-neutral-900">
                   {labels.join(', ')}
                 </span>
               )}
@@ -87,7 +87,7 @@ export function PdfPreviewModal({ source, onClose }) {
   const labels = source.focusLabel ? [source.focusLabel]
     : pages.find((p) => p.pageNo === page)?.labels || [];
   const tab = (active) => `rounded px-2 py-0.5 text-xs ${active
-    ? 'bg-cyan text-ink-deep' : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'}`;
+    ? 'bg-cyan text-on-accent' : 'text-cream-secondary hover:bg-ink-hover hover:text-on-accent'}`;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -103,7 +103,7 @@ export function PdfPreviewModal({ source, onClose }) {
                 <button key={p.pageNo} type="button" onClick={() => setPage(p.pageNo)}
                   aria-pressed={p.pageNo === page}
                   className={`rounded px-1.5 py-0.5 text-xs ${p.pageNo === page
-                    ? 'bg-cyan text-ink-deep' : 'bg-cyan-muted/60 text-cream-secondary hover:text-cream'}`}>
+                    ? 'bg-cyan text-on-accent' : 'bg-cyan/10 text-cream-secondary hover:text-on-accent'}`}>
                   p.{p.pageNo}
                 </button>
               ))}

@@ -29,6 +29,8 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-async';
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
+import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light';
+import { useTheme } from '../lib/theme';
 import 'katex/dist/katex.min.css';
 
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
@@ -54,12 +56,13 @@ function CopyButton({ value }) {
 }
 
 const CodeBlock = memo(function CodeBlock({ language, value }) {
+  const theme = useTheme();
   return (
     <div className="relative my-2 text-[13px]">
       <CopyButton value={value} />
       <SyntaxHighlighter
         language={language}
-        style={oneDark}
+        style={theme === 'dark' ? oneDark : oneLight}
         customStyle={{ margin: 0, borderRadius: '0.5rem', padding: '0.9rem 1rem' }}
         PreTag="div"
       >
@@ -103,7 +106,7 @@ function makeComponents(streaming, onCite) {
       // An [E#] marker (lib/citations.js linkCitations): open the cited passage.
       ? <button type="button" onClick={() => onCite(href.slice(6))}
           title={`Show source ${href.slice(6)}`}
-          className="rounded px-0.5 text-cyan underline decoration-dotted underline-offset-2 hover:bg-cyan-muted/60">
+          className="rounded px-0.5 text-cyan underline decoration-dotted underline-offset-2 hover:bg-cyan/10">
           {children}
         </button>
       : <a href={href} target="_blank" rel="noreferrer" className="text-cyan underline">{children}</a>),
