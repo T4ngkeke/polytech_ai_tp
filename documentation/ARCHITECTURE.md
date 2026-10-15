@@ -33,8 +33,10 @@ for a session without a lab `400 session_without_lab`. The LangGraph path
    - `search` (`agent/search.py`): one search with the question as written, the
      found pages and their neighbours, one short answer citing `[E#]`; below a
      best reranker score of 0.001 it answers "not found".
-   - `direct` (`agent/direct.py`): one answer without the course files and
-     without citations.
+   - `direct` (`agent/direct.py`): one short answer without the course files
+     and without citations.
+   The Search and Direct answers are short unless the teacher's rules ask for
+   more detail.
 4. **Scope.** The course files of a run are the published PDF revisions of the
    lab and of the class (class-wide documents), frozen when the run starts.
    Every search filters `class_id` and `lab_id` (or `lab_id IS NULL`) in SQL.

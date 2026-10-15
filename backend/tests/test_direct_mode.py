@@ -1,7 +1,7 @@
 """Direct mode: one model call, no course material, the teacher's rules."""
 import pytest
 
-from backend.app.agent.direct import COURSE_NOTE, DIRECT_PROMPT, EXAM_NOTE, DirectRunner
+from backend.app.agent.direct import CONCISE_NOTE, COURSE_NOTE, DIRECT_PROMPT, EXAM_NOTE, DirectRunner
 from backend.app.agent.model import ModelReply
 
 
@@ -30,6 +30,22 @@ async def test_rules_history_and_no_citations():
     assert [m['role'] for m in model.seen[0]] == ['system', 'user', 'assistant', 'user']
     assert result.answer == 'Une boucle répète  un bloc.' and result.citations == []
     assert (result.mode, result.stop_reason, result.tool_calls) == ('direct', 'finished', 0)
+
+
+@pytest.mark.asyncio
+async def test_concise_comes_before_the_teacher_rules_that_may_change_it():
+    model = Model('Réponse.')
+    rules = '[CLASS RULES]\nRéponds en détail.'
+    await DirectRunner(model, concise=True).run('Q ?', teaching_rules=rules)
+    await DirectRunner(model).run('Q ?', teaching_rules=rules)
+    concise, plain = (seen[0]['content'] for seen in model.seen)
+    assert concise.index(CONCISE_NOTE) < concise.index(rules) and "teacher's rules" in CONCISE_NOTE
+    assert CONCISE_NOTE not in plain
+
+
+def test_the_product_answers_concisely():
+    from backend.app.agent import direct
+    assert direct.CONCISE is True
 
 
 @pytest.mark.asyncio

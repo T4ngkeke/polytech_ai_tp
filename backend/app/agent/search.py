@@ -52,7 +52,8 @@ below, or one query per part of a compound question (at most three). Resolve ref
 earlier messages ("and for HAVING?" becomes a full query).'''
 
 CONCISE_NOTE = ('Be concise: answer with the key points in a few short paragraphs or a short '
-                'list, each with its citations; the student can ask for more.')
+                'list, each with its citations; the student can ask for more. If the teacher\'s '
+                'rules ask for another length or level of detail, follow the rules.')
 
 CHECK_TURN = ('The student has not seen this reply yet. If it states course content from the pages, '
               'write it again citing their [E#] IDs, without mentioning this check. If the pages do '

@@ -16,6 +16,7 @@ from dataclasses import dataclass, fields
 
 from sqlalchemy import select
 
+from backend.app.agent import direct as direct_mode
 from backend.app.agent import search as search_mode
 from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.direct import DirectRunner
@@ -178,7 +179,8 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
         billed = usage.wrap_model(run_id=started.run_id, model=model_name,
                                   alpha=token_alpha, beta=token_beta, call=model)
         if mode == 'direct':
-            runner = DirectRunner(billed, exam_mode=exam_mode, total_timeout=limits.total_seconds,
+            runner = DirectRunner(billed, exam_mode=exam_mode, concise=direct_mode.CONCISE,
+                                  total_timeout=limits.total_seconds,
                                   model_timeout=limits.call_seconds, on_draft=on_draft)
         elif mode == 'search':
             # Searches and page reads are not research tool calls: no tool budget.

@@ -3,7 +3,8 @@
 One streamed model call, no tools. The teacher's rules are part of the system
 prompt as in the other modes. The answer cites nothing: [E#] IDs copied from
 earlier answers in the conversation are removed, since no page was read.
-A class in exam mode answers only in this mode.
+A class in exam mode answers only in this mode. Answers are concise by default;
+the teacher's rules can ask for more detail.
 """
 from __future__ import annotations
 
@@ -24,21 +25,30 @@ COURSE_NOTE = ('If the student asks about this course itself (a slide, a page, a
                'Research mode does.')
 EXAM_NOTE = ('The teacher has put this class in exam mode: course search is off for everyone. Do '
              'not suggest other modes.')
+CONCISE_NOTE = ('Be concise: answer with the key points in a few short paragraphs or a short list; '
+                'the student can ask for more. If the teacher\'s rules ask for another length or '
+                'level of detail, follow the rules.')
+
+# The product's setting (2026-10-15): Direct answers ran to about 3000 characters and
+# 21-23 s; concise as in Search mode.
+CONCISE = True
 
 
 class DirectRunner:
-    def __init__(self, model, *, exam_mode: bool = False, total_timeout: float = 120.0,
+    def __init__(self, model, *, exam_mode: bool = False, concise: bool = False,
+                 total_timeout: float = 120.0,
                  model_timeout: float = 60.0,
                  on_draft: Callable[[str | None], None] | None = None,
                  clock: Callable[[], float] = time.monotonic):
         # model: model.ResearchModel, or a wrapper with the same call (billing, tests).
-        self.model, self.exam_mode = model, exam_mode
+        self.model, self.exam_mode, self.concise = model, exam_mode, concise
         self.total_timeout, self.model_timeout = total_timeout, model_timeout
         self.on_draft, self.clock = on_draft, clock
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', **_ignored) -> ResearchResult:
-        system = '\n'.join([DIRECT_PROMPT, EXAM_NOTE if self.exam_mode else COURSE_NOTE, teaching_rules])
+        system = '\n'.join([DIRECT_PROMPT, EXAM_NOTE if self.exam_mode else COURSE_NOTE,
+                            *([CONCISE_NOTE] if self.concise else []), teaching_rules])
         messages = [{'role': 'system', 'content': system},
                     *({'role': m['role'], 'content': m['content']} for m in history or []),
                     {'role': 'user', 'content': question}]
