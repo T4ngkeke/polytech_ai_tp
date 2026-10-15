@@ -20,7 +20,8 @@ Environment:
   M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
   M4_SAMPLING      qwen (Qwen's non-thinking advice, default, as the product) | greedy (temperature 0),
                    for research and view_image
-  M4_BUDGET        standard | relaxed | relaxed_slow (see BUDGETS)
+  M4_BUDGET        standard | relaxed | relaxed_slow | product (see BUDGETS)
+  M4_TOOL_CALLS    overrides the budget's tool call limit
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
   M4_QUESTIONS     comma-separated question IDs to keep
   M4_CONCURRENCY   trials of one variant and round running at once (default 1)
@@ -76,7 +77,7 @@ BUDGETS = {
                      'research_seconds': 600, 'total_seconds': 720, 'call_seconds': 240,
                      'rag_top_k': 10, 'rag_context_chars': 60000},
     # The student chat's defaults (services/research_service.py ResearchLimits).
-    'product': {'input_tokens': 28000, 'final_reserve': 2500, 'tool_calls': 20, 'visual_calls': 4,
+    'product': {'input_tokens': 28000, 'final_reserve': 2500, 'tool_calls': 30, 'visual_calls': 4,
                 'research_seconds': 300, 'total_seconds': 420, 'call_seconds': 120,
                 'rag_top_k': 10, 'rag_context_chars': 60000},
 }
@@ -268,7 +269,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     output.mkdir(parents=True, exist_ok=True)
     query_cache = output / 'query-embedding-cache.jsonl'
     tasks, digest = load_tasks(benchmark, split)
-    limits = BUDGETS[budget]
+    limits = dict(BUDGETS[budget])
+    if os.getenv('M4_TOOL_CALLS'):          # one limit changed, the rest of the budget kept
+        limits['tool_calls'] = int(os.environ['M4_TOOL_CALLS'])
     chat = await db.scalar(select(Session).join(User, User.id == Session.user_id)
                            .where(User.role == UserRole.student))
     scope = await create_scope(db, user_id=chat.user_id, session_id=chat.id)

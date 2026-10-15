@@ -36,8 +36,11 @@ class ResearchLimits:
     """Limits of one research run; an admin can change them (SystemConfig,
     LIMIT_KEYS). The defaults suit Qwen3.8-27B and Qwen3.8-Flash-Next on one
     DGX Spark (the 2026-10-12 end-to-end test): a long answer can take two
-    minutes, so the run keeps total - research seconds for it."""
-    tool_calls: int = 20
+    minutes, so the run keeps total - research seconds for it. 30 tool calls
+    (2026-10-15, v4 x 2): runs stopped at the limit fell from 10 of 38 to 2,
+    facets found 81% -> 90%, median time 86 s -> 82 s; reads are one page each,
+    so a question across several documents needs more than 20."""
+    tool_calls: int = 30
     visual_calls: int = 4
     research_seconds: int = 300
     total_seconds: int = 420

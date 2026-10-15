@@ -320,8 +320,34 @@ docker run -d --name edullm-reranker --gpus all --ipc=host --restart unless-stop
   --hf-overrides '{"architectures": ["Qwen3ForSequenceClassification"], "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}'
 ```
 
-Admin setting: `RERANK_MODEL=Qwen/Qwen3-Reranker-0.6B`. Research mode was not
-rerun with it.
+Admin setting: `RERANK_MODEL=Qwen/Qwen3-Reranker-0.6B`. The dev stack runs it
+since 2026-10-15.
+
+## Tool call limit (2026-10-15)
+
+About one Research run in six stopped at the tool call limit (20): 71 of 482
+benchmark trials of 2026-10-14 and 19 of about 100 runs in the dev database. Such
+a run still answers, with what it read. In every case the reason was the tool
+call limit, never the research time (300 s) or the input size (runs stayed under
+8,000 input tokens of 28,000). The model makes no identical call twice and few
+calls fail (about one per trial). It reads one page per call, often the next
+slide of the same file, so a question over several documents needs more than 20
+calls: W01 stopped at the limit in 12 of 16 trials, W11 in 8, W02 and W08 in 7.
+
+v4, 17 questions x 2 rounds, Flash-Next, Qwen3-Reranker, product budget, same
+evening (`m4-agent/2026-10-15-research-v4-qwen3-tools20`, `-tools30`):
+
+| Tool calls | Stopped at the limit | Facets | Complete questions | Citation precision | Tool calls (mean, max) | Median / p95 s |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 10/38 | 86/106 (81%) | 20/34 | 76% | 10.9, 21 | 86 / 171 |
+| 30 | 2/38 | 95/106 (90%) | 26/34 | 71% | 11.4, 30 | 82 / 167 |
+
+Most runs are unchanged (median 10 tool calls in both); only four went past 20.
+W01 found 0 of 8 facets with 20 and 5 of 8 with 30. Part of the 9-point gain is
+one run's spread (about 3 points between earlier runs); the fall of runs stopped
+at the limit is not. Citation precision falls 5 points: more pages read, more
+pages cited. The default is now 30 (`ResearchLimits.tool_calls`; admin setting
+`AGENT_MAX_TOOL_CALLS`, at most 40).
 
 ## Tool changes and answer drafts (2026-10-14)
 

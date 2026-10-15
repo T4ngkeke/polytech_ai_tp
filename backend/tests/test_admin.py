@@ -380,7 +380,7 @@ class TestLLMConfig:
         got = (await admin_client.get("/api/admin/llm/config")).json()
         assert got["agent_max_tool_calls"] == "20"
         # The form shows each default and range from the backend.
-        assert got["research_limits"]["agent_max_tool_calls"] == {"default": 20, "min": 1, "max": 40}
+        assert got["research_limits"]["agent_max_tool_calls"] == {"default": 30, "min": 1, "max": 40}
         assert got["research_limits"]["agent_max_input_tokens"]["default"] == 28000
         assert len(got["research_limits"]) == 6
         # An empty value goes back to the default.

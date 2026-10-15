@@ -188,7 +188,7 @@ class LLMConfigResponse(BaseModel):
     agent_call_seconds: str = ""
     agent_max_input_tokens: str = ""
     # Default and allowed range of each research limit field, for the form:
-    # {"agent_max_tool_calls": {"default": 20, "min": 1, "max": 40}, …}.
+    # {"agent_max_tool_calls": {"default": 30, "min": 1, "max": 40}, …}.
     research_limits: dict[str, dict[str, int]] = Field(default_factory=dict)
     token_alpha: float = 0.2
     token_beta: float = 1.0
