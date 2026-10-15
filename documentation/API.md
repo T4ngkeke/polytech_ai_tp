@@ -47,12 +47,14 @@
 | GET | `/api/admin/analytics/classes/{class_id}` | require_admin | Per-class hierarchical analytics (class→lab→student). |
 | DELETE | `/api/admin/sessions/{session_id}` | require_admin | Hard-delete a specific session to purge inappropriate content. |
 | POST | `/api/admin/maintenance/prune` | require_admin | Bulk hard-delete sessions/messages older than `older_than_days`. With `dry_run: true`, only counts what would be deleted (shown before confirming). |
+| POST | `/api/admin/monitoring/session` | require_admin | Sets the monitoring cookie `edullm_monitoring` (path `/grafana/`, HttpOnly, SameSite Strict, 8 hours, signed for monitoring only). The Monitoring tab calls it before showing Grafana. `204`. |
+| GET | `/api/admin/monitoring/check` | monitoring cookie | Called by nginx (`auth_request`) for every `/grafana/` request: `204` when the cookie belongs to a user who is an admin now, `401` otherwise. |
 
 ### B. Teacher Audit & Control
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
-| POST | `/api/teacher/classes` | require_teacher | Create class and generate 6-char `invite_code`. |
+| POST | `/api/teacher/classes` | require_teacher | Create class and generate 6-char `invite_code`. The class starts in exam mode (setting `NEW_CLASS_EXAM_MODE`, on by default). |
 | GET | `/api/teacher/classes` | require_teacher | List own classes (name, invite code, student count). |
 | PUT | `/api/teacher/classes/{class_id}` | require_teacher | Rename/update class details (ownership enforced). |
 | DELETE | `/api/teacher/classes/{class_id}` | require_teacher | Soft-delete own class. |

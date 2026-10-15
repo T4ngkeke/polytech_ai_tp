@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.database import Base, engine
-from backend.app.routers import admin, auth, chat, student, teacher, document_versions, document_reader
+from backend.app.routers import admin, auth, chat, monitoring, student, teacher, document_versions, document_reader
 
 # The research agent logs one INFO line per tool call (agent/runner.py), so a
 # run can be followed in the container log. Uvicorn configures only its own
@@ -114,6 +114,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(monitoring.router)
 app.include_router(teacher.router)
 app.include_router(document_versions.router)
 app.include_router(document_reader.teacher_router)

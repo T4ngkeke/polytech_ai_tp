@@ -20,16 +20,18 @@ export function dashboardUrl(key, { theme = 'light', embedded = true } = {}) {
 }
 
 /**
- * Whether Grafana answers. Without the monitoring containers, /grafana/
- * returns a 502, or the app page itself on an older frontend.
+ * 'running', 'denied' (nginx let the request through only for an app admin
+ * with the monitoring cookie: 401) or 'stopped'. Without the monitoring
+ * containers, /grafana/ returns a 502, or the app page on an older frontend.
  */
-export async function grafanaRunning(fetchFn = fetch) {
+export async function grafanaState(fetchFn = fetch) {
   try {
     const res = await fetchFn('/grafana/api/health');
-    if (!res.ok) return false;
+    if (res.status === 401) return 'denied';
+    if (!res.ok) return 'stopped';
     const body = await res.json();
-    return body?.database === 'ok';
+    return body?.database === 'ok' ? 'running' : 'stopped';
   } catch {
-    return false;
+    return 'stopped';
   }
 }

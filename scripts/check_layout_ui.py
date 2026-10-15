@@ -9,7 +9,9 @@ In a teacher lab, the class name in the breadcrumb must open the class, and the
 Analytics tab must show its charts and refill a student's quota; Audit shows
 the latest AI report on the lab.
 The admin Monitoring tab shows the real Grafana dashboards (not mocked), in the
-app's theme; it needs the monitoring containers running.
+app's theme; it needs the monitoring containers running, and MONITORING_COOKIE
+(an admin's monitoring token), since Grafana is open to app admins only.
+Without it, the check only makes sure Grafana is closed.
 
 UI_TEST_URL must be a loopback frontend; it defaults to v9's mapped port 8080.
 PLAYWRIGHT_CHROMIUM may name a Chromium executable when Playwright's own build
@@ -282,11 +284,26 @@ def check_report(browser, target, shots):
 
 
 def check_monitoring(browser, target, shots):
-    """Both dashboards load inside the admin page, in the app's theme, at both widths."""
+    """Grafana is closed without the monitoring cookie. With MONITORING_COOKIE
+    (an admin's monitoring token), both dashboards load inside the admin page,
+    in the app's theme, at both widths."""
+    cookie = os.getenv('MONITORING_COOKIE')
+    context, page, errors = open_page(browser, target, 'admin', '/admin', 'light', DESKTOP)
+    try:
+        assert page.request.get(f'{target}/grafana/api/health').status == 401, 'Grafana is open without a login'
+        if not cookie:
+            # The mocked session sets no cookie: the tab says access is for admins.
+            page.get_by_role('button', name='Monitoring').click()
+            expect(page.get_by_text('Monitoring is open to admins only', exact=False)).to_be_visible()
+            print('PASS: Grafana is closed without an admin (set MONITORING_COOKIE to check the dashboards)')
+            return
+    finally:
+        context.close()
     for theme in ('light', 'dark'):
         for size in (DESKTOP, PHONE):
             name = f'monitoring-{theme}-{size[0]}'
             context, page, errors = open_page(browser, target, 'admin', '/admin', theme, size)
+            context.add_cookies([{'name': 'edullm_monitoring', 'value': cookie, 'url': f'{target}/grafana/'}])
             try:
                 if size == PHONE:
                     page.get_by_role('button', name='Menu').click()

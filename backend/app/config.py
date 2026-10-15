@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     STRUCTURED_INGEST_ENABLED: bool = False
     PDF_STRUCTURED_INGEST_ENABLED: bool = False
     AGENTIC_SEARCH_ENABLED: bool = False
+    # New classes start in exam mode (Direct answers, no course search): the
+    # safe start for teachers coming from v6. The teacher turns it off.
+    NEW_CLASS_EXAM_MODE: bool = True
     # M2-C: model descriptions of pictures, on a teacher's request only. Turn on
     # only after the configured VLM_MODEL was checked to really read images.
     STRUCTURED_VISION_ENABLED: bool = False

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { dashboardUrl, grafanaRunning } from './monitoring.js';
+import { dashboardUrl, grafanaState } from './monitoring.js';
 
 test('an embedded dashboard hides the Grafana menus and follows the app theme', () => {
   const url = dashboardUrl('system', { theme: 'dark' });
@@ -15,11 +15,12 @@ test('the full Grafana page keeps its menus; an unknown dashboard opens System',
   assert.match(dashboardUrl('nope'), /edullm-system/);
 });
 
-test('Grafana is running only when its health check answers', async () => {
-  const answer = (ok, body) => async () => ({ ok, json: async () => body });
-  assert.equal(await grafanaRunning(answer(true, { database: 'ok' })), true);
-  assert.equal(await grafanaRunning(answer(false, {})), false);
+test('Grafana is running only when its health check answers; 401 means not allowed', async () => {
+  const answer = (status, body) => async () => ({ ok: status < 400, status, json: async () => body });
+  assert.equal(await grafanaState(answer(200, { database: 'ok' })), 'running');
+  assert.equal(await grafanaState(answer(502, {})), 'stopped');
+  assert.equal(await grafanaState(answer(401, {})), 'denied');
   // An older frontend returns the app page: not JSON.
-  assert.equal(await grafanaRunning(async () => ({ ok: true, json: async () => { throw new SyntaxError(); } })), false);
-  assert.equal(await grafanaRunning(async () => { throw new TypeError('network'); }), false);
+  assert.equal(await grafanaState(async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError(); } })), 'stopped');
+  assert.equal(await grafanaState(async () => { throw new TypeError('network'); }), 'stopped');
 });

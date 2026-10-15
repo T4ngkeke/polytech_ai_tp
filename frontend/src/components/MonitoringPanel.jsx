@@ -1,21 +1,26 @@
 /**
  * MonitoringPanel — the admin Monitoring tab: the Grafana dashboards, shown
  * inside the app without Grafana's menus. Grafana draws the charts and keeps
- * the history (see documentation/MONITORING.md).
+ * the history (see documentation/MONITORING.md). Grafana is open to app
+ * admins only: the tab first gets the monitoring cookie nginx checks.
  */
 import { useEffect, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
-import { DASHBOARDS, dashboardUrl, grafanaRunning } from '../lib/monitoring';
+import api from '../lib/api';
+import { DASHBOARDS, dashboardUrl, grafanaState } from '../lib/monitoring';
 import { useTheme } from '../lib/theme';
 
 export default function MonitoringPanel() {
   const theme = useTheme();
   const [board, setBoard] = useState('system');
-  const [running, setRunning] = useState(null); // null while checking
+  const [state, setState] = useState(null); // null while checking; 'running', 'denied', 'stopped'
+  const running = state === 'running';
 
   useEffect(() => {
     let live = true;
-    grafanaRunning().then((ok) => { if (live) setRunning(ok); });
+    api.post('/api/admin/monitoring/session')
+      .then(() => grafanaState(), () => 'denied')
+      .then((s) => { if (live) setState(s); });
     return () => { live = false; };
   }, []);
 
@@ -41,8 +46,13 @@ export default function MonitoringPanel() {
       </div>
 
       <div className="flex-1 min-h-0 rounded-xl border border-border-subtle bg-ink-base overflow-hidden">
-        {running === null && <p className="p-6 text-sm text-cream-muted">Checking monitoring…</p>}
-        {running === false && <NotRunning />}
+        {state === null && <p className="p-6 text-sm text-cream-muted">Checking monitoring…</p>}
+        {state === 'stopped' && <NotRunning />}
+        {state === 'denied' && (
+          <p className="p-6 text-sm text-cream-secondary">
+            Monitoring is open to admins only, and your access could not be confirmed. Sign in again as an admin.
+          </p>
+        )}
         {running && (
           <iframe key={`${board}-${theme}`} title={`${board} dashboard`} src={dashboardUrl(board, { theme })}
             className="w-full h-full border-0" />

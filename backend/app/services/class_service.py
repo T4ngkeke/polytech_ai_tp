@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.config import settings
 from backend.app.models import Class, ClassStudent, User, UserRole
 
 
@@ -42,9 +43,11 @@ async def generate_unique_invite_code(db: AsyncSession) -> str:
 
 
 async def create_class(db: AsyncSession, teacher_id: uuid.UUID, name: str) -> Class:
-    """Create a new class with a unique invite code."""
+    """Create a new class with a unique invite code, in exam mode unless
+    NEW_CLASS_EXAM_MODE is off."""
     code = await generate_unique_invite_code(db)
-    new_class = Class(name=name, teacher_id=teacher_id, invite_code=code)
+    new_class = Class(name=name, teacher_id=teacher_id, invite_code=code,
+                      exam_mode=settings.NEW_CLASS_EXAM_MODE)
     db.add(new_class)
     await db.flush()
     await db.refresh(new_class)

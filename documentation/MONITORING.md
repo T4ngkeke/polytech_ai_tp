@@ -33,23 +33,30 @@ On the DGX Spark the GPU has no memory of its own: it uses the main memory, so
 
 ## Access
 
-Grafana is shown **without a login**, as a viewer. This is acceptable only
-because the frontend of this stack listens on the local and Tailscale addresses
-only. Anyone who can open the app address can open `/grafana/`.
+Only admins of the app see Grafana. When the Monitoring tab opens, the app asks
+the backend for a monitoring cookie (`POST /api/admin/monitoring/session`,
+admins only). The cookie is valid for `/grafana/` only, for 8 hours, and is
+HttpOnly; it is signed for this use only, so an app login token does not work
+in its place. For every `/grafana/` request, nginx asks the backend
+(`auth_request` to `/api/admin/monitoring/check`), which lets it through only
+when the cookie belongs to a user who is an admin now. A user who is demoted or
+deleted loses access at once. Behind that check Grafana shows its pages as a
+viewer, without a login of its own.
 
-A viewer can send any SQL to the PostgreSQL source, so the limit is the database
-login `grafana_reader`:
+A viewer can send any SQL to the PostgreSQL source, so the database login
+`grafana_reader` is still limited:
 
 - it reads only the columns in `monitoring/reader_grants.sql`: no user names,
   no passwords, no answer text, no course text (the questions are included);
 - every transaction is read-only, and a query stops after 10 s.
 
-Before the app is opened to the internet, or Grafana is moved to a public
-address, Grafana must require the app's admin login. That is not built yet.
-
 Editing in Grafana needs the Grafana admin login (`admin`, password in `.env`).
 The dashboards are files in `monitoring/grafana/dashboards`; changes made in the
 Grafana editor are lost on restart, so edit or export the JSON files instead.
+
+The browser check (`scripts/check_layout_ui.py`) makes sure `/grafana/` answers
+401 without the cookie. To also check the dashboards, set `MONITORING_COOKIE`
+to an admin's monitoring token.
 
 ## Setup
 
@@ -81,4 +88,6 @@ that monitoring is not running.
 
 - Alerts (for example a model server down for 5 minutes). Grafana can send them
   once a destination (e-mail or a chat tool) is chosen.
+- Signing out of the app does not remove the monitoring cookie; it ends after
+  8 hours, and it stops working at once if the user is no longer an admin.
 - Links from the latest questions to the conversation in the app.

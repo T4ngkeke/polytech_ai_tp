@@ -114,6 +114,7 @@ class TestCreateClass:
         body = resp.json()
         assert body["name"] == "New Class"
         assert len(body["invite_code"]) == 6
+        assert body["exam_mode"] is True        # a new class starts in exam mode
 
     async def test_student_cannot_create_403(self, student_client):
         resp = await student_client.post("/api/teacher/classes", json={"name": "Bad"})
