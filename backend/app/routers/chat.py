@@ -50,6 +50,7 @@ from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
 from backend.app.services.research_service import ResearchLimits, run_persisted_research
 from backend.app.services.research_vision import ResearchVision
+from backend.app.services.session_titles import title_first_exchange
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +316,7 @@ async def chat_stream(
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
               if vlm.model and vlm.base_url else None)
     request_id = str(body.client_request_id or uuid.uuid4())
+    title_model = ResearchModel(agent)
 
     async def research_events():
         queue = asyncio.Queue()
@@ -368,6 +370,16 @@ async def chat_stream(
                 yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
             yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
             yield f"event: done\ndata: {json.dumps({'message_id': result['message_id']})}\n\n"
+            # After the answer is final: a new conversation gets its title.
+            # A failure here must not turn a delivered answer into an error.
+            try:
+                title = await title_first_exchange(research_factory, scope.session_id, title_model,
+                                                   body.message, result['answer'])
+            except Exception:
+                logger.exception('Session title failed')
+                title = None
+            if title:
+                yield f"event: title\ndata: {json.dumps({'session_id': str(scope.session_id), 'title': title})}\n\n"
         except RunConflict:
             yield f"event: error\ndata: {json.dumps({'detail': 'Another research request is already running'})}\n\n"
         except ResearchQuotaExceeded:

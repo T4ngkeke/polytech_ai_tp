@@ -90,7 +90,8 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
                 'client_request_id': request_id})
             assert response.status_code == 200, response.text
             stream = events(response.text)
-            assert [name for name, _ in stream][-3:] == ['token', 'citations', 'done']
+            # A new conversation is titled after its first answer.
+            assert [name for name, _ in stream][-4:] == ['token', 'citations', 'done', 'title']
             # The draft comes first; the checked answer follows as the token.
             drafts = ''.join(payload for name, payload in stream if name == 'draft')
             assert drafts.strip() == 'Voir la définition [E1].'
@@ -229,7 +230,7 @@ async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch
             assert ('token', 'Bonjour !') in stream
             assert ('citations', []) in stream
             assert any(name == 'done' for name, _ in stream)
-            assert endpoints == ['ornith']
+            assert endpoints == ['ornith', 'ornith']   # the answer and the title use the agent model
             run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id))
             await db.refresh(run)
             assert run.stop_reason == 'finished'
@@ -526,6 +527,8 @@ async def test_a_question_back_is_saved_shown_and_answered_in_the_next_turn(pg_s
             def __init__(self, endpoint):
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                if purpose == 'title':          # the new conversation's title
+                    return ModelReply('Définition de θ', [], 'fixture', 5, 3)
                 offered.append([t['function']['name'] for t in tools or []])
                 seen.append(messages)
                 return steps.pop(0)
@@ -535,7 +538,7 @@ async def test_a_question_back_is_saved_shown_and_answered_in_the_next_turn(pg_s
             first = events((await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'la définition ?'})).text)
             assert ('token', 'Quelle définition ?') in first and ('clarification', ask) in first
-            assert [n for n, _ in first][-2:] == ['citations', 'done'] and 'ask_student' in offered[0]
+            assert [n for n, _ in first][-3:] == ['citations', 'done', 'title'] and 'ask_student' in offered[0]
             run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id))
             await db.refresh(run)
             assert run.stop_reason == 'clarification'
@@ -587,8 +590,8 @@ async def test_search_mode_answers_from_found_pages_and_records_the_mode(pg_sess
             assert ('token', 'Voir [E1].') in stream
             cited = next(data for name, data in stream if name == 'citations')
             assert [c['label'] for c in cited] == ['E1']
-            # One answer call without tools, the found page in the message.
-            assert [c['purpose'] for c in calls] == ['search_answer'] and calls[0]['tools'] is None
+            # One answer call without tools (then the conversation title), the found page in the message.
+            assert [c['purpose'] for c in calls] == ['search_answer', 'title'] and calls[0]['tools'] is None
             assert '[E1]' in calls[0]['messages'][-1]['content']
             stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
             assert stored[-1]['answer_mode'] == 'search' and stored[-1]['citations']
@@ -607,7 +610,7 @@ async def test_direct_mode_reads_nothing_and_cites_nothing(pg_session, tmp_path,
                 'session_id': str(chat.id), 'message': 'La récursion ?', 'mode': 'direct'})).text)
             # An ID copied from nowhere is removed: no page was read.
             assert ('token', 'Une récursion  appelle…') in stream and ('citations', []) in stream
-            assert [c['purpose'] for c in calls] == ['direct_answer'] and calls[0]['tools'] is None
+            assert [c['purpose'] for c in calls] == ['direct_answer', 'title'] and calls[0]['tools'] is None
             assert 'Search or Research' in calls[0]['messages'][0]['content']
             stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
             assert stored[-1]['answer_mode'] == 'direct'
@@ -630,7 +633,7 @@ async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, 
                 'session_id': str(chat.id), 'message': 'Définition θ₁', 'mode': 'research'})).text)
             assert ('status', {'route': 'agent', 'phase': 'thinking', 'mode': 'direct',
                                'exam_mode': True}) in stream
-            assert [c['purpose'] for c in calls] == ['direct_answer']
+            assert [c['purpose'] for c in calls] == ['direct_answer', 'title']
             assert 'exam mode' in calls[0]['messages'][0]['content']
             classes = (await client.get('/api/student/classes')).json()
             assert classes[0]['exam_mode'] is True

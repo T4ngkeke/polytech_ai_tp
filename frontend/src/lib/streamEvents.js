@@ -12,6 +12,8 @@
 // before its sources are checked) and `draft_reset` (that draft is withdrawn).
 // The checked answer arrives as a content-token frame at the end. When the
 // answer is a question back, `clarification` follows with its options.
+// After `done`, a new conversation may receive its `title` (written from the
+// first question and answer).
 
 function safeParse(data) {
   try {
@@ -24,7 +26,7 @@ function safeParse(data) {
 /**
  * Classify one SSE event into an action the UI can apply.
  * @param {{event?: string, data?: string}} ev
- * @returns {{type: 'status'|'done'|'error'|'citations'|'clarification'|'draft'|'draft_reset'|'token'|'ignore', [k: string]: any}}
+ * @returns {{type: 'status'|'done'|'error'|'citations'|'clarification'|'draft'|'draft_reset'|'title'|'token'|'ignore', [k: string]: any}}
  */
 export function interpretStreamEvent(ev) {
   switch (ev.event) {
@@ -44,6 +46,12 @@ export function interpretStreamEvent(ev) {
     }
     case 'draft_reset':
       return { type: 'draft_reset' };
+    case 'title': {
+      const parsed = safeParse(ev.data);
+      return typeof parsed?.title === 'string' && parsed.title
+        ? { type: 'title', sessionId: parsed.session_id ?? null, title: parsed.title }
+        : { type: 'ignore' };
+    }
     case 'clarification': {
       const parsed = safeParse(ev.data);
       const options = Array.isArray(parsed?.options) ? parsed.options.filter((o) => typeof o === 'string') : [];

@@ -50,6 +50,13 @@ test('an unknown named event without data is ignored, never a token', () => {
   assert.equal(interpretStreamEvent({ event: 'ping' }).type, 'ignore');
 });
 
+test('a new conversation receives its title after done; a bad title is ignored', () => {
+  assert.deepEqual(interpretStreamEvent({ event: 'title', data: '{"session_id": "s-1", "title": "Jointure naturelle en SQL"}' }),
+    { type: 'title', sessionId: 's-1', title: 'Jointure naturelle en SQL' });
+  assert.equal(interpretStreamEvent({ event: 'title', data: '{"title": ""}' }).type, 'ignore');
+  assert.equal(interpretStreamEvent({ event: 'title', data: 'oops' }).type, 'ignore');
+});
+
 test('a research status carries its phase; done carries the saved message id', () => {
   const status = interpretStreamEvent({ event: 'status', data: '{"route": "agent", "phase": "reading"}' });
   assert.equal(status.phase, 'reading');

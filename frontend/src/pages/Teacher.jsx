@@ -851,7 +851,7 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
                       >
                         <div>
                           <p className="text-xs font-medium text-cream">
-                            <span className={s.is_deleted ? 'line-through opacity-70' : ''}>{s.title || 'Untitled Session'}</span>
+                            <span className={s.is_deleted ? 'line-through opacity-70' : ''}>{s.title || 'New conversation'}</span>
                             {s.is_deleted && (
                               <span className="ml-2 align-middle rounded bg-danger-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-danger">
                                 deleted by student

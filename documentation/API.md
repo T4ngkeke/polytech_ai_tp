@@ -97,7 +97,7 @@
 | GET | `/api/student/classes` | get_current_user | List all joined classes (with labs). Each class has `exam_mode`. |
 | GET | `/api/student/classes/{class_id}/labs` | get_current_user | List active labs for a joined class. |
 | DELETE | `/api/student/classes/{class_id}/leave` | get_current_user | Voluntarily leave a joined class. |
-| POST | `/api/student/labs/{lab_id}/sessions` | get_current_user | Create a new Chat Session specifically within a Lab. |
+| POST | `/api/student/labs/{lab_id}/sessions` | get_current_user | Create a new Chat Session specifically within a Lab. `title` is optional: the app sends none and the first answer gives the title (`title` event). |
 | GET | `/api/student/sessions` | get_current_user | List own sessions (optional `?lab_id=` filter). |
 | GET | `/api/student/sessions/{session_id}` | get_current_user | Fetch message history. **IDOR check required.** |
 | PUT | `/api/student/sessions/{session_id}` | get_current_user | Rename a chat session title (cosmetic only). |
@@ -138,6 +138,7 @@ Server-sent events, in order:
 | `clarification` | Only when the answer is a question back to the student (the `ask_student` tool): `{"question": ..., "options": [2 to 4 short answers]}`. The client shows the options as buttons; the picked option, or any typed answer, is the next message. The next run of the session cannot ask again. |
 | `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`, `box` (the cited block's region as `[x0, y0, x1, y1]` fractions of the page, or `null`). |
 | `done` | `{"message_id": ...}` |
+| `title` | Only after the first answer of a conversation without a title: `{"session_id": ..., "title": ...}`. The answer model writes it from the first question and answer (at most 6 words, in the student's language; the first line of the question if the model fails). A title the student wrote is kept; teacher test sessions get none. Not charged to the quota. |
 | `error` | `{"detail": ...}`, for example when another research request of the session is still running, or `Daily token quota exceeded` when the quota runs out during research. |
 | (comment) | `: keep-alive`, every 15 s without another event, so proxies keep the stream open. SSE clients ignore it. |
 

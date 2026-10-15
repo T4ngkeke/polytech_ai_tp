@@ -159,9 +159,8 @@ export default function Chat() {
   const handleNewSession = useCallback(async () => {
     if (!activeLabId) return;
     try {
-      const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {
-        title: `Session ${new Date().toLocaleDateString()}`,
-      });
+      // No title: the first question and answer give it one (server side).
+      const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {});
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
       setMessages([]);
@@ -209,7 +208,7 @@ export default function Chat() {
     // Auto-create session if none exists
     if (!currentSessionId) {
       try {
-        const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, { title: text.slice(0, 40) });
+        const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {});
         setSessions((prev) => [newSession, ...prev]);
         setActiveSessionId(newSession.id);
         currentSessionId = newSession.id;
@@ -273,6 +272,10 @@ export default function Chat() {
               setResearchPhase(null);
               setIsStreaming(false);
               loadUsage();
+              return;
+            case 'title':
+              setSessions((prev) => prev.map((s) => s.id === (action.sessionId || currentSessionId)
+                ? { ...s, title: action.title } : s));
               return;
             case 'error':
               // Server-side mid-stream failure: stop the spinner and surface it,
@@ -422,7 +425,7 @@ export default function Chat() {
                       : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
                   }`}
                 >
-                  <span className="block truncate">{s.title || 'Untitled Session'}</span>
+                  <span className="block truncate">{s.title || 'New conversation'}</span>
                   <span className="block text-[9px] text-cream-muted mt-0.5">
                     {new Date(s.created_at).toLocaleDateString()}
                   </span>
@@ -513,7 +516,7 @@ export default function Chat() {
               <MenuIcon className="w-5 h-5" />
             </button>
             {activeSession ? (
-              <h2 className="text-sm font-semibold text-cream truncate">{activeSession.title || 'Untitled Session'}</h2>
+              <h2 className="text-sm font-semibold text-cream truncate">{activeSession.title || 'New conversation'}</h2>
             ) : activeLabId ? (
               <h2 className="text-sm font-semibold text-cream-secondary">Select or create a session</h2>
             ) : (
