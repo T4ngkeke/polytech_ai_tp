@@ -31,8 +31,8 @@ for a session without a lab `400 session_without_lab`. The LangGraph path
      (search, open, read, grep, view_image) and `ask_student`, within the admin
      limits; citations are verified `[E#]` evidence of the passages read.
    - `search` (`agent/search.py`): one search with the question as written, the
-     found pages and their neighbours, one answer citing `[E#]`; below a best
-     reranker score of 0.001 it answers "not found".
+     found pages and their neighbours, one short answer citing `[E#]`; below a
+     best reranker score of 0.001 it answers "not found".
    - `direct` (`agent/direct.py`): one answer without the course files and
      without citations.
 4. **Scope.** The course files of a run are the published PDF revisions of the

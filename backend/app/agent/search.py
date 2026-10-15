@@ -64,10 +64,11 @@ NO_PAGES = '(The course search found no page for this question.)'
 # the question as written (a rewrite lost 5 points on v4), with the reranker; below a
 # best score of 0.001 the course has no page for the question (an off-topic probe
 # scored 0.0006 and was answered with 15 unrelated citations; answerable questions
-# scored 0.004 and up).
+# scored 0.004 and up). The concise answer is about 5 s faster for 3 points fewer
+# right pages (71% vs 74% on v4); the product keeps it on.
 REWRITE = False
 MIN_SCORE: float | None = 0.001
-CONCISE = False
+CONCISE = True
 SEARCH_TOP_K = 10      # blocks per query (the search tool allows at most 12)
 PAGE_CHARS = 6000      # text of one page
 CONTEXT_CHARS = 24000  # text of all pages

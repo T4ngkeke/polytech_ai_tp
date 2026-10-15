@@ -199,4 +199,4 @@ async def test_concise_asks_for_a_short_answer():
 
 def test_product_settings_follow_the_comparison():
     from backend.app.agent import search
-    assert (search.REWRITE, search.MIN_SCORE) == (False, 0.001)
+    assert (search.REWRITE, search.MIN_SCORE, search.CONCISE) == (False, 0.001, True)
