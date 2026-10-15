@@ -2,7 +2,7 @@
 test_model_routing.py — [v7.2] the pure SystemConfigs → model-routing resolver.
 
 The resolver turns the raw key/value map from `system_configs` into a structured
-routing config, applying the v7.2 fallback rule: embedding / ingest / agent
+routing config, applying the v7.2 fallback rule: embedding / agent
 endpoints fall back to the main LLM when their own values are empty, so the
 cheap-model split is opt-in and the default behaviour is unchanged.
 """
@@ -34,37 +34,6 @@ def test_embedding_uses_its_own_endpoint_when_set():
     )
     assert routing.embedding.base_url == "http://embed/v1"
     assert routing.embedding.api_key == "embed-key"
-
-
-# --- ingest (off-peak worker) --------------------------------------------
-
-
-def test_ingest_falls_back_to_main_llm_when_unset():
-    routing = resolve_model_routing(_BASE)
-    assert routing.ingest.base_url == "http://main/v1"
-    assert routing.ingest.api_key == "main-key"
-    assert routing.ingest.model == "qwen3-120b"
-
-
-def test_ingest_uses_cheap_model_when_set():
-    routing = resolve_model_routing(
-        {
-            **_BASE,
-            "INGEST_BASE_URL": "http://local/v1",
-            "INGEST_API_KEY": "local-key",
-            "INGEST_MODEL": "qwen3-30b",
-        }
-    )
-    assert routing.ingest.base_url == "http://local/v1"
-    assert routing.ingest.api_key == "local-key"
-    assert routing.ingest.model == "qwen3-30b"
-
-
-def test_ingest_model_override_alone_keeps_main_endpoint():
-    routing = resolve_model_routing({**_BASE, "INGEST_MODEL": "qwen3-30b"})
-    assert routing.ingest.model == "qwen3-30b"
-    assert routing.ingest.base_url == "http://main/v1"
-    assert routing.ingest.api_key == "main-key"
 
 
 # --- rerank: URL has NO fallback (empty = disabled), key does ------------
@@ -128,14 +97,6 @@ def test_agent_uses_its_own_endpoint_when_set():
 
 
 # --- [v7.3] worker budgets ----------------------------------------------------
-
-
-def test_worker_budget_has_a_default_and_parses():
-    routing = resolve_model_routing(_BASE)
-    assert routing.ingest_token_budget == 200_000
-
-    routing = resolve_model_routing({**_BASE, "INGEST_TOKEN_BUDGET": "50000"})
-    assert routing.ingest_token_budget == 50_000
 
 
 def test_hint_sampling_budget_is_gone():

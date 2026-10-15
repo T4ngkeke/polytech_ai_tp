@@ -24,7 +24,7 @@ from backend.tests.conftest import make_user
 from backend.tests.test_document_versions_pg import m1_pg  # noqa: F401 - fixture
 from backend.tests.test_structured_ingest import worker_settings
 from backend.worker import structured_ingest as si
-from backend.worker.queue import claim_next_job, claim_structured_job
+from backend.worker.queue import claim_structured_job
 from scripts.migrate_document_snapshots import M2_SQL_PATH, apply_migration
 
 
@@ -90,13 +90,12 @@ async def test_pg_a_half_bound_structured_job_is_refused(m1_pg, storage, deck):
 
 
 @pytest.mark.asyncio
-async def test_pg_legacy_and_structured_claims_never_cross(m1_pg, storage, deck):
+async def test_pg_the_structured_claim_never_takes_a_legacy_row(m1_pg, storage, deck):
     factory = async_sessionmaker(m1_pg, expire_on_commit=False)
     async with factory() as db:
         teacher, lab = await seed(db)
         await pdf_upload(db, teacher, lab, deck, storage)
         class_id, lab_id, teacher_id = lab.class_id, lab.id, teacher.id
-        assert await claim_next_job(db) is None  # the legacy claim does not see it
         legacy = Document(id=uuid.uuid4(), class_id=class_id, lab_id=lab_id, filename='cours.pdf',
                           storage_path='/x.pdf', content_hash='b' * 64, uploaded_by=teacher_id)
         legacy_id = legacy.id
@@ -107,8 +106,6 @@ async def test_pg_legacy_and_structured_claims_never_cross(m1_pg, storage, deck)
         claim = await claim_structured_job(db)
         assert claim is not None and claim.document_id != legacy_id
         assert await claim_structured_job(db) is None
-        legacy_claim = await claim_next_job(db)
-        assert legacy_claim.document_id == legacy_id
 
 
 @pytest.mark.asyncio

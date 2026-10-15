@@ -57,92 +57,32 @@ model and the MinerU server.
 
 ## 7. Ingestion Pipeline
 
-A deferred, load-aware pipeline that never preempts live students.
-**No Airflow, no k8s, no LibreOffice.**
+A deferred, load-aware worker that never preempts live students. Details:
+[PDF_INGESTION.md](PDF_INGESTION.md).
 
-Every document takes the same path. There is no type to declare and nothing to
-branch on: an upload becomes chunks, and that is all it becomes.
-
-- **`worker` service** (in docker-compose): shares the backend image/code/DB; the
-  only difference is the entrypoint — a polling loop instead of uvicorn. It
-  reuses the same DB-as-queue pattern already used for rate limiting.
-- **Input = PDF, Markdown or HTML.** Instructors export slides (`.ppt/.pptx`) to
-  PDF themselves before upload (1 slide = 1 page). An `.md` file is read as text
-  and split into **heading pseudo-pages** (shallowest heading level present;
-  ``` fences never split), then runs the same character-yield gate and downstream
-  pipeline. An `.html/.htm` file is first converted to markdown-ish text
-  (`html_to_markdown`): headings → `#`-lines, `<pre>` fenced, page chrome
-  stripped, and the **original LaTeX recovered** from KaTeX/MathJax markup
-  (`annotation x-tex` / `script math/tex`), so formulas that mangle in a printed
-  PDF arrive intact.
-- **VLM garbled-formula repair** (`vlm.py`, PDFs only, opt-in via `VLM_MODEL`):
-  HTML-printed PDFs mangle math (`2^15` flattens to `215`). Detection is
-  **deterministic** (spike-validated per-line rules: word-char ratio, math-symbol
-  density, mojibake — code lines and dot-leaders exempt); adjacent hits merge
-  into a region, whose **bbox is cropped from the PDF page** (pymupdf) and sent
-  to the vision model with a **transcribe-only** prompt (LaTeX for math,
-  `[illisible]` for unreadable, never invent).
-
-  The safety check is that the model **reads, it never writes**: a transcription
-  carrying prose the region never had is refused and the original kept. LaTeX
-  commands are ignored when judging this, since a real repair introduces them by
-  definition. Every region lands in `ingest_report.vlm_repairs` (before/after)
-  for teacher review, and no failure ever breaks ingestion. Empty `VLM_MODEL` =
-  feature off — it never falls back to a text model.
-- **Per-job pipeline (concurrency = 1, `FOR UPDATE SKIP LOCKED`):**
-  1. **Parse + input gate** (`parsing.py`): pymupdf text extraction; a cheap
-     **character-yield gate** (chars/page below threshold, or a high garbage /
-     non-word ratio) marks the document `needs_review` and hands it back to the
-     teacher — never silently ingest garbage.
-  2. **Clean once, upstream**: repeated header/footer lines stripped (two narrow
-     rules — byte-identical repeats and pure pagination lines); TOC pages dropped
-     (they otherwise match every query). Everything downstream sees clean pages.
-  3. **Chunking** (`chunking.py`): code-aware paragraph split (a blank line
-     inside an indented block is not a break), document-level paragraph dedup,
-     then size control — merge below 120 chars, sentence-split above 1600.
-  4. **Contextual Retrieval**: per chunk, the worker LLM generates the chunk's
-     in-document context and prepends it; the **augmented** text
-     (`context + content`) is embedded and BM25-indexed, while the original
-     `content` is stored for citation. This is what makes a context-poor slide
-     findable. The context is generated from the chunk's **own local scope** —
-     its section when there is one, otherwise its page (1 slide = 1 page) — so a
-     long document never gets a context hallucinated from its opening. Generation
-     uses `INGEST_MODEL` (defaults to `LLM_MODEL`), so a cheap off-peak model can
-     do this without touching the chat model. Calls run concurrently, bounded.
-  5. **Build the BM25 column** (`tsvector`, config selected by the document's
-     `language`) and record page numbers for citation.
-  6. **Report** (`ingest_report`): chunk count, estimated token spend, whether it
-     went over the configured budget, and any VLM repairs. The budget is
-     **observed, never enforced** — an over-budget document still indexes fully.
-- **Teacher-edit protection**: a chunk the teacher corrected (`edited_by_teacher`)
-  survives the idempotent rebuild instead of being wiped, matched back by
-  `chunk_index`.
-- **What used to be here.** The pipeline also built structured `Exercises` rows
-  and, from a `corrigé`, `Answers` rows — via an LLM-primary segmenter (a
-  per-page line classifier with a regex cross-check), numbering-anomaly
-  detection, a content-hash boundary cache and a teacher compare-and-confirm
-  step. All of it existed because a row was a hard claim the system then served
-  with confidence. With no rows to build, none of it has a job.
-- **Config-driven engine, optionally split:** embeddings and Contextual-Retrieval
-  generation are read from `SystemConfigs` — nothing hardcoded, no torch. By
-  default they fall back to the one chat engine, but an admin can point
-  `INGEST_MODEL` / `INGEST_BASE_URL` at a separate cheap model so ingestion
-  doesn't share the chat model's RPM pool. These calls run entirely on the
-  **off-peak worker** and never preempt students.
-- **"When to run" lives in the worker's Python** (`gpu_gate.py`): the **primary
-  signal is live chat load** — the worker counts recent `Messages` in the DB and
-  pauses ingestion while students are actively chatting (sliding window +
-  hysteresis to avoid flapping). **GPU utilization is an optional additional
-  condition**: on a local engine the worker also requires the GPU idle via
-  `pynvml`; with a remote API there is no local GPU, so `pynvml` reads idle and
-  that condition no-ops. The same gate therefore works for both. At night or in a
-  no-class window it may pull freely. No external cron.
-- **Urgent jobs bypass both gates.** A job at `priority=0` is claimed first and
-  skips the chat-load and GPU gates — "do it now" runs during class instead of
-  waiting for a quiet window.
-- **Crash recovery & idempotency:** stale `processing` jobs past a timeout are
-  re-claimed; a re-run deletes the document's old chunks before rebuilding, so
-  the result is consistent after a strategy change.
+- **Input = PDF.** Teachers export slides and notes to PDF before upload
+  (1 slide = 1 page). An ODP, Markdown or HTML upload is refused
+  (`odp_not_supported`, `only_pdf`). The pre-MinerU pipeline (pymupdf text,
+  chunk context written by an ingest model, VLM formula repair, the page
+  reader and its page reviews) was removed on 2026-10-15; its code is on
+  branch `archive/cleanup-2026-10-15`. Documents it indexed stay listed and
+  can be deleted, but the research agent reads only structured revisions.
+- **`worker` service** (in docker-compose): shares the backend code and DB; its
+  entrypoint is a polling loop (`backend/worker/main.py`).
+- **One structured job per revision** (`FOR UPDATE SKIP LOCKED`, a lock token
+  and a lease): MinerU reads each page (`structured_ingest.py`), the parsed
+  draft is stored as pages, blocks and assets, then the same job indexes it
+  (`structured_index.py`: exact character ranges, BGE-M3 embeddings, a BM25
+  `tsvector` in the document's language). A draft becomes searchable only when
+  the teacher publishes it.
+- **"When to run" lives in the worker** (`gpu_gate.py`): the primary signal is
+  live chat load (recent messages in the DB, with hysteresis); the GPU idle
+  check (`pynvml`) is an optional extra condition that no-ops without a local
+  GPU. No external cron.
+- **Hot-reloaded settings:** the embedding endpoint and the MinerU server come
+  from `SystemConfigs` (admin model map) and change without a worker restart.
+- **Crash recovery:** a job whose lease ran out is claimed again; a stale
+  result (another claim, a new generation, a deleted document) writes nothing.
 
 ---
 

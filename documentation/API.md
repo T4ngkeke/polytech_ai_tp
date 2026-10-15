@@ -47,7 +47,6 @@
 | GET | `/api/admin/analytics/classes/{class_id}` | require_admin | Per-class hierarchical analytics (class→lab→student). |
 | DELETE | `/api/admin/sessions/{session_id}` | require_admin | Hard-delete a specific session to purge inappropriate content. |
 | POST | `/api/admin/maintenance/prune` | require_admin | Bulk hard-delete sessions/messages older than `older_than_days`. With `dry_run: true`, only counts what would be deleted (shown before confirming). |
-| GET | `/api/admin/ingestion/jobs` | require_admin | Inspect the ingestion queue (status, attempts, errors). |
 
 ### B. Teacher Audit & Control
 
@@ -76,12 +75,10 @@
 | GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W`. **Includes student soft-deleted sessions** (each row carries `is_deleted` so the UI can flag the hidden ones). |
 | GET | `/api/teacher/labs/{lab_id}/citation-report` | require_teacher (lab owner) | Which course files, pages and passages the lab's research answers cite, with the students and their questions; the lab's published files no answer cited; questions without a verified answer (`partial_*` or failed runs); answers a student marked down. `?start=YYYY-MM-DD&end=YYYY-MM-DD` (days included, UTC; 422 if end is before start). Test drives are left out; sessions a student deleted are kept. Counts are distinct answers (assistant messages), students and passages. Shape: `backend/app/services/citation_report.py`. |
 | GET | `/api/teacher/analytics/classes/{class_id}` | require_teacher | Hierarchical token usage: class → lab → student breakdown. |
-| POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | Upload course material (**PDF / Markdown / HTML**) for this lab only. Multipart form; the file is the only required field. Optional `language` (BM25 config, default `fr`); `shared` (older clients) makes it class-wide, as the class upload does. Stored + enqueued. |
+| POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | Upload a course **PDF** for this lab only; it is read by MinerU and indexed as a draft the teacher publishes. Multipart form; the file is the only required field. Optional `language` (BM25 config, default `fr`); `shared` (older clients) makes it class-wide, as the class upload does. Other formats: `400 only_pdf` (ODP: `odp_not_supported`); structured ingestion off: `409 structured_ingest_disabled`. Replace an existing document with `mode=replace`, `replace_document_id`, `expected_generation`. |
 | GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | The documents the lab uses + status + summary + `ingest_report`: the class-wide documents first, then the lab's own. Each row has `scope`: `class` or `lab`. |
 | POST | `/api/teacher/classes/{class_id}/documents` | require_teacher | Upload a class-wide document (`lab_id=NULL`), read by every lab of the class (e.g. the course handout). Same form as the lab upload, without `shared`. |
 | GET | `/api/teacher/classes/{class_id}/documents` | require_teacher | The class-wide documents of a class (`scope` = `class`). |
-| GET | `/api/teacher/documents/{document_id}/chunks` | require_teacher | Paginated chunk text + `page_no` (+ generated `context`). |
-| PUT | `/api/teacher/documents/{document_id}/chunks/{chunk_id}` | require_teacher | Correct a chunk's text; re-embeds + rebuilds the BM25 `tsv`; sets `edited_by_teacher`. |
 | POST | `/api/teacher/labs/{lab_id}/test-session` | require_teacher | Open a **test-drive** session (`is_test`) on an owned lab — chat as a preview (membership bypassed). |
 | DELETE | `/api/teacher/documents/{document_id}` | require_teacher | Delete a document, its chunks and its ingestion jobs, plus the stored file. |
 

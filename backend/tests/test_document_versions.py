@@ -64,7 +64,7 @@ async def content(db, doc, rev, tmp_path, body='if (!p) { return 1; }'):
         source_text=body, source_ref={'native_object_ids':['test-object']},
         source_completeness='complete', index_state='searchable')
     db.add(block); await db.flush()
-    from backend.app.services.document_service import _tsv_value
+    from backend.worker.structured_index import _tsv_value
     chunk = DocChunk(document_id=doc.id, class_id=doc.class_id, lab_id=doc.lab_id,
         revision_id=rev.id, block_id=block.block_id, chunk_index=0, content=body,
         embedding=[0.0]*(EMBEDDING_DIM-1)+[1.0], tsv=_tsv_value(db, body) if db.bind.dialect.name=='postgresql' else body,

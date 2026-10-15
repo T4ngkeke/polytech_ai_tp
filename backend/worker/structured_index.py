@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import math
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from backend.app.models import (
     DocChunk, Document, DocumentBlock, DocumentPage, DocumentRevision, DocumentSource,
@@ -20,8 +22,10 @@ from backend.app.models import (
 )
 from backend.app.services import document_versions as versions
 from backend.app.services.document_cleanup import aware
-from backend.worker.ingest import _embed_batches, _tsv_value
 from backend.worker.queue import claim_structured_job
+
+EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
+EMBED_BATCH_SIZE = 64
 
 CHUNKER_VERSION = 'm3b-utf8-byte-v1'
 TARGET_BYTES = 400
@@ -30,6 +34,39 @@ HARD_BYTES = 600
 
 class IndexConflict(ValueError):
     pass
+
+
+class EmbeddingResultError(ValueError):
+    """An embedding response is incomplete or malformed, rather than a code error."""
+
+
+async def _embed_batches(texts: list[str], embed_fn: EmbedFn) -> list[list[float]]:
+    """Reject incomplete/malformed results before replacing any existing chunks."""
+    embeddings = []
+    dimension = None
+    for start in range(0, len(texts), EMBED_BATCH_SIZE):
+        batch = texts[start:start + EMBED_BATCH_SIZE]
+        vectors = await embed_fn(batch)
+        if len(vectors) != len(batch):
+            raise EmbeddingResultError(f"Embedding count mismatch: expected {len(batch)}, got {len(vectors)}.")
+        for vector in vectors:
+            if not vector or any(not math.isfinite(value) for value in vector):
+                raise EmbeddingResultError("Embedding contains empty or non-finite values.")
+            dimension = dimension or len(vector)
+            if len(vector) != dimension:
+                raise EmbeddingResultError("Embedding dimensions are inconsistent.")
+        embeddings.extend(vectors)
+    return embeddings
+
+
+def _tsv_value(db, text: str, language: str = "fr"):
+    """The BM25 tsvector of a chunk (Postgres only; None elsewhere). The config
+    comes from the document's language: index and query must share it."""
+    from backend.app.services.retrieval_service import ts_config_for
+
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        return func.to_tsvector(ts_config_for(language), text)
+    return None
 
 
 @dataclass(frozen=True)

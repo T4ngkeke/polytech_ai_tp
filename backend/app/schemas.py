@@ -131,17 +131,13 @@ class LLMConfigRequest(BaseModel):
     rerank_url: str | None = None
     rerank_api_key: str | None = None
     rerank_model: str | None = None
-    ingest_base_url: str | None = None
-    ingest_api_key: str | None = None
-    ingest_model: str | None = None
-    # Agent slot (the research agent's model) + the per-document ingest budget.
+    # Agent slot (the research agent's model).
     agent_base_url: str | None = None
     agent_api_key: str | None = None
     agent_model: str | None = None
-    ingest_token_budget: str | None = None
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str | None = None
-    # [v8.1] VLM slot — garbled-formula transcription (off-peak worker).
+    # VLM slot — images the research agent views and figure descriptions.
     # Empty model = feature off (never falls back — vision is opt-in).
     vlm_base_url: str | None = None
     vlm_api_key: str | None = None
@@ -170,17 +166,13 @@ class LLMConfigResponse(BaseModel):
     rerank_url: str = ""
     rerank_api_key: str = ""
     rerank_model: str = ""
-    ingest_base_url: str = ""
-    ingest_api_key: str = ""
-    ingest_model: str = ""
     # Raw stored values — agent slot empty = inherits main LLM.
     agent_base_url: str = ""
     agent_api_key: str = ""
     agent_model: str = ""
-    ingest_token_budget: str = ""
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str = ""
-    # [v8.1] VLM slot — empty model = garbled-formula transcription off.
+    # VLM slot — empty model = vision off.
     vlm_base_url: str = ""
     vlm_api_key: str = ""
     vlm_model: str = ""

@@ -123,7 +123,6 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
 
 @pytest.mark.asyncio
 async def test_legacy_pdf_opens_only_in_own_session(db_session, tmp_path):
-    from backend.app.services.document_service import create_document
     import pymupdf
 
     with pymupdf.open() as source:
@@ -144,9 +143,14 @@ async def test_legacy_pdf_opens_only_in_own_session(db_session, tmp_path):
         other = Session(id=uuid.uuid4(), lab_id=lab.id, user_id=outsider.id)
         db.add_all([own, other])
         await db.flush()
-        doc = await create_document(db, class_id=lab.class_id, lab_id=lab.id,
-                                    filename='course.pdf', content=pdf_bytes,
-                                    uploaded_by=student.id, storage_root=storage)
+        # A document from before the PDF path: a row and its stored file.
+        digest = hashlib.sha256(pdf_bytes).hexdigest()
+        path = storage / f'{digest}_course.pdf'
+        path.write_bytes(pdf_bytes)
+        doc = Document(class_id=lab.class_id, lab_id=lab.id, filename='course.pdf',
+                       storage_path=str(path), content_hash=digest, uploaded_by=student.id)
+        db.add(doc)
+        await db.flush()
         url = f'/api/documents/{doc.id}/pdf'
         client = await make_client(db, student)
         async with client:

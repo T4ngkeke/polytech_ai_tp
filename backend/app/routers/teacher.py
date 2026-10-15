@@ -20,8 +20,9 @@ PUT    /api/teacher/classes/{class_id}
 DELETE /api/teacher/classes/{class_id}
 PUT    /api/teacher/labs/{lab_id}
 DELETE /api/teacher/labs/{lab_id}
-PUT    /api/teacher/documents/{document_id}/chunks/{chunk_id}      [v7.2] edit + re-index
-PUT    /api/teacher/documents/{document_id}/exercises/{exercise_id} [v7.2] edit
+POST   /api/teacher/labs/{lab_id}/documents, /classes/{class_id}/documents  PDF upload
+GET    /api/teacher/labs/{lab_id}/documents, /classes/{class_id}/documents   document lists
+DELETE /api/teacher/documents/{document_id}
 GET    /api/teacher/analytics/classes/{class_id}
 """
 
@@ -42,8 +43,8 @@ from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    Class, ClassStudent, Lab, RuleLevel, Session, DocumentReview,
-    SystemConfig, UsageStat, User, UserRole,
+    Class, ClassStudent, Lab, RuleLevel, Session,
+    UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
     ClassAnalyticsResponse,
@@ -55,10 +56,7 @@ from backend.app.schemas import (
     LabCreate,
     LabResponse,
     LabUpdateRequest,
-    ChunkResponse,
-    ChunkUpdateRequest,
     DocumentResponse,
-    DocumentReviewRequest, DocumentReviewResponse,
     DocumentSummaryResponse,
     ApplySkillRequest,
     RuleResponse,
@@ -72,7 +70,6 @@ from backend.app.schemas import (
 from backend.app.services import (
     class_service,
     document_service,
-    document_reviews,
     lab_service,
     rule_service,
     session_service,
@@ -87,31 +84,6 @@ router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 def get_storage_root() -> str:
     """Storage root for uploaded documents (overridable in tests)."""
     return settings.DOCUMENTS_STORAGE_ROOT
-
-
-async def get_embed_fn(db: AsyncSession = Depends(get_db)) -> document_service.EmbedFn:
-    """[v7.2] Build the config-driven embedder used to re-index an edited chunk.
-
-    A FastAPI dependency so tests can override it with a fake (no live embedding
-    server needed), mirroring `get_db` / `get_storage_root`.
-    """
-    from openai import AsyncOpenAI
-
-    from backend.app.services.model_routing import resolve_model_routing
-
-    rows = (await db.execute(select(SystemConfig))).scalars().all()
-    routing = resolve_model_routing({r.key: r.value for r in rows})
-    client = AsyncOpenAI(
-        api_key=routing.embedding.api_key, base_url=routing.embedding.base_url
-    )
-
-    async def embed(texts: list[str]) -> list[list[float]]:
-        resp = await client.embeddings.create(
-            model=routing.embedding.model, input=texts, encoding_format="float"
-        )
-        return [item.embedding for item in resp.data]
-
-    return embed
 
 
 async def _verify_class_ownership(db: AsyncSession, class_id: uuid.UUID, teacher: User) -> Class:
@@ -300,40 +272,20 @@ async def upload_class_document(
 
 async def _store_upload(db, response, *, scope, shared, file, language, mode,
                         replace_document_id, expected_generation, teacher, storage_root):
-    """One upload in a lab (scope: the Lab) or class-wide (shared)."""
-    if (file.filename or "").lower().endswith(".pdf") and settings.PDF_STRUCTURED_INGEST_ENABLED and settings.STRUCTURED_INGEST_ENABLED:
-        return await _upload_structured(
-            db, response, lab=scope, file=file, language=language, shared=shared, mode=mode,
-            replace_document_id=replace_document_id, expected_generation=expected_generation,
-            teacher=teacher, storage_root=storage_root)
-    if (file.filename or "").lower().endswith(".odp"):
+    """One upload in a lab (scope: the Lab) or class-wide (shared). PDF only: it
+    goes to the structured path (MinerU, then indexing)."""
+    name = (file.filename or "").lower()
+    if name.endswith(".odp"):
         # The ODP reader was removed on 2026-10-15: export the slides to PDF.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="odp_not_supported")
-    # Replacing a file is part of the structured path only.
-    if mode != "new" or replace_document_id is not None or expected_generation is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="replace_requires_structured_odp")
-
-    # PDF (slides exported to PDF), Markdown or HTML — no other formats.
-    if not (file.filename or "").lower().endswith((".pdf", ".md", ".html", ".htm")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF, Markdown or HTML uploads are supported. Export slides to PDF first.",
-        )
-
-    content = await file.read()
-    doc = await document_service.create_document(
-        db,
-        class_id=scope.class_id,
-        # Shared → lab_id NULL, reachable from every lab of the class.
-        lab_id=None if shared else scope.id,
-        filename=file.filename,
-        content=content,
-        uploaded_by=teacher.id,
-        storage_root=storage_root,
-        language=language,
-    )
-    return DocumentResponse.model_validate(doc)
+    if not name.endswith(".pdf"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="only_pdf")
+    if not (settings.PDF_STRUCTURED_INGEST_ENABLED and settings.STRUCTURED_INGEST_ENABLED):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="structured_ingest_disabled")
+    return await _upload_structured(
+        db, response, lab=scope, file=file, language=language, shared=shared, mode=mode,
+        replace_document_id=replace_document_id, expected_generation=expected_generation,
+        teacher=teacher, storage_root=storage_root)
 
 
 async def _upload_structured(db, response, *, lab, file, language, shared, mode,
@@ -427,43 +379,6 @@ async def _owned_document_or_404(db, document_id, teacher):
     if doc is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     return doc
-
-
-@router.get("/documents/{document_id}/chunks", response_model=list[ChunkResponse])
-async def get_document_chunks(
-    document_id: uuid.UUID,
-    offset: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-) -> list[ChunkResponse]:
-    """Paginated chunk inspector for a document the teacher owns."""
-    await _owned_document_or_404(db, document_id, teacher)
-    chunks = await document_service.get_document_chunks(
-        db, document_id, offset=offset, limit=limit
-    )
-    return [ChunkResponse.model_validate(c) for c in chunks]
-
-
-@router.put("/documents/{document_id}/chunks/{chunk_id}", response_model=ChunkResponse)
-async def update_document_chunk(
-    document_id: uuid.UUID,
-    chunk_id: uuid.UUID,
-    body: ChunkUpdateRequest,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-    embed_fn: document_service.EmbedFn = Depends(get_embed_fn),
-) -> ChunkResponse:
-    """[v7.2] Correct a mis-split chunk's text. The edit re-embeds + re-indexes the
-    chunk so retrieval reflects the correction. Ownership enforced via the document."""
-    owned = await _owned_document_or_404(db, document_id, teacher)
-    if owned.structured:
-        raise HTTPException(409, "edit_complete_block_required")
-    chunk = await document_service.get_chunk_in_document(db, document_id, chunk_id)
-    if chunk is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found")
-    chunk = await document_service.update_chunk(db, chunk, content=body.content, embed_fn=embed_fn)
-    return ChunkResponse.model_validate(chunk)
 
 
 @router.delete(
@@ -912,59 +827,3 @@ async def get_class_analytics(
     cls = await _verify_class_ownership(db, class_id, teacher)
     result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
     return ClassAnalyticsResponse.from_analytics(result)
-
-
-# Visual review endpoints: scope comes exclusively from the owned document.
-
-
-def _review_conflict(exc):
-    # Machine-readable code so the page can say what happened and what helps.
-    return HTTPException(409,{'code':exc.code,'message':str(exc)})
-
-
-@router.get('/documents/{document_id}/reviews', response_model=list[DocumentReviewResponse])
-async def list_document_reviews(document_id: uuid.UUID,
-    teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
-    await _owned_document_or_404(db,document_id,teacher)
-    # Legacy PDF reviews only; structured ones are listed per revision (M2-C).
-    rows=(await db.scalars(select(DocumentReview).where(DocumentReview.document_id==document_id,
-        DocumentReview.revision_id.is_(None)).order_by(DocumentReview.page_no,DocumentReview.id))).all()
-    return [DocumentReviewResponse.model_validate(row) for row in rows]
-
-
-@router.get('/documents/{document_id}/reviews/{review_id}/image')
-async def document_review_image(document_id: uuid.UUID, review_id: uuid.UUID,
-    teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
-    doc=await _owned_document_or_404(db,document_id,teacher)
-    if doc.structured:
-        raise HTTPException(409,'structured_review_endpoint_required')
-    row=await db.scalar(select(DocumentReview).where(DocumentReview.id==review_id,
-        DocumentReview.document_id==document_id))
-    if row is None:raise HTTPException(404,'Review not found')
-    try:
-        image=document_reviews.render_review_image(doc,row)
-    except document_reviews.ReviewConflict as exc:
-        raise _review_conflict(exc) from exc
-    return Response(content=image,media_type='image/png',headers={'Cache-Control':'private, no-store'})
-
-
-@router.put('/documents/{document_id}/reviews/{review_id}', response_model=DocumentReviewResponse)
-async def resolve_document_review(document_id: uuid.UUID, review_id: uuid.UUID, body: DocumentReviewRequest,
-    teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db),
-    embed_fn: document_service.EmbedFn = Depends(get_embed_fn)):
-    doc=await _owned_document_or_404(db,document_id,teacher)
-    if doc.structured:
-        raise HTTPException(409,'structured_review_endpoint_required')
-    try:
-        row=await document_reviews.resolve_review(db,doc,review_id,revision=body.revision,
-            status=body.status,content=body.content,teacher_id=teacher.id,embed_fn=embed_fn)
-    except document_reviews.ReviewConflict as exc:
-        raise _review_conflict(exc) from exc
-    except document_reviews.EmbeddingUnavailable as exc:
-        # Nothing was written; the teacher keeps the text and can retry.
-        raise HTTPException(503,{'code':'embedding_unavailable','message':str(exc)}) from exc
-    except LookupError as exc:
-        raise HTTPException(404,str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(422,str(exc)) from exc
-    return DocumentReviewResponse.model_validate(row)

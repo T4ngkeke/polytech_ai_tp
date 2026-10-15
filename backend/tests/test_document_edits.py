@@ -329,13 +329,3 @@ async def test_a_too_long_description_is_refused_not_cut(db_session, storage, tm
         assert await db_session.scalar(select(DocumentReview.id)) is None
     finally:
         app.dependency_overrides.pop(get_describe_fn, None)
-
-
-@pytest.mark.asyncio
-async def test_legacy_review_endpoints_refuse_structured_documents(db_session, storage, tmp_path, deck_bytes):
-    teacher, _, _, ids = await parsed(db_session, storage, tmp_path, deck_bytes)
-    resp = await call(db_session, teacher, 'PUT', f"/api/teacher/documents/{ids['doc_id']}/reviews/{uuid.uuid4()}",
-                      {'revision': 1, 'status': 'ignored'})
-    assert resp.status_code == 409
-    listed = await call(db_session, teacher, 'GET', f"/api/teacher/documents/{ids['doc_id']}/reviews")
-    assert listed.status_code == 200 and listed.json() == []

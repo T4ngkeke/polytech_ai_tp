@@ -3,7 +3,7 @@ test_teacher_visibility.py — teacher ingestion-visibility endpoints.
 
 The author is the ground-truth oracle for "was this processed well?", so a teacher can:
   * list a lab's documents with status + summary (pages / chunks) + warnings,
-  * read the actual chunks (paginated, with page_no + Contextual-Retrieval context).
+  * delete a document they own.
 Exercise listing went with the Exercises table.
 Ownership is enforced; runs on SQLite (plain reads, no vector ops).
 """
@@ -90,38 +90,7 @@ async def test_needs_review_document_surfaces_warning(db_session):
 
 
 @pytest.mark.asyncio
-async def test_get_document_chunks_with_context_and_page(db_session):
-    teacher, cls, lab, doc = await _seed_doc(db_session, chunks=3)
-    client = await make_client(db_session, teacher)
-    try:
-        resp = await client.get(f"/api/teacher/documents/{doc.id}/chunks")
-    finally:
-        await client.aclose()
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 3
-    assert body[0]["content"] == "chunk 0 body"
-    assert body[0]["context"] == "ctx 0"
-    assert body[0]["page_no"] == 1
-    assert body[0]["section"] == "Section 0"
-
-
-@pytest.mark.asyncio
-async def test_get_document_chunks_is_paginated(db_session):
-    teacher, cls, lab, doc = await _seed_doc(db_session, chunks=5)
-    client = await make_client(db_session, teacher)
-    try:
-        resp = await client.get(f"/api/teacher/documents/{doc.id}/chunks?offset=2&limit=2")
-    finally:
-        await client.aclose()
-
-    body = resp.json()
-    assert [c["chunk_index"] for c in body] == [2, 3]
-
-
-@pytest.mark.asyncio
-async def test_document_chunks_ownership_enforced(db_session):
+async def test_document_deletion_needs_the_owner(db_session):
     teacher, cls, lab, doc = await _seed_doc(db_session)
     intruder = make_user(role=UserRole.teacher)
     db_session.add(intruder)
@@ -129,7 +98,7 @@ async def test_document_chunks_ownership_enforced(db_session):
 
     client = await make_client(db_session, intruder)
     try:
-        resp = await client.get(f"/api/teacher/documents/{doc.id}/chunks")
+        resp = await client.delete(f"/api/teacher/documents/{doc.id}")
     finally:
         await client.aclose()
 

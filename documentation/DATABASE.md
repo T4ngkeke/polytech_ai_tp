@@ -39,9 +39,6 @@ token tracking, and hybrid retrieval over course documents.
 > | `RERANK_URL` | empty | A real rerank endpoint (the full path accepting `{query, documents}`), not a chat `…/v1` base |
 > | `RERANK_MODEL` | `bge-reranker-v2-m3` | Reranker model. Unset or failing → retrieval degrades to fusion-only order |
 > | `RERANK_API_KEY` | empty | Key for `RERANK_URL` |
-> | `INGEST_MODEL` | empty → `LLM_MODEL` | Cheap model the **off-peak worker** uses for per-chunk Contextual Retrieval |
-> | `INGEST_BASE_URL` | empty → `LLM_BASE_URL` | Ingestion endpoint (e.g. local 30B) |
-> | `INGEST_API_KEY` | empty → `LLM_API_KEY` | Ingestion key |
 > | `TOKEN_ALPHA` | `0.2` | Prefill (prompt) weight for billed-token quota |
 > | `TOKEN_BETA` | `1.0` | Decode (completion) weight for billed-token quota |
 >
@@ -49,10 +46,10 @@ token tracking, and hybrid retrieval over course documents.
 >
 > **Other keys.** `AGENT_MODEL` / `AGENT_BASE_URL` / `AGENT_API_KEY` (empty → main
 > LLM) — the model that does the reasoning behind retrieval; point it at the
-> **big** model, quality over latency. `INGEST_TOKEN_BUDGET` (per-document
-> worker budget, observed and reported, never enforced). The `ROUTER_*`,
-> `RAG_MAX_RETRIES` and `RERANK_SCORE_THRESHOLD` keys of the removed LangGraph
-> path are no longer read.
+> **big** model, quality over latency. The `ROUTER_*`, `RAG_MAX_RETRIES` and
+> `RERANK_SCORE_THRESHOLD` keys of the removed LangGraph path, and the
+> `INGEST_*` / `INGEST_TOKEN_BUDGET` keys of the removed pre-MinerU worker,
+> are no longer read.
 >
 > **Context and vision keys.** `CONTEXT_MAX_TOKENS` (default `8000`) — estimated-token budget (chars÷3,
 > deliberately conservative) for the chat history sent per message; oldest turns are
@@ -183,7 +180,7 @@ written before the modes).
 | lab_id | UUID | **Denormalized**, nullable |
 | chunk_index | Integer | Position in source document (ordering / locating) |
 | content | Text | The **original** chunk text — what citations and the teacher chunk-inspector show |
-| context | Text | LLM-generated Contextual-Retrieval context (nullable). This is what makes a context-poor slide findable |
+| context | Text | Context line written by the removed pre-MinerU worker (nullable; empty for structured chunks) |
 | section | String | Heading/section path the chunk came from (nullable — the current chunker does not fill it) |
 | embedding | `vector(N)` | Embedded over the **augmented** text (`context + content`). N = embedding dim (`bge-m3` = 1024) |
 | tsv | `tsvector` | BM25 full-text column, built over the **augmented** text (config from the document language) |

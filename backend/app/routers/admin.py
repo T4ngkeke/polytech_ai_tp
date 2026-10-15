@@ -243,14 +243,10 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "rerank_url": "RERANK_URL",
     "rerank_api_key": "RERANK_API_KEY",
     "rerank_model": "RERANK_MODEL",
-    "ingest_base_url": "INGEST_BASE_URL",
-    "ingest_api_key": "INGEST_API_KEY",
-    "ingest_model": "INGEST_MODEL",
-    # Agent slot + worker budget.
+    # Agent slot.
     "agent_base_url": "AGENT_BASE_URL",
     "agent_api_key": "AGENT_API_KEY",
     "agent_model": "AGENT_MODEL",
-    "ingest_token_budget": "INGEST_TOKEN_BUDGET",
     # [v8.1] estimated-token budget for chat history (OOM protection).
     "context_max_tokens": "CONTEXT_MAX_TOKENS",
     # [v8.1] VLM slot (garbled-formula transcription; empty model = off).

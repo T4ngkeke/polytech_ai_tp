@@ -3,7 +3,7 @@ model_routing.py — [v7.2] resolve the dynamic ``system_configs`` key/value map
 a structured model-routing config.
 
 The single LLM is split into a routing table: the default model, embedding,
-rerank, ingestion (off-peak worker), the research agent and vision each have
+rerank, the research agent and vision each have
 their own optional endpoint/key/model. The rule is **opt-in fallback**: an empty
 endpoint/key/model falls back to the main LLM, so a single-engine setup works
 as is, while an admin can point a role at another model.
@@ -39,17 +39,14 @@ class ModelRouting:
     llm: Endpoint
     embedding: Endpoint
     rerank: Endpoint
-    ingest: Endpoint
     # The agent's reasoning model — the retrieval loop's planner. Point it at
     # the BIG model: quality over latency.
     agent: Endpoint
-    # [v8.1] Vision slot — garbled-formula transcription (off-peak worker).
-    # model == "" means the feature is OFF; it never falls back.
+    # Vision slot — images the research agent views and figure descriptions
+    # teachers ask for. model == "" means the feature is OFF; it never falls back.
     vlm: Endpoint
     token_alpha: float
     token_beta: float
-    # Worker budget: estimated tokens per document (observed, never enforced).
-    ingest_token_budget: int
 
 
 def _get(configs: Mapping[str, str], key: str, default: str = "") -> str:
@@ -61,13 +58,6 @@ def _get(configs: Mapping[str, str], key: str, default: str = "") -> str:
 def _to_float(raw: str, default: float) -> float:
     try:
         return float(raw)
-    except (TypeError, ValueError):
-        return default
-
-
-def _to_int(raw: str, default: int) -> int:
-    try:
-        return int(raw)
     except (TypeError, ValueError):
         return default
 
@@ -94,12 +84,6 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         model=_get(configs, "RERANK_MODEL", _DEFAULT_RERANK_MODEL),
     )
 
-    ingest = Endpoint(
-        base_url=_get(configs, "INGEST_BASE_URL", main_base),
-        api_key=_get(configs, "INGEST_API_KEY", main_key),
-        model=_get(configs, "INGEST_MODEL", main_model),
-    )
-
     agent = Endpoint(
         base_url=_get(configs, "AGENT_BASE_URL", main_base),
         api_key=_get(configs, "AGENT_API_KEY", main_key),
@@ -120,10 +104,8 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         llm=llm,
         embedding=embedding,
         rerank=rerank,
-        ingest=ingest,
         agent=agent,
         vlm=vlm,
         token_alpha=_to_float(_get(configs, "TOKEN_ALPHA", ""), _DEFAULT_TOKEN_ALPHA),
         token_beta=_to_float(_get(configs, "TOKEN_BETA", ""), _DEFAULT_TOKEN_BETA),
-        ingest_token_budget=_to_int(_get(configs, "INGEST_TOKEN_BUDGET", ""), 200_000),
     )

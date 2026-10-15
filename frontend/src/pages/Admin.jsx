@@ -664,9 +664,9 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'vlm', x: 34, y: 48, icon: 'eye', name: 'Vision (VLM)', sources: ['agent', 'teachers', 'worker'],
+    id: 'vlm', x: 34, y: 48, icon: 'eye', name: 'Vision (VLM)', sources: ['agent', 'teachers'],
     tag: 'Looks at images: page images and figures the research agent views, figure descriptions '
-      + 'teachers ask for, and the worker’s repair of garbled formulas. Empty model = off; it never '
+      + 'teachers ask for. Empty model = off; it never '
       + 'falls back to a text-only model.',
     status: (c) => (c.vlm_model ? 'set' : 'off'),
     fields: [
@@ -712,19 +712,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'ingest', x: 34, y: 82, icon: 'download', name: 'Ingest model', sources: ['worker'],
-    tag: 'Writes one line of context for each chunk when a document is indexed (worker, off-peak). '
-      + 'The token budget per document is recorded in the ingest report.',
-    status: (c) => (c.ingest_model ? 'set' : 'inherits'),
-    fields: [
-      { key: 'ingest_model', label: 'Model Name', placeholder: 'inherits the default model' },
-      { key: 'ingest_base_url', label: 'Base URL', placeholder: 'inherits the default model' },
-      { key: 'ingest_api_key', label: 'API Key', placeholder: 'inherits the default model', secret: true },
-      { key: 'ingest_token_budget', label: 'Token budget / document', placeholder: '200000' },
-    ],
-  },
-  {
-    id: 'mineru', x: 58, y: 82, icon: 'file', name: 'MinerU (PDF)', sources: ['worker'],
+    id: 'mineru', x: 34, y: 82, icon: 'file', name: 'MinerU (PDF)', sources: ['worker'],
     tag: 'Reads each page of an uploaded PDF (layout, text, tables, formulas) through a MinerU vision '
       + 'server. Only the server can change here, without a restart; the MinerU client, its local models '
       + 'and mineru.json are part of the worker deployment.',

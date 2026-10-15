@@ -1,9 +1,10 @@
 """
 test_teacher_documents.py — teacher document upload endpoint.
 
-POST /api/teacher/labs/{lab_id}/documents — ownership-checked, stores the file
-and enqueues ingestion. Runs on SQLite via make_client; the storage root is an
-overridable dependency pointing at a tmp dir.
+POST /api/teacher/labs/{lab_id}/documents — ownership-checked, stores the PDF
+and queues its parse job. Runs on SQLite via make_client; the storage root is an
+overridable dependency pointing at a tmp dir. Only PDF is accepted; Markdown
+and HTML went with the pre-MinerU pipeline (2026-10-15).
 
 The form no longer asks for a type or an audience. Everything a teacher uploads
 is course material and the whole class can see it, so the only remaining choices
@@ -21,7 +22,17 @@ from backend.app.models import (
     UserRole,
 )
 from backend.app.routers.teacher import get_storage_root
+from backend.app.config import settings
+from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_client, make_user
+
+PDF = pdf_fixtures.course_pdf(1)
+
+
+@pytest.fixture(autouse=True)
+def structured_on(monkeypatch):
+    monkeypatch.setattr(settings, "STRUCTURED_INGEST_ENABLED", True)
+    monkeypatch.setattr(settings, "PDF_STRUCTURED_INGEST_ENABLED", True)
 
 
 async def _teacher_with_lab(session):
@@ -46,7 +57,7 @@ async def test_teacher_uploads_document_to_own_lab(db_session, tmp_path):
     try:
         resp = await client.post(
             f"/api/teacher/labs/{lab.id}/documents",
-            files={"file": ("cm3.pdf", b"course slides", "application/pdf")},
+            files={"file": ("cm3.pdf", PDF, "application/pdf")},
         )
     finally:
         await client.aclose()
@@ -72,7 +83,7 @@ async def test_upload_needs_no_type_or_audience(db_session, tmp_path):
     try:
         resp = await client.post(
             f"/api/teacher/labs/{lab.id}/documents",
-            files={"file": ("cm3.pdf", b"course slides", "application/pdf")},
+            files={"file": ("cm3.pdf", PDF, "application/pdf")},
         )
     finally:
         await client.aclose()
@@ -91,7 +102,7 @@ async def test_shared_upload_is_class_wide(db_session, tmp_path):
     try:
         resp = await client.post(
             f"/api/teacher/labs/{lab.id}/documents",
-            files={"file": ("cours.pdf", b"slides", "application/pdf")},
+            files={"file": ("cours.pdf", PDF, "application/pdf")},
             data={"shared": "true"},
         )
     finally:
@@ -135,7 +146,7 @@ async def test_teacher_cannot_upload_to_foreign_lab(db_session, tmp_path):
     try:
         resp = await client.post(
             f"/api/teacher/labs/{lab.id}/documents",
-            files={"file": ("cm3.pdf", b"course slides", "application/pdf")},
+            files={"file": ("cm3.pdf", PDF, "application/pdf")},
         )
     finally:
         await client.aclose()
@@ -199,41 +210,40 @@ async def test_delete_document_rejects_foreign_teacher(db_session, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_upload_accepts_markdown(db_session, tmp_path):
-    """.md is a first-class upload format, enqueued like a PDF."""
+@pytest.mark.parametrize("name,content,mime", [
+    ("cours.md", b"# Recursivite\ncorps", "text/markdown"),
+    ("cours.html", b"<h1>Recursivite</h1>", "text/html"),
+])
+async def test_markdown_and_html_are_refused(db_session, tmp_path, name, content, mime):
+    """Only PDF goes to the course reader; other files are refused, not stored."""
     teacher, cls, lab = await _teacher_with_lab(db_session)
     app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
     client = await make_client(db_session, teacher)
     try:
-        resp = await client.post(
-            f"/api/teacher/labs/{lab.id}/documents",
-            files={"file": ("cours.md", b"# Recursivite\ncorps", "text/markdown")},
-        )
+        resp = await client.post(f"/api/teacher/labs/{lab.id}/documents",
+                                 files={"file": (name, content, mime)})
     finally:
         await client.aclose()
         app.dependency_overrides.clear()
 
-    assert resp.status_code == 201
-    assert resp.json()["filename"] == "cours.md"
+    assert resp.status_code == 400 and resp.json()["detail"] == "only_pdf"
+    assert (await db_session.execute(select(Document))).scalars().all() == []
 
 
 @pytest.mark.asyncio
-async def test_upload_accepts_html(db_session, tmp_path):
-    """.html is a first-class upload format, enqueued like a PDF."""
+async def test_a_pdf_is_refused_while_structured_ingestion_is_off(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "STRUCTURED_INGEST_ENABLED", False)
     teacher, cls, lab = await _teacher_with_lab(db_session)
     app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
     client = await make_client(db_session, teacher)
     try:
-        resp = await client.post(
-            f"/api/teacher/labs/{lab.id}/documents",
-            files={"file": ("cours.html", b"<h1>Recursivite</h1><p>corps</p>", "text/html")},
-        )
+        resp = await client.post(f"/api/teacher/labs/{lab.id}/documents",
+                                 files={"file": ("cours.pdf", PDF, "application/pdf")})
     finally:
         await client.aclose()
         app.dependency_overrides.clear()
 
-    assert resp.status_code == 201
-    assert resp.json()["filename"] == "cours.html"
+    assert resp.status_code == 409 and resp.json()["detail"] == "structured_ingest_disabled"
 
 
 @pytest.mark.asyncio
@@ -245,7 +255,7 @@ async def test_class_upload_is_class_wide(db_session, tmp_path):
     try:
         resp = await client.post(
             f"/api/teacher/classes/{cls.id}/documents",
-            files={"file": ("poly.pdf", b"handout", "application/pdf")},
+            files={"file": ("poly.pdf", PDF, "application/pdf")},
         )
     finally:
         await client.aclose()
@@ -268,7 +278,7 @@ async def test_teacher_cannot_upload_to_foreign_class(db_session, tmp_path):
     try:
         resp = await client.post(
             f"/api/teacher/classes/{cls.id}/documents",
-            files={"file": ("poly.pdf", b"handout", "application/pdf")},
+            files={"file": ("poly.pdf", PDF, "application/pdf")},
         )
     finally:
         await client.aclose()
