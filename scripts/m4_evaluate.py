@@ -175,6 +175,8 @@ def make_tool_dependencies(config):
         rerank_usage['calls'] += 1
         started = time.monotonic()
         try:
+            from backend.app.services.model_clients import rerank_inputs
+            query, documents = rerank_inputs(config['rerank_model'], query, documents)
             response = await embedding_client.post(config['rerank_url'], json={
                 'model': config['rerank_model'], 'query': query, 'documents': documents}, timeout=30)
             response.raise_for_status()

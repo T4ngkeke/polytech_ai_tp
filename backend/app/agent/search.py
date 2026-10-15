@@ -62,14 +62,26 @@ CHECK_TURN = ('The student has not seen this reply yet. If it states course cont
 NO_PAGES = '(The course search found no page for this question.)'
 
 # The product's settings, chosen from the 2026-10-15 comparison (M4_AGENT_EVALUATION.md):
-# the question as written (a rewrite lost 5 points on v4), with the reranker; below a
-# best score of 0.001 the course has no page for the question (an off-topic probe
-# scored 0.0006 and was answered with 15 unrelated citations; answerable questions
-# scored 0.004 and up). The concise answer is about 5 s faster for 3 points fewer
-# right pages (71% vs 74% on v4); the product keeps it on.
+# the question as written (a rewrite lost 5 points on v4), with the reranker. Below a
+# best reranker score the course has no page for the question; each reranker has its
+# own scale, so the bound follows the configured rerank model (min_score_for):
+# - bge-reranker-v2-m3: an off-topic probe scored 0.0006 and was answered with 15
+#   unrelated citations; answerable questions scored 0.004 and up;
+# - Qwen3-Reranker (the probability of "yes"): the 70 questions of benchmarks v2-v4
+#   scored 0.79 and up; 10 of 12 off-course questions scored under 0.13, one 0.27,
+#   and "the date of the final exam" 0.66.
+# The concise answer is about 5 s faster for 3 points fewer right pages (71% vs 74%
+# on v4); the product keeps it on.
 REWRITE = False
 MIN_SCORE: float | None = 0.001
+MIN_SCORES = {'qwen3-reranker': 0.5}
 CONCISE = True
+
+
+def min_score_for(rerank_model: str | None) -> float | None:
+    """The "no page" bound for the configured rerank model."""
+    name = (rerank_model or '').lower()
+    return next((v for k, v in MIN_SCORES.items() if k in name), MIN_SCORE)
 SEARCH_TOP_K = 10      # blocks per query (the search tool allows at most 12)
 PAGE_CHARS = 6000      # text of one page
 CONTEXT_CHARS = 24000  # text of all pages

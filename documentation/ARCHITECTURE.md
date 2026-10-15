@@ -32,7 +32,8 @@ for a session without a lab `400 session_without_lab`. The LangGraph path
      limits; citations are verified `[E#]` evidence of the passages read.
    - `search` (`agent/search.py`): one search with the question as written, the
      found pages and their neighbours, one short answer citing `[E#]`; below a
-     best reranker score of 0.001 it answers "not found".
+     best reranker score it answers "not found" (0.5 for Qwen3-Reranker, 0.001
+     for bge-reranker; the bound follows the configured rerank model).
    - `direct` (`agent/direct.py`): one short answer without the course files
      and without citations.
    The Search and Direct answers are short unless the teacher's rules ask for

@@ -74,6 +74,25 @@ def make_embed_fn(llm_config: dict[str, str]):
     return embed
 
 
+# Qwen3-Reranker is a chat model asked "yes" or "no" (vLLM serves it as a
+# classifier with --hf-overrides, see its model card); the client wraps the
+# query and each passage in its prompt. Other rerankers get the plain texts.
+QWEN3_RERANK_PREFIX = (
+    '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query '
+    'and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n'
+    '<|im_start|>user\n')
+QWEN3_RERANK_SUFFIX = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+RERANK_TASK = 'Given a student question about a course, retrieve the course passages that answer it'
+
+
+def rerank_inputs(model: str, query: str, documents: list[str]) -> tuple[str, list[str]]:
+    """The query and passages as the rerank model expects them."""
+    if 'qwen3-reranker' not in (model or '').lower():
+        return query, documents
+    return (f'{QWEN3_RERANK_PREFIX}<Instruct>: {RERANK_TASK}\n<Query>: {query}\n',
+            [f'<Document>: {doc}{QWEN3_RERANK_SUFFIX}' for doc in documents])
+
+
 def make_rerank_fn(llm_config: dict[str, str]):
     """Build a reranker hitting the configured rerank endpoint, or None if unset.
 
@@ -88,6 +107,7 @@ def make_rerank_fn(llm_config: dict[str, str]):
     import httpx
 
     async def rerank(query: str, documents: list[str]) -> list[float]:  # pragma: no cover
+        query, documents = rerank_inputs(llm_config["rerank_model"], query, documents)
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json={
                 "model": llm_config["rerank_model"],

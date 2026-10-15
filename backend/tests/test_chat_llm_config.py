@@ -40,3 +40,11 @@ async def test_embedding_endpoint_uses_its_own_when_set(db_session):
     cfg = await _get_llm_config(db_session)
     assert cfg["embedding_base_url"] == "http://embed/v1"
     assert cfg["embedding_api_key"] == "embed-key"
+
+
+def test_qwen3_reranker_gets_its_prompt_other_rerankers_the_plain_texts():
+    from backend.app.services.model_clients import rerank_inputs
+    assert rerank_inputs('BAAI/bge-reranker-v2-m3', 'q', ['d']) == ('q', ['d'])
+    query, docs = rerank_inputs('Qwen/Qwen3-Reranker-0.6B', 'WHERE ou HAVING ?', ['HAVING filtre les groupes'])
+    assert query.startswith('<|im_start|>system') and query.endswith('<Query>: WHERE ou HAVING ?\n')
+    assert docs == ['<Document>: HAVING filtre les groupes<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n']

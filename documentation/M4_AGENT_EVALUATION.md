@@ -260,6 +260,69 @@ docker run -d --name edullm-reranker --gpus all --ipc=host --restart unless-stop
 
 Admin setting: `RERANK_URL=http://edullm-reranker:8000/rerank`.
 
+## Reranker and embedding models (2026-10-15)
+
+Retrieval only, no answer model (`scripts/retrieval_eval.py`): the 190 course
+facets of benchmarks v2, v3 and v4 on corpus v3. A facet is found when one of its
+pages is among the first k chunks the question as written retrieves (vector 20 +
+BM25 20, RRF, rerank), as Search does it.
+
+| Embedding + reranker | top 3 | top 6 | top 10 |
+| --- | ---: | ---: | ---: |
+| bge-m3 + bge-reranker-v2-m3 (product) | 48.4% | 61.1% | 72.6% |
+| bge-m3 + Qwen3-Reranker-0.6B (vLLM) | 53.7% | 67.4% | 76.8% |
+| Qwen3-Embedding-0.6B + Qwen3-Reranker-0.6B | 53.7% | 68.9% | 75.8% |
+| harrier-oss-v1-0.6b + Qwen3-Reranker-0.6B | 55.3% | 68.9% | 75.3% |
+
+With the Qwen3 reranker the three embeddings are within about one point: a new
+embedding is not worth a reindex. Without any reranker they are within 2-3
+points (66-69% at top 10).
+
+Search end to end, benchmark v4, 17 questions x 2 rounds, Flash-Next, the
+question as written, concise answers, same evening
+(`m4-agent/2026-10-15-search-v4-raw-qwen3rerank-concise`,
+`-bgererank-concise-rerun`; the earlier bge run is `-raw-rerank-on-concise`):
+
+| Reranker | Facets | Complete questions | Citation precision | Median / p95 s |
+| --- | ---: | ---: | ---: | ---: |
+| bge-reranker-v2-m3 | 75/106 (71%) | 14/34 | 72% | 17.4 / 33.0 |
+| bge-reranker-v2-m3 (earlier run) | 75/106 (71%) | 15/34 | 72% | 19.9 / 38.3 |
+| Qwen3-Reranker-0.6B | 79/106 (74%) | 17/34 | 84% | 17.5 / 28.9 |
+
+A rerank call of about 34 passages takes 0.07-0.09 s on vLLM for either model.
+Qwen3-Reranker uses about the same memory as bge (`--gpu-memory-utilization
+0.03`).
+
+"No page" bound. The best rerank score of the product search on the dev class
+(14 PDFs), for the 70 benchmark questions and 12 questions the course does not
+cover:
+
+| Reranker | Course questions: lowest | Other questions: highest three |
+| --- | ---: | --- |
+| bge-reranker-v2-m3 | 0.027 | 0.027 (TCP/IP), 0.48 (photosynthesis), 0.93 (exam date) |
+| Qwen3-Reranker-0.6B | 0.79 | 0.12 (a joke), 0.27 (CNN), 0.66 (exam date) |
+
+bge cannot tell them apart: its bound 0.001 only stops the most remote
+questions. Qwen3's bound is 0.5 (`search.MIN_SCORES`); the exam date may be in
+the course's exam grid. The bound follows the configured `RERANK_MODEL`.
+
+Qwen3-Reranker is a chat model asked "yes" or "no". vLLM serves it as a
+classifier, and the client wraps the query and each passage in its prompt
+(`model_clients.rerank_inputs`):
+
+```sh
+docker run -d --name edullm-reranker --gpus all --ipc=host --restart unless-stopped \
+  --network edullm-models -p 127.0.0.1:18004:8000 \
+  -v /home/spark-1/.cache/huggingface:/root/.cache/huggingface \
+  nvcr.io/nvidia/vllm:26.07-py3 \
+  vllm serve Qwen/Qwen3-Reranker-0.6B --host 0.0.0.0 --port 8000 \
+  --runner pooling --gpu-memory-utilization 0.03 --max-model-len 8192 --max-num-seqs 32 \
+  --hf-overrides '{"architectures": ["Qwen3ForSequenceClassification"], "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}'
+```
+
+Admin setting: `RERANK_MODEL=Qwen/Qwen3-Reranker-0.6B`. Research mode was not
+rerun with it.
+
 ## Tool changes and answer drafts (2026-10-14)
 
 Tool calls of the last 150 trials (Flash-Next): read 1757, search 685,

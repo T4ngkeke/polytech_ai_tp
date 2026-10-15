@@ -122,19 +122,31 @@ def candidates(out: Path) -> dict[str, list[str]]:
 
 
 def rerank_service(out: Path, url: str, model: str, name: str) -> None:
-    """Scores of a running vLLM /rerank service (the product's reranker) for every candidate."""
-    import httpx
+    """Scores of a running /rerank service for every candidate, through the
+    product's rerank client (backend/app/services/model_clients.py), with
+    its timing (one call per question, as Search makes)."""
+    import asyncio
+    import time
+    from backend.app.services.model_clients import make_rerank_fn
+    rerank = make_rerank_fn({'rerank_url': url, 'rerank_model': model})
     chunks = {c['id']: c for c in map(json.loads, (out / 'chunks.jsonl').read_text().splitlines())}
     questions = {q['id']: q for q in map(json.loads, (out / 'questions.jsonl').read_text().splitlines())}
-    result = {}
-    with httpx.Client(timeout=120) as client:
-        for qid, ids in json.loads((out / 'candidates.json').read_text()).items():
-            response = client.post(url, json={'model': model, 'query': questions[qid]['question'],
-                                              'documents': [chunks[i]['rerank_text'] for i in ids]})
-            response.raise_for_status()
-            scores = {ids[r['index']]: r['relevance_score'] for r in response.json()['results']}
-            result[qid] = {i: scores.get(i, 0.0) for i in ids}
+    candidates = json.loads((out / 'candidates.json').read_text())
+
+    async def run():
+        result, seconds = {}, []
+        for qid, ids in candidates.items():
+            started = time.monotonic()
+            scores = await rerank(questions[qid]['question'], [chunks[i]['rerank_text'] for i in ids])
+            seconds.append((time.monotonic() - started, len(ids)))
+            result[qid] = dict(zip(ids, scores))
+        return result, seconds
+
+    result, seconds = asyncio.run(run())
     (out / f'rerank-{name}.json').write_text(json.dumps(result))
+    times = sorted(t for t, _ in seconds)
+    print(f'{name}: {len(times)} calls, {sum(n for _, n in seconds)} passages, median {times[len(times) // 2]:.2f} s, '
+          f'slowest {times[-1]:.2f} s per call')
 
 
 def score(out: Path) -> dict:

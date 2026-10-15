@@ -200,3 +200,7 @@ async def test_concise_asks_for_a_short_answer():
 def test_product_settings_follow_the_comparison():
     from backend.app.agent import search
     assert (search.REWRITE, search.MIN_SCORE, search.CONCISE) == (False, 0.001, True)
+    # The "no page" bound follows the reranker's scale.
+    assert search.min_score_for('BAAI/bge-reranker-v2-m3') == 0.001
+    assert search.min_score_for('Qwen/Qwen3-Reranker-0.6B') == 0.5
+    assert search.min_score_for(None) == 0.001
