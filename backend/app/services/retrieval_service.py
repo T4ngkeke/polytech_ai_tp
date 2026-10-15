@@ -16,7 +16,7 @@ Exercises table.
 import logging
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Awaitable, Callable, Hashable, Mapping
 
 from sqlalchemy import select, tuple_
@@ -54,6 +54,8 @@ class ChunkHit:
     block_id: uuid.UUID | None = None
     content_start: int | None = None
     content_end: int | None = None
+    # The reranker's score for the query, when a reranker ordered the hits.
+    score: float | None = None
 
 
 def _augmented_text(hit: ChunkHit) -> str:
@@ -109,12 +111,13 @@ async def apply_rerank(
         )
         return hits[:top_k], False
     order = sorted(range(len(hits)), key=lambda i: scores[i], reverse=True)
+    scored = [replace(h, score=float(s)) for h, s in zip(hits, scores)]
     if score_threshold is not None:
         kept = [i for i in order if scores[i] >= score_threshold]
         if not kept:
             return [], True
-        return [hits[i] for i in kept[:top_k]], False
-    return [hits[i] for i in order[:top_k]], False
+        return [scored[i] for i in kept[:top_k]], False
+    return [scored[i] for i in order[:top_k]], False
 
 
 def _scope(

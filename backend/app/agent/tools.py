@@ -298,6 +298,10 @@ class ResearchTools:
                     'issues': block.issues or [], 'snippets': [],
                 }
                 items_by_block[key] = item
+            if hit.score is not None:
+                # Best reranker score of the block's snippets (search mode
+                # uses it to tell a missing topic from a weak match).
+                item['score'] = max(item.get('score', hit.score), hit.score)
             item['snippets'].append({
                 'chunk_id': str(hit.id),
                 'range': {'start': hit.content_start, 'end': hit.content_end},

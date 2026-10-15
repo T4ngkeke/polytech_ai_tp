@@ -10,6 +10,8 @@ Variants:
   agent       backend/app/agent/runner.py, as the student chat runs it
   strong_rag  one search with the raw question; the model reads the full text
               of the found pages and of their adjacent pages, and answers
+  search      backend/app/agent/search.py, the product's Search mode (same idea as
+              strong_rag, with [E#] evidence, citation cleaning and the reranker score)
 
 Environment:
   M4_UPSTREAM      model server (OpenAI-compatible, native tool calls), default Flash-Next
@@ -24,6 +26,9 @@ Environment:
   M4_CONCURRENCY   trials of one variant and round running at once (default 1)
   M4_CORPUS        corpus label written to the manifest
   M4_ASK           1 (default, as the student chat) offers ask_student; 0 does not
+  M4_SEARCH_QUERY  raw (default: the question as written) | rewrite (the model writes 1-3 queries),
+                   for the search variant
+  M4_SEARCH_MIN_SCORE  best reranker score below which search answers "not found" (default: unset)
   M4_RERANK_URL    rerank endpoint (vLLM /rerank) for the search tool; unset: no reranker.
                    M4_RERANK_MODEL names its model (default BAAI/bge-reranker-v2-m3)
 """
@@ -54,7 +59,7 @@ V4_SHA256 = '656592794ff37c48bcddc1cd8856e7c1bb39c2c1deab01c4ae5c55909f4d2927'
 # (answer / clarify / either) and, for "clarify", the student's next message.
 CLARIFY = ROOT / 'documentation/ingestion-agent-acceptance/m4-agent/2026-10-14-clarify-probe'
 CLARIFY_SHA256 = '1398afcdbc6e444664c238d330cccf7c3484c3049b2a3993dc70fb116e2b16e6'
-VARIANTS = ('agent', 'strong_rag')
+VARIANTS = ('agent', 'strong_rag', 'search')
 # One budget for every variant of a run (M4_BUDGET). "standard" is the budget of
 # the student chat; "relaxed" uses most of a 32768-token model window.
 BUDGETS = {
@@ -247,6 +252,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.agent.result import ResearchResult
     from backend.app.agent.runner import ResearchRunner
+    from backend.app.agent.search import SearchRunner
     from backend.app.agent.tools import PerCallTools, create_scope
     from backend.app.models import Document, Session, User, UserRole
     from backend.app.services.model_routing import Endpoint
@@ -280,6 +286,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                    'rerank_model': os.getenv('M4_RERANK_MODEL', 'BAAI/bge-reranker-v2-m3')}
     concurrency = int(os.getenv('M4_CONCURRENCY', '1'))
     allow_ask = os.getenv('M4_ASK', '1') == '1'
+    search_query = os.getenv('M4_SEARCH_QUERY', 'raw')
+    assert search_query in ('raw', 'rewrite'), 'M4_SEARCH_QUERY is raw or rewrite'
+    search_min_score = float(os.getenv('M4_SEARCH_MIN_SCORE')) if os.getenv('M4_SEARCH_MIN_SCORE') else None
     results = []
     dependencies = []
 
@@ -350,8 +359,17 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
         base_tools = PerCallTools(trial_scope, factory, **deps['options'])
         started = time.monotonic()
         follow_up = None
-        if variant == 'agent':
+        if variant in ('agent', 'search'):
             def runner(first_evidence=1):
+                if variant == 'search':
+                    # Searches and page reads are not limited like research tool calls.
+                    tools = CourseTools(base_tools, max_tool_calls=40,
+                                        research_seconds=limits['total_seconds'],
+                                        max_visual_calls=0, first_evidence=first_evidence)
+                    return tools, SearchRunner(tools, model, rewrite=search_query == 'rewrite',
+                                               min_score=search_min_score,
+                                               total_timeout=limits['total_seconds'],
+                                               model_timeout=call_seconds)
                 tools = CourseTools(base_tools, max_tool_calls=limits['tool_calls'],
                                     research_seconds=limits['research_seconds'],
                                     max_visual_calls=limits['visual_calls'], first_evidence=first_evidence)
@@ -433,13 +451,15 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'thinking_enabled': False, 'sampling': {'name': sampling_name, **sampling},
             'budget': budget, 'limits': limits,
             'concurrency': concurrency, 'ask_student': allow_ask,
+            'search': {'query': search_query, 'min_score': search_min_score} if 'search' in variants else None,
             'reranker': ({'url': tool_config['rerank_url'], 'model': tool_config['rerank_model']}
                          if tool_config['rerank_url'] else None),
             'index': 'frozen M3-C mineru-text/BGE-M3',
             'query_embedding': 'shared frozen cache plus common BGE-M3 service',
             'source_hashes': {
                 str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in [
-                    ROOT/'backend/app/agent/runner.py', ROOT/'backend/app/agent/course_tools.py',
+                    ROOT/'backend/app/agent/runner.py', ROOT/'backend/app/agent/search.py',
+                    ROOT/'backend/app/agent/course_tools.py',
                     ROOT/'backend/app/agent/tools.py', ROOT/'backend/app/agent/evidence.py',
                     ROOT/'backend/app/agent/model.py', Path(__file__)]}}
         (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
