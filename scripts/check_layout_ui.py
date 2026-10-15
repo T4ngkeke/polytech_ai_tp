@@ -4,7 +4,7 @@ Each main page (student chat, teacher lab, admin model map) is opened in both
 themes at desktop (1440 px) and phone (390 px) width. The check fails when the
 page scrolls sideways, the theme is not applied, the phone menu does not open
 the navigation drawer, the student drawer is not ordered classes, sessions,
-account, or the admin model map is missing.
+account, the token quota is pushed off screen, or the admin model map is missing.
 
 UI_TEST_URL must be a loopback frontend; it defaults to v9's mapped port 8080.
 PLAYWRIGHT_CHROMIUM may name a Chromium executable when Playwright's own build
@@ -30,7 +30,9 @@ LONG_ANSWER = (
 MOCKS = {
     '/api/student/classes': [{'id': 'class', 'name': 'Informatique'}],
     '/api/student/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True}],
-    '/api/student/sessions': [{'id': 'session', 'title': 'Group by et having', 'created_at': '2026-10-15T09:00:00Z'}],
+    # Many sessions, as in a real course: the list must scroll, not push the quota away.
+    '/api/student/sessions': [{'id': 'session', 'title': 'Group by et having', 'created_at': '2026-10-15T09:00:00Z'}]
+    + [{'id': f'old-{i}', 'title': f'Session {i}', 'created_at': '2026-10-01T09:00:00Z'} for i in range(60)],
     '/api/student/sessions/session': {'messages': [
         {'id': 'm1', 'sender': 'user', 'content': 'Quelle différence entre WHERE et HAVING ?'},
         {'id': 'm2', 'sender': 'llm', 'content': LONG_ANSWER},
@@ -118,6 +120,10 @@ def check_view(browser, target, shots, role, path, ready, steps, menu, theme, si
             expect(button).to_be_hidden()
             if shots:
                 page.screenshot(path=str(shots / f'{name}.png'))
+        if role == 'student':
+            # Phones: the drawer is open here. Many sessions must not push the quota away.
+            quota = page.get_by_text('Token Quota', exact=True).bounding_box()
+            assert quota and quota['y'] + quota['height'] <= size[1], f'{name}: token quota off screen {quota}'
         assert not errors, f'{name}: {errors}'
         print(f'PASS: {name}')
     finally:

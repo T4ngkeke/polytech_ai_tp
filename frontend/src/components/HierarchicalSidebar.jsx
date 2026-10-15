@@ -58,7 +58,7 @@ export default function HierarchicalSidebar({
   };
 
   return (
-    <div className="flex flex-col h-full bg-ink-base border-r border-border-subtle select-none">
+    <div className="flex flex-col h-full min-h-0 bg-ink-base border-r border-border-subtle select-none">
       {/* Header */}
       <div className="px-4 pt-5 pb-3 border-b border-border-subtle shrink-0">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-cream-muted mb-1">
