@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from backend.app.auth import get_current_user
 from backend.app.config import settings
 from backend.app.database import get_db
-from backend.app.models import Class, ClassStudent, Lab, User, UsageStat
+from backend.app.models import Class, ClassStudent, Lab, User
 from backend.app.schemas import (
     ClassResponse,
     JoinClassRequest,
@@ -40,7 +40,7 @@ from backend.app.schemas import (
     SessionUpdateRequest,
     SessionWithMessagesResponse,
 )
-from backend.app.services import session_service
+from backend.app.services import quota_service, session_service
 from backend.app.services.research_runs import ResearchRuns
 
 router = APIRouter(prefix="/api/student", tags=["student"])
@@ -287,20 +287,10 @@ async def get_usage(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the current user's daily token quota limit and used amount."""
-    today = date.today()
-    result = await db.execute(
-        select(UsageStat).where(
-            UsageStat.user_id == current_user.id,
-            UsageStat.date == today,
-        )
-    )
-    usage = result.scalar_one_or_none()
-
-    return {
-        "used": usage.tokens_used if usage else 0,
-        "limit": current_user.daily_token_quota,
-    }
+    """Return the current user's daily token limit (quota plus today's
+    teacher grants) and used amount."""
+    usage = await quota_service.usage(db, current_user, date.today())
+    return {"used": usage.used, "limit": usage.limit}
 
 
 # ===================================================================

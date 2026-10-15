@@ -5,7 +5,8 @@ themes at desktop (1440 px) and phone (390 px) width. The check fails when the
 page scrolls sideways, the theme is not applied, the phone menu does not open
 the navigation drawer, the student drawer is not ordered classes, sessions,
 account, the token quota is pushed off screen, or the admin model map is missing.
-In a teacher lab, the class name in the breadcrumb must open the class.
+In a teacher lab, the class name in the breadcrumb must open the class, and the
+Analytics tab must show its charts and refill a student's quota.
 The admin Monitoring tab shows the real Grafana dashboards (not mocked), in the
 app's theme; it needs the monitoring containers running.
 
@@ -45,6 +46,32 @@ MOCKS = {
     '/api/teacher/classes': [{'id': 'class', 'name': 'Informatique'}],
     '/api/teacher/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True}],
     '/api/admin/llm/config': {'llm_model': 'ornith', 'features': {'research_agent': True, 'pdf_documents': True}},
+    '/api/teacher/analytics/classes/class/details': {
+        'class_id': 'class', 'lab_id': 'lab', 'period_days': 30,
+        'overview': {'members': 3, 'active_7d': 2, 'active_ever': 2, 'questions': 41, 'questions_7d': 12,
+                     'sessions': 9, 'thumbs_up': 3, 'thumbs_down': 1, 'at_limit_today': 1},
+        'modes': {'search': 20, 'research': 15, 'direct': 6},
+        'daily': [{'date': f'2026-10-{d:02d}', 'questions': d % 5} for d in range(1, 31)],
+        'heatmap': [[(d * 24 + h) % 4 if 8 <= h <= 22 else 0 for h in range(24)] for d in range(7)],
+        'students': [
+            {'user_id': 's1', 'username': 'a.very.long.student.name@etu.univ-smb.fr', 'member': True,
+             'questions': 30, 'sessions': 6, 'last_active': '2026-10-15T09:00:00Z', 'tokens': 90000,
+             'thumbs_down': 1, 'modes': {}, 'used_today': 50000, 'limit_today': 50000,
+             'granted_today': 0, 'at_limit': True},
+            {'user_id': 's2', 'username': 'bob', 'member': True, 'questions': 11, 'sessions': 3,
+             'last_active': '2026-10-12T09:00:00Z', 'tokens': 20000, 'thumbs_down': 0, 'modes': {},
+             'used_today': 1000, 'limit_today': 50000, 'granted_today': 0, 'at_limit': False},
+            {'user_id': 's3', 'username': 'cat', 'member': True, 'questions': 0, 'sessions': 0,
+             'last_active': None, 'tokens': 0, 'thumbs_down': 0, 'modes': {}, 'used_today': 0,
+             'limit_today': 50000, 'granted_today': 0, 'at_limit': False},
+        ],
+        'thumbs_down': [{'message_id': 'm', 'session_id': 'x', 'user_id': 's1', 'lab_id': 'lab',
+                         'lab_name': 'TP agent', 'username': 'a.very.long.student.name@etu.univ-smb.fr',
+                         'question': 'Pourquoi ma requête GROUP BY renvoie une erreur ' * 4, 'at': '2026-10-14T09:00:00Z'}],
+        'problems': [{'session_id': 'y', 'user_id': 's2', 'username': 'bob', 'lab_id': 'lab', 'lab_name': 'TP agent',
+                      'question': 'Explique Dijkstra', 'at': '2026-10-13T09:00:00Z', 'reason': 'Tool limit reached'}],
+    },
+    '/api/teacher/classes/class/students/s1/quota-refill': {'used': 50000, 'limit': 100000, 'granted': 50000},
 }
 
 # role, path, text that shows the page is ready, steps after loading, drawer label
@@ -197,6 +224,31 @@ def check_breadcrumb(browser, target):
         context.close()
 
 
+def check_analytics(browser, target, shots):
+    # The lab Analytics tab: charts, the student table and a quota refill, at every width.
+    for theme in ('light', 'dark'):
+        for size in (DESKTOP, PHONE):
+            name = f'analytics-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'teacher', '/teacher', theme, size)
+            try:
+                page.get_by_text('TP agent', exact=True).first.click()
+                page.get_by_role('button', name='Analytics', exact=True).click()
+                expect(page.get_by_text('When students ask', exact=True)).to_be_visible()
+                expect(page.get_by_text('Busiest:', exact=False)).to_be_visible()
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                refill = page.get_by_role('button', name='Refill')
+                expect(refill).to_have_count(2)          # cat has used nothing: no refill
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+                refill.first.click()
+                expect(page.get_by_text('can use 50,000 tokens today', exact=False)).to_be_visible()
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+
+
 def check_monitoring(browser, target, shots):
     """Both dashboards load inside the admin page, in the app's theme, at both widths."""
     for theme in ('light', 'dark'):
@@ -241,6 +293,7 @@ def main():
                         check_view(browser, target, shots, role, path, ready, steps, menu, theme, size)
             check_toggle(browser, target)
             check_breadcrumb(browser, target)
+            check_analytics(browser, target, shots)
             check_monitoring(browser, target, shots)
             check_long_answer_stays_at_its_start(browser, target)
         finally:

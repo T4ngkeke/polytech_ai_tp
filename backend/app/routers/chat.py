@@ -44,7 +44,7 @@ from backend.app.models import (
     User,
 )
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
-from backend.app.services import rule_service
+from backend.app.services import quota_service, rule_service
 from backend.app.services.model_routing import Endpoint, resolve_model_routing
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
@@ -258,7 +258,8 @@ async def chat_stream(
         )
     )
     usage = usage_result.scalar_one_or_none()
-    if usage and usage.tokens_used >= current_user.daily_token_quota:
+    # The limit includes what a teacher granted today (quota_service).
+    if usage and usage.tokens_used >= await quota_service.daily_limit(db, current_user, today):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Daily token quota exceeded",

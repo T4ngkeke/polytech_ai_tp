@@ -140,6 +140,11 @@ research answer is a question back to the student: `{"question", "options"}`.
 that wrote an assistant answer: `direct`, `search` or `research` (NULL for answers
 written before the modes).
 
+`QuotaGrants` (`quota_grants`): tokens a teacher adds to a student's limit for one
+day (`user_id`, `date`, `tokens` > 0, `granted_by`, `created_at`). Today's limit is
+`users.daily_token_quota` plus the day's grants; every quota check uses it.
+`usage_stats` is never rewritten, so usage figures stay true.
+
 ---
 
 ### Retrieval & Ingestion Tables

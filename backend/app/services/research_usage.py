@@ -20,6 +20,7 @@ from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import AgentRun, ModelCallUsage, UsageReservation, UsageStat, User, _utcnow
+from backend.app.services import quota_service
 from backend.app.services.billing import compute_billed_tokens
 
 
@@ -83,7 +84,7 @@ class ResearchUsage:
                     UsageReservation.user_id == user.id,
                     UsageReservation.date == today,
                     UsageReservation.state.in_(('active', 'unknown')))) or 0
-                if consumed + held + reserve_tokens > user.daily_token_quota:
+                if consumed + held + reserve_tokens > await quota_service.daily_limit(db, user, today):
                     raise ResearchQuotaExceeded('daily_token_quota_exceeded')
                 db.add(UsageReservation(
                     call_id=call_id, run_id=run_id, user_id=user.id, date=today,

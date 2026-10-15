@@ -16,6 +16,7 @@ import { PdfPreviewModal } from '../components/PdfPreview';
 import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
+import TeacherAnalytics from '../components/TeacherAnalytics';
 import SkillPresetManager from '../components/SkillPresetManager';
 import CitationReport from '../components/CitationReport';
 import ModeSwitch from '../components/ModeSwitch';
@@ -113,6 +114,22 @@ export default function Teacher() {
     setAnalytics(null);
   }, []);
 
+  // Analytics of the class, or of the selected lab only.
+  const loadAnalytics = useCallback(() => {
+    if (!selectedClass) return Promise.resolve();
+    const lab = selectedLab ? `?lab_id=${selectedLab.id}` : '';
+    return api.get(`/api/teacher/analytics/classes/${selectedClass.id}/details${lab}`)
+      .then(setAnalytics).catch(() => setAnalytics(null));
+  }, [selectedClass, selectedLab]);
+
+  // From Analytics to the conversation in Audit (Audit is a lab tab).
+  const openConversation = useCallback(({ lab_id: labId, user_id: userId, session_id: sessionId }) => {
+    if (labId && labId !== selectedLab?.id) handleSelectLab(labId, selectedClass.id);
+    setActiveTab(3);
+    setExpandedStudentId(userId || null);
+    setExpandedSession(sessionId || null);
+  }, [selectedLab, selectedClass, handleSelectLab]);
+
   // ── Load tab data on tab change ──
   useEffect(() => {
     if (!selectedClass && !selectedLab) return;
@@ -124,7 +141,7 @@ export default function Teacher() {
           .then((rules) => { const r = rules[0] || null; setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true); })
           .catch(() => { setRuleText(''); });
       } else if (activeTab === 2) {
-        api.get(`/api/teacher/analytics/classes/${selectedClass.id}`).then(setAnalytics).catch(() => setAnalytics(null));
+        loadAnalytics();
       }
     } else {
       if (activeTab === 1) {
@@ -139,7 +156,7 @@ export default function Teacher() {
           })
           .catch(() => { setRuleText(''); setInheritedClassRule(''); });
       } else if (activeTab === 2) {
-        api.get(`/api/teacher/analytics/classes/${selectedClass.id}`).then(setAnalytics).catch(() => setAnalytics(null));
+        loadAnalytics();
       } else if (activeTab === 3 || activeTab === 4) {
         Promise.all([
           api.get(`/api/teacher/classes/${selectedClass.id}/students`),
@@ -150,7 +167,7 @@ export default function Teacher() {
         }).catch(() => { setStudents([]); setAuditSessions([]); });
       }
     }
-  }, [activeTab, selectedClass, selectedLab]);
+  }, [activeTab, selectedClass, selectedLab, loadAnalytics]);
 
   // ── Handlers ──
   const handleCreateClass = async () => {
@@ -348,12 +365,19 @@ export default function Teacher() {
             <div className="flex-1 p-4 md:p-8 overflow-y-auto">
               {level === 'class' && activeTab === 0 && <ClassSettingsPanel cls={selectedClass} onChange={handleClassChanged} />}
               {level === 'class' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule="" showPresets />}
-              {level === 'class' && activeTab === 2 && <AnalyticsPanel analytics={analytics} />}
+              {level === 'class' && activeTab === 2 && (
+                <TeacherAnalytics data={analytics} classId={selectedClass.id} onReload={loadAnalytics}
+                  onOpenConversation={openConversation} />
+              )}
               {level === 'class' && activeTab === 3 && <DocumentManager classId={selectedClass.id} />}
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
-              {level === 'lab' && activeTab === 2 && <AnalyticsPanel analytics={analytics} filterLabId={selectedLab.id} />}
+              {level === 'lab' && activeTab === 2 && (
+                <TeacherAnalytics data={analytics} classId={selectedClass.id} onReload={loadAnalytics}
+                  onOpenConversation={openConversation}
+                  onOpenStudent={(userId) => openConversation({ user_id: userId })} />
+              )}
               {level === 'lab' && activeTab === 3 && <AuditPanel lab={selectedLab} sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
@@ -462,7 +486,7 @@ function Breadcrumb({ cls, lab, onClass, className }) {
     <nav aria-label="Breadcrumb" className={className}>
       {lab ? (
         <button type="button" onClick={onClass} title={`Open ${cls.name}`}
-          className="-my-1 py-1 cursor-pointer hover:text-cyan hover:underline underline-offset-2">
+          className="-my-1 py-1 [text-transform:inherit] cursor-pointer hover:text-cyan hover:underline underline-offset-2">
           {cls.name}
         </button>
       ) : <span aria-current="page">{cls.name}</span>}
@@ -763,48 +787,6 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
   );
 }
 
-function AnalyticsPanel({ analytics, filterLabId }) {
-  if (!analytics) return (
-    <div className="flex items-center gap-2 text-cream-muted text-sm">
-      <div className="w-4 h-4 rounded-full border-2 border-cyan border-t-transparent animate-[spin_0.8s_linear_infinite]" />
-      Loading analytics…
-    </div>
-  );
-
-  const labs = filterLabId ? analytics.labs?.filter((l) => l.lab_id === filterLabId) : analytics.labs;
-
-  return (
-    <div className="space-y-6 max-w-3xl">
-      <div className="grid grid-cols-2 gap-4">
-        <StatCard label="Total Tokens" value={analytics.total_tokens?.toLocaleString()} />
-        <StatCard label="Total Requests" value={analytics.total_requests?.toLocaleString()} />
-      </div>
-      {labs?.map((lab) => (
-        <div key={lab.lab_id} className="bg-ink-raised rounded-xl border border-border-subtle p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-sm font-semibold text-cream">{lab.lab_name}</h4>
-            <span className="text-xs font-mono text-cyan">{lab.tokens?.toLocaleString()} tokens</span>
-          </div>
-          <div className="space-y-2">
-            {lab.students?.map((s) => (
-              <div key={s.user_id} className="flex items-center justify-between text-xs">
-                <span className="text-cream-secondary">{s.username}</span>
-                <div className="flex items-center gap-4 text-cream-muted font-mono">
-                  <span>{s.tokens_used?.toLocaleString()} tok</span>
-                  <span>{s.request_count} req</span>
-                </div>
-              </div>
-            ))}
-            {(!lab.students || lab.students.length === 0) && (
-              <p className="text-xs text-cream-muted italic">No activity yet</p>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStudentId, expandedSession, setExpandedSession }) {
   // Two views of the same conversations: per student, or which course
   // material the answers cite ("open conversation" leads back to a student).
@@ -912,15 +894,6 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function StatCard({ label, value }) {
-  return (
-    <div className="bg-ink-raised rounded-xl border border-border-subtle p-4">
-      <p className="text-[10px] uppercase tracking-widest text-cream-muted mb-1">{label}</p>
-      <p className="text-2xl font-display text-cream">{value ?? '—'}</p>
     </div>
   );
 }

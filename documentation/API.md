@@ -61,6 +61,7 @@
 | GET | `/api/teacher/students` | require_teacher | List every student across the teacher's own classes. |
 | GET | `/api/teacher/classes/{class_id}/students` | require_teacher | List the students in one owned class. |
 | DELETE | `/api/teacher/classes/{class_id}/students/{student_id}` | require_teacher | Kick/Remove a student from the class. |
+| POST | `/api/teacher/classes/{class_id}/students/{student_id}/quota-refill` | require_teacher | Give a student of the class a full daily quota again for today. Usage is kept: the teacher grants what the student used today beyond earlier grants (`quota_grants`); nothing when a full quota is still left. Returns `{used, limit, granted}`; `404` when the student is not in the class. |
 | POST | `/api/teacher/classes/{class_id}/labs` | require_teacher | Create a Lab under a Class (ownership enforced). |
 | GET | `/api/teacher/classes/{class_id}/labs` | require_teacher | List labs for a class. |
 | PUT | `/api/teacher/labs/{lab_id}` | require_teacher | Rename lab or toggle `is_active` (Open/Close). |
@@ -75,6 +76,7 @@
 | GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W`. **Includes student soft-deleted sessions** (each row carries `is_deleted` so the UI can flag the hidden ones). |
 | GET | `/api/teacher/labs/{lab_id}/citation-report` | require_teacher (lab owner) | Which course files, pages and passages the lab's research answers cite, with the students and their questions; the lab's published files no answer cited; questions without a verified answer (`partial_*` or failed runs); answers a student marked down. `?start=YYYY-MM-DD&end=YYYY-MM-DD` (days included, UTC; 422 if end is before start). Test drives are left out; sessions a student deleted are kept. Counts are distinct answers (assistant messages), students and passages. Shape: `backend/app/services/citation_report.py`. |
 | GET | `/api/teacher/analytics/classes/{class_id}` | require_teacher | Hierarchical token usage: class → lab → student breakdown. |
+| GET | `/api/teacher/analytics/classes/{class_id}/details` | require_teacher | The Analytics tab, for the class or one lab (`?lab_id=`): overview (members, active in 7 days, questions, conversations, thumbs, students at their limit today), answers by mode, questions per day and per weekday × hour over 30 days (Paris time), every student (questions, conversations, last active, today's usage and limit), the latest 20 thumbs-down questions and the latest 20 answers that failed or stopped early. Teacher test sessions are left out. |
 | POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | Upload a course **PDF** for this lab only; it is read by MinerU and indexed, and published at once when every page was read (otherwise it stays a draft the teacher publishes). Multipart form; the file is the only field that matters (the language is found from the text when it is indexed); `shared` (older clients) makes it class-wide, as the class upload does. Other formats: `400 only_pdf` (ODP: `odp_not_supported`); structured ingestion off: `409 structured_ingest_disabled`. Replace an existing document with `mode=replace`, `replace_document_id`, `expected_generation`. |
 | GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | The documents the lab uses + status + summary + `ingest_report`: the class-wide documents first, then the lab's own. Each row has `scope`: `class` or `lab`. |
 | POST | `/api/teacher/classes/{class_id}/documents` | require_teacher | Upload a class-wide document (`lab_id=NULL`), read by every lab of the class (e.g. the course handout). Same form as the lab upload, without `shared`. |
@@ -100,7 +102,7 @@
 | GET | `/api/student/sessions/{session_id}` | get_current_user | Fetch message history. **IDOR check required.** |
 | PUT | `/api/student/sessions/{session_id}` | get_current_user | Rename a chat session title (cosmetic only). |
 | DELETE | `/api/student/sessions/{session_id}` | get_current_user | **Soft-delete (hide)** own session: sets `is_deleted=True`. Hidden from the student; retained and teacher/admin-visible. **IDOR check required.** |
-| GET | `/api/student/usage` | get_current_user | Today's token usage vs. daily quota. |
+| GET | `/api/student/usage` | get_current_user | Today's token usage vs. today's limit (daily quota plus teacher grants). |
 | POST | `/api/chat/stream` | get_current_user | Core chat endpoint. Scoped by `session_id`. SSE streaming. The research agent answers (see below); it needs `AGENTIC_SEARCH_ENABLED` (else `503 chat_not_enabled`) and a session in a lab (else `400 session_without_lab`). |
 | POST | `/api/chat/messages/{message_id}/feedback` | get_current_user | 👍/👎 on an assistant message (body `{feedback: up\|down}`). A student may only rate a message in a session they own. |
 

@@ -15,6 +15,7 @@ GET    /api/teacher/rules
 GET    /api/teacher/chat-history
 GET    /api/teacher/students
 DELETE /api/teacher/classes/{class_id}/students/{student_id}
+POST   /api/teacher/classes/{class_id}/students/{student_id}/quota-refill
 POST   /api/teacher/classes/{class_id}/reset-code
 PUT    /api/teacher/classes/{class_id}
 DELETE /api/teacher/classes/{class_id}
@@ -24,6 +25,7 @@ POST   /api/teacher/labs/{lab_id}/documents, /classes/{class_id}/documents  PDF 
 GET    /api/teacher/labs/{lab_id}/documents, /classes/{class_id}/documents   document lists
 DELETE /api/teacher/documents/{document_id}
 GET    /api/teacher/analytics/classes/{class_id}
+GET    /api/teacher/analytics/classes/{class_id}/details?lab_id=
 """
 
 import contextlib
@@ -75,6 +77,7 @@ from backend.app.services import (
     session_service,
     skill_preset_service,
     analytics_service,
+    quota_service,
 )
 from backend.app.services.citation_report import lab_citation_report
 
@@ -706,6 +709,33 @@ async def unenroll_student(
 
 
 # ===================================================================
+# POST /api/teacher/classes/{class_id}/students/{student_id}/quota-refill
+# ===================================================================
+
+
+@router.post("/classes/{class_id}/students/{student_id}/quota-refill")
+async def refill_student_quota(
+    class_id: uuid.UUID,
+    student_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Give a student of this class a full daily quota again for today.
+
+    Usage is not erased: the teacher grants what the student used today
+    (quota_grants), so the statistics stay true.
+    """
+    await _verify_class_ownership(db, class_id, teacher)
+    student = await db.scalar(select(User).join(ClassStudent, ClassStudent.student_id == User.id).where(
+        ClassStudent.class_id == class_id, User.id == student_id, User.is_deleted.is_(False)))
+    if student is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not in this class")
+    usage = await quota_service.refill(db, student=student, teacher_id=teacher.id, day=date.today())
+    await db.commit()
+    return {"used": usage.used, "limit": usage.limit, "granted": usage.granted}
+
+
+# ===================================================================
 # POST /api/teacher/classes/{class_id}/reset-code
 # ===================================================================
 
@@ -825,3 +855,19 @@ async def get_class_analytics(
     cls = await _verify_class_ownership(db, class_id, teacher)
     result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
     return ClassAnalyticsResponse.from_analytics(result)
+
+
+@router.get("/analytics/classes/{class_id}/details")
+async def get_class_analytics_details(
+    class_id: uuid.UUID,
+    lab_id: uuid.UUID | None = Query(None),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Activity, students, quotas and answers that went wrong, for a class or one of its labs."""
+    await _verify_class_ownership(db, class_id, teacher)
+    if lab_id is not None:
+        lab = await lab_service.get_lab_by_id(db, lab_id)
+        if lab.class_id != class_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+    return await analytics_service.get_teaching_analytics(db, class_id, lab_id)

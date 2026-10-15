@@ -433,6 +433,31 @@ class UsageStat(Base):
         )
 
 
+class QuotaGrant(Base):
+    """Tokens a teacher adds to a student's quota for one day.
+
+    A student who used the whole daily quota is not stuck until tomorrow: the
+    teacher tops it up. Usage itself (UsageStat) is never rewritten, so the
+    statistics stay true, and every grant says who gave it.
+    """
+    __tablename__ = "quota_grants"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        CheckConstraint("tokens > 0", name="ck_quota_grant_tokens"),
+        Index("ix_quota_grants_user_date", "user_id", "date"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 8. Session — now scoped to a Lab
 # ---------------------------------------------------------------------------
