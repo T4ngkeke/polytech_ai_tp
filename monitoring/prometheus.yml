@@ -1,0 +1,30 @@
+# Prometheus for the v9 dev stack (see documentation/MONITORING.md).
+# It records the host, the GPU, each container and the model servers every
+# 15 s and keeps 15 days. The answers come from PostgreSQL, read by Grafana.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: host
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: gpu
+    static_configs:
+      - targets: ["gpu-exporter:9835"]
+
+  - job_name: containers
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # The model servers (vLLM metrics). The names are the containers on the
+  # external network edullm-models; `server` is the name shown in Grafana.
+  - job_name: models
+    static_configs:
+      - targets: ["m4-flashnext-v030:8000"]
+        labels: {server: "LLM (Flash-Next)"}
+      - targets: ["edullm-reranker:8000"]
+        labels: {server: "Reranker"}
+      - targets: ["edullm-mineru-vlm:8000"]
+        labels: {server: "MinerU"}

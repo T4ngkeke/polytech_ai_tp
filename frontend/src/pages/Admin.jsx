@@ -1,6 +1,6 @@
 /**
  * Admin.jsx — God-mode dashboard v7.2.
- * Left nav rail: Users | Oversight | Analytics | LLM Config | Maintenance.
+ * Left nav rail: Users | Oversight | Analytics | Monitoring | LLM Config | Maintenance.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
@@ -9,11 +9,13 @@ import api from '../lib/api';
 import useAuthStore from '../store/authStore';
 import ThemeToggle from '../components/ThemeToggle';
 import Icon from '../components/Icon';
+import MonitoringPanel from '../components/MonitoringPanel';
 
 const NAV = [
   { key: 'users', label: 'Users', icon: UsersIcon },
   { key: 'oversight', label: 'Oversight', icon: GridIcon },
   { key: 'analytics', label: 'Analytics', icon: ChartIcon },
+  { key: 'monitoring', label: 'Monitoring', icon: PulseIcon },
   { key: 'llm', label: 'LLM Config', icon: ChipIcon },
   { key: 'maintenance', label: 'Maintenance', icon: DatabaseIcon },
 ];
@@ -83,6 +85,7 @@ export default function Admin() {
         {active === 'users' && <UsersTab />}
         {active === 'oversight' && <OversightTab />}
         {active === 'analytics' && <AnalyticsTab />}
+        {active === 'monitoring' && <MonitoringPanel />}
         {active === 'llm' && <LLMConfigTab />}
         {active === 'maintenance' && <MaintenanceTab />}
       </main>
@@ -1159,6 +1162,7 @@ function Svg({ children, className = 'w-4 h-4' }) {
 function UsersIcon(p) { return <Svg {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Svg>; }
 function GridIcon(p) { return <Svg {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></Svg>; }
 function ChartIcon(p) { return <Svg {...p}><path d="M3 3v18h18" /><rect x="7" y="11" width="3" height="6" /><rect x="12" y="7" width="3" height="10" /><rect x="17" y="13" width="3" height="4" /></Svg>; }
+function PulseIcon(p) { return <Svg {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></Svg>; }
 function ChipIcon(p) { return <Svg {...p}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" /></Svg>; }
 function DatabaseIcon(p) { return <Svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></Svg>; }
 function KeyIcon(p) { return <Svg {...p}><circle cx="7.5" cy="15.5" r="5.5" /><path d="m21 2-9.6 9.6" /><path d="m15.5 7.5 3 3L22 7l-3-3" /></Svg>; }

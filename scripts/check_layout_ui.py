@@ -5,6 +5,8 @@ themes at desktop (1440 px) and phone (390 px) width. The check fails when the
 page scrolls sideways, the theme is not applied, the phone menu does not open
 the navigation drawer, the student drawer is not ordered classes, sessions,
 account, the token quota is pushed off screen, or the admin model map is missing.
+The admin Monitoring tab shows the real Grafana dashboards (not mocked), in the
+app's theme; it needs the monitoring containers running.
 
 UI_TEST_URL must be a loopback frontend; it defaults to v9's mapped port 8080.
 PLAYWRIGHT_CHROMIUM may name a Chromium executable when Playwright's own build
@@ -85,7 +87,8 @@ def open_page(browser, target, role, path, theme, size):
     page = context.new_page()
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
-    page.route('**/api/**', handler(role))
+    # The app's own API only; /grafana/api/ reaches the real Grafana.
+    page.route(lambda url: urlsplit(url).path.startswith('/api/'), handler(role))
     page.goto(target + path)
     return context, page, errors
 
@@ -177,6 +180,35 @@ def check_toggle(browser, target):
         context.close()
 
 
+def check_monitoring(browser, target, shots):
+    """Both dashboards load inside the admin page, in the app's theme, at both widths."""
+    for theme in ('light', 'dark'):
+        for size in (DESKTOP, PHONE):
+            name = f'monitoring-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'admin', '/admin', theme, size)
+            try:
+                if size == PHONE:
+                    page.get_by_role('button', name='Menu').click()
+                page.get_by_role('button', name='Monitoring').click()
+                frame = page.frame_locator('iframe[title="system dashboard"]')
+                expect(frame.get_by_text('Model servers').first).to_be_visible(timeout=20000)
+                body = frame.locator('body')
+                light = luminance(body.evaluate('b => getComputedStyle(b).backgroundColor'))
+                assert (light > 0.6) if theme == 'light' else (light < 0.2), f'{name}: Grafana background {light:.2f}'
+                page.get_by_role('button', name='Answers').click()
+                answers = page.frame_locator('iframe[title="answers dashboard"]')
+                expect(answers.get_by_text('Students only').first).to_be_visible(timeout=20000)
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                if shots:
+                    page.wait_for_timeout(2500)  # the panels draw after their queries
+                    page.screenshot(path=str(shots / f'{name}.png'))
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+
+
 def main():
     target = os.getenv('UI_TEST_URL', 'http://127.0.0.1:8080')
     assert urlsplit(target).hostname == '127.0.0.1', 'Use an explicit loopback frontend'
@@ -191,6 +223,7 @@ def main():
                     for size in (DESKTOP, PHONE):
                         check_view(browser, target, shots, role, path, ready, steps, menu, theme, size)
             check_toggle(browser, target)
+            check_monitoring(browser, target, shots)
             check_long_answer_stays_at_its_start(browser, target)
         finally:
             browser.close()

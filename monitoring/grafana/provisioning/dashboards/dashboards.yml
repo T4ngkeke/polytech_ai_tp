@@ -1,0 +1,11 @@
+apiVersion: 1
+
+# The dashboards are files in the repository; changes made in the Grafana
+# editor are lost on restart. Edit the JSON files instead.
+providers:
+  - name: edullm
+    folder: EduLLM
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

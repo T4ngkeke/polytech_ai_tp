@@ -44,7 +44,6 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/edudb
       - LLM_BASE_URL=http://host.docker.internal:11434/v1
       - DOCUMENTS_STORAGE_ROOT=/data/documents
-      - WORKER_PAGE_READER=${WORKER_PAGE_READER:-0}
     volumes:
       - documents_data:/data/documents
     extra_hosts:

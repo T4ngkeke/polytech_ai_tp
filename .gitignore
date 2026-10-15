@@ -70,3 +70,6 @@ htmlcov/
 *.tmp
 *.bak
 *~
+
+# Local secrets for docker compose (Grafana passwords)
+/.env
