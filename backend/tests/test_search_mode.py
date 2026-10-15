@@ -186,3 +186,17 @@ async def test_the_reranker_score_comes_with_each_hit():
 
     ranked, filtered = await apply_rerank('q', hits, rerank, top_k=2)
     assert [(h.content, h.score) for h in ranked] == [('b', 0.9), ('c', 0.5)] and not filtered
+
+
+@pytest.mark.asyncio
+async def test_concise_asks_for_a_short_answer():
+    from backend.app.agent.search import CONCISE_NOTE
+    model = Script('Oui [E3].', 'Oui [E3].')
+    await SearchRunner(CourseTools(ViewFixture()), model, concise=True).run('Produit ?')
+    await SearchRunner(CourseTools(ViewFixture()), model).run('Produit ?')
+    assert CONCISE_NOTE in model.seen[0][0]['content'] and CONCISE_NOTE not in model.seen[1][0]['content']
+
+
+def test_product_settings_follow_the_comparison():
+    from backend.app.agent import search
+    assert (search.REWRITE, search.MIN_SCORE) == (False, 0.001)

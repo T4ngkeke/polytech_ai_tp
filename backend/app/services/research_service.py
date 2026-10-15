@@ -186,7 +186,8 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                        max_visual_calls=0,
                                        first_evidence=await runs.next_evidence_number(scope.session_id))
             runner = SearchRunner(course_tools, billed, rewrite=search_mode.REWRITE,
-                                  min_score=search_mode.MIN_SCORE, total_timeout=limits.total_seconds,
+                                  min_score=search_mode.MIN_SCORE, concise=search_mode.CONCISE,
+                                  total_timeout=limits.total_seconds,
                                   model_timeout=limits.call_seconds, on_phase=on_phase, on_draft=on_draft)
         else:
             course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,

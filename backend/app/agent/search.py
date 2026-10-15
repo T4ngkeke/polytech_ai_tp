@@ -51,15 +51,23 @@ Give one short standalone query with the key terms, in the language of the cours
 below, or one query per part of a compound question (at most three). Resolve references to
 earlier messages ("and for HAVING?" becomes a full query).'''
 
+CONCISE_NOTE = ('Be concise: answer with the key points in a few short paragraphs or a short '
+                'list, each with its citations; the student can ask for more.')
+
 CHECK_TURN = ('The student has not seen this reply yet. If it states course content from the pages, '
               'write it again citing their [E#] IDs, without mentioning this check. If the pages do '
               'not cover the question and the reply says so, or it needs no course material, reply '
               'only with the word DONE.')
 NO_PAGES = '(The course search found no page for this question.)'
 
-# The product's settings, chosen from the 2026-10-15 comparison (M4_AGENT_EVALUATION.md).
+# The product's settings, chosen from the 2026-10-15 comparison (M4_AGENT_EVALUATION.md):
+# the question as written (a rewrite lost 5 points on v4), with the reranker; below a
+# best score of 0.001 the course has no page for the question (an off-topic probe
+# scored 0.0006 and was answered with 15 unrelated citations; answerable questions
+# scored 0.004 and up).
 REWRITE = False
-MIN_SCORE: float | None = None
+MIN_SCORE: float | None = 0.001
+CONCISE = False
 SEARCH_TOP_K = 10      # blocks per query (the search tool allows at most 12)
 PAGE_CHARS = 6000      # text of one page
 CONTEXT_CHARS = 24000  # text of all pages
@@ -92,7 +100,7 @@ def _queries(content: str, question: str) -> tuple[list[str], str]:
 
 class SearchRunner:
     def __init__(self, course_tools: CourseTools, model, *, rewrite: bool = False,
-                 min_score: float | None = None, total_timeout: float = 120.0,
+                 min_score: float | None = None, concise: bool = False, total_timeout: float = 120.0,
                  model_timeout: float = 60.0, context_chars: int = CONTEXT_CHARS,
                  on_phase: Callable[[str], None] | None = None,
                  on_draft: Callable[[str | None], None] | None = None,
@@ -101,7 +109,7 @@ class SearchRunner:
         # min_score: below this best reranker score, the course has no page for the
         # question (no reranker or None: only an empty search counts as not found).
         self.course_tools, self.model = course_tools, model
-        self.rewrite, self.min_score = rewrite, min_score
+        self.rewrite, self.min_score, self.concise = rewrite, min_score, concise
         self.total_timeout, self.model_timeout = total_timeout, model_timeout
         self.context_chars, self.clock = context_chars, clock
         self.on_phase = on_phase or (lambda _phase: None)
@@ -159,7 +167,8 @@ class SearchRunner:
                                   model_calls, tools.trace + trace, usage, mode='search')
 
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
-        system = SEARCH_PROMPT + '\n' + teaching_rules + '\n' + research_note
+        system = (SEARCH_PROMPT + ('\n' + CONCISE_NOTE if self.concise else '')
+                  + '\n' + teaching_rules + '\n' + research_note)
         catalogue = await tools.catalogue()
 
         if not await tools.document_count():

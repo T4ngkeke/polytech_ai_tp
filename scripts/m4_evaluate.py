@@ -29,6 +29,7 @@ Environment:
   M4_SEARCH_QUERY  raw (default: the question as written) | rewrite (the model writes 1-3 queries),
                    for the search variant
   M4_SEARCH_MIN_SCORE  best reranker score below which search answers "not found" (default: unset)
+  M4_SEARCH_CONCISE    1: the search answer is asked to be concise (default 0)
   M4_RERANK_URL    rerank endpoint (vLLM /rerank) for the search tool; unset: no reranker.
                    M4_RERANK_MODEL names its model (default BAAI/bge-reranker-v2-m3)
 """
@@ -289,6 +290,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     search_query = os.getenv('M4_SEARCH_QUERY', 'raw')
     assert search_query in ('raw', 'rewrite'), 'M4_SEARCH_QUERY is raw or rewrite'
     search_min_score = float(os.getenv('M4_SEARCH_MIN_SCORE')) if os.getenv('M4_SEARCH_MIN_SCORE') else None
+    search_concise = os.getenv('M4_SEARCH_CONCISE', '0') == '1'
     results = []
     dependencies = []
 
@@ -367,7 +369,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                                         research_seconds=limits['total_seconds'],
                                         max_visual_calls=0, first_evidence=first_evidence)
                     return tools, SearchRunner(tools, model, rewrite=search_query == 'rewrite',
-                                               min_score=search_min_score,
+                                               min_score=search_min_score, concise=search_concise,
                                                total_timeout=limits['total_seconds'],
                                                model_timeout=call_seconds)
                 tools = CourseTools(base_tools, max_tool_calls=limits['tool_calls'],
@@ -451,7 +453,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'thinking_enabled': False, 'sampling': {'name': sampling_name, **sampling},
             'budget': budget, 'limits': limits,
             'concurrency': concurrency, 'ask_student': allow_ask,
-            'search': {'query': search_query, 'min_score': search_min_score} if 'search' in variants else None,
+            'search': {'query': search_query, 'min_score': search_min_score, 'concise': search_concise}
+                      if 'search' in variants else None,
             'reranker': ({'url': tool_config['rerank_url'], 'model': tool_config['rerank_model']}
                          if tool_config['rerank_url'] else None),
             'index': 'frozen M3-C mineru-text/BGE-M3',
