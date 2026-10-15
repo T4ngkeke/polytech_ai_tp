@@ -55,7 +55,7 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
             assert entry['pdf_sha256'] == digest and entry['page_no'] == page_no
             return entry['content_list']
 
-        def cached_pipeline(source, source_digest, work_dir, *, settings):
+        def cached_pipeline(source, source_digest, work_dir, *, settings, extractor=None):
             parsed, metrics = read_pdf(source, source_digest, work_dir, cached_page)
             return si.ParseOutcome(parsed, {'status': 'source_pdf', 'extractor': metrics},
                                    {'kind': 'same_pdf_physical_page', 'pages': 14}, True)

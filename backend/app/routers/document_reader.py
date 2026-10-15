@@ -156,7 +156,7 @@ async def teacher_preview(document_id: uuid.UUID, revision_id: uuid.UUID,
 async def teacher_source(document_id: uuid.UUID, revision_id: uuid.UUID,
                          teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db),
                          root: str = Depends(get_storage_root)):
-    """The original ODP. Teachers only: it still holds notes and hidden slides."""
+    """The uploaded source file. Teachers only."""
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
     source = await db.get(DocumentSource, rev.source_version_id)
     try:

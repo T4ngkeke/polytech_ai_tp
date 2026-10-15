@@ -94,10 +94,12 @@ async def claim_next_job(
 
 
 # ---------------------------------------------------------------------------
-# M2-B: structured (ODP) jobs. A separate claim, so the legacy loop can never
+# Structured jobs. A separate claim, so the legacy loop can never
 # pick one up and this one can never pick up a legacy row.
 # ---------------------------------------------------------------------------
 
+# odp_parse stays claimable so that an ODP job left from before 2026-10-15
+# fails as odp_not_supported instead of waiting forever.
 STRUCTURED_TASK_KINDS = ("odp_parse", "pdf_parse")
 # Parse + render may take a while (the render budget alone is 600 s). The lease
 # must be longer than one full attempt; a worker stops writing before it ends.

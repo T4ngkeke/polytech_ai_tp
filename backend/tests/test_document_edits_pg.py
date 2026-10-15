@@ -10,22 +10,21 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from backend.app.models import Document, DocumentBlock, DocumentReview, DocumentRevision
 from backend.app.services import document_edits as edits
 from backend.app.services.document_versions import VersionConflict
-from backend.tests import odp_fixtures
+from backend.tests import pdf_fixtures
 from backend.tests.test_document_versions_pg import m1_pg  # noqa: F401 - fixture
-from backend.tests.test_structured_ingest import fake_renderer, page_texts_for, worker_settings
-from backend.tests.test_structured_ingest_pg import odp_upload, seed
+from backend.tests.test_structured_ingest import worker_settings
+from backend.tests.test_structured_ingest_pg import pdf_upload, seed
 from backend.worker import structured_ingest as si
 
 
 async def parsed_pg(factory, storage, tmp_path):
-    deck = odp_fixtures.write_course_deck(tmp_path / 'deck.odp').read_bytes()
+    deck = pdf_fixtures.course_pdf(3)
     async with factory() as db:
         teacher, lab = await seed(db)
-        result = await odp_upload(db, teacher, lab, deck, storage)
+        result = await pdf_upload(db, teacher, lab, deck, storage)
         ids = {'teacher_id': teacher.id, 'doc_id': result.document.id, 'rev_id': result.revision.id}
-        assert await si.process_structured_job(db, settings=worker_settings(storage, tmp_path), runner=fake_renderer(),
-                                               page_count_reader=lambda _p: 3,
-                                               page_texts_reader=page_texts_for(deck, tmp_path))
+        assert await si.process_structured_job(db, settings=worker_settings(storage, tmp_path),
+                                               extractor=pdf_fixtures.extractor())
         block = await db.scalar(select(DocumentBlock).where(DocumentBlock.revision_id == ids['rev_id'],
                                                             DocumentBlock.content.contains('SELECT')))
         ids['block_id'] = block.block_id
@@ -95,9 +94,8 @@ async def test_pg_edit_and_reparse_under_the_snapshot_triggers(m1_pg, storage, t
                                                  expected_revision_id=rev.id, expected_generation=doc.generation)
         await db.commit()
         reparse_id = reparse.id
-        assert await si.process_structured_job(db, settings=worker_settings(storage, tmp_path), runner=fake_renderer(),
-                                               page_count_reader=lambda _p: 3,
-                                               page_texts_reader=page_texts_for(deck, tmp_path))
+        assert await si.process_structured_job(db, settings=worker_settings(storage, tmp_path),
+                                               extractor=pdf_fixtures.extractor())
         block = await db.scalar(select(DocumentBlock).where(DocumentBlock.revision_id == reparse_id,
                                                             DocumentBlock.block_id == ids['block_id']))
         assert block.content == 'SELECT 3;' and block.edited_by_teacher

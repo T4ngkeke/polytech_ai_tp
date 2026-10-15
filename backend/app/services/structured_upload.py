@@ -1,9 +1,9 @@
-"""M2-B: a teacher uploads an ODP file into the structured path.
+"""A teacher uploads a PDF into the structured path.
 
 What this guarantees:
 
-* The bytes are checked as a real ODF presentation (ZIP paths, expansion
-  limits, declared type) before anything is stored.
+* The bytes are checked as a readable PDF (no password, page limit) before
+  anything is stored.
 * The storage key is made by the server under the document's own folder. The
   uploaded filename is kept as a label only, never used as a path.
 * The file is recorded in document_staged_objects and committed BEFORE it is
@@ -16,15 +16,14 @@ What this guarantees:
   to the same document returns the revision and job it already has; nothing is
   queued twice.
 
-PDF, Markdown and HTML do not come here; they keep the legacy upload.
+ODP uploads were removed on 2026-10-15 (export slides to PDF).
 """
 import asyncio
 import hashlib
-import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 from sqlalchemy import delete, select
 
@@ -34,9 +33,7 @@ from backend.app.models import (
 from backend.app.services import document_storage as storage
 from backend.app.services import document_versions as versions
 from backend.app.services.document_access import DocumentNotFound, owned_document
-from backend.worker.odf_package import OdfLimits, OdfPackageError, open_package
 
-TASK_KIND = 'odp_parse'
 PDF_TASK_KIND = 'pdf_parse'
 MAX_PDF_BYTES = 200 * 1024 * 1024
 # How long an upload may take between recording its key and committing the
@@ -56,33 +53,8 @@ class UploadResult:
     created: bool
 
 
-def max_upload_bytes(limits: OdfLimits | None = None, *, fmt: str = 'odp') -> int:
-    return MAX_PDF_BYTES if fmt == 'pdf' else (limits or OdfLimits()).max_archive_bytes
-
-
-def check_odp(content: bytes, limits: OdfLimits | None = None) -> str:
-    """Return the SHA256 of a file that opens as an ODF presentation.
-
-    One oversized member is accepted here: the reader records it as a gap
-    instead of hiding it. A file the package reader refuses outright is
-    rejected.
-    """
-    limits = limits or OdfLimits()
-    if len(content) > limits.max_archive_bytes:
-        raise UploadRejected('file_too_large')
-    with tempfile.TemporaryDirectory(prefix='odp-upload-') as tmp:
-        path = Path(tmp) / 'upload.odp'
-        path.write_bytes(content)
-        try:
-            with open_package(path, limits) as package:
-                if not package.has('content.xml'):
-                    raise UploadRejected('invalid_odp')
-                package.xml('content.xml')
-                return package.sha256
-        except OdfPackageError:
-            raise UploadRejected('invalid_odp') from None
-
-
+def max_upload_bytes() -> int:
+    return MAX_PDF_BYTES
 
 
 def check_pdf(content: bytes) -> str:
@@ -104,7 +76,7 @@ def check_pdf(content: bytes) -> str:
 def display_name(filename: str | None) -> str:
     """The last part of the client's filename, as a label. Never a path."""
     name = PurePosixPath((filename or '').replace('\\', '/')).name.strip()
-    return (name or 'document.odp')[:512]
+    return (name or 'document.pdf')[:512]
 
 
 async def _existing_upload(db, document_id, sha256):
@@ -133,7 +105,7 @@ async def discard_staged(db, storage_root, key) -> None:
         await db.rollback()
 
 
-async def _upload_structured(db, *, fmt: str, teacher_id, lab, shared: bool, filename, content: bytes, language: str,
+async def _upload_structured(db, *, teacher_id, lab, shared: bool, filename, content: bytes, language: str,
                              storage_root, mode: str = 'new', replace_document_id=None,
                              expected_generation: int | None = None) -> UploadResult:
     versions._enabled()
@@ -143,7 +115,7 @@ async def _upload_structured(db, *, fmt: str, teacher_id, lab, shared: bool, fil
         raise UploadRejected('replace_fields_require_replace_mode')
     if mode == 'replace' and (replace_document_id is None or expected_generation is None):
         raise UploadRejected('replace_document_id_and_expected_generation_required')
-    sha256 = await asyncio.to_thread(check_pdf if fmt == 'pdf' else check_odp, content)
+    sha256 = await asyncio.to_thread(check_pdf, content)
     name = display_name(filename)
     lab_scope = None if shared else lab.id
 
@@ -170,7 +142,7 @@ async def _upload_structured(db, *, fmt: str, teacher_id, lab, shared: bool, fil
     else:
         document_id = uuid.uuid4()
 
-    key = storage.source_key(document_id, uuid.uuid4(), fmt)
+    key = storage.source_key(document_id, uuid.uuid4(), 'pdf')
     db.add(DocumentStagedObject(storage_key=key, document_id=document_id, purpose='upload_source',
                                 lease_expires_at=_utcnow() + UPLOAD_LEASE))
     await db.commit()
@@ -185,12 +157,12 @@ async def _upload_structured(db, *, fmt: str, teacher_id, lab, shared: bool, fil
             generation = expected_generation
         rev = await versions.register_source(
             db, document_id=document_id, teacher_id=teacher_id, expected_generation=generation,
-            sha256=sha256, format=fmt, original_filename=name, key=key)
+            sha256=sha256, format='pdf', original_filename=name, key=key)
         source = await db.get(DocumentSource, rev.source_version_id)
         created = source.storage_key == key
         if created:
             job = IngestionJob(id=uuid.uuid4(), document_id=document_id, status=JobStatus.queued,
-                               task_kind=PDF_TASK_KIND if fmt == 'pdf' else TASK_KIND,
+                               task_kind=PDF_TASK_KIND,
                                source_version_id=source.id, revision_id=rev.id)
             db.add(job)
             await db.execute(delete(DocumentStagedObject).where(DocumentStagedObject.storage_key == key))
@@ -207,9 +179,5 @@ async def _upload_structured(db, *, fmt: str, teacher_id, lab, shared: bool, fil
     return UploadResult(document=doc, revision=rev, job=job, created=created)
 
 
-async def upload_odp(db, **kwargs) -> UploadResult:
-    return await _upload_structured(db, fmt='odp', **kwargs)
-
-
 async def upload_pdf(db, **kwargs) -> UploadResult:
-    return await _upload_structured(db, fmt='pdf', **kwargs)
+    return await _upload_structured(db, **kwargs)

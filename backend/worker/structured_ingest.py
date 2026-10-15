@@ -1,11 +1,11 @@
-"""M2-B: run one structured (ODP) job and store the result as a parsed draft.
+"""Run one structured PDF job and store the result as a parsed draft.
 
 The order of work, and why it is this order:
 
 1. Claim (queue.claim_structured_job). A short transaction that records a new
    lock token, the document generation it saw, and a lease.
 2. Mark the revision "processing". A short transaction under the document lock.
-3. Copy the source out of storage, check its hash, parse it and render it.
+3. Copy the source out of storage, check its hash, and read it with MinerU.
    No transaction is open during this step, and it never touches the database.
 4. Stage. Record every file key in document_staged_objects and commit, then
    write the files. A file never exists without a row that says it may be
@@ -18,7 +18,9 @@ A stale result (another claim, another generation, an archived or deleted
 document) writes nothing. Its files are removed straight away, or by the sweep.
 
 The result is always a draft with index_ready false. "parsed" is not "ready",
-and nothing here can publish: indexing is M3. No model is called here.
+and nothing here can publish: the same job then indexes the draft
+(structured_index.py). The ODP reader and slide renderer were removed on
+2026-10-15; an ODP job left in a queue fails as odp_not_supported.
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
@@ -45,21 +47,12 @@ from backend.app.services import document_versions as versions
 from backend.app.services.document_cleanup import aware, sweep_staged_objects
 from backend.app.services.document_edits import carry_forward
 from backend.worker.document_ir import ParsedDocument, ParseIssue
-from backend.worker.odf_package import OdfPackageError
 from backend.worker.pdf_reader import PDFReadError, read_pdf
 from backend.worker.pdf_mineru import MinerUUnavailable, subprocess_extractor
-from backend.worker.odp_reader import OdpReadError, read_odp
-from backend.worker.odp_sanitize import SanitizeError
 from backend.worker.queue import DEFAULT_LEASE_SECONDS, StructuredClaim, claim_structured_job
-from backend.worker.slide_renderer import (
-    RenderFailed, RendererUnavailable, RenderSettings, RenderValidationError,
-    apply_preview_mapping, attach_preview_assets, pdf_page_texts, prepare_deck_task, render,
-    run_subprocess_renderer, verify_preview_mapping,
-)
 
 logger = logging.getLogger(__name__)
 
-PIPELINE_VERSION = 'm2b-structured-1'
 PDF_PIPELINE_VERSION = 'm3a-pdf-1'
 
 # IR asset kinds to database asset kinds. Written out so that a new IR kind
@@ -102,7 +95,6 @@ class StaleClaim(Exception):
 class StructuredSettings:
     storage_root: Path
     task_root: Path
-    render: RenderSettings = field(default_factory=RenderSettings)
     lease_seconds: int = DEFAULT_LEASE_SECONDS
     max_attempts: int = 3
     pdf_python: str = ""
@@ -118,7 +110,6 @@ class StructuredSettings:
         env = environ if environ is not None else os.environ
         task_root = env.get('STRUCTURED_TASK_ROOT') or str(Path(tempfile.gettempdir()) / 'edullm-structured-tasks')
         return cls(storage_root=Path(storage_root), task_root=Path(task_root),
-                   render=RenderSettings.from_env(env),
                    lease_seconds=int(env.get('STRUCTURED_LEASE_SECONDS') or DEFAULT_LEASE_SECONDS),
                    max_attempts=int(env.get('STRUCTURED_MAX_ATTEMPTS') or 3),
                    pdf_python=env.get('PDF_MINERU_PYTHON') or '',
@@ -147,66 +138,8 @@ def asset_db_id(source_version_id: uuid.UUID, ir_asset_id: str) -> uuid.UUID:
 
 
 # --------------------------------------------------------------------------
-# Step 3: parse and render. Pure: no database, no model.
+# Step 3: read the PDF. No database; MinerU is the only model.
 # --------------------------------------------------------------------------
-
-def _render_report(settings: RenderSettings) -> dict:
-    report = settings.as_report()
-    report.pop('command', None)  # deployment detail, not something a teacher needs
-    return report
-
-
-def run_pipeline(source: Path, expected_sha256: str, work_dir: Path, *, render_settings: RenderSettings,
-                 runner=run_subprocess_renderer, page_count_reader=None, page_texts_reader=None) -> ParseOutcome:
-    """Parse one checked copy of the source and render its visible slides.
-
-    A render that cannot run or fails is not a failed parse: the text is still
-    there. It becomes a document issue, and every page without a checked
-    preview is partial.
-    """
-    try:
-        document = read_odp(source)
-    except OdpReadError as exc:
-        raise JobFailed('unreadable_odp') from exc
-    if document.source_sha256 != expected_sha256:
-        raise JobFailed('source_hash_mismatch')
-    if not document.pages:
-        # Every slide is hidden (or there is none): nothing a student may read.
-        raise JobFailed('no_visible_content')
-    report = {'settings': _render_report(render_settings), 'status': 'not_run'}
-    mapping_dict = None
-    mapping_valid = False
-    try:
-        task = prepare_deck_task(document, source, work_dir, settings=render_settings, task_id='deck')
-        outcome = render(task, runner=runner, page_count_reader=page_count_reader)
-    except RendererUnavailable:
-        report['status'] = 'unavailable'
-        document.issues.append(ParseIssue(
-            code='render_failure', scope='document',
-            message='no slide renderer is configured, so this draft has no page previews'))
-    except (RenderFailed, RenderValidationError, SanitizeError, OdfPackageError) as exc:
-        report['status'] = 'failed'
-        report['error'] = type(exc).__name__
-        document.issues.append(ParseIssue(
-            code='render_failure', scope='document',
-            message=f'the page previews could not be made ({type(exc).__name__})'))
-    else:
-        report.update(status=outcome.status, page_count=outcome.page_count, seconds=outcome.seconds,
-                      renderer_version=outcome.renderer_version, soffice_version=outcome.soffice_version)
-        document.issues.extend(outcome.issues)
-        if outcome.status == 'ok':
-            texts = (page_texts_reader or pdf_page_texts)(outcome.pdf.path)
-            mapping = verify_preview_mapping(document, texts)
-            apply_preview_mapping(document, mapping)
-            attach_preview_assets(document, outcome)
-            mapping_dict = mapping.to_dict()
-            mapping_valid = mapping.verified_pages == len(document.pages)
-    for page in document.pages:
-        if page.preview_asset_id is None and page.state == 'usable':
-            page.state = 'partial'
-    return ParseOutcome(document=document.validate(), render=report, mapping=mapping_dict,
-                        preview_mapping_valid=mapping_valid)
-
 
 def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
                      settings: StructuredSettings, extractor=None) -> ParseOutcome:
@@ -242,7 +175,7 @@ def build_report(outcome: ParseOutcome) -> dict:
     """The revision report. Counts and issues only: no notes, no file paths."""
     doc = outcome.document
     return {
-        'pipeline_version': PDF_PIPELINE_VERSION if doc.reader_version.startswith('mineru-text-') else PIPELINE_VERSION,
+        'pipeline_version': PDF_PIPELINE_VERSION,
         'schema_version': doc.schema_version,
         'reader_version': doc.reader_version,
         'identity_version': doc.identity_version,
@@ -404,7 +337,9 @@ async def _mark_processing(db, claim: StructuredClaim, *, now) -> None:
 async def _source_row(db, claim: StructuredClaim) -> DocumentSource:
     source = await db.get(DocumentSource, claim.source_version_id)
     await db.commit()
-    if source is None or source.format != ('pdf' if claim.task_kind == 'pdf_parse' else 'odp'):
+    if source is not None and source.format == 'odp':
+        raise JobFailed('odp_not_supported')
+    if source is None or source.format != 'pdf':
         raise JobFailed('source_unavailable')
     return source
 
@@ -469,14 +404,11 @@ async def _commit_parsed(db, claim, outcome: ParseOutcome, planned: list[Planned
     staged = [item.key for item in planned if not item.reuse]
     if staged:
         await db.execute(delete(DocumentStagedObject).where(DocumentStagedObject.storage_key.in_(staged)))
-    if claim.task_kind == 'pdf_parse':
-        # Reuse the unique revision-bound job for indexing. A crash between
-        # parse and index leaves a queued task, not a silent parsed draft.
-        job.task_kind, job.status = 'pdf_index', JobStatus.queued
-        job.attempts = 0
-        job.lock_token = job.claimed_generation = job.lease_expires_at = None
-    else:
-        job.status = JobStatus.done
+    # Reuse the unique revision-bound job for indexing. A crash between
+    # parse and index leaves a queued task, not a silent parsed draft.
+    job.task_kind, job.status = 'pdf_index', JobStatus.queued
+    job.attempts = 0
+    job.lock_token = job.claimed_generation = job.lease_expires_at = None
     job.error_message = None
     await db.commit()
 
@@ -485,7 +417,7 @@ async def _commit_failed(db, claim, code: str, now_fn) -> None:
     doc, job, rev = await _locked(db, claim, now=now_fn())
     await versions.set_processing_result(
         db, document_id=doc.id, revision_id=rev.id, expected_generation=claim.generation,
-        state='failed', report={'pipeline_version': PDF_PIPELINE_VERSION if claim.task_kind == 'pdf_parse' else PIPELINE_VERSION, 'error_code': code,
+        state='failed', report={'pipeline_version': PDF_PIPELINE_VERSION, 'error_code': code,
                                 'index_ready': False})
     job.status, job.error_message = JobStatus.failed, code
     await db.commit()
@@ -526,9 +458,10 @@ async def _discard(db, settings: StructuredSettings, planned: list[PlannedAsset]
 # One job
 # --------------------------------------------------------------------------
 
-async def process_structured_job(db, *, settings: StructuredSettings, runner=run_subprocess_renderer,
-                                 page_count_reader=None, page_texts_reader=None, now_fn=_utcnow) -> bool:
-    """Claim and run one structured job. Returns False when there was none."""
+async def process_structured_job(db, *, settings: StructuredSettings, extractor=None,
+                                 now_fn=_utcnow) -> bool:
+    """Claim and run one structured job. Returns False when there was none.
+    extractor: a MinerU stand-in for tests (None: the configured MinerU)."""
     claim = await claim_structured_job(db, lease_seconds=settings.lease_seconds, now=now_fn())
     if claim is None:
         return False
@@ -541,20 +474,15 @@ async def process_structured_job(db, *, settings: StructuredSettings, runner=run
         await _mark_processing(db, claim, now=now_fn())
         source = await _source_row(db, claim)
         work_dir.mkdir(parents=True, exist_ok=False)
-        copy = work_dir / ('source.pdf' if claim.task_kind == 'pdf_parse' else 'source.odp')
+        copy = work_dir / 'source.pdf'
         try:
             await asyncio.to_thread(storage.copy_verified, settings.storage_root, source.storage_key,
                                     source.sha256, copy)
         except storage.StorageError as exc:
             raise JobFailed(str(exc)) from exc
-        if claim.task_kind == 'pdf_parse':
-            outcome = await asyncio.to_thread(
-                run_pdf_pipeline, copy, source.sha256, work_dir, settings=settings)
-            outcome.document.source_filename = source.original_filename
-        else:
-            outcome = await asyncio.to_thread(
-                run_pipeline, copy, source.sha256, work_dir, render_settings=settings.render, runner=runner,
-                page_count_reader=page_count_reader, page_texts_reader=page_texts_reader)
+        outcome = await asyncio.to_thread(
+            run_pdf_pipeline, copy, source.sha256, work_dir, settings=settings, extractor=extractor)
+        outcome.document.source_filename = source.original_filename
         planned = plan_assets(outcome, claim)
         await _stage(db, claim, planned, settings, now_fn)
         await _commit_parsed(db, claim, outcome, planned, now_fn)

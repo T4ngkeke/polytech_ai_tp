@@ -1,4 +1,4 @@
-"""M2-B on real PostgreSQL: triggers, constraints, SKIP LOCKED and races.
+"""Structured PDF jobs on real PostgreSQL: triggers, constraints, SKIP LOCKED and races.
 
 Uses the M1 fixture: a random schema in a disposable *_test database, built by
 create_all and then the M1 + M2 migrations. Set M1_TEST_PG_URL explicitly.
@@ -19,10 +19,10 @@ from backend.app.models import (
 from backend.app.services import structured_upload
 from backend.app.services.document_cleanup import mark_deleted, run_cleanup
 from backend.app.services.document_versions import VersionConflict
-from backend.tests import odp_fixtures
+from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_user
 from backend.tests.test_document_versions_pg import m1_pg  # noqa: F401 - fixture
-from backend.tests.test_structured_ingest import fake_renderer, page_texts_for, worker_settings
+from backend.tests.test_structured_ingest import worker_settings
 from backend.worker import structured_ingest as si
 from backend.worker.queue import claim_next_job, claim_structured_job
 from scripts.migrate_document_snapshots import M2_SQL_PATH, apply_migration
@@ -41,15 +41,15 @@ async def seed(db):
     return teacher, lab
 
 
-async def odp_upload(db, teacher, lab, content, storage):
-    return await structured_upload.upload_odp(
-        db, teacher_id=teacher.id, lab=lab, shared=False, filename='cours.odp', content=content,
+async def pdf_upload(db, teacher, lab, content, storage):
+    return await structured_upload.upload_pdf(
+        db, teacher_id=teacher.id, lab=lab, shared=False, filename='cours.pdf', content=content,
         language='fr', storage_root=storage)
 
 
 @pytest.fixture
 def deck(tmp_path):
-    return odp_fixtures.write_course_deck(tmp_path / 'deck' / 'cours.odp').read_bytes()
+    return pdf_fixtures.course_pdf(3)
 
 
 @pytest.fixture
@@ -76,14 +76,14 @@ async def test_pg_a_half_bound_structured_job_is_refused(m1_pg, storage, deck):
     factory = async_sessionmaker(m1_pg, expire_on_commit=False)
     async with factory() as db:
         teacher, lab = await seed(db)
-        result = await odp_upload(db, teacher, lab, deck, storage)
+        result = await pdf_upload(db, teacher, lab, deck, storage)
         doc_id, source_id, rev_id = result.document.id, result.revision.source_version_id, result.revision.id
-        db.add(IngestionJob(id=uuid.uuid4(), document_id=doc_id, task_kind='odp_parse'))
+        db.add(IngestionJob(id=uuid.uuid4(), document_id=doc_id, task_kind='pdf_parse'))
         with pytest.raises(IntegrityError):
             await db.commit()
         await db.rollback()
         # One structured job per revision.
-        db.add(IngestionJob(id=uuid.uuid4(), document_id=doc_id, task_kind='odp_parse',
+        db.add(IngestionJob(id=uuid.uuid4(), document_id=doc_id, task_kind='pdf_parse',
                             source_version_id=source_id, revision_id=rev_id))
         with pytest.raises(IntegrityError):
             await db.commit()
@@ -94,7 +94,7 @@ async def test_pg_legacy_and_structured_claims_never_cross(m1_pg, storage, deck)
     factory = async_sessionmaker(m1_pg, expire_on_commit=False)
     async with factory() as db:
         teacher, lab = await seed(db)
-        await odp_upload(db, teacher, lab, deck, storage)
+        await pdf_upload(db, teacher, lab, deck, storage)
         class_id, lab_id, teacher_id = lab.class_id, lab.id, teacher.id
         assert await claim_next_job(db) is None  # the legacy claim does not see it
         legacy = Document(id=uuid.uuid4(), class_id=class_id, lab_id=lab_id, filename='cours.pdf',
@@ -116,9 +116,9 @@ async def test_pg_concurrent_claims_take_different_jobs(m1_pg, storage, deck, tm
     factory = async_sessionmaker(m1_pg, expire_on_commit=False)
     async with factory() as db:
         teacher, lab = await seed(db)
-        other = odp_fixtures.write_minimal(tmp_path / 'b.odp').read_bytes()
-        await odp_upload(db, teacher, lab, deck, storage)
-        await odp_upload(db, teacher, lab, other, storage)
+        other = pdf_fixtures.course_pdf(2, title='Autre')
+        await pdf_upload(db, teacher, lab, deck, storage)
+        await pdf_upload(db, teacher, lab, other, storage)
 
     async def claim():
         async with factory() as db:
@@ -134,15 +134,14 @@ async def test_pg_full_job_stores_a_parsed_draft_under_the_triggers(m1_pg, stora
     factory = async_sessionmaker(m1_pg, expire_on_commit=False)
     async with factory() as db:
         teacher, lab = await seed(db)
-        result = await odp_upload(db, teacher, lab, deck, storage)
+        result = await pdf_upload(db, teacher, lab, deck, storage)
         assert await si.process_structured_job(
-            db, settings=worker_settings(storage, tmp_path), runner=fake_renderer(),
-            page_count_reader=lambda _pdf: 3, page_texts_reader=page_texts_for(deck, tmp_path))
+            db, settings=worker_settings(storage, tmp_path), extractor=pdf_fixtures.extractor())
         rev = await db.get(DocumentRevision, result.revision.id)
         await db.refresh(rev)
         assert (rev.processing_state, rev.publication_state, rev.index_ready) == ('parsed', 'draft', False)
         pages = (await db.scalars(select(DocumentPage).where(DocumentPage.revision_id == rev.id))).all()
-        assert len(pages) == 3 and any(p.preview_page_no is None for p in pages)
+        assert len(pages) == 3 and all(p.preview_page_no for p in pages)
         assert await db.scalar(select(func.count()).select_from(DocumentStagedObject)) == 0
         doc = await db.get(Document, result.document.id)
         await db.refresh(doc)
@@ -159,14 +158,12 @@ async def test_pg_a_commit_racing_a_deletion_never_revives_the_document(m1_pg, s
     factory = async_sessionmaker(m1_pg, expire_on_commit=False)
     async with factory() as db:
         teacher, lab = await seed(db)
-        result = await odp_upload(db, teacher, lab, deck, storage)
+        result = await pdf_upload(db, teacher, lab, deck, storage)
         claim = await claim_structured_job(db)
-        copy = tmp_path / 'copy.odp'
+        copy = tmp_path / 'copy.pdf'
         copy.write_bytes(deck)
-        outcome = si.run_pipeline(copy, hashlib.sha256(deck).hexdigest(), tmp_path / 'work',
-                                  render_settings=worker_settings(storage, tmp_path).render,
-                                  runner=fake_renderer(), page_count_reader=lambda _pdf: 3,
-                                  page_texts_reader=page_texts_for(deck, tmp_path))
+        outcome = si.run_pdf_pipeline(copy, hashlib.sha256(deck).hexdigest(), tmp_path / 'work',
+                                      settings=worker_settings(storage, tmp_path), extractor=pdf_fixtures.page_items)
         planned = si.plan_assets(outcome, claim)
         await si._stage(db, claim, planned, worker_settings(storage, tmp_path), si._utcnow)
         doc_id, teacher_id, generation = result.document.id, teacher.id, claim.generation
@@ -211,14 +208,12 @@ async def test_pg_a_commit_behind_a_deletion_writes_nothing(m1_pg, storage, deck
     factory = async_sessionmaker(m1_pg, expire_on_commit=False)
     async with factory() as db:
         teacher, lab = await seed(db)
-        result = await odp_upload(db, teacher, lab, deck, storage)
+        result = await pdf_upload(db, teacher, lab, deck, storage)
         claim = await claim_structured_job(db)
-        copy = tmp_path / 'copy.odp'
+        copy = tmp_path / 'copy.pdf'
         copy.write_bytes(deck)
-        outcome = si.run_pipeline(copy, hashlib.sha256(deck).hexdigest(), tmp_path / 'work',
-                                  render_settings=worker_settings(storage, tmp_path).render,
-                                  runner=fake_renderer(), page_count_reader=lambda _pdf: 3,
-                                  page_texts_reader=page_texts_for(deck, tmp_path))
+        outcome = si.run_pdf_pipeline(copy, hashlib.sha256(deck).hexdigest(), tmp_path / 'work',
+                                      settings=worker_settings(storage, tmp_path), extractor=pdf_fixtures.page_items)
         planned = si.plan_assets(outcome, claim)
         await si._stage(db, claim, planned, worker_settings(storage, tmp_path), si._utcnow)
         doc_id, teacher_id = result.document.id, teacher.id

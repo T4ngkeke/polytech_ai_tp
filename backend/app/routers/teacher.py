@@ -305,15 +305,11 @@ async def _store_upload(db, response, *, scope, shared, file, language, mode,
         return await _upload_structured(
             db, response, lab=scope, file=file, language=language, shared=shared, mode=mode,
             replace_document_id=replace_document_id, expected_generation=expected_generation,
-            teacher=teacher, storage_root=storage_root, fmt="pdf")
+            teacher=teacher, storage_root=storage_root)
     if (file.filename or "").lower().endswith(".odp"):
-        if settings.PDF_STRUCTURED_INGEST_ENABLED:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="odp_not_supported")
-        return await _upload_structured(
-            db, response, lab=scope, file=file, language=language, shared=shared, mode=mode,
-            replace_document_id=replace_document_id, expected_generation=expected_generation,
-            teacher=teacher, storage_root=storage_root, fmt="odp")
-    # Replacing a file is part of the structured path only (M2-B, ODP).
+        # The ODP reader was removed on 2026-10-15: export the slides to PDF.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="odp_not_supported")
+    # Replacing a file is part of the structured path only.
     if mode != "new" or replace_document_id is not None or expected_generation is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="replace_requires_structured_odp")
@@ -341,8 +337,8 @@ async def _store_upload(db, response, *, scope, shared, file, language, mode,
 
 
 async def _upload_structured(db, response, *, lab, file, language, shared, mode,
-                             replace_document_id, expected_generation, teacher, storage_root, fmt):
-    """[M2-B] ODP upload: new document or replacement, one parse job each."""
+                             replace_document_id, expected_generation, teacher, storage_root):
+    """A structured PDF upload: new document or replacement, one parse job each."""
     from backend.app.services import structured_upload
     from backend.app.services.document_access import DocumentNotFound
     from backend.app.services.document_versions import VersionConflict
@@ -351,12 +347,12 @@ async def _upload_structured(db, response, *, lab, file, language, shared, mode,
     # keep working and already stored structured documents stay readable.
     if not settings.STRUCTURED_INGEST_ENABLED:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="structured_ingest_disabled")
-    limit = structured_upload.max_upload_bytes(fmt=fmt)
+    limit = structured_upload.max_upload_bytes()
     content = await file.read(limit + 1)
     if len(content) > limit:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
     try:
-        result = await (structured_upload.upload_pdf if fmt == "pdf" else structured_upload.upload_odp)(
+        result = await structured_upload.upload_pdf(
             db, teacher_id=teacher.id, lab=lab, shared=shared, filename=file.filename,
             content=content, language=language, storage_root=storage_root, mode=mode,
             replace_document_id=replace_document_id, expected_generation=expected_generation)

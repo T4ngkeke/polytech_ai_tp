@@ -89,11 +89,10 @@ map stores `PDF_MINERU_SERVER_URL` in SystemConfig, and the worker uses it from
 its next tick (empty: the worker's environment value). The client, its models
 and `mineru.json` stay deployment settings.
 
-ODP parsing and an isolated LibreOffice renderer remain available for historical
-fixtures and source-to-PDF experiments. ODP feature development is frozen;
-there is no requirement to implement a custom reader for every source format.
-The renderer Dockerfile and test Compose file run separately from application
-services. They do not automatically install MinerU in the worker image.
+The ODP reader and its LibreOffice slide renderer were removed on 2026-10-15
+(code on branch `archive/cleanup-2026-10-15`). Slides are uploaded as PDF; an
+ODP upload is refused (`odp_not_supported`), and an ODP job left in a queue
+fails with the same code. Existing ODP revisions stay readable.
 
 ## Validation and experimental artifacts
 

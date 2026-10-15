@@ -259,7 +259,7 @@ class DocumentResponse(BaseModel):
     lab_id: uuid.UUID | None
     filename: str
     status: str
-    # M2-B: filled for structured (ODP) uploads; legacy uploads leave them empty.
+    # Filled for structured (PDF) uploads; legacy uploads leave them empty.
     structured: bool = False
     generation: int | None = None
     source_version_id: uuid.UUID | None = None

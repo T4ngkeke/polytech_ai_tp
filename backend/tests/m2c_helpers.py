@@ -1,4 +1,4 @@
-"""Shared set-up for the M2-C tests: a parsed ODP draft, and a synthetic index.
+"""Shared set-up for the M2-C tests: a parsed PDF draft, and a synthetic index.
 
 fake_index stands in for M3. It writes one chunk per searchable block, exactly
 equal to the block content, so the unchanged M1 publication check can pass.
@@ -13,15 +13,15 @@ from backend.app.models import (
     Session, UserRole,
 )
 from backend.app.services import document_versions as versions
-from backend.tests import odp_fixtures
+from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_user
 from backend.tests.test_structured_ingest import run_job, seed, upload
 
 
-async def parsed(db, storage, tmp_path, content):
+async def parsed(db, storage, tmp_path, content, *, extractor=None):
     teacher, outsider, lab, other_lab = await seed(db)
     body = (await upload(db, teacher, lab, content)).json()
-    assert await run_job(db, storage, tmp_path, content)
+    assert await run_job(db, storage, tmp_path, content, extractor=extractor)
     ids = {'teacher_id': teacher.id, 'outsider_id': outsider.id, 'lab_id': lab.id, 'other_lab_id': other_lab.id,
            'class_id': lab.class_id, 'doc_id': uuid.UUID(body['id']), 'rev_id': uuid.UUID(body['revision_id'])}
     return teacher, outsider, lab, ids
@@ -48,7 +48,7 @@ async def fake_index(db, rev_id):
 
 
 async def published(db, storage, tmp_path, slides=3):
-    content = odp_fixtures.write_minimal(tmp_path / f'min-{uuid.uuid4().hex}.odp', slides=slides).read_bytes()
+    content = pdf_fixtures.course_pdf(slides)
     teacher, outsider, lab, ids = await parsed(db, storage, tmp_path, content)
     await fake_index(db, ids['rev_id'])
     await versions.publish_revision(db, document_id=ids['doc_id'], revision_id=ids['rev_id'],

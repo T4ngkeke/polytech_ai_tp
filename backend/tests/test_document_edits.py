@@ -15,12 +15,13 @@ from backend.app.models import (
 from backend.app.routers.document_versions import get_describe_fn
 from backend.app.services import document_versions as versions
 from backend.app.services.vision_descriptions import VisionResult
-from backend.tests import odp_fixtures
+from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_client
 from backend.tests.m2c_helpers import generation, job_for, parsed, published
 from backend.tests.test_structured_ingest import (  # noqa: F401 - fixtures
-    deck_bytes, other_deck_bytes, run_job, storage, structured_on, upload,
+    deck_bytes, other_deck_bytes, run_job, seed, storage, structured_on, upload, worker_settings,
 )
+from backend.worker import structured_ingest as si
 
 T = '/api/teacher/documents'
 
@@ -170,7 +171,7 @@ async def test_a_reparse_carries_proven_changes_and_reviews_the_rest(db_session,
     assert resp.status_code == 200, resp.text
     rev4 = uuid.UUID(resp.json()['revision_id'])
     job = await job_for(db_session, rev4)
-    assert job.task_kind == 'odp_parse' and job.source_version_id == (await db_session.get(DocumentRevision, rev3)).source_version_id
+    assert job.task_kind == 'pdf_parse' and job.source_version_id == (await db_session.get(DocumentRevision, rev3)).source_version_id
     assert await run_job(db_session, storage, tmp_path, deck_bytes)
     rev = await db_session.get(DocumentRevision, rev4)
     await db_session.refresh(rev)
@@ -222,8 +223,11 @@ async def test_a_new_source_file_inherits_no_teacher_change(db_session, storage,
 
 @pytest.mark.asyncio
 async def test_a_failed_draft_can_be_reparsed_but_not_edited(db_session, storage, tmp_path):
-    content = odp_fixtures.write_all_hidden(tmp_path / 'hidden.odp').read_bytes()
-    teacher, _, _, ids = await parsed(db_session, storage, tmp_path, content)
+    # A parse without MinerU configured leaves a failed draft.
+    teacher, _, lab, _ = await seed(db_session)
+    body = (await upload(db_session, teacher, lab, pdf_fixtures.course_pdf(1))).json()
+    assert await si.process_structured_job(db_session, settings=worker_settings(storage, tmp_path))
+    ids = {'doc_id': uuid.UUID(body['id']), 'rev_id': uuid.UUID(body['revision_id'])}
     rev = await db_session.get(DocumentRevision, ids['rev_id'])
     await db_session.refresh(rev)
     assert rev.processing_state == 'failed'
