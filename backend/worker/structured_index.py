@@ -1,4 +1,4 @@
-"""M3-B PDF draft index. Embed outside a transaction; publish only by teacher action.
+"""M3-B PDF draft index. Embed outside a transaction; publish when every page was read.
 
 UTF-8 bytes are a conservative, deterministic budget proxy until the embedding
 service exposes its tokenizer. ``token_estimate`` records that proxy, not model
@@ -22,6 +22,7 @@ from backend.app.models import (
 )
 from backend.app.services import document_versions as versions
 from backend.app.services.document_cleanup import aware
+from backend.app.services.retrieval_service import detect_language
 from backend.worker.queue import claim_structured_job
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
@@ -164,6 +165,8 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
         raise IndexConflict('stale_index_claim')
     if meta[:3] != (doc.id, doc.class_id, doc.lab_id) or meta[4] != rev.id:
         raise IndexConflict('tenant_or_revision_changed')
+    # The teacher no longer picks the language: BM25 stems with the one the text is in.
+    language = detect_language(item[3].content for item in prepared)
     # Embeddings are complete and validated before any existing draft rows go.
     await db.execute(delete(DocChunk).where(DocChunk.revision_id == rev.id))
     for idx, (item, embedding) in enumerate(zip(prepared, embeddings, strict=True)):
@@ -175,7 +178,7 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
             content_end=part.end, content=part.content, token_estimate=part.byte_count,
             chunker_version=CHUNKER_VERSION, source_text=source_text,
             source_ref=copy.deepcopy(source_ref), source_fingerprint=fingerprint,
-            section=section, embedding=embedding, tsv=(_tsv_value(db, part.content, doc.language)
+            section=section, embedding=embedding, tsv=(_tsv_value(db, part.content, language)
                                      if db.bind.dialect.name == 'postgresql' else part.content),
             page_no=page_no, edited_by_teacher=bool(edited)))
     await db.flush()
@@ -184,13 +187,29 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
                        'chunker_version': CHUNKER_VERSION, 'budget_unit': 'utf8_bytes_upper_bound',
                        'target': TARGET_BYTES, 'hard_limit': HARD_BYTES, 'overlap': 0,
                        'embedding_inputs': len(prepared), 'embedding_elapsed_seconds': round(elapsed_seconds, 3),
-                       'embedding_model_tokens': None}
+                       'embedding_model_tokens': None, 'language': language}
+    # A page MinerU could not read is the only real problem: then the teacher
+    # decides whether to publish. Otherwise the new version goes live at once.
+    unread = sorted((await db.scalars(select(DocumentPage.source_slide_no).where(
+        DocumentPage.revision_id == rev.id, DocumentPage.state != 'usable'))).all())
+    report['index']['unread_pages'] = unread
     report['index_ready'] = True
-    report['next_step'] = 'teacher_review_and_publish'
+    report['next_step'] = 'teacher_review_and_publish' if unread else 'published'
     rev.report = report
-    rev.processing_state = 'partial'  # uncertain extraction needs an explicit acknowledgement
+    rev.processing_state = 'partial' if unread else 'ready'
     rev.index_ready = True
     job.status, job.error_message = JobStatus.done, None
+    if not unread:
+        try:
+            async with db.begin_nested():
+                await versions.publish_revision(db, document_id=doc.id, revision_id=rev.id,
+                    teacher_id=rev.created_by, expected_generation=doc.generation)
+        except (versions.VersionConflict, versions.DocumentNotFound) as exc:
+            # Keep the index; the teacher can still publish this version.
+            report['index']['publish_error'] = str(exc)
+            report['next_step'] = 'teacher_review_and_publish'
+            rev.report = copy.deepcopy(report)
+            rev.processing_state = 'partial'
     await db.commit()
     return len(prepared)
 

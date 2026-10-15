@@ -44,7 +44,7 @@ async def seed(db):
 async def pdf_upload(db, teacher, lab, content, storage):
     return await structured_upload.upload_pdf(
         db, teacher_id=teacher.id, lab=lab, shared=False, filename='cours.pdf', content=content,
-        language='fr', storage_root=storage)
+        storage_root=storage)
 
 
 @pytest.fixture

@@ -18,9 +18,9 @@
  *
  * Backed by:
  *   GET    /api/teacher/classes/{classId}/documents
- *   POST   /api/teacher/classes/{classId}/documents (multipart: file, language)
+ *   POST   /api/teacher/classes/{classId}/documents (multipart: file)
  *   GET    /api/teacher/labs/{labId}/documents
- *   POST   /api/teacher/labs/{labId}/documents     (multipart: file, language)
+ *   POST   /api/teacher/labs/{labId}/documents     (multipart: file)
  *   DELETE /api/teacher/documents/{id}
  */
 
@@ -29,10 +29,6 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import StructuredDocumentDetail from './DocumentBlockEditor';
 import Icon from './Icon';
-
-// Document language selects the BM25 tsvector config; ingest and query sides
-// must match. fr is the backend default.
-const LANGUAGES = [{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }];
 
 // Status → badge classes. Coloured chips read fine on the dark panel.
 const STATUS_BADGE = {
@@ -45,13 +41,24 @@ const STATUS_BADGE = {
   parsed: 'bg-cyan-muted text-cyan',
 };
 
-const STATUS_LABEL = { parsed: 'parsed · waiting for indexing' };
+const STATUS_LABEL = {
+  parsed: 'parsed · waiting for indexing',
+  needs_review: 'needs review',
+  partially_indexed: 'some pages not read',
+};
+
+// Shown on the warning icon when the server gave no message.
+const WARNING_HINT = {
+  needs_review: 'Some pages could not be read. Open the document to check them and publish.',
+  partially_indexed: 'Some pages could not be read: students cannot find their content.',
+  failed: 'Processing failed. Open the document to reprocess it.',
+};
 
 const IN_PROGRESS = new Set(['pending', 'processing']);
 
 // A structured document has no published version until indexing
 // exists (M3). Until then its newest draft tells what is going on.
-const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', failed: 'failed' };
+const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', partial: 'needs_review', failed: 'failed' };
 function displayStatus(doc) {
   if (doc.structured && !doc.current_revision_id && doc.latest_revision) {
     return REVISION_STATUS[doc.latest_revision.processing_state] || doc.latest_revision.processing_state;
@@ -68,7 +75,6 @@ export default function DocumentManager({ labId, classId }) {
 
   const fileRef = useRef(null);
   const [fileName, setFileName] = useState('');
-  const [language, setLanguage] = useState('fr');          // BM25 tsvector config
 
   const loadDocuments = useCallback(async () => {
     if (!base) return [];
@@ -105,7 +111,6 @@ export default function DocumentManager({ labId, classId }) {
     }
     const form = new FormData();
     form.append('file', file);
-    form.append('language', language);
 
     setUploading(true);
     try {
@@ -179,12 +184,6 @@ export default function DocumentManager({ labId, classId }) {
             <span className="truncate text-sm text-cream-muted">{fileName || 'PDF'}</span>
           </label>
         </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-cream-muted">Language</label>
-          <select value={language} onChange={(e) => setLanguage(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-sm text-cream focus:border-cyan/40 focus:outline-none">
-            {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-          </select>
-        </div>
         <button
           type="submit"
           disabled={uploading}
@@ -200,7 +199,7 @@ export default function DocumentManager({ labId, classId }) {
         <p className="text-sm text-cream-muted">No documents yet. Upload course material above.</p>
       ) : (
         <ul className="divide-y divide-border-subtle rounded-lg border border-border-default">
-          {documents.map((doc) => (
+          {documents.map((doc) => { const status = displayStatus(doc); return (
             <li key={doc.id} className={`flex items-stretch ${opens(doc) ? 'hover:bg-ink-hover' : ''}`}>
               <button
                 type="button"
@@ -213,12 +212,12 @@ export default function DocumentManager({ labId, classId }) {
                 <span className="flex min-w-0 max-w-full items-center gap-2">
                   {!classId && <ScopeBadge scope={doc.scope} />}
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
-                  {(doc.status === 'needs_review' || doc.status === 'failed' || doc.status === 'partially_indexed') && (
-                    <span title={doc.error_message || ''} className="text-gold"><Icon name="warning" className="w-4 h-4" /></span>
+                  {WARNING_HINT[status] && (
+                    <span title={doc.error_message || WARNING_HINT[status]} className="text-gold"><Icon name="warning" className="w-4 h-4" /></span>
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
-                  <StatusBadge status={displayStatus(doc)} />
+                  <StatusBadge status={status} />
                   <SummaryChips doc={doc} />
                 </span>
               </button>
@@ -234,7 +233,7 @@ export default function DocumentManager({ labId, classId }) {
                 </button>
               )}
             </li>
-          ))}
+          ); })}
         </ul>
       )}
     </div>

@@ -40,6 +40,26 @@ def ts_config_for(language: str | None) -> str:
     return _TS_CONFIGS.get((language or "").lower(), "simple")
 
 
+# Common words that tell French from English. Words both languages use
+# ("on", "a") and keywords of code ("from", "in", "for", "is", "and", "not")
+# are left out: course PDFs are full of SQL and Python.
+_FRENCH_WORDS = frozenset("le la les de des est une et du pour dans que qui sur par pas au aux avec ce "
+                          "sont ou il elle nous vous cette ces son sa ses mais donc".split())
+_ENGLISH_WORDS = frozenset("the of to that with are this be by an it "
+                           "we you these its but which can was were".split())
+
+
+def detect_language(texts) -> str:
+    """'fr' or 'en' for a document, from its common words; French on a tie
+    (the school teaches in French). Code and formulas count for neither."""
+    french = english = 0
+    for text in texts:
+        for word in _WORD_RE.findall(text.lower()):
+            french += word in _FRENCH_WORDS
+            english += word in _ENGLISH_WORDS
+    return "en" if english > french else "fr"
+
+
 @dataclass(frozen=True)
 class ChunkHit:
     """A RAG retrieval result, carrying its source for citations."""

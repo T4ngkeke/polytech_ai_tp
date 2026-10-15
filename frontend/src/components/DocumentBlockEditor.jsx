@@ -109,6 +109,27 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
     api.post(`/api/teacher/documents/${doc.id}/revisions/${revisionId}/reprocess`,
       { expected_generation: target.expected_generation }));
 
+  // Only a version with pages that were not read waits for the teacher;
+  // every other version is published as soon as it is indexed.
+  const publish = async () => {
+    setBusy(true);
+    try {
+      await api.post(`${base}/publish`, {
+        expected_generation: versions.generation,
+        acknowledge_issues: revision.processing_state === 'partial',
+      });
+      toast.success('Published: students can search this version');
+      await loadVersions(revisionId);
+      onRefresh?.().catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const canPublish = revision && revision.publication_state === 'draft' && revision.index_ready
+    && ['ready', 'partial'].includes(revision.processing_state);
+
   const downloadSource = async () => {
     const res = await api.raw(`${base}/source`);
     if (!res.ok) { toast.error((await responseError(res)).message); return; }
@@ -134,6 +155,13 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
             ))}
           </select>
         )}
+        {canPublish && (
+          <button type="button" disabled={busy} onClick={publish}
+            title={revision.processing_state === 'partial' ? 'Students will not find the pages that were not read' : undefined}
+            className="rounded border border-cyan/40 bg-cyan-muted px-2 py-1 text-xs text-cream hover:bg-cyan/20 disabled:opacity-50">
+            {revision.processing_state === 'partial' ? 'Publish anyway' : 'Publish'}
+          </button>
+        )}
         <button type="button" disabled={busy || !revision} onClick={reprocess}
           className="rounded border border-border-default px-2 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
           Reprocess file
@@ -157,7 +185,7 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
             {outline.map((p) => (
               <button key={p.page_id} type="button" onClick={() => setPageId(p.page_id)}
                 className={`block w-full rounded px-2 py-1 text-left text-xs ${p.page_id === pageId ? 'bg-ink-hover text-cream' : 'text-cream-secondary hover:bg-ink-hover'}`}>
-                <span className="font-medium">Slide {p.source_slide_no}</span>
+                <span className="font-medium">Page {p.source_slide_no}</span>
                 {p.state !== 'usable' && <span className="ml-1 text-gold"><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /></span>}
                 <span className="block truncate text-cream-muted">{p.title || p.summary || '—'}</span>
               </button>
@@ -176,9 +204,9 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
 function RevisionSummary({ revision }) {
   const report = revision.report || {};
   const notes = [];
-  if (report.parse_quality) notes.push(`parse quality: ${report.parse_quality}`);
-  if (report.visible_slide_count != null) notes.push(`${report.visible_slide_count} visible slides`);
-  if (report.hidden_slide_count) notes.push(`${report.hidden_slide_count} hidden slides left out`);
+  const unread = report.index?.unread_pages || [];
+  if (report.totals?.pages != null) notes.push(`${report.totals.pages} pages`);
+  if (unread.length) notes.push(`not read: page${unread.length > 1 ? 's' : ''} ${unread.join(', ')}`);
   if (report.carried_forward) {
     notes.push(`teacher changes carried over: ${report.carried_forward.carried}, to check: ${report.carried_forward.reviews}`);
   }
@@ -196,7 +224,7 @@ function PageView({ page, base, busy, change, docId }) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm text-cream">
-        <span className="font-medium">Slide {page.page.source_slide_no}</span>
+        <span className="font-medium">Page {page.page.source_slide_no}</span>
         <span className="text-xs text-cream-muted">
           {page.page.preview_mapping === 'verified'
             ? `preview page ${page.page.preview_page_no}`
@@ -205,8 +233,8 @@ function PageView({ page, base, busy, change, docId }) {
         </span>
       </div>
       {preview
-        ? <img src={preview} alt={`Preview of slide ${page.page.source_slide_no}`} className="max-h-96 rounded border border-border-default" />
-        : <p className="rounded bg-ink-surface p-2 text-xs text-cream-muted">No verified preview for this slide.</p>}
+        ? <img src={preview} alt={`Preview of page ${page.page.source_slide_no}`} className="max-h-96 rounded border border-border-default" />
+        : <p className="rounded bg-ink-surface p-2 text-xs text-cream-muted">No verified preview for this page.</p>}
       {page.unavailable.length > 0 && (
         <ul className="space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
           {page.unavailable.map((u, i) => <li key={i}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {u.message}{u.type ? ` (${u.type})` : ''}</li>)}

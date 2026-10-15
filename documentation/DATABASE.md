@@ -153,7 +153,7 @@ written before the modes).
 | filename | String | Original display name |
 | storage_path | String | Path inside the `documents_data` Docker volume |
 | content_hash | String | Hash of file content — dedup + change detection (triggers re-index) |
-| language | String | `fr` (default) / `en`. Set at upload — selects the BM25 `tsvector` config (ingest and query side must match) |
+| language | String | `fr` (default) / `en`. Found from the text when a version is indexed and set when it is published — selects the BM25 `tsvector` config (ingest and query side must match) |
 | ingest_report | JSON | Summary of the run: chunk count, estimated token spend, whether it went over budget, and any VLM formula repairs — the teacher audits this instead of re-reading the document |
 | status | Enum | `pending` → `processing` → `indexed` → `failed`, plus `needs_review` (the character-yield gate handed the file back to the teacher) |
 | error_message | Text | Populated on `failed`; also carries the `needs_review` reason |

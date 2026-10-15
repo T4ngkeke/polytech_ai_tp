@@ -12,7 +12,7 @@ from backend.app.models import (
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.app.agent.tools import ResearchTools, create_scope
-from backend.app.services import document_edits, document_versions
+from backend.app.services import document_edits
 from backend.app.services.document_access import DocumentNotFound
 from backend.tests.conftest import make_user
 from backend.tests.test_structured_index_m3b import _parsed_pdf
@@ -23,24 +23,21 @@ async def _indexed_pdf(db, tmp_path, monkeypatch, *, language='fr'):
     doc, rev, teacher, _ = await _parsed_pdf(db, tmp_path, monkeypatch)
     doc_id = doc.id
     if language == 'en':
-        text = await db.scalar(select(DocumentBlock).where(
-            DocumentBlock.revision_id == rev.id, DocumentBlock.kind == 'text'))
-        text.content = 'Recursive functions are explained in this chapter.'
-        doc.language = 'en'
+        # The language is found from the text: make the whole document English.
+        blocks = (await db.scalars(select(DocumentBlock).where(
+            DocumentBlock.revision_id == rev.id, DocumentBlock.content != ''))).all()
+        for block in blocks:
+            block.content = 'Recursive functions are explained in this chapter.'
         await db.commit()
 
     async def embed(texts):
         return [[0.0] * (EMBEDDING_DIM - 1) + [1.0] for _ in texts]
 
-    assert await process_index_job(db, embed_fn=embed)
+    assert await process_index_job(db, embed_fn=embed)   # every page read: published
     doc = await db.get(Document, doc_id, populate_existing=True)
     await db.refresh(teacher)
     await db.refresh(rev)
-    await document_versions.publish_revision(
-        db, document_id=doc.id, revision_id=rev.id,
-        teacher_id=teacher.id, expected_generation=doc.generation,
-        acknowledge_issues=True,
-    )
+    assert doc.current_revision_id == rev.id and doc.language == language
     student = make_user()
     outsider = make_user()
     db.add_all([student, outsider])
@@ -154,15 +151,10 @@ async def test_snapshot_survives_republication_but_membership_revokes_it(pg_sess
         prepublication = await create_scope(db, user_id=student.id, session_id=chat.id)
         assert prepublication.snapshot_revisions[doc.id] == old.id
         assert await process_index_job(db, embed_fn=embed)
+        # The teacher's edit is published as soon as it is indexed.
         doc = await db.get(Document, doc.id, populate_existing=True)
-        await db.refresh(teacher)
         await db.refresh(edited)
-        await document_versions.publish_revision(
-            db, document_id=doc.id, revision_id=edited.id,
-            teacher_id=teacher.id, expected_generation=doc.generation,
-            acknowledge_issues=True,
-        )
-        await db.commit()
+        assert doc.current_revision_id == edited.id
         old_tools = ResearchTools(db, old_scope)
         old_result = await old_tools.execute('search', {'query': 'Définition θ₁'})
         assert old_result['ok'] and old_result['items']

@@ -16,7 +16,6 @@ from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import ClassStudent, Document, DocumentPage, DocumentRevision, EMBEDDING_DIM, Session
 from backend.app.routers.teacher import get_storage_root
-from backend.app.services import document_versions
 from backend.tests.conftest import make_client, make_user
 from backend.tests.test_structured_ingest import seed
 from backend.worker import structured_ingest as si
@@ -41,7 +40,6 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
     app.dependency_overrides[get_storage_root] = lambda: str(storage)
     try:
         teacher, _, lab, _ = await seed(db)
-        teacher_id = teacher.id
         client = await make_client(db, teacher)
         async with client:
             uploaded = await client.post(f'/api/teacher/labs/{lab.id}/documents',
@@ -70,7 +68,7 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
         assert await process_index_job(db, embed_fn=embed)
         doc = await db.get(Document, uuid.UUID(ids['id']), populate_existing=True)
         rev = await db.get(DocumentRevision, uuid.UUID(ids['revision_id']), populate_existing=True)
-        document_id, revision_id, generation = doc.id, rev.id, doc.generation
+        document_id, revision_id = doc.id, rev.id
         assert rev.index_ready and len((await db.scalars(select(DocumentPage).where(
             DocumentPage.revision_id == rev.id))).all()) == 14
         student, outsider = make_user(), make_user()
@@ -85,15 +83,8 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
         page9_id = page9.page_id
         base = f'/api/documents/{document_id}/revisions/{revision_id}'
         params = {'session_id': str(session.id)}
-        client = await make_client(db, student)
-        async with client:
-            before = await client.get(f'{base}/pages/{page9_id}', params=params)
-        assert before.status_code == 404
-
-        await document_versions.publish_revision(db, document_id=document_id, revision_id=revision_id,
-                                                 teacher_id=teacher_id, expected_generation=generation,
-                                                 acknowledge_issues=True)
-        await db.commit()
+        # Every page was read, so the version was published when it was indexed.
+        assert doc.current_revision_id == revision_id
         client = await make_client(db, student)
         async with client:
             opened = await client.get(f'{base}/pages/{page9_id}', params=params)

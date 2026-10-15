@@ -105,7 +105,7 @@ async def discard_staged(db, storage_root, key) -> None:
         await db.rollback()
 
 
-async def _upload_structured(db, *, teacher_id, lab, shared: bool, filename, content: bytes, language: str,
+async def _upload_structured(db, *, teacher_id, lab, shared: bool, filename, content: bytes,
                              storage_root, mode: str = 'new', replace_document_id=None,
                              expected_generation: int | None = None) -> UploadResult:
     versions._enabled()
@@ -151,7 +151,6 @@ async def _upload_structured(db, *, teacher_id, lab, shared: bool, filename, con
         if mode == 'new':
             doc = await versions.new_document(db, teacher_id=teacher_id, class_id=lab.class_id,
                                               lab_id=lab_scope, filename=name, document_id=document_id)
-            doc.language = language
             generation = doc.generation
         else:
             generation = expected_generation

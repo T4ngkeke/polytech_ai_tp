@@ -11,6 +11,7 @@ import pytest
 from backend.app.services.retrieval_service import (
     ChunkHit,
     apply_rerank,
+    detect_language,
     reciprocal_rank_fusion,
 )
 
@@ -152,3 +153,11 @@ async def test_threshold_skipped_when_reranker_fails():
 
     assert [h.content for h in out] == ["aaa"]
     assert all_filtered is False
+
+
+def test_language_comes_from_the_text_french_on_a_tie():
+    assert detect_language(["Une restriction garde les tuples qui vérifient la condition."]) == "fr"
+    assert detect_language(["The selection keeps the tuples that satisfy the condition."]) == "en"
+    # A French course with English code stays French; code alone is a tie.
+    assert detect_language(["Le parcours de l'arbre est récursif.", "for node in tree: print(node)"]) == "fr"
+    assert detect_language(["SELECT * FROM t;"]) == "fr"

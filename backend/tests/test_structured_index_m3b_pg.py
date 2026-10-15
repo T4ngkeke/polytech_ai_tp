@@ -28,13 +28,10 @@ async def test_pg_pdf_index_and_release_are_revision_scoped(m1_pg,tmp_path,monke
             doc=await db.get(Document,ids[0],populate_existing=True)
             rev=await db.get(DocumentRevision,ids[1],populate_existing=True)
             job=await db.get(IngestionJob,ids[3],populate_existing=True)
-            assert job.status==JobStatus.done and rev.index_ready and rev.processing_state=='partial'
+            assert job.status==JobStatus.done and rev.index_ready and rev.processing_state=='ready'
+            assert doc.current_revision_id==rev.id   # every page read: published at once
             chunks=(await db.scalars(select(DocChunk).where(DocChunk.revision_id==rev.id))).all()
             assert chunks and all(c.tsv is not None for c in chunks)
-            assert not await bm25_search(db,'Définition',doc.lab_id,class_id=doc.class_id)
-            await document_versions.publish_revision(db,document_id=doc.id,revision_id=rev.id,
-                teacher_id=ids[2],expected_generation=doc.generation,acknowledge_issues=True)
-            await db.commit()
             hits=await bm25_search(db,'Définition',doc.lab_id,class_id=doc.class_id)
             assert hits and all(h.document_id==doc.id and h.page_no==1 and
                 h.revision_id==rev.id and h.block_id is not None and

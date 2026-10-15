@@ -25,7 +25,7 @@ async def test_pg_pdf_job_is_fenced_and_persists_draft(m1_pg,tmp_path,monkeypatc
         teacher,lab=await seed(db)
         content=pdf_bytes()
         result=await structured_upload.upload_pdf(db,teacher_id=teacher.id,lab=lab,shared=False,
-            filename='lecture.pdf',content=content,language='fr',storage_root=storage)
+            filename='lecture.pdf',content=content,storage_root=storage)
         job=await db.scalar(select(IngestionJob).where(IngestionJob.revision_id==result.revision.id))
         assert job.task_kind=='pdf_parse' and job.status==JobStatus.queued
         def fake_pipeline(source,digest,work_dir,*,settings,extractor=None):

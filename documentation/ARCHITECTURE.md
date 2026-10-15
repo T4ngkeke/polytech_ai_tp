@@ -75,8 +75,10 @@ A deferred, load-aware worker that never preempts live students. Details:
   and a lease): MinerU reads each page (`structured_ingest.py`), the parsed
   draft is stored as pages, blocks and assets, then the same job indexes it
   (`structured_index.py`: exact character ranges, BGE-M3 embeddings, a BM25
-  `tsvector` in the document's language). A draft becomes searchable only when
-  the teacher publishes it.
+  `tsvector` in the language of the text, French or English, found from its
+  common words). When every page was read, the new version is published at
+  once; when a page could not be read, it stays a draft and the teacher
+  publishes it from the document view ("Publish anyway").
 - **"When to run" lives in the worker** (`gpu_gate.py`): the primary signal is
   live chat load (recent messages in the DB, with hysteresis); the GPU idle
   check (`pynvml`) is an optional extra condition that no-ops without a local

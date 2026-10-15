@@ -220,7 +220,6 @@ async def upload_document(
     lab_id: uuid.UUID,
     response: Response,
     file: UploadFile = File(...),
-    language: str = Form("fr"),
     shared: bool = Form(False),
     mode: str = Form("new"),
     replace_document_id: uuid.UUID | None = Form(None),
@@ -232,15 +231,15 @@ async def upload_document(
     """Upload a course document (PDF, Markdown or HTML) to a lab the teacher
     owns; enqueues ingestion.
 
-    The form asks for the file and nothing else that matters: `language` selects
-    the BM25 text-search config. `shared` (older clients) makes the document
-    class-wide, as an upload to /classes/{class_id}/documents does.
+    The form asks for the file and nothing else that matters: the language is
+    found from the text when it is indexed. `shared` (older clients) makes the
+    document class-wide, as an upload to /classes/{class_id}/documents does.
     There is no type to declare and no audience to pick — everything uploaded is
     course material the whole class can read.
     """
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
-    return await _store_upload(db, response, scope=lab, shared=shared, file=file, language=language,
+    return await _store_upload(db, response, scope=lab, shared=shared, file=file,
                                mode=mode, replace_document_id=replace_document_id,
                                expected_generation=expected_generation, teacher=teacher,
                                storage_root=storage_root)
@@ -251,7 +250,6 @@ async def upload_class_document(
     class_id: uuid.UUID,
     response: Response,
     file: UploadFile = File(...),
-    language: str = Form("fr"),
     mode: str = Form("new"),
     replace_document_id: uuid.UUID | None = Form(None),
     expected_generation: int | None = Form(None, ge=0),
@@ -264,13 +262,13 @@ async def upload_class_document(
     await _verify_class_ownership(db, class_id, teacher)
     # The upload code needs a class id and a lab id; a class-wide document has none.
     scope = SimpleNamespace(id=None, class_id=class_id)
-    return await _store_upload(db, response, scope=scope, shared=True, file=file, language=language,
+    return await _store_upload(db, response, scope=scope, shared=True, file=file,
                                mode=mode, replace_document_id=replace_document_id,
                                expected_generation=expected_generation, teacher=teacher,
                                storage_root=storage_root)
 
 
-async def _store_upload(db, response, *, scope, shared, file, language, mode,
+async def _store_upload(db, response, *, scope, shared, file, mode,
                         replace_document_id, expected_generation, teacher, storage_root):
     """One upload in a lab (scope: the Lab) or class-wide (shared). PDF only: it
     goes to the structured path (MinerU, then indexing)."""
@@ -283,12 +281,12 @@ async def _store_upload(db, response, *, scope, shared, file, language, mode,
     if not (settings.PDF_STRUCTURED_INGEST_ENABLED and settings.STRUCTURED_INGEST_ENABLED):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="structured_ingest_disabled")
     return await _upload_structured(
-        db, response, lab=scope, file=file, language=language, shared=shared, mode=mode,
+        db, response, lab=scope, file=file, shared=shared, mode=mode,
         replace_document_id=replace_document_id, expected_generation=expected_generation,
         teacher=teacher, storage_root=storage_root)
 
 
-async def _upload_structured(db, response, *, lab, file, language, shared, mode,
+async def _upload_structured(db, response, *, lab, file, shared, mode,
                              replace_document_id, expected_generation, teacher, storage_root):
     """A structured PDF upload: new document or replacement, one parse job each."""
     from backend.app.services import structured_upload
@@ -306,7 +304,7 @@ async def _upload_structured(db, response, *, lab, file, language, shared, mode,
     try:
         result = await structured_upload.upload_pdf(
             db, teacher_id=teacher.id, lab=lab, shared=shared, filename=file.filename,
-            content=content, language=language, storage_root=storage_root, mode=mode,
+            content=content, storage_root=storage_root, mode=mode,
             replace_document_id=replace_document_id, expected_generation=expected_generation)
     except structured_upload.UploadRejected as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None

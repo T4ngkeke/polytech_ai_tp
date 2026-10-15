@@ -1,4 +1,4 @@
-"""M3-B PDF indexing: exact ranges, draft isolation and failed embedding."""
+"""M3-B PDF indexing: exact ranges, publication when every page was read, failed embedding."""
 import uuid
 
 import pytest
@@ -75,8 +75,11 @@ async def test_index_draft_and_teacher_edit_rebuild(db_session,tmp_path,monkeypa
             return [[0.0]*(EMBEDDING_DIM-1)+[1.0] for _ in texts]
         assert await process_index_job(db,embed_fn=embed)
         await db.refresh(rev);await db.refresh(job);await db.refresh(doc);await db.refresh(teacher)
-        assert rev.processing_state=='partial' and rev.index_ready
-        assert rev.publication_state=='draft' and doc.current_revision_id is None
+        # Every page was read: the version is published at once. A figure
+        # without text is normal in a PDF, not a reason to hold it back.
+        assert rev.processing_state=='ready' and rev.index_ready
+        assert rev.publication_state=='published' and doc.current_revision_id==rev.id
+        assert doc.status.value=='indexed' and doc.error_message is None
         assert job.status==JobStatus.done
         chunks=(await db.scalars(select(DocChunk).where(DocChunk.revision_id==rev.id).order_by(DocChunk.chunk_index))).all()
         assert len(chunks)==len(calls) and len(chunks)>5
@@ -88,10 +91,6 @@ async def test_index_draft_and_teacher_edit_rebuild(db_session,tmp_path,monkeypa
             assert ''.join(c.content for c in parts)==block.content
             assert all(c.content==block.content[c.content_start:c.content_end] for c in parts)
             assert all(c.page_no==1 and c.source_ref.get('format')=='pdf' for c in parts)
-        assert not (await db.scalars(_scope(select(DocChunk),doc.lab_id,doc.class_id))).all()
-        await document_versions.publish_revision(db,document_id=doc.id,revision_id=rev.id,
-            teacher_id=teacher.id,expected_generation=doc.generation,acknowledge_issues=True)
-        await db.commit()
         assert (await db.scalars(_scope(select(DocChunk),doc.lab_id,doc.class_id))).all()
         text_block=next(b for b in blocks.values() if b.kind=='text')
         text_block_id=text_block.block_id
@@ -103,15 +102,45 @@ async def test_index_draft_and_teacher_edit_rebuild(db_session,tmp_path,monkeypa
         assert new_job.task_kind=='pdf_index' and new_job.status==JobStatus.queued
         assert await process_index_job(db,embed_fn=embed)
         await db.refresh(new);await db.refresh(doc);await db.refresh(rev)
-        assert new.index_ready and new.processing_state=='partial'
-        assert doc.current_revision_id==rev.id
+        assert new.index_ready and new.processing_state=='ready'
+        assert doc.current_revision_id==new.id
         new_chunks=(await db.scalars(select(DocChunk).where(DocChunk.revision_id==new.id,
                        DocChunk.block_id==text_block_id))).all()
         assert ''.join(c.content for c in new_chunks)=='Texte corrigé par enseignant'
         assert all(c.edited_by_teacher for c in new_chunks)
-        # Search still uses the old published revision until explicit publication.
+        # The teacher's edit is what students search now.
         visible=(await db.scalars(_scope(select(DocChunk),doc.lab_id,doc.class_id))).all()
-        assert all(c.revision_id==rev.id for c in visible)
+        assert visible and all(c.revision_id==new.id for c in visible)
+    finally:
+        app.dependency_overrides.pop(get_storage_root,None)
+
+
+@pytest.mark.asyncio
+async def test_unread_page_waits_for_the_teacher(db_session,tmp_path,monkeypatch):
+    try:
+        db=db_session
+        doc,rev,teacher,_=await _parsed_pdf(db,tmp_path,monkeypatch)
+        page=await db.scalar(select(DocumentPage).where(DocumentPage.revision_id==rev.id))
+        page.state='partial'
+        slide_no=page.source_slide_no
+        await db.commit()
+        async def embed(texts):
+            return [[0.0]*(EMBEDDING_DIM-1)+[1.0] for _ in texts]
+        assert await process_index_job(db,embed_fn=embed)
+        await db.refresh(rev);await db.refresh(doc);await db.refresh(teacher)
+        assert rev.processing_state=='partial' and rev.publication_state=='draft'
+        assert rev.report['index']['unread_pages']==[slide_no]
+        assert doc.current_revision_id is None
+        target=dict(document_id=doc.id,revision_id=rev.id,teacher_id=teacher.id,
+                    expected_generation=doc.generation)
+        with pytest.raises(document_versions.VersionConflict):
+            await document_versions.publish_revision(db,**target)
+        await db.rollback()
+        await document_versions.publish_revision(db,**target,acknowledge_issues=True)
+        await db.commit()
+        await db.refresh(doc)
+        assert doc.status.value=='partially_indexed'
+        assert doc.error_message==f'Not read: page {slide_no}. Students cannot find their content.'
     finally:
         app.dependency_overrides.pop(get_storage_root,None)
 
@@ -138,6 +167,9 @@ async def test_published_pdf_page_and_original_open_with_session_auth(db_session
     try:
         db=db_session
         doc,rev,teacher,_=await _parsed_pdf(db,tmp_path,monkeypatch)
+        # A page that was not read keeps the version a draft, hidden from students.
+        (await db.scalar(select(DocumentPage).where(DocumentPage.revision_id==rev.id))).state='partial'
+        await db.commit()
         async def embed(texts):
             return [[0.0]*(EMBEDDING_DIM-1)+[1.0] for _ in texts]
         assert await process_index_job(db,embed_fn=embed)

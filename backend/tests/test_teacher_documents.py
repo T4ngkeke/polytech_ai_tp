@@ -7,8 +7,9 @@ overridable dependency pointing at a tmp dir. Only PDF is accepted; Markdown
 and HTML went with the pre-MinerU pipeline (2026-10-15).
 
 The form no longer asks for a type or an audience. Everything a teacher uploads
-is course material and the whole class can see it, so the only remaining choices
-are which lab it belongs to (or the whole class) and what language it is in.
+is course material and the whole class can see it, so the only remaining choice
+is which lab it belongs to (or the whole class). The language is found from the
+text when the PDF is indexed.
 """
 
 import uuid

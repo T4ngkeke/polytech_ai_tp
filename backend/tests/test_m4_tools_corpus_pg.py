@@ -73,11 +73,12 @@ async def publish_frozen_pdf(db, teacher, lab_id, storage, tmp_path, monkeypatch
     doc = await db.get(Document, uuid.UUID(upload['id']), populate_existing=True)
     rev = await db.get(DocumentRevision, uuid.UUID(upload['revision_id']), populate_existing=True)
     assert rev.index_ready
-    await db.refresh(teacher)
-    await document_versions.publish_revision(db, document_id=doc.id,
-        revision_id=rev.id, teacher_id=teacher.id,
-        expected_generation=doc.generation, acknowledge_issues=True)
-    await db.commit()
+    if doc.current_revision_id != rev.id:   # a page was not read: the teacher publishes
+        await db.refresh(teacher)
+        await document_versions.publish_revision(db, document_id=doc.id,
+            revision_id=rev.id, teacher_id=teacher.id,
+            expected_generation=doc.generation, acknowledge_issues=True)
+        await db.commit()
 
 
 @pytest.mark.asyncio

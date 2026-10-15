@@ -167,10 +167,9 @@ async def validate_publishable(db, rev, *, acknowledge_issues):
         raise VersionConflict('empty_revision')
     if rev.report.get('preview_mapping_valid') is not True:
         raise VersionConflict('preview_mapping_unverified')
-    if rev.processing_state == 'ready' and (rev.report.get('source_coverage_complete') is not True
-            or rev.report.get('issues') or any(p.state != 'usable' or p.issues for p in pages)
-            or any(b.index_state == 'needs_review' or b.issues or
-                   (b.index_state != 'excluded' and b.source_completeness != 'complete') for b in blocks)):
+    # Ready means every page was read. Figures without text and blocks MinerU
+    # cannot vouch for (formulas, tables, code) are normal in a PDF, not issues.
+    if rev.processing_state == 'ready' and (rev.report.get('issues') or any(p.state != 'usable' for p in pages)):
         raise VersionConflict('unresolved_issues')
     for page in pages:
         if page.state != 'unavailable' and page.preview_page_no is None:
@@ -205,6 +204,12 @@ async def validate_publishable(db, rev, *, acknowledge_issues):
             raise VersionConflict('incomplete_index')
 
 
+def unread_pages_message(pages) -> str:
+    if not pages:
+        return 'Some content could not be read.'
+    return f"Not read: page{'s' if len(pages) > 1 else ''} {', '.join(map(str, pages))}. Students cannot find their content."
+
+
 async def publish_revision(db, *, document_id, revision_id, teacher_id,
                            expected_generation, acknowledge_issues=False):
     doc = await owned_document(db, document_id, teacher_id)
@@ -218,7 +223,11 @@ async def publish_revision(db, *, document_id, revision_id, teacher_id,
     rev.publication_state = 'published'
     rev.published_at = _utcnow()
     doc.current_revision_id = rev.id
+    # The language the chunks were indexed with; searches use the document's.
+    doc.language = ((rev.report or {}).get('index') or {}).get('language') or doc.language
     doc.status = DocumentStatus.indexed if rev.processing_state == "ready" else DocumentStatus.partially_indexed
+    doc.error_message = (unread_pages_message(((rev.report or {}).get('index') or {}).get('unread_pages'))
+                         if rev.processing_state == "partial" else None)
     doc.ingest_report = copy.deepcopy(rev.report)
     doc.page_count = await db.scalar(select(func.count()).select_from(DocumentPage).where(DocumentPage.revision_id == rev.id))
     await db.flush()
