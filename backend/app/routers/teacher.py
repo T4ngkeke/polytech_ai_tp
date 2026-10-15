@@ -74,7 +74,6 @@ from backend.app.services import (
     document_service,
     document_reviews,
     lab_service,
-    router_service,
     rule_service,
     session_service,
     skill_preset_service,
@@ -516,7 +515,7 @@ async def create_test_session(
 ) -> TestSessionResponse:
     """[v8.0 §11A] Open a test-drive session on a lab the teacher owns — chat as a
     preview (membership bypassed, writes excluded from
-    analytics/LearnerProfile)."""
+    analytics and the citation report)."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
     session = await session_service.create_session(

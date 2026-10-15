@@ -134,16 +134,10 @@ class LLMConfigRequest(BaseModel):
     ingest_base_url: str | None = None
     ingest_api_key: str | None = None
     ingest_model: str | None = None
-    router_base_url: str | None = None
-    router_api_key: str | None = None
-    router_model: str | None = None
-    rag_max_retries: str | None = None
-    # Agent slot (the reasoning model behind the retrieval loop) + injection gate
-    # + the per-document ingest budget.
+    # Agent slot (the research agent's model) + the per-document ingest budget.
     agent_base_url: str | None = None
     agent_api_key: str | None = None
     agent_model: str | None = None
-    rerank_score_threshold: str | None = None
     ingest_token_budget: str | None = None
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str | None = None
@@ -179,16 +173,10 @@ class LLMConfigResponse(BaseModel):
     ingest_base_url: str = ""
     ingest_api_key: str = ""
     ingest_model: str = ""
-    router_base_url: str = ""
-    router_api_key: str = ""
-    router_model: str = ""
-    rag_max_retries: str = ""
-    # Raw stored values — agent slot empty = inherits main LLM;
-    # threshold empty = injection gate OFF (until calibrated).
+    # Raw stored values — agent slot empty = inherits main LLM.
     agent_base_url: str = ""
     agent_api_key: str = ""
     agent_model: str = ""
-    rerank_score_threshold: str = ""
     ingest_token_budget: str = ""
     # [v8.1] estimated-token budget for chat history (OOM protection).
     context_max_tokens: str = ""
@@ -320,12 +308,6 @@ class ChunkUpdateRequest(BaseModel):
 class TestSessionResponse(BaseModel):
     """[v8.0 §11A] The id of a freshly created teacher test-drive session."""
     session_id: uuid.UUID
-
-
-class HealthDegradationsResponse(BaseModel):
-    """[v8.0 §11D] Admin health panel: per-fallback counts over a recent window."""
-    window_minutes: int
-    degradations: dict[str, int]
 
 
 class LabUpdateRequest(BaseModel):
@@ -530,8 +512,6 @@ class PruneResponse(BaseModel):
     dry_run: bool = False
     sessions_deleted: int
     messages_deleted: int
-    router_logs_deleted: int = 0
-    trace_logs_deleted: int = 0
 
 
 class DailyUsage(BaseModel):

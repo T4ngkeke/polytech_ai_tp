@@ -41,10 +41,8 @@ from backend.app.config import settings
 from backend.app.auth import hash_password, require_admin
 from backend.app.database import get_db
 from backend.app.models import (
-    AgentTraceLog,
     Class,
     Message,
-    RouterQueryLog,
     Session,
     SystemConfig,
     User,
@@ -57,7 +55,6 @@ from backend.app.schemas import (
     ClassResponse,
     CSVImportPreviewResponse,
     DailyUsage,
-    HealthDegradationsResponse,
     LabResponse,
     LabUpdateRequest,
     LLMConfigRequest,
@@ -70,7 +67,7 @@ from backend.app.schemas import (
     UserCreateRequest,
     UserResponse,
 )
-from backend.app.services import class_service, lab_service, analytics_service, trace_service
+from backend.app.services import class_service, lab_service, analytics_service
 from backend.app.services.model_routing import resolve_model_routing
 from backend.app.services.research_service import DEFAULT_LIMITS, LIMIT_KEYS, limit_value
 
@@ -249,15 +246,10 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "ingest_base_url": "INGEST_BASE_URL",
     "ingest_api_key": "INGEST_API_KEY",
     "ingest_model": "INGEST_MODEL",
-    "router_base_url": "ROUTER_BASE_URL",
-    "router_api_key": "ROUTER_API_KEY",
-    "router_model": "ROUTER_MODEL",
-    "rag_max_retries": "RAG_MAX_RETRIES",
-    # Agent slot + injection gate + worker budget.
+    # Agent slot + worker budget.
     "agent_base_url": "AGENT_BASE_URL",
     "agent_api_key": "AGENT_API_KEY",
     "agent_model": "AGENT_MODEL",
-    "rerank_score_threshold": "RERANK_SCORE_THRESHOLD",
     "ingest_token_budget": "INGEST_TOKEN_BUDGET",
     # [v8.1] estimated-token budget for chat history (OOM protection).
     "context_max_tokens": "CONTEXT_MAX_TOKENS",
@@ -651,17 +643,6 @@ async def prune_old_data(
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=body.older_than_days)
 
-    # [v8.0] Aged telemetry logs are pruned independently of sessions.
-    router_logs_deleted = (await db.execute(
-        select(func.count(RouterQueryLog.id)).where(RouterQueryLog.created_at < cutoff)
-    )).scalar_one()
-    trace_logs_deleted = (await db.execute(
-        select(func.count(AgentTraceLog.id)).where(AgentTraceLog.created_at < cutoff)
-    )).scalar_one()
-    if not body.dry_run:
-        await db.execute(delete(RouterQueryLog).where(RouterQueryLog.created_at < cutoff))
-        await db.execute(delete(AgentTraceLog).where(AgentTraceLog.created_at < cutoff))
-
     old_sessions_result = await db.execute(select(Session.id).where(Session.created_at < cutoff))
     old_session_ids = [row[0] for row in old_sessions_result.all()]
 
@@ -681,19 +662,4 @@ async def prune_old_data(
         dry_run=body.dry_run,
         sessions_deleted=len(old_session_ids),
         messages_deleted=messages_deleted,
-        router_logs_deleted=router_logs_deleted,
-        trace_logs_deleted=trace_logs_deleted,
     )
-
-
-@router.get("/health/degradations", response_model=HealthDegradationsResponse)
-async def health_degradations(
-    window_minutes: int = Query(60, ge=1, le=1440),
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-) -> HealthDegradationsResponse:
-    """[v8.0 §11D] Health panel: per-fallback counts of recent silent degradations
-    (router / embedding / rerank / all_filtered) — makes graceful degradation
-    visible to admins instead of invisible."""
-    counts = await trace_service.recent_degradation_counts(db, window_minutes)
-    return HealthDegradationsResponse(window_minutes=window_minutes, degradations=counts)

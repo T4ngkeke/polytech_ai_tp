@@ -2,12 +2,11 @@
 model_routing.py — [v7.2] resolve the dynamic ``system_configs`` key/value map into
 a structured model-routing config.
 
-v7.2 splits the single LLM into a routing table: generation, embedding, rerank,
-ingestion (off-peak worker) and router (live exercise-number fallback) each have
+The single LLM is split into a routing table: the default model, embedding,
+rerank, ingestion (off-peak worker), the research agent and vision each have
 their own optional endpoint/key/model. The rule is **opt-in fallback**: an empty
-endpoint/key/model falls back to the main LLM, so existing single-engine setups
-behave exactly as before, while an admin can point ingestion/router at a cheap
-model without sharing the chat model's RPM pool.
+endpoint/key/model falls back to the main LLM, so a single-engine setup works
+as is, while an admin can point a role at another model.
 
 Pure function over a plain mapping — no DB, no HTTP — so it is trivially testable.
 """
@@ -41,9 +40,6 @@ class ModelRouting:
     embedding: Endpoint
     rerank: Endpoint
     ingest: Endpoint
-    # [v7.3] The live auxiliary model: router classification, self-eval verdict
-    # and query rewrite all share this slot (same latency/cost profile).
-    router: Endpoint
     # The agent's reasoning model — the retrieval loop's planner. Point it at
     # the BIG model: quality over latency.
     agent: Endpoint
@@ -52,9 +48,6 @@ class ModelRouting:
     vlm: Endpoint
     token_alpha: float
     token_beta: float
-    # [v7.3] Absolute relevance floor for context injection. None = gate off
-    # (ships disabled until calibrated on the golden set).
-    rerank_score_threshold: float | None
     # Worker budget: estimated tokens per document (observed, never enforced).
     ingest_token_budget: int
 
@@ -107,12 +100,6 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         model=_get(configs, "INGEST_MODEL", main_model),
     )
 
-    router = Endpoint(
-        base_url=_get(configs, "ROUTER_BASE_URL", main_base),
-        api_key=_get(configs, "ROUTER_API_KEY", main_key),
-        model=_get(configs, "ROUTER_MODEL", main_model),
-    )
-
     agent = Endpoint(
         base_url=_get(configs, "AGENT_BASE_URL", main_base),
         api_key=_get(configs, "AGENT_API_KEY", main_key),
@@ -129,22 +116,14 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         model=_get(configs, "VLM_MODEL", ""),
     )
 
-    raw_threshold = _get(configs, "RERANK_SCORE_THRESHOLD", "")
-    try:
-        threshold: float | None = float(raw_threshold) if raw_threshold else None
-    except (TypeError, ValueError):
-        threshold = None
-
     return ModelRouting(
         llm=llm,
         embedding=embedding,
         rerank=rerank,
         ingest=ingest,
-        router=router,
         agent=agent,
         vlm=vlm,
         token_alpha=_to_float(_get(configs, "TOKEN_ALPHA", ""), _DEFAULT_TOKEN_ALPHA),
         token_beta=_to_float(_get(configs, "TOKEN_BETA", ""), _DEFAULT_TOKEN_BETA),
-        rerank_score_threshold=threshold,
         ingest_token_budget=_to_int(_get(configs, "INGEST_TOKEN_BUDGET", ""), 200_000),
     )

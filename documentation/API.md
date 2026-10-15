@@ -33,7 +33,7 @@
 | PUT | `/api/admin/users/{id}/quota` | require_admin | Update user's daily token quota. |
 | DELETE | `/api/admin/users/{id}` | require_admin | Soft-delete a user. |
 | POST | `/api/admin/users/import` | require_admin | CSV Bulk Import. Dry-run by default. `?force=true` executes. |
-| GET | `/api/admin/llm/config` | require_admin | Read the current model-routing config: the main LLM, plus the embedding / rerank / ingest / router / agent / vision slots, the cost weights and the budgets. |
+| GET | `/api/admin/llm/config` | require_admin | Read the current model-routing config: the main LLM, plus the embedding / rerank / ingest / agent / vision slots, the cost weights and the budgets. |
 | PUT | `/api/admin/llm/config` | require_admin | Zero-downtime update of SystemConfigs (all keys above). An empty slot falls back to the main LLM — except the vision slot, where empty means the feature is off. |
 | GET | `/api/admin/classes` | require_admin | God Mode: List all classes across the system (no ownership filter). |
 | GET | `/api/admin/classes/{class_id}/labs` | require_admin | God Mode: List all labs in a class. |
@@ -46,9 +46,8 @@
 | GET | `/api/admin/analytics` | require_admin | Global platform-wide token usage dashboard (hierarchical). |
 | GET | `/api/admin/analytics/classes/{class_id}` | require_admin | Per-class hierarchical analytics (class→lab→student). |
 | DELETE | `/api/admin/sessions/{session_id}` | require_admin | Hard-delete a specific session to purge inappropriate content. |
-| POST | `/api/admin/maintenance/prune` | require_admin | Bulk hard-delete sessions/messages older than X days. Also prunes `RouterQueryLog` + `AgentTraceLog`. |
+| POST | `/api/admin/maintenance/prune` | require_admin | Bulk hard-delete sessions/messages older than `older_than_days`. With `dry_run: true`, only counts what would be deleted (shown before confirming). |
 | GET | `/api/admin/ingestion/jobs` | require_admin | Inspect the ingestion queue (status, attempts, errors). |
-| GET | `/api/admin/health/degradations` | require_admin | Health panel: per-fallback counts (router / embedding / rerank / all_filtered) over a recent window (`?window_minutes=`). |
 
 ### B. Teacher Audit & Control
 
@@ -105,10 +104,10 @@
 | PUT | `/api/student/sessions/{session_id}` | get_current_user | Rename a chat session title (cosmetic only). |
 | DELETE | `/api/student/sessions/{session_id}` | get_current_user | **Soft-delete (hide)** own session: sets `is_deleted=True`. Hidden from the student; retained and teacher/admin-visible. **IDOR check required.** |
 | GET | `/api/student/usage` | get_current_user | Today's token usage vs. daily quota. |
-| POST | `/api/chat/stream` | get_current_user | Core chat endpoint. Scoped by `session_id`. SSE streaming. With `AGENTIC_SEARCH_ENABLED` and a lab session: the research agent (see below); otherwise the LangGraph agent. |
+| POST | `/api/chat/stream` | get_current_user | Core chat endpoint. Scoped by `session_id`. SSE streaming. The research agent answers (see below); it needs `AGENTIC_SEARCH_ENABLED` (else `503 chat_not_enabled`) and a session in a lab (else `400 session_without_lab`). |
 | POST | `/api/chat/messages/{message_id}/feedback` | get_current_user | 👍/👎 on an assistant message (body `{feedback: up\|down}`). A student may only rate a message in a session they own. |
 
-#### Research agent (opt-in: `AGENTIC_SEARCH_ENABLED`)
+#### Research agent (`AGENTIC_SEARCH_ENABLED`)
 
 For a session in a lab, `POST /api/chat/stream` answers in one of three
 modes over the published PDF revisions of the lab and its class. The answer

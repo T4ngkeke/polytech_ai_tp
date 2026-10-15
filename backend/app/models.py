@@ -171,13 +171,6 @@ class JobStatus(str, enum.Enum):
     failed = "failed"
 
 
-class CoachingLevel(str, enum.Enum):
-    """How much scaffolding the tutor applies, from the effort window."""
-    neutral = "neutral"
-    low = "low"
-    high = "high"
-
-
 class JobType(str, enum.Enum):
     """Ingestion-queue job kind. Only one kind survives, but the column stays so
     the worker's dispatch point is still there if a second one is ever added."""
@@ -462,8 +455,7 @@ class Session(Base):
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Teacher test-drive session: the owning teacher chats against their own lab
-    # to preview the tutor. Excluded from analytics / router-training /
-    # learner-profile writes.
+    # to preview the tutor. Excluded from analytics and the citation report.
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -707,117 +699,6 @@ class DocChunk(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<DocChunk id={self.id} doc={self.document_id} idx={self.chunk_index}>"
-
-
-# ---------------------------------------------------------------------------
-# 13. LearnerProfile — prompt-literacy coaching (per student + lab)
-# ---------------------------------------------------------------------------
-
-
-class LearnerProfile(Base):
-    __tablename__ = "learner_profiles"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    lab_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("labs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    # Smoothed sliding-window effort/clarity score (0..1).
-    effort_ema: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    coaching_level: Mapped[CoachingLevel] = mapped_column(
-        Enum(CoachingLevel, name="coachinglevel"), nullable=False, default=CoachingLevel.neutral
-    )
-    # Throttle marker for the explicit "how to ask" tip.
-    last_tip_msg_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    teacher_override: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
-    )
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "lab_id", name="uq_learner_profile_user_lab"),
-    )
-
-    def __repr__(self) -> str:  # pragma: no cover
-        return (
-            f"<LearnerProfile user={self.user_id} lab={self.lab_id} "
-            f"ema={self.effort_ema:.2f} level={self.coaching_level}>"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 14. RouterQueryLog — one row per routing decision
-# ---------------------------------------------------------------------------
-
-
-class RouterQueryLog(Base):
-    """Write-only log of EVERY LLM-router decision.
-
-    Records the route for each message so a future distilled router has a
-    labelled source. `degraded` marks timeout/failure fallbacks — not a real
-    label, so it must be excludable when distilling. `is_test` marks teacher
-    test-drive traffic (also excluded). Nothing in the live path reads it back.
-    """
-    __tablename__ = "router_query_logs"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    message: Mapped[str] = mapped_column(Text, nullable=False)
-    route: Mapped[str] = mapped_column(String(16), nullable=False)
-    degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-
-    def __repr__(self) -> str:  # pragma: no cover
-        return f"<RouterQueryLog route={self.route} degraded={self.degraded}>"
-
-
-# ---------------------------------------------------------------------------
-# 15. AgentTraceLog — per-message observability
-# ---------------------------------------------------------------------------
-
-
-class AgentTraceLog(Base):
-    """Write-only, one row per chat message: which route, per-node latencies,
-    which fallbacks fired, retrieval/threshold counts, and the self-eval verdict.
-
-    This is the data source that decides the self-eval loop's fate (bad-verdict
-    rate / retry-flip rate / false-grounding rate) and calibrates the rerank
-    threshold. Nothing in the live path reads it. Soft references (nullable GUIDs)
-    for message/lab so the async write never fights row-creation ordering.
-    """
-    __tablename__ = "agent_trace_logs"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
-    session_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
-    lab_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
-    route: Mapped[str] = mapped_column(String(32), nullable=False)
-    # Per-node milliseconds: router / retrieval / rerank / selfeval / first-token.
-    node_latencies: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # Which fallbacks fired: router / embedding / rerank / all_filtered.
-    degraded_flags: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    recall_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    rerank_filtered_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    all_filtered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    verdict: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    retry_flipped: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Optional regex injection-attempt marker (log-only, teacher-audit sort key).
-    red_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-
-    def __repr__(self) -> str:  # pragma: no cover
-        return f"<AgentTraceLog msg={self.message_id} route={self.route}>"
 
 
 class DocumentReview(Base):

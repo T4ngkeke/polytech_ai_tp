@@ -39,26 +39,20 @@ token tracking, and hybrid retrieval over course documents.
 > | `RERANK_URL` | empty | A real rerank endpoint (the full path accepting `{query, documents}`), not a chat `…/v1` base |
 > | `RERANK_MODEL` | `bge-reranker-v2-m3` | Reranker model. Unset or failing → retrieval degrades to fusion-only order |
 > | `RERANK_API_KEY` | empty | Key for `RERANK_URL` |
-> | `RAG_MAX_RETRIES` | `1` | How many bounded self-eval re-retrievals a bad verdict may trigger |
 > | `INGEST_MODEL` | empty → `LLM_MODEL` | Cheap model the **off-peak worker** uses for per-chunk Contextual Retrieval |
 > | `INGEST_BASE_URL` | empty → `LLM_BASE_URL` | Ingestion endpoint (e.g. local 30B) |
 > | `INGEST_API_KEY` | empty → `LLM_API_KEY` | Ingestion key |
-> | `ROUTER_MODEL` | empty → `LLM_MODEL` | Cheap model for the **live** auxiliary calls: intent routing, the self-eval verdict, query rewriting |
-> | `ROUTER_BASE_URL` | empty → `LLM_BASE_URL` | Router endpoint |
-> | `ROUTER_API_KEY` | empty → `LLM_API_KEY` | Router key |
 > | `TOKEN_ALPHA` | `0.2` | Prefill (prompt) weight for billed-token quota |
 > | `TOKEN_BETA` | `1.0` | Decode (completion) weight for billed-token quota |
 >
-> Ingestion (off-peak) and router (live) have different latency/cost needs, so they are
-> configured independently; point them at the same endpoint to reuse one engine.
+> Each slot can point at the same endpoint to reuse one engine.
 >
 > **Other keys.** `AGENT_MODEL` / `AGENT_BASE_URL` / `AGENT_API_KEY` (empty → main
 > LLM) — the model that does the reasoning behind retrieval; point it at the
-> **big** model, quality over latency. `RERANK_SCORE_THRESHOLD` (absolute
-> relevance floor for context injection; **ships empty = off** until calibrated
-> on a golden set). `INGEST_TOKEN_BUDGET` (per-document worker budget, observed
-> and reported, never enforced). The admin UI warns when the `ROUTER_*` slot is
-> empty, because auxiliary load then lands silently on the big chat model.
+> **big** model, quality over latency. `INGEST_TOKEN_BUDGET` (per-document
+> worker budget, observed and reported, never enforced). The `ROUTER_*`,
+> `RAG_MAX_RETRIES` and `RERANK_SCORE_THRESHOLD` keys of the removed LangGraph
+> path are no longer read.
 >
 > **Context and vision keys.** `CONTEXT_MAX_TOKENS` (default `8000`) — estimated-token budget (chars÷3,
 > deliberately conservative) for the chat history sent per message; oldest turns are
@@ -135,14 +129,14 @@ token tracking, and hybrid retrieval over course documents.
 | user_id | FK | → Users.id |
 | lab_id | FK | → Labs.id. Sessions are tightly scoped to a specific lab |
 | title | String | Optional display name, renameable by student |
-| is_test | Boolean | Default False. A teacher **test-drive** session: membership bypassed for the owning teacher, excluded from analytics / LearnerProfile / router distillation |
+| is_test | Boolean | Default False. A teacher **test-drive** session: membership bypassed for the owning teacher, excluded from analytics and the citation report |
 | is_deleted | Boolean | Default: False. A **student soft-delete** sets this True (the session is hidden from the student but retained and visible to teacher/admin audit). Teacher/admin can also set it; only admin hard-deletes. |
 | created_at | Timestamp | Timezone-aware (UTC) |
 
 ### 8. Messages & Usage Stats
 Tracks tokens used per user and per message. `Messages` carries `feedback`
 (Enum `up` / `down`, nullable) — a student 👍/👎 on an assistant reply. These are
-free golden-set labels; a 👎 links back to that message's `AgentTraceLog`.
+free golden-set labels.
 `clarification` (JSON, nullable, migration `m4e_clarification_v1`) is set when a
 research answer is a question back to the student: `{"question", "options"}`.
 `answer_mode` (VARCHAR(16), nullable, migration `m4f_answer_modes_v1`) is the mode
@@ -222,50 +216,13 @@ stuck in `processing` past a timeout (crash recovery). Ingestion is idempotent: 
 re-run first deletes the document's old chunks, then rebuilds — so a strategy
 change lands cleanly. Teacher-edited chunks survive the rebuild.*
 
-### 12. LearnerProfiles (prompt-literacy coaching — §8)
-| Column | Type | Constraints / Notes |
-| --- | --- | --- |
-| id | UUID | Primary Key |
-| user_id | FK | → Users.id |
-| lab_id | FK | → Labs.id. Profile is per *(student, lab)* |
-| effort_ema | Float | Smoothed sliding-window effort/clarity score (0–1) |
-| samples | Integer | Number of scored questions so far (cold-start = neutral) |
-| coaching_level | Enum | `neutral` / `low` / `high` — derived from `effort_ema` (hysteresis) |
-| last_tip_msg_index | Integer | Throttle marker for the explicit "how to ask" tip |
-| teacher_override | Boolean | Default False. Teacher can pin/override the profile |
-| updated_at | Timestamp | Timezone-aware (UTC) |
-*Stores structured scores + controlled-vocabulary strategy only — never free-text judgments.*
+### 12–14. Removed: LearnerProfiles, RouterQueryLog, AgentTraceLog
 
-### 13. RouterQueryLog (every routing decision — §6)
-| Column | Type | Constraints / Notes |
-| --- | --- | --- |
-| id | UUID | Primary Key |
-| message | Text | The raw student query |
-| route | String | The LLM router's decision: `rag` / `direct` |
-| degraded | Boolean | True when this was a timeout/failure fallback (`→ rag`) — **not a real label**, so it must be excludable when distilling |
-| is_test | Boolean | The row came from a teacher test-drive — excluded from distillation/aggregation |
-| model_name | String | Router model used (nullable) |
-| prompt_version | String | Router prompt version (nullable) |
-| latency_ms | Integer | Router call latency (nullable) |
-| lab_id | FK | → Labs.id. Nullable |
-| created_at | Timestamp | Timezone-aware (UTC) |
-
-> Write-only: **every** routing decision is logged, not just low-confidence ones,
-> so a future distilled router has a labelled source. Nothing in the live path
-> reads it back.
-
-### 14. AgentTraceLog (per-message observability)
-| Column | Type | Constraints / Notes |
-| --- | --- | --- |
-| id | UUID | Primary Key |
-| message_id / session_id / lab_id | UUID | Soft references (nullable) — the async write never fights row-creation ordering |
-| route | String | Route taken for this message |
-| node_latencies | JSON | Per-node ms: router / retrieval / rerank / selfeval / first-token |
-| degraded_flags | JSON | Which fallbacks fired: router / embedding / rerank / all_filtered — the health panel (§11D) counts these |
-| recall_count / rerank_filtered_count / all_filtered | Integer / Bool | Retrieval + threshold-gate counts |
-| verdict / retry_flipped | String / Bool | Self-eval outcome (feeds the two-week keep/drop decision) |
-| red_flag | Boolean | Log-only injection heuristic (never rejects — sorts the teacher audit) |
-| created_at | Timestamp | Timezone-aware (UTC) |
+These tables belonged to the LangGraph chat path (prompt-literacy coaching,
+router decisions, per-message traces), removed on 2026-10-15. They are no
+longer models and nothing writes them; an existing database keeps the tables
+and their rows until an administrator drops them. The research agent records
+its runs in `agent_runs` and `model_call_usage` (§16).
 
 ### 15. SkillPresets (per-teacher instructor-style library — §5)
 | Column | Type | Constraints / Notes |

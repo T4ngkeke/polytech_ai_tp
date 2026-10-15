@@ -1,35 +1,15 @@
 """
-routers/chat.py — Streaming chat endpoint with 3-tier rule injection & dynamic LLM config.
+routers/chat.py — the streaming chat endpoint.
 
-Execution Flow
---------------
-1. Gate checks
-   - Validate session ownership & is_deleted.
-   - Verify student membership in the class owning the session's lab.
-   - Quota check (UsageStat tokens_used < daily_token_quota).
+1. Gate checks: session ownership, class membership (or the owning teacher's
+   test drive), an open lab, the daily quota.
+2. The teacher's rules (class, lab, student) become part of the system prompt.
+3. The research agent answers in the requested mode — direct, search or
+   research (services/research_service.py); a class in exam mode answers in
+   direct mode only. The answer is saved with its citations and billed call by
+   call before it is sent as server-sent events.
 
-2. Three-Tier Prompt Controller
-   - Fetch session → lab_id → class_id.
-   - Query Rules table for active rules:
-     * level='class', target_id=class_id
-     * level='lab', target_id=lab_id
-     * level='student', target_id=user_id
-   - Concatenate sequentially into a Master System Prompt.
-
-3. Dynamic LLM Proxy (Zero-Downtime)
-   - Fetch LLM_BASE_URL, LLM_API_KEY, LLM_MODEL from SystemConfig table.
-   - Fallback to env-based config if DB rows are missing.
-   - Instantiate AsyncOpenAI client dynamically per request.
-
-4. SSE streaming + token counting
-   - Yield tokens via text/event-stream.
-   - Track completion_tokens from yielded chunks or final usage stats.
-   - Break early on client disconnect (await request.is_disconnected()).
-
-5. BackgroundTasks DB write (after stream finishes)
-   - Insert user message.
-   - Insert LLM message with prompt_tokens + completion_tokens.
-   - Upsert usage_stats (increment tokens_used + request_count for today).
+Models and limits come from SystemConfig (admin) with environment fallbacks.
 """
 
 import asyncio
@@ -39,31 +19,25 @@ import time
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from backend.app.agent.legacy.router import _ROUTER_SCHEMA
-from backend.app.agent.legacy.graph import build_agent
 from backend.app.agent.history import trim_history
 from backend.app.agent.model import ResearchModel
 from backend.app.agent.result import ResearchQuotaExceeded
 from backend.app.agent.tools import create_scope
 from backend.app.config import settings
 from backend.app.auth import get_current_user
-from backend.app.database import AsyncSessionLocal, get_db
+from backend.app.database import get_db
 from backend.app.models import (
     Class,
     ClassStudent,
-    Document,
-    DocumentPage,
-    DocumentRevision,
     Lab,
     Message,
     MessageFeedback,
-    SenderType,
     Session,
     SystemConfig,
     UsageStat,
@@ -71,13 +45,11 @@ from backend.app.models import (
 )
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
 from backend.app.services import rule_service
-from backend.app.services.billing import compute_billed_tokens
 from backend.app.services.model_routing import Endpoint, resolve_model_routing
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
 from backend.app.services.research_service import ResearchLimits, run_persisted_research
 from backend.app.services.research_vision import ResearchVision
-from backend.app.services.trace_service import TraceBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -135,14 +107,6 @@ async def _get_llm_config(db: AsyncSession) -> dict:
         "rerank_url": routing.rerank.base_url,
         "rerank_api_key": routing.rerank.api_key,
         "rerank_model": routing.rerank.model,
-        # [v7.3/v8.0] absolute relevance floor for context injection; empty = off
-        # (ships disabled until calibrated). Drives the zero-context disclaimer.
-        "rerank_score_threshold": configs.get("RERANK_SCORE_THRESHOLD", ""),
-        # The router model (a small fast model when configured).
-        "router_base_url": routing.router.base_url,
-        "router_api_key": routing.router.api_key,
-        "router_model": routing.router.model,
-        "rag_max_retries": configs.get("RAG_MAX_RETRIES", "1"),
         # [v8.1] estimated-token budget for chat history (OOM protection).
         "context_max_tokens": configs.get("CONTEXT_MAX_TOKENS", "8000"),
         "token_alpha": str(routing.token_alpha),
@@ -155,83 +119,6 @@ async def _get_llm_config(db: AsyncSession) -> dict:
         "vlm_model": routing.vlm.model,
         "research_limits": ResearchLimits.from_config(configs),
     }
-
-
-# ---------------------------------------------------------------------------
-# Helper: build the SSE citations payload (enrich agent citations with filename)
-# ---------------------------------------------------------------------------
-
-async def _build_citations_payload(db: AsyncSession, citations: list[dict]) -> list[dict]:
-    """Resolve retrieved source pages to verified physical pages of a PDF.
-
-    A structured citation without its exact revision or verified page mapping
-    stays visible as text, but cannot become a misleading PDF link.
-    """
-    if not citations:
-        return []
-
-    seen: set[tuple] = set()
-    deduped: list[dict] = []
-    for c in citations:
-        key = (str(c.get("document_id")), str(c.get("revision_id")), c.get("page_no"))
-        if key not in seen:
-            seen.add(key)
-            deduped.append(c)
-
-    document_ids = set()
-    revision_ids = set()
-    page_nos = set()
-    for c in deduped:
-        try:
-            document_ids.add(uuid.UUID(str(c.get("document_id"))))
-            if c.get("revision_id"):
-                revision_ids.add(uuid.UUID(str(c["revision_id"])))
-        except (ValueError, TypeError):
-            continue
-        if type(c.get("page_no")) is int and c["page_no"] > 0:
-            page_nos.add(c["page_no"])
-
-    documents = {}
-    if document_ids:
-        documents = {str(d.id): d for d in (await db.scalars(
-            select(Document).where(Document.id.in_(document_ids)))).all()}
-    pages = {}
-    if revision_ids and page_nos:
-        rows = (await db.execute(select(DocumentPage, DocumentRevision.document_id)
-            .join(DocumentRevision, DocumentPage.revision_id == DocumentRevision.id)
-            .where(DocumentPage.revision_id.in_(revision_ids),
-                   DocumentPage.source_slide_no.in_(page_nos),
-                   DocumentRevision.publication_state.in_(("published", "superseded"))))).all()
-        for page, owner_id in rows:
-            key = (str(owner_id), str(page.revision_id), page.source_slide_no)
-            # Ambiguous mappings are never linked.
-            pages[key] = page if key not in pages else None
-
-    payload = []
-    for c in deduped:
-        doc = documents.get(str(c.get("document_id")))
-        page_no = c.get("page_no")
-        revision_id = str(c.get("revision_id")) if c.get("revision_id") else None
-        pdf_page_no = None
-        page_id = None
-        if doc is not None and type(page_no) is int and page_no > 0:
-            if doc.structured and revision_id:
-                page = pages.get((str(doc.id), revision_id, page_no))
-                if page is not None and page.preview_page_no is not None:
-                    pdf_page_no = page.preview_page_no
-                    page_id = str(page.page_id)
-            elif (not doc.structured and doc.filename.lower().endswith('.pdf')
-                  and (doc.page_count is None or page_no <= doc.page_count)):
-                pdf_page_no = page_no
-        payload.append({
-            "document_id": str(c.get("document_id")),
-            "filename": doc.filename if doc else None,
-            "page_no": page_no,
-            "revision_id": revision_id if pdf_page_no and doc and doc.structured else None,
-            "page_id": page_id,
-            "pdf_page_no": pdf_page_no,
-        })
-    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -284,152 +171,6 @@ def _make_rerank_fn(llm_config: dict[str, str]):
     return rerank
 
 
-def _make_grade_fn(llm_config: dict[str, str]):
-    """Guided 3-tier retrieval self-eval: returns 'good' | 'partial' | 'bad'."""
-    async def grade(query: str, documents: list[str]) -> str:  # pragma: no cover
-        client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
-        joined = "\n\n".join(f"[{i}] {d}" for i, d in enumerate(documents))
-        resp = await client.chat.completions.create(
-            model=llm_config["model"],
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Rate how well the retrieved material answers the question. "
-                    "Reply with exactly one word: good, partial, or bad.\n\n"
-                    f"Question: {query}\n\nMaterial:\n{joined}"
-                ),
-            }],
-            max_tokens=4,
-        )
-        return (resp.choices[0].message.content or "").strip().lower()
-    return grade
-
-
-def _make_rewrite_fn(llm_config: dict[str, str]):
-    """Rewrite the query for a better retrieval pass."""
-    async def rewrite(query: str) -> str:  # pragma: no cover
-        client = AsyncOpenAI(api_key=llm_config["api_key"], base_url=llm_config["base_url"])
-        resp = await client.chat.completions.create(
-            model=llm_config["model"],
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Rewrite this question to retrieve better course material "
-                    "(add synonyms / key terms). Reply with the rewritten query only.\n\n"
-                    f"{query}"
-                ),
-            }],
-        )
-        return (resp.choices[0].message.content or query).strip()
-    return rewrite
-
-
-def _make_router_llm_fn(llm_config: dict[str, str]):
-    """[v8.0] The one-call router. `classify()` assembles the messages; this closes
-    over the ROUTER_MODEL endpoint + json_schema and returns the raw JSON string.
-    The router's tokens are cheap and are not billed to the student's quota."""
-    async def router_llm(messages: list[dict]) -> str:  # pragma: no cover
-        client = AsyncOpenAI(
-            api_key=llm_config["router_api_key"],
-            base_url=llm_config["router_base_url"],
-        )
-        resp = await client.chat.completions.create(
-            model=llm_config["router_model"],
-            messages=messages,
-            max_tokens=200,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "router_decision", "schema": _ROUTER_SCHEMA},
-            },
-        )
-        return resp.choices[0].message.content or ""
-    return router_llm
-
-
-# ---------------------------------------------------------------------------
-# Background task: save messages & usage stats
-# ---------------------------------------------------------------------------
-
-async def save_chat_background_task(
-    user_id: str,
-    session_id: str,
-    user_message_content: str,
-    llm_message_content: str,
-    prompt_tokens: int,
-    completion_tokens: int,
-    token_alpha: float = 1.0,
-    token_beta: float = 1.0,
-    trace: TraceBuilder | None = None,
-):
-    """
-    Background task to save messages and upsert usage stats.
-    Uses its own DB session since the request session is already closed.
-
-    [v7.2] The per-message record keeps the *raw* prompt/completion/total counts,
-    but the quota (UsageStat.tokens_used) accumulates *billed* tokens — the
-    weighted sum that discounts cheaper prefill tokens.
-    """
-    total_tokens = prompt_tokens + completion_tokens
-    billed_tokens = compute_billed_tokens(
-        prompt_tokens, completion_tokens, alpha=token_alpha, beta=token_beta
-    )
-
-    async with AsyncSessionLocal() as db:
-        try:
-            # 1. Insert user message
-            user_msg = Message(
-                session_id=session_id,
-                sender=SenderType.user,
-                content=user_message_content,
-            )
-
-            # 2. Insert LLM message
-            llm_msg = Message(
-                session_id=session_id,
-                sender=SenderType.llm,
-                content=llm_message_content,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                billed_tokens=billed_tokens,
-            )
-            db.add_all([user_msg, llm_msg])
-
-            # [v8.0] One AgentTraceLog row per message (health panel / self-eval data).
-            if trace is not None:
-                await db.flush()  # materialize llm_msg.id for the soft reference
-                await trace.flush(db, message_id=llm_msg.id)
-
-            # 3. Upsert UsageStat for today
-            today = date.today()
-            dialect = db.bind.dialect.name
-
-            if dialect == "postgresql":
-                from sqlalchemy.dialects.postgresql import insert
-            else:
-                from sqlalchemy.dialects.sqlite import insert
-
-            stmt = insert(UsageStat).values(
-                user_id=user_id,
-                date=today,
-                tokens_used=billed_tokens,
-                request_count=1,
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["user_id", "date"],
-                set_={
-                    "tokens_used": UsageStat.tokens_used + billed_tokens,
-                    "request_count": UsageStat.request_count + 1,
-                },
-            )
-            await db.execute(stmt)
-            await db.commit()
-        except Exception as e:
-            logger.error("Background task failed: %s", repr(e), exc_info=True)
-            await db.rollback()
-            raise
-
-
 # ===================================================================
 # POST /api/chat/stream
 # ===================================================================
@@ -439,13 +180,11 @@ async def save_chat_background_task(
 async def chat_stream(
     request: Request,
     body: ChatStreamRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Core streaming chat endpoint with 3-tier rule injection and
-    dynamic LLM configuration.
+    The answer of the research agent, in the requested mode, as server-sent events.
     """
     # ---------------------------------------------------------
     # STEP 1: Gate checks
@@ -526,284 +265,125 @@ async def chat_stream(
         )
 
     # ---------------------------------------------------------
-    # STEP 2: Agent (router → retrieve → synthesize) builds the payload
+    # STEP 2: the research agent (agent/runner.py, search.py, direct.py) answers
     # ---------------------------------------------------------
     llm_config = await _get_llm_config(db)
 
-    # Fetch last 20 messages as chronological chat history.
-    msg_result = await db.execute(
-        select(Message)
-        .where(Message.session_id == body.session_id)
-        .order_by(Message.created_at.desc())
-        .limit(20)
-    )
-    last_messages = msg_result.scalars().all()
-    last_messages.reverse()
-    history = [
-        {"role": "user" if m.sender == SenderType.user else "assistant", "content": m.content}
-        for m in last_messages
-    ]
-    # [v8.1] Cap the history's estimated token size (the 20-message cap bounds
-    # count, not size) — oldest turns are silently forgotten so a marathon
-    # conversation can never grow the prompt until the local engine OOMs.
-    history = trim_history(
-        history, max_tokens=int(llm_config["context_max_tokens"] or 8000)
-    )
-
     rule_texts = await rule_service.get_active_rule_texts(db, class_id, lab_id, current_user.id)
 
-    if settings.AGENTIC_SEARCH_ENABLED and lab_id is not None:
-        # All source scope and focus IDs are resolved from the authenticated
-        # session. The model never supplies a URL or a revision map.
-        # A class in exam mode answers in direct mode only, whatever the client asks.
-        exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == class_id)))
-        mode = 'direct' if exam_mode else body.mode
-        try:
-            scope = await create_scope(db, user_id=current_user.id,
-                                       session_id=body.session_id)
-            research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
-            runs = ResearchRuns(research_factory)
-            # History may take a quarter of the research input tokens.
-            limits = llm_config['research_limits']
-            safe_history, earlier_citations = await runs.load_safe_context(scope)
-            # Right after a question back the model must answer, not ask again.
-            allow_ask = not await runs.last_answer_asked(scope.session_id)
-            safe_history = trim_history(safe_history,
-                max_tokens=min(int(llm_config["context_max_tokens"] or 8000),
-                               limits.input_tokens // 4))
-        except DocumentNotFound:
-            raise HTTPException(404, 'source_unavailable') from None
-        teaching_rules = '\n\n'.join(
-            f'[{label.upper()} RULES]\n{rule_texts[key]}'
-            for key, label in (('class_rules', 'class'), ('lab_rules', 'lab'),
-                               ('student_rules', 'student')) if rule_texts.get(key))
-        embedder = _make_embed_fn(llm_config)
-        async def embed_query(query: str):
-            return (await embedder([query]))[0]
-        # The research model is the AGENT_* endpoint (default: the main LLM);
-        # view_image uses the VLM_* endpoint and is off when no VLM_MODEL is set.
-        agent = Endpoint(llm_config['agent_base_url'],
-                         llm_config['agent_api_key'], llm_config['agent_model'])
-        if not agent.model or not agent.base_url:
-            raise HTTPException(503, 'agent_model_not_configured')
-        vlm = Endpoint(llm_config['vlm_base_url'],
-                       llm_config['vlm_api_key'], llm_config['vlm_model'])
-        vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
-                  if vlm.model and vlm.base_url else None)
-        request_id = str(body.client_request_id or uuid.uuid4())
-
-        async def research_events():
-            queue = asyncio.Queue()
-            def phase(name):
-                if name in {'finding', 'reading', 'checking_image', 'checking_sources'}:
-                    queue.put_nowait(name)
-
-            def draft(text):
-                # None withdraws the draft shown so far.
-                queue.put_nowait(('draft', text))
-            yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
-            task = asyncio.create_task(run_persisted_research(
-                scope=scope, question=body.message, client_request_id=request_id,
-                model=ResearchModel(agent), model_name=agent.model,
-                token_alpha=float(llm_config['token_alpha']),
-                token_beta=float(llm_config['token_beta']),
-                history=safe_history, earlier_citations=earlier_citations,
-                teaching_rules=teaching_rules,
-                embed_fn=embed_query,
-                rerank_fn=_make_rerank_fn(llm_config),
-                embed_model=llm_config['embedding_model'],
-                rerank_model=llm_config['rerank_model'], on_phase=phase,
-                vision_fn=vision, vision_model=vlm.model, limits=limits,
-                on_draft=draft, allow_ask=allow_ask and mode == 'research',
-                mode=mode, exam_mode=exam_mode, session_factory=research_factory))
-            last_sent = time.monotonic()
-            try:
-                while not task.done():
-                    if await request.is_disconnected():
-                        return  # finally cancels the run
-                    try:
-                        items = [await asyncio.wait_for(queue.get(), timeout=0.5)]
-                        while not queue.empty():
-                            items.append(queue.get_nowait())
-                        for frame in _research_frames(items):
-                            yield frame
-                        last_sent = time.monotonic()
-                    except asyncio.TimeoutError:
-                        # A model call can be silent for minutes; an SSE comment
-                        # keeps proxies from closing the stream. Clients ignore it.
-                        if time.monotonic() - last_sent >= KEEPALIVE_SECONDS:
-                            yield ": keep-alive\n\n"
-                            last_sent = time.monotonic()
-                result = await task
-                if result['status'] != 'finished':
-                    yield f"event: error\ndata: {json.dumps({'detail': 'Research did not finish'})}\n\n"
-                    return
-                # Commit and reload are complete before any answer bytes leave.
-                yield f"data: {json.dumps(result['answer'])}\n\n"
-                if result.get('clarification'):
-                    yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
-                yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
-                yield f"event: done\ndata: {json.dumps({'message_id': result['message_id']})}\n\n"
-            except RunConflict:
-                yield f"event: error\ndata: {json.dumps({'detail': 'Another research request is already running'})}\n\n"
-            except ResearchQuotaExceeded:
-                yield f"event: error\ndata: {json.dumps({'detail': 'Daily token quota exceeded'})}\n\n"
-            except Exception:
-                logger.exception('Research request failed')
-                yield f"event: error\ndata: {json.dumps({'detail': 'Research failed'})}\n\n"
-            finally:
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-        return StreamingResponse(research_events(), media_type='text/event-stream',
-                                 headers={'Cache-Control': 'no-store',
-                                          'X-Accel-Buffering': 'no'})
-
-    # [v8.0] Per-request trace: the graph writes route + degradation flags; here we
-    # add the injection red-flag and, after the run, recall/all-filtered. Flushed to
-    # one AgentTraceLog row in the background task (the health panel's data source).
-    trace = TraceBuilder(session_id=body.session_id, lab_id=lab_id)
-    trace.mark_if_suspicious(body.message)
-
-    agent = build_agent(
-        db,
-        embed_fn=_make_embed_fn(llm_config),
-        router_llm_fn=_make_router_llm_fn(llm_config),
-        rerank_fn=_make_rerank_fn(llm_config),
-        grade_fn=_make_grade_fn(llm_config),
-        rewrite_fn=_make_rewrite_fn(llm_config),
-        max_retries=int(llm_config["rag_max_retries"]),
-        router_model_name=llm_config["router_model"],
-        rerank_score_threshold=(
-            float(llm_config["rerank_score_threshold"])
-            if llm_config["rerank_score_threshold"] else None
-        ),
-        trace=trace,
-    )
-    agent_result = await agent.ainvoke({
-        "message": body.message,
-        "class_id": class_id,
-        "lab_id": lab_id,
-        "user_id": current_user.id,
-        "history": history,
-        "is_test": session.is_test,
-        **rule_texts,
-    })
-    messages_payload = agent_result["messages_payload"]
-    trace.set("recall_count", len(agent_result.get("citations", [])))
-    trace.set("all_filtered", bool(agent_result.get("no_material")))
-
-    # Resolve citations now, while the request DB session is still open (the
-    # streaming generator runs after the request returns and cannot use `db`).
-    citations_payload = await _build_citations_payload(
-        db, agent_result.get("citations", [])
-    )
-
-    # ---------------------------------------------------------
-    # STEP 3: Dynamic LLM Proxy (Zero-Downtime)
-    # ---------------------------------------------------------
-    client = AsyncOpenAI(
-        api_key=llm_config["api_key"],
-        base_url=llm_config["base_url"],
-    )
-
+    # The research agent answers every chat (direct, search or research mode).
+    if not settings.AGENTIC_SEARCH_ENABLED:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "chat_not_enabled")
+    if lab_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "session_without_lab")
+    # All source scope and focus IDs are resolved from the authenticated
+    # session. The model never supplies a URL or a revision map.
+    # A class in exam mode answers in direct mode only, whatever the client asks.
+    exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == class_id)))
+    mode = 'direct' if exam_mode else body.mode
     try:
-        stream = await client.chat.completions.create(
-            model=llm_config["model"],
-            messages=messages_payload,
-            stream=True,
-            # [v7.2] Opt into streamed token usage. Without this most OpenAI-
-            # compatible servers (vLLM/Ollama) omit `usage` on streamed chunks,
-            # so billing would fall back to a flat 10/10 charge and quota would be
-            # meaningless. A final usage-only chunk arrives after the content.
-            stream_options={"include_usage": True},
-            # Disable "thinking/reasoning" mode for reasoning-capable models
-            # (e.g. Qwen3): otherwise the model emits all tokens in a non-standard
-            # `reasoning` field with an empty `content`, so nothing streams to the
-            # client. Ollama's OpenAI-compatible endpoint honors this; plain models
-            # simply ignore it.
-            extra_body={"reasoning_effort": "low"},
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LLM service unavailable: {str(e)}",
-        )
+        scope = await create_scope(db, user_id=current_user.id,
+                                   session_id=body.session_id)
+        research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
+        runs = ResearchRuns(research_factory)
+        # History may take a quarter of the research input tokens.
+        limits = llm_config['research_limits']
+        safe_history, earlier_citations = await runs.load_safe_context(scope)
+        # Right after a question back the model must answer, not ask again.
+        allow_ask = not await runs.last_answer_asked(scope.session_id)
+        safe_history = trim_history(safe_history,
+            max_tokens=min(int(llm_config["context_max_tokens"] or 8000),
+                           limits.input_tokens // 4))
+    except DocumentNotFound:
+        raise HTTPException(404, 'source_unavailable') from None
+    teaching_rules = '\n\n'.join(
+        f'[{label.upper()} RULES]\n{rule_texts[key]}'
+        for key, label in (('class_rules', 'class'), ('lab_rules', 'lab'),
+                           ('student_rules', 'student')) if rule_texts.get(key))
+    embedder = _make_embed_fn(llm_config)
+    async def embed_query(query: str):
+        return (await embedder([query]))[0]
+    # The research model is the AGENT_* endpoint (default: the main LLM);
+    # view_image uses the VLM_* endpoint and is off when no VLM_MODEL is set.
+    agent = Endpoint(llm_config['agent_base_url'],
+                     llm_config['agent_api_key'], llm_config['agent_model'])
+    if not agent.model or not agent.base_url:
+        raise HTTPException(503, 'agent_model_not_configured')
+    vlm = Endpoint(llm_config['vlm_base_url'],
+                   llm_config['vlm_api_key'], llm_config['vlm_model'])
+    vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
+              if vlm.model and vlm.base_url else None)
+    request_id = str(body.client_request_id or uuid.uuid4())
 
-    # ---------------------------------------------------------
-    # STEP 4: SSE Streaming + Background Task
-    # ---------------------------------------------------------
-    stream_results = {
-        "content": "",
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-    }
+    async def research_events():
+        queue = asyncio.Queue()
+        def phase(name):
+            if name in {'finding', 'reading', 'checking_image', 'checking_sources'}:
+                queue.put_nowait(name)
 
-    async def event_generator():
-        disconnected = False
-        # [v8.0] Open with a status event so the client can show a "working…"
-        # indicator; it carries the resolved route. (Per-node progress would need
-        # graph.astream_events — deferred.)
-        yield f"event: status\ndata: {json.dumps({'route': agent_result['route']})}\n\n"
+        def draft(text):
+            # None withdraws the draft shown so far.
+            queue.put_nowait(('draft', text))
+        yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
+        task = asyncio.create_task(run_persisted_research(
+            scope=scope, question=body.message, client_request_id=request_id,
+            model=ResearchModel(agent), model_name=agent.model,
+            token_alpha=float(llm_config['token_alpha']),
+            token_beta=float(llm_config['token_beta']),
+            history=safe_history, earlier_citations=earlier_citations,
+            teaching_rules=teaching_rules,
+            embed_fn=embed_query,
+            rerank_fn=_make_rerank_fn(llm_config),
+            embed_model=llm_config['embedding_model'],
+            rerank_model=llm_config['rerank_model'], on_phase=phase,
+            vision_fn=vision, vision_model=vlm.model, limits=limits,
+            on_draft=draft, allow_ask=allow_ask and mode == 'research',
+            mode=mode, exam_mode=exam_mode, session_factory=research_factory))
+        last_sent = time.monotonic()
         try:
-            async for chunk in stream:
+            while not task.done():
                 if await request.is_disconnected():
-                    disconnected = True
-                    break
-
-                # Check for token usage
-                if chunk.usage:
-                    stream_results["prompt_tokens"] = chunk.usage.prompt_tokens
-                    stream_results["completion_tokens"] = chunk.usage.completion_tokens
-
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        stream_results["content"] += delta.content
-                        # JSON-encode the token so embedded newlines survive SSE
-                        # framing. A raw `data: foo\nbar\n\n` would split on the
-                        # inner newline and the client would lose it, collapsing
-                        # multi-line code/markdown into one line (renders only
-                        # correctly after a refresh, which reloads the DB copy).
-                        yield f"data: {json.dumps(delta.content)}\n\n"
-
-            # After the token stream: emit citations, then a terminal `done`
-            # event (the client stops streaming and refreshes quota on `done`).
-            if not disconnected:
-                yield f"event: citations\ndata: {json.dumps(citations_payload)}\n\n"
-                yield "event: done\ndata: {}\n\n"
-        except Exception as e:
-            # A mid-stream failure must surface as an explicit `error` event so the
-            # client can stop the spinner and show a message — otherwise the
-            # connection just drops with no `done` and the UI hangs.
-            logger.error("Chat stream failed mid-flight: %s", repr(e), exc_info=True)
-            yield f"event: error\ndata: {json.dumps({'detail': 'Generation failed'})}\n\n"
+                    return  # finally cancels the run
+                try:
+                    items = [await asyncio.wait_for(queue.get(), timeout=0.5)]
+                    while not queue.empty():
+                        items.append(queue.get_nowait())
+                    for frame in _research_frames(items):
+                        yield frame
+                    last_sent = time.monotonic()
+                except asyncio.TimeoutError:
+                    # A model call can be silent for minutes; an SSE comment
+                    # keeps proxies from closing the stream. Clients ignore it.
+                    if time.monotonic() - last_sent >= KEEPALIVE_SECONDS:
+                        yield ": keep-alive\n\n"
+                        last_sent = time.monotonic()
+            result = await task
+            if result['status'] != 'finished':
+                yield f"event: error\ndata: {json.dumps({'detail': 'Research did not finish'})}\n\n"
+                return
+            # Commit and reload are complete before any answer bytes leave.
+            yield f"data: {json.dumps(result['answer'])}\n\n"
+            if result.get('clarification'):
+                yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
+            yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
+            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id']})}\n\n"
+        except RunConflict:
+            yield f"event: error\ndata: {json.dumps({'detail': 'Another research request is already running'})}\n\n"
+        except ResearchQuotaExceeded:
+            yield f"event: error\ndata: {json.dumps({'detail': 'Daily token quota exceeded'})}\n\n"
+        except Exception:
+            logger.exception('Research request failed')
+            yield f"event: error\ndata: {json.dumps({'detail': 'Research failed'})}\n\n"
         finally:
-            # Enqueue the background task with fallback token estimates
-            pt = stream_results["prompt_tokens"] or 10
-            ct = stream_results["completion_tokens"] or 10
-
-            background_tasks.add_task(
-                save_chat_background_task,
-                user_id=current_user.id,
-                session_id=body.session_id,
-                user_message_content=body.message,
-                llm_message_content=stream_results["content"],
-                prompt_tokens=pt,
-                completion_tokens=ct,
-                token_alpha=float(llm_config["token_alpha"]),
-                token_beta=float(llm_config["token_beta"]),
-                trace=trace,
-            )
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-    )
-
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+    return StreamingResponse(research_events(), media_type='text/event-stream',
+                             headers={'Cache-Control': 'no-store',
+                                      'X-Accel-Buffering': 'no'})
 
 
 @router.post("/messages/{message_id}/feedback")
@@ -813,9 +393,8 @@ async def rate_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """[v8.0 §11B] Thumbs up/down on an assistant message — a free golden-set
-    label (a 👎 links back to the message's AgentTraceLog for review). A student
-    may only rate a message in a session they own."""
+    """Thumbs up/down on an assistant message. A student may only rate a
+    message in a session they own."""
     message = (await db.execute(
         select(Message)
         .join(Session, Message.session_id == Session.id)

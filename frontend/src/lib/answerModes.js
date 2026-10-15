@@ -5,9 +5,10 @@
  */
 
 export const MODES = [
-  { key: 'direct', label: 'Direct', hint: 'Fast answer without the course files' },
-  { key: 'search', label: 'Search', hint: 'One search in the course files, about 20 seconds' },
-  { key: 'research', label: 'Research', hint: 'Deep search in the course files, one to two minutes' },
+  // Times measured alone on the v9 stack (2026-10-15), one question at a time.
+  { key: 'direct', label: 'Direct', hint: 'Answers at once, without the course files' },
+  { key: 'search', label: 'Search', hint: 'One search in the course files, about 10 seconds' },
+  { key: 'research', label: 'Research', hint: 'Deep search in the course files, about a minute' },
 ];
 export const DEFAULT_MODE = 'research';
 

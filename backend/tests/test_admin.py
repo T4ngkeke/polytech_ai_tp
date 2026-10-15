@@ -15,31 +15,10 @@ from backend.app.auth import create_access_token, hash_password, verify_password
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import (
-    AgentTraceLog, Class, ClassStudent, Lab, Message, SenderType,
+    Class, ClassStudent, Lab, Message, SenderType,
     Session, SystemConfig, UsageStat, User, UserRole,
 )
 from tests.conftest import make_user
-
-
-class TestHealthPanel:
-    async def test_degradation_counts(self, admin_client, db_session):
-        """[v8.0 §11D] Admin health panel tallies recent silent degradations."""
-        db_session.add_all([
-            AgentTraceLog(id=uuid.uuid4(), route="rag", degraded_flags={"embedding": True}),
-            AgentTraceLog(id=uuid.uuid4(), route="rag", degraded_flags={"rerank": True}),
-        ])
-        await db_session.commit()
-
-        resp = await admin_client.get("/api/admin/health/degradations")
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["degradations"]["embedding"] == 1
-        assert body["degradations"]["rerank"] == 1
-
-    async def test_student_rejected_403(self, student_client):
-        resp = await student_client.get("/api/admin/health/degradations")
-        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -320,15 +299,14 @@ class TestLLMConfig:
         })
         assert resp.status_code == 403
 
-    async def test_agent_and_threshold_keys_roundtrip(self, admin_client):
-        """The agent slot (the reasoning model behind the retrieval loop) and the
-        rerank score threshold are admin-configurable and survive a GET after PUT."""
+    async def test_agent_keys_roundtrip(self, admin_client):
+        """The agent slot (the research agent's model) is admin-configurable and
+        survives a GET after PUT."""
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",
             "agent_base_url": "http://big/v1",
             "agent_api_key": "big-key",
             "agent_model": "qwen3-235b",
-            "rerank_score_threshold": "0.35",
             "ingest_token_budget": "50000",
         })
         assert resp.status_code == 200
@@ -336,7 +314,6 @@ class TestLLMConfig:
         got = (await admin_client.get("/api/admin/llm/config")).json()
         assert got["agent_model"] == "qwen3-235b"
         assert got["agent_base_url"] == "http://big/v1"
-        assert got["rerank_score_threshold"] == "0.35"
         assert got["ingest_token_budget"] == "50000"
 
     async def test_agent_fields_default_empty(self, admin_client):
@@ -376,7 +353,6 @@ class TestLLMConfig:
         assert resp.status_code == 200
         got = (await admin_client.get("/api/admin/llm/config")).json()
         assert got["context_max_tokens"] == "12000"
-        assert got["rerank_score_threshold"] == ""  # gate ships OFF
 
     async def test_mineru_server_roundtrip_and_read_only_deployment_info(self, admin_client, monkeypatch):
         monkeypatch.setenv("PDF_MINERU_SERVER_URL", "http://edullm-mineru-vlm:8000/v1")
@@ -424,14 +400,12 @@ class TestLLMConfig:
             "embedding_model": "bge-m3",
             "rerank_url": "http://rerank", "rerank_api_key": "rk",
             "ingest_base_url": "http://local/v1", "ingest_model": "small-30b",
-            "router_model": "small-30b",
             "token_alpha": 0.3, "token_beta": 0.8,
         })
         assert resp.status_code == 200
         data = (await admin_client.get("/api/admin/llm/config")).json()
         assert data["embedding_url"] == "http://embed/v1"
         assert data["ingest_model"] == "small-30b"
-        assert data["router_model"] == "small-30b"
         assert data["rerank_api_key"] == "rk"
         assert data["token_alpha"] == 0.3
         assert data["token_beta"] == 0.8
@@ -641,29 +615,6 @@ class TestAdminPrune:
                                      json={"older_than_days": 30})
         r = await db_session.execute(select(Session).where(Session.id == recent_id))
         assert r.scalar_one_or_none() is not None
-
-    async def test_prunes_old_router_and_trace_logs(self, admin_full_client, db_session):
-        """[v8.0] prune also clears aged RouterQueryLog + AgentTraceLog rows,
-        independent of whether any session is old."""
-        import uuid
-        from datetime import datetime, timedelta, timezone
-
-        from backend.app.models import AgentTraceLog, RouterQueryLog
-
-        old = datetime.now(timezone.utc) - timedelta(days=60)
-        db_session.add(RouterQueryLog(id=uuid.uuid4(), message="old", route="rag",
-                                      degraded=False, created_at=old))
-        db_session.add(AgentTraceLog(id=uuid.uuid4(), route="rag", created_at=old))
-        await db_session.commit()
-
-        resp = await admin_full_client.post("/api/admin/maintenance/prune",
-                                            json={"older_than_days": 30})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["router_logs_deleted"] == 1
-        assert body["trace_logs_deleted"] == 1
-        assert (await db_session.execute(select(RouterQueryLog))).scalars().all() == []
-        assert (await db_session.execute(select(AgentTraceLog))).scalars().all() == []
 
     async def test_dry_run_counts_and_deletes_nothing(self, admin_full_client, seed_full, db_session):
         old_id = seed_full["old_session"].id

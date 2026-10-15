@@ -11,7 +11,6 @@ Structural assertions only — no DB round-trip needed.
 
 from backend.app.database import Base
 from backend.app.models import (
-    AgentTraceLog,
     DocChunk,
     Document,
     DocumentStatus,
@@ -19,7 +18,6 @@ from backend.app.models import (
     JobType,
     Message,
     MessageFeedback,
-    RouterQueryLog,
     Session,
 )
 
@@ -64,12 +62,6 @@ def test_session_has_no_exercise_dialogue_state():
     cols = _cols(Session)
     assert "current_exercise_id" not in cols
     assert "last_route" not in cols
-
-
-def test_router_query_log_has_no_exercise_attribution():
-    cols = _cols(RouterQueryLog)
-    assert "exercise_number" not in cols
-    assert "number_source" not in cols
 
 
 def test_hint_and_answer_enums_are_gone():
@@ -126,16 +118,9 @@ def test_ingestion_job_keeps_queue_columns():
         assert kept in cols, f"IngestionJob lost {kept}"
 
 
-def test_router_query_log_keeps_decision_telemetry():
-    cols = _cols(RouterQueryLog)
-    for kept in ("message", "route", "degraded", "is_test", "model_name",
-                 "prompt_version", "latency_ms", "lab_id", "created_at"):
-        assert kept in cols, f"RouterQueryLog lost {kept}"
-
-
-def test_agent_trace_log_is_unchanged():
-    cols = _cols(AgentTraceLog)
-    for kept in ("message_id", "session_id", "lab_id", "route", "node_latencies",
-                 "degraded_flags", "recall_count", "rerank_filtered_count",
-                 "all_filtered", "verdict", "retry_flipped", "red_flag", "created_at"):
-        assert kept in cols, f"AgentTraceLog lost {kept}"
+def test_old_chat_path_tables_are_gone():
+    """The LangGraph chat path is gone: its learner profiles, router decisions and
+    per-message traces are no longer models (old databases keep the tables)."""
+    import backend.app.models as models
+    for name in ("LearnerProfile", "RouterQueryLog", "AgentTraceLog", "CoachingLevel"):
+        assert not hasattr(models, name), name

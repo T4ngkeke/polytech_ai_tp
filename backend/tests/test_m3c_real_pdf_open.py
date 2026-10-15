@@ -14,7 +14,6 @@ from sqlalchemy import select
 
 from backend.app.config import settings
 from backend.app.main import app
-from backend.app.routers.chat import _build_citations_payload
 from backend.app.models import ClassStudent, Document, DocumentPage, DocumentRevision, EMBEDDING_DIM, Session
 from backend.app.routers.teacher import get_storage_root
 from backend.app.services import document_versions
@@ -95,11 +94,6 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
                                                  teacher_id=teacher_id, expected_generation=generation,
                                                  acknowledge_issues=True)
         await db.commit()
-        citations = await _build_citations_payload(db, [
-            {'document_id': str(document_id), 'revision_id': str(revision_id), 'page_no': 9},
-        ])
-        assert citations[0]['page_id'] == str(page9_id)
-        assert citations[0]['pdf_page_no'] == 9
         client = await make_client(db, student)
         async with client:
             opened = await client.get(f'{base}/pages/{page9_id}', params=params)
@@ -128,7 +122,7 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_legacy_pdf_citation_requires_own_session(db_session, tmp_path):
+async def test_legacy_pdf_opens_only_in_own_session(db_session, tmp_path):
     from backend.app.services.document_service import create_document
     import pymupdf
 
@@ -153,10 +147,6 @@ async def test_legacy_pdf_citation_requires_own_session(db_session, tmp_path):
         doc = await create_document(db, class_id=lab.class_id, lab_id=lab.id,
                                     filename='course.pdf', content=pdf_bytes,
                                     uploaded_by=student.id, storage_root=storage)
-        citations = await _build_citations_payload(db, [
-            {'document_id': str(doc.id), 'page_no': 9},
-        ])
-        assert citations[0]['pdf_page_no'] == 9 and citations[0]['revision_id'] is None
         url = f'/api/documents/{doc.id}/pdf'
         client = await make_client(db, student)
         async with client:

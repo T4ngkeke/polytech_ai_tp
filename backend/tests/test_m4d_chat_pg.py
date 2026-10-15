@@ -63,9 +63,6 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
         await db.commit()
         import backend.app.routers.chat as chat_api
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
-        async def router(_messages):
-            return '{"route":"rag"}'
-        monkeypatch.setattr(chat_api, '_make_router_llm_fn', lambda _config: router)
         steps = [
             tool_call('search', {'query': 'Définition θ₁'}),
             tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
@@ -205,7 +202,7 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
         app.dependency_overrides.pop(get_storage_root, None)
 
 @pytest.mark.asyncio
-async def test_direct_http_saved_and_charged_without_router(pg_session, tmp_path, monkeypatch):
+async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
@@ -213,9 +210,6 @@ async def test_direct_http_saved_and_charged_without_router(pg_session, tmp_path
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         import backend.app.routers.chat as chat_api
-        async def forbidden_router(_config):
-            raise AssertionError('router called')
-        monkeypatch.setattr(chat_api, '_make_router_llm_fn', forbidden_router)
         endpoints = []
         class FakeModel:
             def __init__(self, endpoint):
@@ -478,9 +472,6 @@ async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monke
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         monkeypatch.setattr(settings, 'DOCUMENTS_STORAGE_ROOT', str(tmp_path / 'storage'))
         import backend.app.routers.chat as chat_api
-        async def router(_messages):
-            return '{"route":"rag"}'
-        monkeypatch.setattr(chat_api, '_make_router_llm_fn', lambda _config: router)
         steps = [tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
                  tool_call('view_image', {'image': 'a1', 'question': 'What is visible?'})]
         class FakeModel:
@@ -525,9 +516,6 @@ async def test_a_question_back_is_saved_shown_and_answered_in_the_next_turn(pg_s
         await db.commit()
         import backend.app.routers.chat as chat_api
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
-        async def router(_messages):
-            return '{"route":"rag"}'
-        monkeypatch.setattr(chat_api, '_make_router_llm_fn', lambda _config: router)
         ask = {'question': 'Quelle définition ?', 'options': ['θ₁', 'θ₂']}
         steps = [tool_call('ask_student', ask),
                  tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
@@ -646,5 +634,26 @@ async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, 
             assert 'exam mode' in calls[0]['messages'][0]['content']
             classes = (await client.get('/api/student/classes')).json()
             assert classes[0]['exam_mode'] is True
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_the_three_tiers_of_teacher_rules_reach_the_prompt(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Réponse.'])
+        from backend.app.models import Rule, RuleLevel
+        db.add_all([Rule(level=RuleLevel.class_, target_id=doc.class_id, rules_text='CLASS-RULE', is_active=True),
+                    Rule(level=RuleLevel.lab, target_id=doc.lab_id, rules_text='LAB-RULE', is_active=True),
+                    Rule(level=RuleLevel.student, target_id=student.id, rules_text='STUDENT-RULE', is_active=True)])
+        await db.commit()
+        client = await make_client(db, student)
+        async with client:
+            await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Bonjour', 'mode': 'direct'})
+        system = calls[0]['messages'][0]['content']
+        assert '[CLASS RULES]\nCLASS-RULE' in system and '[LAB RULES]\nLAB-RULE' in system
+        assert '[STUDENT RULES]\nSTUDENT-RULE' in system
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

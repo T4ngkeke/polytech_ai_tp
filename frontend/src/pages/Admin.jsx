@@ -643,8 +643,7 @@ const MAP_SOURCES = [
 
 // status(config): 'live' (the default model itself) · 'set' (own model/endpoint) ·
 // 'inherits' (empty: uses the default model) · 'off' (feature disabled) ·
-// 'deployment' (empty: uses the deployment setting) · 'legacy' (unused while
-// the research agent is on).
+// 'deployment' (empty: uses the deployment setting).
 const MAP_NODES = [
   {
     id: 'agent', x: 34, y: 14, icon: 'bot', name: 'Research agent', sources: ['students'],
@@ -678,8 +677,8 @@ const MAP_NODES = [
   },
   {
     id: 'chat', x: 85, y: 48, icon: 'message', name: 'Default model', sources: [],
-    tag: 'Every empty model slot uses this model (dashed lines). It also answers chats outside a lab '
-      + '(the old chat path) and holds the billing weights α/β applied to every model call.',
+    tag: 'Every empty model slot uses this model (dashed lines). It also holds the billing weights '
+      + 'α/β applied to every model call.',
     status: () => 'live',
     fields: [
       { key: 'model', label: 'Model Name', placeholder: 'served model name' },
@@ -704,24 +703,12 @@ const MAP_NODES = [
   {
     id: 'rerank', x: 58, y: 14, icon: 'sort', name: 'Reranker', sources: ['agent'],
     tag: 'Reorders the research search results (bge-reranker behind a /rerank endpoint, not the chat '
-      + 'base URL). Empty URL = off: fusion order only. The score threshold applies only to the old chat path.',
+      + 'base URL). Empty URL = off: fusion order only.',
     status: (c) => (c.rerank_url ? 'set' : 'off'),
     fields: [
       { key: 'rerank_model', label: 'Model Name', placeholder: 'BAAI/bge-reranker-v2-m3' },
       { key: 'rerank_url', label: 'Rerank URL', placeholder: 'http://reranker:8000/rerank (empty = off)' },
       { key: 'rerank_api_key', label: 'API Key', placeholder: '', secret: true },
-      { key: 'rerank_score_threshold', label: 'Score threshold, old chat path only (empty = off)', placeholder: 'e.g. 0.35 once calibrated' },
-    ],
-  },
-  {
-    id: 'aux', x: 85, y: 82, icon: 'compass', name: 'Old chat path', sources: [],
-    tag: 'Router, self-evaluation and rewrite of the chat path without the research agent (chats outside '
-      + 'a lab, or the agent turned off). Not used while the research agent is on.',
-    status: (c) => (c.features?.research_agent ? 'legacy' : c.router_model ? 'set' : 'inherits'),
-    fields: [
-      { key: 'router_model', label: 'Model Name', placeholder: 'inherits the default model' },
-      { key: 'router_base_url', label: 'Base URL', placeholder: 'inherits the default model' },
-      { key: 'router_api_key', label: 'API Key', placeholder: 'inherits the default model', secret: true },
     ],
   },
   {
@@ -755,7 +742,6 @@ const NODE_STATUS_META = {
   set: { chip: 'own setting', cls: 'bg-success-muted text-success' },
   inherits: { chip: 'inherits', cls: 'bg-gold-muted text-gold' },
   deployment: { chip: 'deployment', cls: 'bg-success/10 text-success' },
-  legacy: { chip: 'not used', cls: 'bg-ink-surface text-cream-muted' },
   off: { chip: 'off', cls: 'bg-ink-surface text-cream-muted' },
 };
 
@@ -770,7 +756,7 @@ function MapEdges({ config }) {
         const st = n.status(config);
         return (
           <line key={`call-${sourceId}-${n.id}`} x1={s.x} y1={s.y} x2={n.x} y2={n.y}
-            className={st === 'off' || st === 'legacy' ? 'stroke-cream-muted/30' : 'stroke-cyan/40'}
+            className={st === 'off' ? 'stroke-cream-muted/30' : 'stroke-cyan/40'}
             strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         );
       }))}
@@ -803,7 +789,7 @@ function MapNode({ node, config, selected, onSelect }) {
         ) : null}
       </div>
       <p className="mt-1 truncate font-mono text-[10px] text-cream-muted">
-        {model || (st === 'off' || st === 'legacy' ? '—' : 'default model')}
+        {model || (st === 'off' ? '—' : 'default model')}
       </p>
       <span className={`mt-1 inline-block rounded px-1 py-px text-[9px] font-medium ${meta.cls}`}>
         {meta.chip}
@@ -975,47 +961,6 @@ function LLMConfigTab() {
 }
 
 /* ═══════════════════════════ MAINTENANCE TAB ═════════════════════════════ */
-// [v8.0 §11D] Health panel — recent graceful-degradation counts, so silent
-// fallbacks (router→rag, embedding→BM25, rerank→fusion, all_filtered) are visible.
-const DEGRADATION_LABEL = {
-  router: 'Router → RAG', embedding: 'Embedding → BM25-only',
-  rerank: 'Rerank → fusion order', all_filtered: 'All retrieval filtered',
-};
-
-function HealthPanel() {
-  const [data, setData] = useState(null);
-
-  const load = useCallback(() => {
-    api.get('/api/admin/health/degradations').then(setData).catch(() => setData(null));
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const entries = data ? Object.entries(data.degradations || {}) : [];
-  return (
-    <div className="mb-6 p-5 rounded-xl bg-ink-raised border border-border-subtle">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-cream">System Health</p>
-        <button onClick={load} className="text-xs text-cyan hover:underline cursor-pointer">Refresh</button>
-      </div>
-      <p className="mt-1 text-xs text-cream-muted">
-        Fallbacks fired in the last {data?.window_minutes ?? 60} min.
-      </p>
-      {entries.length === 0 ? (
-        <p className="mt-3 text-sm text-success">✓ No degradations — all systems nominal.</p>
-      ) : (
-        <ul className="mt-3 space-y-1.5">
-          {entries.map(([k, n]) => (
-            <li key={k} className="flex items-center justify-between text-sm">
-              <span className="text-cream-secondary">{DEGRADATION_LABEL[k] || k}</span>
-              <span className="font-mono text-gold">{n}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function MaintenanceTab() {
   const [days, setDays] = useState(30);
   const [pruning, setPruning] = useState(false);
@@ -1048,7 +993,6 @@ function MaintenanceTab() {
   return (
     <div className="p-4 md:p-8 overflow-y-auto h-full">
       <div className="max-w-md mx-auto">
-        <HealthPanel />
         <PageHeader title="Database Maintenance" subtitle="Permanently remove old sessions to free disk space." />
         <div className="p-5 rounded-xl bg-danger-muted border border-danger/20 space-y-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-danger">
@@ -1078,8 +1022,8 @@ function MaintenanceTab() {
           message={preview
             ? <>Permanently delete what is older than <span className="text-cream font-medium">{plural(days, 'day')}</span>:{' '}
                 <span className="text-cream font-medium">{plural(preview.sessions_deleted, 'session')}</span> with{' '}
-                <span className="text-cream font-medium">{plural(preview.messages_deleted, 'message')}</span>, and{' '}
-                {plural(preview.router_logs_deleted + preview.trace_logs_deleted, 'log row')}. This cannot be undone.</>
+                <span className="text-cream font-medium">{plural(preview.messages_deleted, 'message')}</span>.
+                This cannot be undone.</>
             : <>Counting what is older than {plural(days, 'day')}…</>}
           confirmLabel={pruning ? 'Pruning…' : 'Run Prune'}
           onConfirm={handlePrune} onCancel={() => setConfirmOpen(false)} />

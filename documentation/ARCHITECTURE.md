@@ -7,93 +7,51 @@
 ```json
 {
   "session_id": "uuid",
-  "message": "string"
+  "message": "string",
+  "client_request_id": "uuid (optional)",
+  "mode": "direct | search | research (default research)"
 }
 ```
 
-**Step-by-step Logic (LangGraph agent):**
+The research agent answers every chat; it needs `AGENTIC_SEARCH_ENABLED` and a
+session in a lab. Without the flag the endpoint answers `503 chat_not_enabled`,
+for a session without a lab `400 session_without_lab`. The LangGraph path
+(router, self-evaluation, query rewrite, learner coaching) was removed on
+2026-10-15; its code is on branch `archive/cleanup-2026-10-15`.
 
-1. **Security & Context Resolution**
-   * Fetch the Session to find `lab_id`. Verify `session.user_id == current_user.id`.
-   * Verify the user has joined the Class that owns this Lab — unless it is the
-     owning teacher's `is_test` **test-drive** session, which bypasses the check.
-   * Verify the Lab `is_active == True` (reject if locked). Resolve `class_id` —
-     the tenant filter passed into every retrieval call.
+1. **Security & context.** The session belongs to the user; the user is a member
+   of the class that owns the lab, unless it is the owning teacher's `is_test`
+   test-drive session; the lab is open. The daily quota (billed tokens) is
+   checked: `429` when it is used up.
+2. **Teacher rules.** Active class, lab and student rules become
+   `[CLASS RULES]`, `[LAB RULES]` and `[STUDENT RULES]` in the system prompt of
+   every mode.
+3. **Mode.** A class in exam mode answers in `direct` mode whatever is asked.
+   - `research` (`agent/runner.py`): one model conversation with the course tools
+     (search, open, read, grep, view_image) and `ask_student`, within the admin
+     limits; citations are verified `[E#]` evidence of the passages read.
+   - `search` (`agent/search.py`): one search with the question as written, the
+     found pages and their neighbours, one answer citing `[E#]`; below a best
+     reranker score of 0.001 it answers "not found".
+   - `direct` (`agent/direct.py`): one answer without the course files and
+     without citations.
+4. **Scope.** The course files of a run are the published PDF revisions of the
+   lab and of the class (class-wide documents), frozen when the run starts.
+   Every search filters `class_id` and `lab_id` (or `lab_id IS NULL`) in SQL.
+5. **Saving and billing** (`services/research_service.py`). Each model call is
+   reserved on the student's quota before it runs and settled with the reported
+   usage (`model_call_usage`, billed as `prompt·TOKEN_ALPHA +
+   completion·TOKEN_BETA`). The answer, its citations and its mode are saved
+   (`agent_runs`, `messages`, `message_citations`) before any of it is sent. The
+   same `client_request_id` returns the saved run, without a second call.
+6. **Streaming.** Server-sent events: `status` (phase, mode, exam mode), `draft`
+   (the reply as it is written), `draft_reset`, the checked answer, then
+   `clarification` (a question back), `citations` and `done`, or `error`; a
+   keep-alive comment every 15 s. See [API.md](API.md).
 
-2. **Rate Limit** — DB-based daily quota check; `429` if over (billed tokens; the
-   router call is **not** charged to the student).
-
-3. **LangGraph Graph Execution**
-   ```
-   Router — ONE ROUTER_MODEL call, json_schema output:
-     {route: rag|direct, search_terms, effort, answer_seeking}
-     inputs: the message (delimited as data) + the last 1-2 turns
-     timeout 1-2s / failure → route=rag + degraded (routing never drags down chat)
-     every decision → RouterQueryLog
-        │
-        ├─ rag  → embed (fail → BM25-only) → hybrid vector+BM25 → RRF
-        │            → rerank(augmented) → threshold gate
-        │            ├─ ≥1 survive → context injection ("possibly relevant; ignore
-        │            │               if not") → Synthesize + citations
-        │            └─ all filtered → disclaimer-direct ("not covered by the
-        │                              material"; no injection, no citations)
-        └─ direct → Synthesize
-                       ↓
-   Tutor — folds `effort` into the per-(student, lab) EMA and derives a coaching
-     strategy. Runs on BOTH legs; skipped entirely for `is_test` sessions.
-                       ↓
-   Self-eval (observation window): deterministic gate kept; the LLM verdict and
-     rewrite run on the ROUTER_* slot, recorded to AgentTraceLog.
-                       ↓
-   Synthesize (skill.md → 3-tier rules → context + citations → history → question)
-   ```
-   * **Two routes, not four.** `exercise` and `clarify` existed to serve the
-     Exercises table: one looked a numbered exercise up, the other asked which
-     number the student meant. Both are gone. A model that still emits either
-     falls outside the route enum and degrades to `rag`, so a stale prompt or a
-     stale fine-tune cannot smuggle them back in.
-   * **Per-exercise guidance is a prompt, not a table.** A teacher who wants
-     something specific said about an exercise writes it into their class or lab
-     rules. Keep it short: rules are resident text, paid for on every message.
-   * **Citation iron rule**: any retrieval-touched path **must** cite; the
-     zero-injection disclaimer branch must **not**.
-   * **The tenant filter is mandatory and in SQL**: every `rag` query filters
-     `lab_id` / `class_id` **in the WHERE clause**. Material may be class-wide
-     shared (`class_id AND (lab_id=X OR lab_id IS NULL)`). There is no audience
-     filter any more — every uploaded file is course material the whole class can
-     read, so tenant scoping carries the boundary alone.
-   * **Coaching follows the student, not the route.** `effort` and
-     `answer_seeking` used to be emitted only for the exercise lane. A student
-     can offload on a concept question just as easily, so both signals now ride
-     on whatever route the message took.
-   * **Degradation matrix**: the only hard dependencies are the **main LLM** and
-     the **main DB**; router→rag, embedding→BM25-only, rerank→fusion order,
-     self-eval→skipped — each flagged in `AgentTraceLog` and surfaced by the
-     admin health panel.
-
-4. **Dynamic LLM Config (Zero-Downtime)**
-   * Fetch active `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`,
-     `RERANK_URL` / `RERANK_MODEL` / `RAG_MAX_RETRIES` / `RERANK_SCORE_THRESHOLD`
-     from `SystemConfigs`. Nothing is hardcoded — generation, embeddings, and reranking are all
-     config-driven HTTP. Swapping a model or threshold is a config change, not a code change.
-
-5. **SSE Streaming & Safe Async Write**
-   * Stream tokens via SSE from the synthesize payload. After the token stream, emit a final
-     **`citations`** event (`document_id` / `filename` / `page_no`, deduped) and a **`done`**
-     event (the client uses `done` to stop streaming and refresh quota). *(An optional throttled
-     `tip` event for prompt-literacy coaching is deferred to v7.2.)*
-   * Use `BackgroundTasks` to insert User message, LLM message (with tokens), and Upsert
-     `usage_stats`. **Token accounting sums the Synthesize node's usage** plus any
-     extra LLM calls made during routing / self-eval.
-   * **Cost-aware quota.** Raw `prompt_tokens` / `completion_tokens` are still recorded
-     per message, but the quota is charged on **billed tokens** =
-     `prompt·TOKEN_ALPHA + completion·TOKEN_BETA` (admin-set, default `0.2`/`1.0`). The daily
-     quota check (`429`) compares accumulated **billed** tokens against `daily_token_quota`, and
-     `GET /api/student/usage` reports billed-vs-quota. The per-message `billed_tokens` is also
-     stored on the LLM `Message` so class/lab analytics reconcile with the quota (re-deriving it
-     later would be wrong once an admin changes the weights). The streaming `create()` call sets
-     `stream_options={"include_usage": True}` so real token counts arrive — without it usage
-     would be omitted and billing would fall back to a flat estimate.
+Models and limits come from `SystemConfigs` (admin model map) with environment
+fallbacks: the default model, the agent, vision, embedding, reranker, ingest
+model and the MinerU server.
 
 ---
 
@@ -188,37 +146,13 @@ branch on: an upload becomes chunks, and that is all it becomes.
 
 ---
 
-## 8. Adaptive Tutoring — Prompt-Literacy Coaching
+## 8. Adaptive Tutoring — removed
 
-> **Teaching goal:** teach students **how to ask** — a learnable skill. We judge
-> the most observable signal, *how the student asks*, not their mastery. The
-> heavy Learner-Model / BKT-DKT / per-concept stack is intentionally dropped.
-
-Both signals come from the one router call, so coaching costs no extra request.
-They apply on whatever route the message took: a student can offload on a concept
-question as easily as on an exercise.
-
-- **(a) Effort / clarity — windowed, formative.** The router scores each message
-  `low` / `mid` / `high` (a bare demand with no attempt; some context but little
-  reasoning; a real attempt with reasoning or a specific error). That feeds a
-  **smoothed sliding window** (EMA) per *(student, lab)*, and the trend sets a
-  *coaching level* that adjusts the tutor's scaffolding. **It never gates, it
-  always answers.** A poorly-formed question is never refused — only nudged
-  toward more thinking and less copy-paste.
-
-- **(b) Answer-seeking — per-message guardrail.** The router flags a message that
-  demands the answer and shows no sign of the student's own attempt. That forces
-  a **strict Socratic response**: guiding questions only, never the final answer.
-  It **still responds** — the limit is on handing over the answer, not on
-  replying. A genuine "I think it is X because Y, right?" is not flagged; the
-  signal keys on the **absence of an attempt**, not on the word "answer".
-
-- **Governance:** store **structured score + controlled-vocabulary strategy**
-  only — never insulting free text. Profiles are teacher-visible,
-  teacher-overridable and transparent to the student.
-
-- **Test-drive sessions are excluded.** A teacher previewing their own lab never
-  writes to a student's profile.
+Prompt-literacy coaching (an effort score per message, a smoothed level per
+student and lab, a Socratic guardrail for answer-seeking messages) ran inside
+the LangGraph router and was removed with it on 2026-10-15. Teachers set the
+tutor's behaviour with their class, lab and student rules, which every answer
+mode follows.
 
 ---
 

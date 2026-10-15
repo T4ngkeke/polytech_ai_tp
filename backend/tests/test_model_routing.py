@@ -2,7 +2,7 @@
 test_model_routing.py — [v7.2] the pure SystemConfigs → model-routing resolver.
 
 The resolver turns the raw key/value map from `system_configs` into a structured
-routing config, applying the v7.2 fallback rule: embedding / ingest / router
+routing config, applying the v7.2 fallback rule: embedding / ingest / agent
 endpoints fall back to the main LLM when their own values are empty, so the
 cheap-model split is opt-in and the default behaviour is unchanged.
 """
@@ -67,20 +67,6 @@ def test_ingest_model_override_alone_keeps_main_endpoint():
     assert routing.ingest.api_key == "main-key"
 
 
-# --- router (live exercise-number fallback) ------------------------------
-
-
-def test_router_falls_back_to_main_llm_when_unset():
-    routing = resolve_model_routing(_BASE)
-    assert routing.router.base_url == "http://main/v1"
-    assert routing.router.model == "qwen3-120b"
-
-
-def test_router_uses_its_own_model_when_set():
-    routing = resolve_model_routing({**_BASE, "ROUTER_MODEL": "qwen3-30b"})
-    assert routing.router.model == "qwen3-30b"
-
-
 # --- rerank: URL has NO fallback (empty = disabled), key does ------------
 
 
@@ -141,24 +127,6 @@ def test_agent_uses_its_own_endpoint_when_set():
     assert routing.agent.model == "qwen3-235b"
 
 
-# --- [v7.3] rerank score threshold (ships OFF until calibrated) --------------
-
-
-def test_rerank_score_threshold_defaults_to_none_meaning_off():
-    routing = resolve_model_routing(_BASE)
-    assert routing.rerank_score_threshold is None
-
-
-def test_rerank_score_threshold_parses_when_set():
-    routing = resolve_model_routing({**_BASE, "RERANK_SCORE_THRESHOLD": "0.35"})
-    assert routing.rerank_score_threshold == 0.35
-
-
-def test_rerank_score_threshold_garbage_means_off():
-    routing = resolve_model_routing({**_BASE, "RERANK_SCORE_THRESHOLD": "oops"})
-    assert routing.rerank_score_threshold is None
-
-
 # --- [v7.3] worker budgets ----------------------------------------------------
 
 
@@ -197,3 +165,8 @@ def test_vlm_uses_its_own_endpoint_when_set():
     assert routing.vlm.base_url == "http://vision/v1"
     assert routing.vlm.api_key == "v-key"
     assert routing.vlm.model == "qwen3.5-122b-a10b"
+
+
+def test_old_chat_path_settings_are_gone():
+    routing = resolve_model_routing({**_BASE, "ROUTER_MODEL": "small", "RERANK_SCORE_THRESHOLD": "0.3"})
+    assert not hasattr(routing, "router") and not hasattr(routing, "rerank_score_threshold")
