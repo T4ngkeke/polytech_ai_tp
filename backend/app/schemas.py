@@ -388,6 +388,11 @@ class UsageStatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ReportRequest(BaseModel):
+    """A teacher report: on the lab, or on one student with student_id."""
+    student_id: uuid.UUID | None = None
+
+
 class SessionCreateRequest(BaseModel):
     title: str | None = Field(None, max_length=255)
 

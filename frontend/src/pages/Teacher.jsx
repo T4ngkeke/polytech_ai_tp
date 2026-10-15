@@ -17,6 +17,7 @@ import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
 import TeacherAnalytics from '../components/TeacherAnalytics';
+import TeachingReport from '../components/TeachingReport';
 import SkillPresetManager from '../components/SkillPresetManager';
 import CitationReport from '../components/CitationReport';
 import ModeSwitch from '../components/ModeSwitch';
@@ -788,8 +789,9 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
 }
 
 function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStudentId, expandedSession, setExpandedSession }) {
-  // Two views of the same conversations: per student, or which course
-  // material the answers cite ("open conversation" leads back to a student).
+  // Three views of the same conversations: per student, which course material
+  // the answers cite ("open conversation" leads back to a student), and a
+  // report the model writes on the lab when the teacher asks.
   const [view, setView] = useState('students');
   const openConversation = useCallback((studentId, sessionId) => {
     setView('students');
@@ -798,7 +800,7 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
   }, [setExpandedStudentId, setExpandedSession]);
   const views = (
     <div className="flex gap-1 mb-4" role="tablist" aria-label="Audit view">
-      {[['students', 'By student'], ['course', 'Course use']].map(([key, label]) => (
+      {[['students', 'By student'], ['course', 'Course use'], ['report', 'AI report']].map(([key, label]) => (
         <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setView(key)}
           className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
             view === key ? 'bg-cyan-muted text-cream border border-cyan/20' : 'text-cream-muted hover:bg-ink-hover'}`}>
@@ -807,6 +809,15 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
       ))}
     </div>
   );
+  if (view === 'report') {
+    return (
+      <div className="max-w-3xl">
+        <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+        {views}
+        <TeachingReport labId={lab.id} />
+      </div>
+    );
+  }
   if (view === 'course') {
     return (
       <div>
@@ -816,12 +827,12 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
       </div>
     );
   }
-  if (!students || students.length === 0) return <p className="text-cream-muted text-sm">No students in this class yet.</p>;
   return (
     <div className="space-y-3 max-w-3xl">
       <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
       {views}
-      {students.map((student) => {
+      {(!students || students.length === 0) && <p className="text-cream-muted text-sm">No students in this class yet.</p>}
+      {(students || []).map((student) => {
         const studentSessions = sessions.filter(s => s.user_id === student.id);
         const isStudentExpanded = expandedStudentId === student.id;
         
@@ -840,6 +851,11 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
             
             {isStudentExpanded && (
               <div className="border-t border-border-subtle bg-ink-base">
+                {studentSessions.length > 0 && (
+                  <div className="border-b border-border-subtle p-3">
+                    <TeachingReport labId={lab.id} studentId={student.id} studentName={student.username} />
+                  </div>
+                )}
                 {studentSessions.length === 0 ? (
                   <p className="text-xs text-cream-muted p-4 italic">No chat history for this student.</p>
                 ) : (

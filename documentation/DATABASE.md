@@ -145,6 +145,12 @@ day (`user_id`, `date`, `tokens` > 0, `granted_by`, `created_at`). Today's limit
 `users.daily_token_quota` plus the day's grants; every quota check uses it.
 `usage_stats` is never rewritten, so usage figures stay true.
 
+`AuditReports` (`audit_reports`): reports a model writes for the teacher, on a lab
+(`student_id` NULL) or one student in it: `status` (`running`, `done`, `failed`),
+`content` (Markdown), `facts` (JSON: the numbers and the questions the model was
+given), `model`, `error`, `created_by`, `created_at`, `finished_at`. The numbers in
+`facts` are counted from stored rows, never by the model.
+
 ---
 
 ### Retrieval & Ingestion Tables

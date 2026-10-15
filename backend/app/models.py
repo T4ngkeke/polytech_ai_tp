@@ -433,6 +433,36 @@ class UsageStat(Base):
         )
 
 
+class AuditReport(Base):
+    """A report a model wrote for the teacher, on a lab or on one student in it.
+
+    Generated when the teacher asks; the facts the model was given are kept
+    with it, so the teacher sees what the text is based on.
+    """
+    __tablename__ = "audit_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    lab_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("labs.id", ondelete="CASCADE"), nullable=False)
+    student_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    facts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('running','done','failed')", name="ck_audit_report_status"),
+        Index("ix_audit_reports_lab_student", "lab_id", "student_id", "created_at"),
+    )
+
+
 class QuotaGrant(Base):
     """Tokens a teacher adds to a student's quota for one day.
 

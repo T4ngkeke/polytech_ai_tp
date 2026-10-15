@@ -6,7 +6,8 @@ page scrolls sideways, the theme is not applied, the phone menu does not open
 the navigation drawer, the student drawer is not ordered classes, sessions,
 account, the token quota is pushed off screen, or the admin model map is missing.
 In a teacher lab, the class name in the breadcrumb must open the class, and the
-Analytics tab must show its charts and refill a student's quota.
+Analytics tab must show its charts and refill a student's quota; Audit shows
+the latest AI report on the lab.
 The admin Monitoring tab shows the real Grafana dashboards (not mocked), in the
 app's theme; it needs the monitoring containers running.
 
@@ -72,6 +73,14 @@ MOCKS = {
                       'question': 'Explique Dijkstra', 'at': '2026-10-13T09:00:00Z', 'reason': 'Tool limit reached'}],
     },
     '/api/teacher/classes/class/students/s1/quota-refill': {'used': 50000, 'limit': 100000, 'granted': 50000},
+    '/api/teacher/labs/lab/reports': {'report': {
+        'id': 'r1', 'lab_id': 'lab', 'student_id': None, 'status': 'done', 'error': None, 'model': 'ornith',
+        'created_at': '2026-10-15T12:00:00Z', 'finished_at': '2026-10-15T12:00:30Z',
+        'facts': {'questions': 108, 'questions_given_to_model': 108, 'pages_matched_by_search': 24,
+                  'period': {'first_question': '2026-10-14T08:00:00Z', 'last_question': '2026-10-15T12:00:00Z'}},
+        'content': '## Summary\nS1 a posé 108 questions.\n\n## What students asked about\n'
+                   '1. **SQL** (~35 questions) : « c\'est quoi la différence entre WHERE et HAVING »\n\n'
+                   '## How to prepare the next session\n1. Revoir `CoursInfoDeBase-2022_SQL.pdf` p.28.'}},
 }
 
 # role, path, text that shows the page is ready, steps after loading, drawer label
@@ -249,6 +258,29 @@ def check_analytics(browser, target, shots):
                 context.close()
 
 
+def check_report(browser, target, shots):
+    # Audit > AI report: the latest report, with what it is based on, at every width.
+    for theme in ('light', 'dark'):
+        for size in (DESKTOP, PHONE):
+            name = f'report-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'teacher', '/teacher', theme, size)
+            try:
+                page.get_by_text('TP agent', exact=True).first.click()
+                page.get_by_role('button', name='Audit', exact=True).click()
+                page.get_by_role('tab', name='AI report').click()
+                expect(page.get_by_role('heading', name='How to prepare the next session')).to_be_visible()
+                expect(page.get_by_text('Based on 108 questions', exact=False)).to_be_visible()
+                expect(page.get_by_role('button', name='Write again')).to_be_enabled()
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+
+
 def check_monitoring(browser, target, shots):
     """Both dashboards load inside the admin page, in the app's theme, at both widths."""
     for theme in ('light', 'dark'):
@@ -294,6 +326,7 @@ def main():
             check_toggle(browser, target)
             check_breadcrumb(browser, target)
             check_analytics(browser, target, shots)
+            check_report(browser, target, shots)
             check_monitoring(browser, target, shots)
             check_long_answer_stays_at_its_start(browser, target)
         finally:

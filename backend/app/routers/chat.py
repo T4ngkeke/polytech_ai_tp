@@ -21,7 +21,6 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -39,16 +38,18 @@ from backend.app.models import (
     Message,
     MessageFeedback,
     Session,
-    SystemConfig,
     UsageStat,
     User,
 )
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
 from backend.app.services import quota_service, rule_service
-from backend.app.services.model_routing import Endpoint, resolve_model_routing
+from backend.app.services.model_routing import Endpoint
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
-from backend.app.services.research_service import ResearchLimits, run_persisted_research
+from backend.app.services.research_service import run_persisted_research
+from backend.app.services.model_clients import (  # noqa: F401  (tests import _get_llm_config from here)
+    get_llm_config as _get_llm_config, make_embed_fn as _make_embed_fn, make_rerank_fn as _make_rerank_fn,
+)
 from backend.app.services.research_vision import ResearchVision
 from backend.app.services.session_titles import title_first_exchange
 
@@ -78,98 +79,6 @@ def _research_frames(items):
     return frames
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-
-
-# ---------------------------------------------------------------------------
-# Helper: Fetch LLM config from SystemConfig table with env fallback
-# ---------------------------------------------------------------------------
-
-async def _get_llm_config(db: AsyncSession) -> dict:
-    """
-    Read LLM connection parameters from the SystemConfig table.
-
-    [v7.2] The model-routing table (embedding / rerank / ingest / router split,
-    token weights) is resolved via ``resolve_model_routing``, which applies the
-    opt-in fallback to the main LLM. The flat keys (``base_url`` etc.) are kept
-    for backward compatibility with existing call sites.
-    """
-    result = await db.execute(select(SystemConfig))
-    configs = {row.key: row.value for row in result.scalars().all()}
-    routing = resolve_model_routing(configs)
-
-    return {
-        "base_url": routing.llm.base_url,
-        "api_key": routing.llm.api_key,
-        "model": routing.llm.model,
-        # [v7.2] embedding endpoint is now independently configurable.
-        "embedding_base_url": routing.embedding.base_url,
-        "embedding_api_key": routing.embedding.api_key,
-        "embedding_model": routing.embedding.model,
-        "rerank_url": routing.rerank.base_url,
-        "rerank_api_key": routing.rerank.api_key,
-        "rerank_model": routing.rerank.model,
-        # [v8.1] estimated-token budget for chat history (OOM protection).
-        "context_max_tokens": configs.get("CONTEXT_MAX_TOKENS", "8000"),
-        "token_alpha": str(routing.token_alpha),
-        "token_beta": str(routing.token_beta),
-        "agent_base_url": routing.agent.base_url,
-        "agent_api_key": routing.agent.api_key,
-        "agent_model": routing.agent.model,
-        "vlm_base_url": routing.vlm.base_url,
-        "vlm_api_key": routing.vlm.api_key,
-        "vlm_model": routing.vlm.model,
-        "research_limits": ResearchLimits.from_config(configs),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Helper: query-embedding function for the agent's RAG node
-# ---------------------------------------------------------------------------
-
-def _make_embed_fn(llm_config: dict[str, str]):
-    """Build an async embedder hitting the configured embedding model."""
-    async def embed(texts: list[str]) -> list[list[float]]:
-        client = AsyncOpenAI(
-            api_key=llm_config["embedding_api_key"],
-            base_url=llm_config["embedding_base_url"],
-        )
-        # encoding_format="float" is mandatory: the OpenAI SDK otherwise defaults
-        # to "base64", which some OpenAI-compatible servers (e.g. Albert) reject
-        # with a 500. Float is universally supported.
-        resp = await client.embeddings.create(
-            model=llm_config["embedding_model"], input=texts, encoding_format="float"
-        )
-        return [item.embedding for item in resp.data]
-    return embed
-
-
-def _make_rerank_fn(llm_config: dict[str, str]):
-    """Build a reranker hitting the configured rerank endpoint, or None if unset.
-
-    Expects an OpenAI-compatible rerank endpoint (TEI / Infinity / vLLM) returning
-    `{"results": [{"index": i, "relevance_score": s}, ...]}`. When `RERANK_URL` is
-    empty, hybrid retrieval degrades gracefully to fusion-only ordering.
-    """
-    url = llm_config.get("rerank_url") or ""
-    if not url:
-        return None
-
-    import httpx
-
-    async def rerank(query: str, documents: list[str]) -> list[float]:  # pragma: no cover
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json={
-                "model": llm_config["rerank_model"],
-                "query": query,
-                "documents": documents,
-            })
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-        scores = [0.0] * len(documents)
-        for item in results:
-            scores[item["index"]] = item["relevance_score"]
-        return scores
-    return rerank
 
 
 # ===================================================================

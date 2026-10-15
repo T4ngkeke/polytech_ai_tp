@@ -26,6 +26,8 @@ GET    /api/teacher/labs/{lab_id}/documents, /classes/{class_id}/documents   doc
 DELETE /api/teacher/documents/{document_id}
 GET    /api/teacher/analytics/classes/{class_id}
 GET    /api/teacher/analytics/classes/{class_id}/details?lab_id=
+POST   /api/teacher/labs/{lab_id}/reports
+GET    /api/teacher/labs/{lab_id}/reports?student_id=
 """
 
 import contextlib
@@ -38,14 +40,14 @@ from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status,
 )
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    Class, ClassStudent, Lab, RuleLevel, Session,
+    AuditReport, Class, ClassStudent, Lab, RuleLevel, Session,
     UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
@@ -55,6 +57,7 @@ from backend.app.schemas import (
     ClassUpdateRequest,
     ExamModeRequest,
     InviteCodeResponse,
+    ReportRequest,
     LabCreate,
     LabResponse,
     LabUpdateRequest,
@@ -871,3 +874,70 @@ async def get_class_analytics_details(
         if lab.class_id != class_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
     return await analytics_service.get_teaching_analytics(db, class_id, lab_id)
+
+
+# ===================================================================
+# Reports a model writes for the teacher (a lab, or one student in it)
+# ===================================================================
+
+
+async def _report_lab(db, lab_id, teacher, student_id):
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    if student_id is not None and not await db.scalar(select(Session.id).where(
+            Session.lab_id == lab.id, Session.user_id == student_id).limit(1)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No conversation of this student in this lab")
+    return lab
+
+
+async def _latest_report(db, lab_id, student_id):
+    return await db.scalar(select(AuditReport).where(
+        AuditReport.lab_id == lab_id,
+        AuditReport.student_id == student_id if student_id else AuditReport.student_id.is_(None))
+        .order_by(AuditReport.created_at.desc()).limit(1))
+
+
+@router.post("/labs/{lab_id}/reports", status_code=202)
+async def create_report(
+    lab_id: uuid.UUID,
+    body: ReportRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Start a report on the lab, or on one student with `student_id`. The
+    model writes it in the background (tens of seconds); poll the GET."""
+    from backend.app.agent.model import ResearchModel
+    from backend.app.services import teaching_reports
+    from backend.app.services.model_clients import get_llm_config, make_embed_fn
+    from backend.app.services.model_routing import Endpoint
+
+    lab = await _report_lab(db, lab_id, teacher, body.student_id)
+    latest = await _latest_report(db, lab.id, body.student_id)
+    if latest is not None and latest.status == "running" and not teaching_reports.stale(latest):
+        return teaching_reports.public(latest)          # one at a time
+    config = await get_llm_config(db)
+    agent = Endpoint(config["agent_base_url"], config["agent_api_key"], config["agent_model"])
+    if not agent.model or not agent.base_url:
+        raise HTTPException(503, "agent_model_not_configured")
+    report = AuditReport(lab_id=lab.id, student_id=body.student_id, created_by=teacher.id)
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    teaching_reports.start_report(
+        async_sessionmaker(db.bind, expire_on_commit=False), report.id, ResearchModel(agent),
+        model_name=agent.model,
+        embed_fn=make_embed_fn(config) if config.get("embedding_model") else None)
+    return teaching_reports.public(report)
+
+
+@router.get("/labs/{lab_id}/reports")
+async def get_report(
+    lab_id: uuid.UUID,
+    student_id: uuid.UUID | None = Query(None),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The latest report on the lab (or on one student), or `{"report": null}`."""
+    from backend.app.services import teaching_reports
+    lab = await _report_lab(db, lab_id, teacher, student_id)
+    return {"report": teaching_reports.public(await _latest_report(db, lab.id, student_id))}
