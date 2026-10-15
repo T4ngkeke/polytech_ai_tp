@@ -162,9 +162,14 @@
   .prose-chat h2 { font-size: 1.05rem; }
   .prose-chat h3 { font-size: 1rem; }
   .prose-chat blockquote { border-left: 3px solid rgb(var(--line) / var(--line-strong)); padding-left: 0.75rem; opacity: 0.85; margin: 0.4rem 0; }
-  .prose-chat table { border-collapse: collapse; margin: 0.4rem 0; }
+  .prose-chat table { border-collapse: collapse; margin: 0.4rem 0; display: block; max-width: 100%; overflow-x: auto; }
+  .prose-chat .katex-display { overflow-x: auto; overflow-y: hidden; }
   .prose-chat th, .prose-chat td { border: 1px solid rgb(var(--line) / var(--line-default)); padding: 0.3rem 0.6rem; }
   .prose-chat a { word-break: break-word; }
+
+  /* Scrolls sideways without a visible scrollbar (tab rows on phones) */
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 
   /* Glass panels */
   .glass {

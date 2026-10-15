@@ -9,7 +9,7 @@ import { Outlet } from 'react-router-dom';
 
 export default function MainLayout() {
   return (
-    <div className="flex flex-col h-screen bg-ink-deep overflow-hidden">
+    <div className="flex flex-col h-dvh bg-ink-deep overflow-hidden">
       <Outlet />
     </div>
   );

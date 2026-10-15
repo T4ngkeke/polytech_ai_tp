@@ -161,7 +161,7 @@ export default function DocumentManager({ labId }) {
       <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3 rounded-lg border border-border-default bg-ink-deep/30 p-3">
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-cream-muted">Course material</label>
-          <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/markdown,.md,text/html,.html,.htm" className="text-sm text-cream-secondary file:mr-2 file:rounded file:border-0 file:bg-ink-surface file:px-2 file:py-1 file:text-cream-secondary" />
+          <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/markdown,.md,text/html,.html,.htm" className="max-w-full text-sm text-cream-secondary file:mr-2 file:rounded file:border-0 file:bg-ink-surface file:px-2 file:py-1 file:text-cream-secondary" />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-cream-muted">Language</label>
@@ -194,9 +194,9 @@ export default function DocumentManager({ labId }) {
               <button
                 type="button"
                 onClick={() => setSelected(doc)}
-                className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-left"
+                className="flex min-w-0 flex-1 flex-col items-start gap-1 px-3 py-2 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-3"
               >
-                <span className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 max-w-full items-center gap-2">
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
                   {(doc.status === 'needs_review' || doc.status === 'failed' || doc.status === 'partially_indexed') && (
                     <span title={doc.error_message || ''} className="text-gold">⚠</span>

@@ -19,6 +19,8 @@ const NAV = [
 
 export default function Admin() {
   const [active, setActive] = useState('users');
+  // Phones: the navigation is a drawer opened from the top bar.
+  const [navOpen, setNavOpen] = useState(false);
   const { username, logout } = useAuthStore();
   const navigate = useNavigate();
 
@@ -28,9 +30,20 @@ export default function Admin() {
   };
 
   return (
-    <div className="flex h-screen bg-ink-deep overflow-hidden">
-      {/* Nav rail */}
-      <aside className="w-56 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base/50">
+    <div className="flex flex-col md:flex-row h-dvh bg-ink-deep overflow-hidden">
+      <div className="md:hidden shrink-0 h-12 px-2 flex items-center gap-2 border-b border-border-subtle bg-ink-base">
+        <button type="button" onClick={() => setNavOpen(true)} title="Menu" aria-label="Menu"
+          className="p-2 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
+          <MenuIcon className="w-5 h-5" />
+        </button>
+        <span className="text-sm font-medium text-cream">{NAV.find((n) => n.key === active)?.label}</span>
+      </div>
+      {navOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} />
+      )}
+      {/* Nav rail (a drawer on phones) */}
+      <aside className={`${navOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-40 w-64 shadow-elevated bg-ink-base
+        md:static md:z-auto md:flex md:w-56 md:shadow-none md:bg-ink-base/50 shrink-0 flex-col border-r border-border-subtle`}>
         <div className="px-5 pt-6 pb-5">
           <h1 className="font-display text-lg text-cream leading-tight">Admin Console</h1>
           <p className="text-[11px] text-cream-muted mt-0.5">God-mode oversight</p>
@@ -39,7 +52,7 @@ export default function Admin() {
           {NAV.map(({ key, label, icon: Icon }) => {
             const on = active === key;
             return (
-              <button key={key} onClick={() => setActive(key)}
+              <button key={key} onClick={() => { setActive(key); setNavOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                   on ? 'bg-cyan-muted text-cyan' : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
                 }`}>
@@ -65,7 +78,7 @@ export default function Admin() {
       </aside>
 
       {/* Content */}
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 min-h-0 overflow-hidden">
         {active === 'users' && <UsersTab />}
         {active === 'oversight' && <OversightTab />}
         {active === 'analytics' && <AnalyticsTab />}
@@ -185,7 +198,7 @@ function UsersTab() {
   if (loading) return <Spinner />;
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 md:p-8 overflow-y-auto h-full">
       <div className="max-w-5xl mx-auto">
         <PageHeader title="Users" subtitle={`${users.length} total accounts`}>
           <button onClick={() => setShowCsvModal(true)}
@@ -214,8 +227,8 @@ function UsersTab() {
         </div>
 
         {/* Table */}
-        <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="bg-ink-surface/40 border-b border-border-subtle text-[10px] uppercase tracking-widest text-cream-muted">
                 <SortableTh label="User" active={sortKey === 'username'} dir={sortDir} onClick={() => toggleSort('username')} />
@@ -414,7 +427,7 @@ function OversightTab() {
   };
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 md:p-8 overflow-y-auto h-full">
       <div className="max-w-3xl mx-auto">
         {!selectedClass ? (
           /* ── Level 0: class list ── */
@@ -558,7 +571,7 @@ function AnalyticsTab() {
   };
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 md:p-8 overflow-y-auto h-full">
       <div className="max-w-4xl mx-auto space-y-6">
         <PageHeader title="Analytics" subtitle="Platform-wide token usage" />
         {global && (
@@ -769,14 +782,15 @@ function MapEdges({ config }) {
   );
 }
 
-function MapNode({ node, config, selected, onSelect }) {
+// inList: a plain grid cell on small screens instead of a positioned map node.
+function MapNode({ node, config, selected, onSelect, inList = false }) {
   const st = node.status(config);
   const meta = NODE_STATUS_META[st];
   const model = node.shows ? node.shows(config) : config[node.fields[0].key];
   return (
     <button type="button" onClick={onSelect}
-      style={{ left: `${node.x}%`, top: `${node.y}%` }}
-      className={`absolute w-36 -translate-x-1/2 -translate-y-1/2 rounded-xl border p-2 text-left transition-all cursor-pointer bg-ink-raised hover:border-cyan/50 ${selected
+      style={inList ? undefined : { left: `${node.x}%`, top: `${node.y}%` }}
+      className={`${inList ? 'w-full min-w-0' : 'absolute w-36 -translate-x-1/2 -translate-y-1/2'} rounded-xl border p-2 text-left transition-all cursor-pointer bg-ink-raised hover:border-cyan/50 ${selected
         ? 'border-cyan ring-2 ring-cyan/30 shadow-glow'
         : 'border-border-default'}`}>
       <div className="flex items-center justify-between gap-1">
@@ -905,7 +919,7 @@ function LLMConfigTab() {
 
   if (loading) return <Spinner />;
   if (loadError || !config) return (
-    <div className="p-8" role="alert">
+    <div className="p-4 md:p-8" role="alert">
       <p className="text-danger">{loadError || 'No model settings returned.'}</p>
       <button type="button" onClick={loadConfig} className="mt-3 text-cyan hover:underline">
         Retry loading settings
@@ -914,7 +928,7 @@ function LLMConfigTab() {
   );
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 md:p-8 overflow-y-auto h-full">
       <div className="max-w-6xl mx-auto">
         <PageHeader title="Model Routing Map"
           subtitle="Changes take effect immediately — no server restart required." />
@@ -932,7 +946,13 @@ function LLMConfigTab() {
         </p>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="relative h-[470px] overflow-hidden rounded-xl border border-border-default bg-ink-deep/40">
+          <div className="grid grid-cols-2 gap-2 md:hidden">
+            {MAP_NODES.map((n) => (
+              <MapNode key={n.id} node={n} config={config} inList
+                selected={n.id === selectedId} onSelect={() => setSelectedId(n.id)} />
+            ))}
+          </div>
+          <div className="relative hidden md:block h-[470px] overflow-hidden rounded-xl border border-border-default bg-ink-deep/40">
             <MapEdges config={config} />
             {MAP_SOURCES.map((s) => <MapSource key={s.id} source={s} />)}
             {MAP_NODES.map((n) => (
@@ -1008,7 +1028,7 @@ function MaintenanceTab() {
   };
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 md:p-8 overflow-y-auto h-full">
       <div className="max-w-md mx-auto">
         <HealthPanel />
         <PageHeader title="Database Maintenance" subtitle="Permanently remove old sessions to free disk space." />
@@ -1209,4 +1229,8 @@ function SortIcon({ className, dir }) {
       <path d="m21 16-4 4-4-4" opacity={dir === 'desc' ? 1 : 0.4} />
     </svg>
   );
+}
+
+function MenuIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
 }

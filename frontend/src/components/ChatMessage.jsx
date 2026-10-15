@@ -74,13 +74,13 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, p
     : linkCitations(message.content, new Set(citations.filter((c) => c.available && c.label).map((c) => c.label)))),
   [isUser, message.content, citations]);
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-2 md:gap-3 animate-fade-in`}>
       {!isUser && (
-        <div className="w-7 h-7 rounded-lg gradient-cyan flex items-center justify-center shrink-0 mt-0.5 shadow-glow">
+        <div className="hidden sm:flex w-7 h-7 rounded-lg gradient-cyan items-center justify-center shrink-0 mt-0.5 shadow-glow">
           <span className="text-on-accent text-[10px] font-bold">AI</span>
         </div>
       )}
-      <div className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+      <div className={`min-w-0 ${isUser ? 'max-w-[85%]' : 'max-w-full'} md:max-w-[72%] rounded-2xl px-3 py-2.5 md:px-4 md:py-3 text-sm leading-relaxed ${
         isUser
           ? 'bg-cyan-muted text-cream rounded-tr-sm border border-cyan/20'
           : 'bg-ink-raised text-cream-secondary border border-border-subtle rounded-tl-sm'

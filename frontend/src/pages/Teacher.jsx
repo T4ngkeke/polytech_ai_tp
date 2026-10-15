@@ -34,6 +34,8 @@ export default function Teacher() {
   const [selectedClass, setSelectedClass] = useState(null);
   const [selectedLab, setSelectedLab] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
+  // Phones: the class tree is a drawer opened from the top bar.
+  const [navOpen, setNavOpen] = useState(true);
 
   // ── Right panel data ──
   const [students, setStudents] = useState([]);
@@ -90,6 +92,7 @@ export default function Teacher() {
     setActiveTab(0);
     setAnalytics(null);
     setAuditSessions([]);
+    setNavOpen(false);
   }, [classes]);
 
   // ── When class node clicked (no lab): set selectedClass, clear lab ──
@@ -279,9 +282,13 @@ export default function Teacher() {
     : null;
 
   return (
-    <div className="flex h-screen bg-ink-deep overflow-hidden">
-      {/* LEFT: Tree */}
-      <div className="w-64 shrink-0">
+    <div className="flex h-dvh bg-ink-deep overflow-hidden">
+      {/* LEFT: Tree (a drawer on phones) */}
+      {navOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} />
+      )}
+      <div className={`${navOpen ? 'block' : 'hidden'} fixed inset-y-0 left-0 z-40 w-[85vw] max-w-xs shadow-elevated
+        md:static md:z-auto md:block md:w-64 md:max-w-none md:shadow-none shrink-0`}>
         <HierarchicalSidebar
           role="teacher"
           classes={classes}
@@ -297,19 +304,26 @@ export default function Teacher() {
 
       {/* RIGHT: Panel */}
       <div className="flex-1 flex flex-col min-w-0">
+        <div className="md:hidden shrink-0 h-12 px-2 flex items-center gap-2 border-b border-border-subtle bg-ink-base">
+          <button type="button" onClick={() => setNavOpen(true)} title="Classes and labs" aria-label="Classes and labs"
+            className="p-2 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
+            <MenuIcon className="w-5 h-5" />
+          </button>
+          <span className="min-w-0 truncate text-sm font-medium text-cream">{context || 'Teacher'}</span>
+        </div>
         {!selectedClass && !selectedLab ? (
           <EmptyState />
         ) : (
           <>
             {/* Panel header */}
-            <div className="shrink-0 px-8 pt-6 pb-0 border-b border-border-subtle bg-ink-base/60">
-              <p className="text-[10px] text-cream-muted uppercase tracking-widest mb-1 font-mono">{context}</p>
-              <div className="flex gap-6">
+            <div className="shrink-0 px-4 pt-2 md:px-8 md:pt-6 pb-0 border-b border-border-subtle bg-ink-base/60">
+              <p className="hidden md:block text-[10px] text-cream-muted uppercase tracking-widest mb-1 font-mono">{context}</p>
+              <div className="flex gap-5 md:gap-6 overflow-x-auto no-scrollbar">
                 {tabs.map((tab, i) => (
                   <button
                     key={tab}
-                    onClick={() => setActiveTab(i)}
-                    className={`pb-3 text-sm font-medium border-b-2 transition-all cursor-pointer ${
+                    onClick={(e) => { setActiveTab(i); e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }}
+                    className={`shrink-0 whitespace-nowrap pb-3 text-sm font-medium border-b-2 transition-all cursor-pointer ${
                       activeTab === i ? 'border-cyan text-cyan' : 'border-transparent text-cream-secondary hover:text-cream'
                     }`}
                   >
@@ -320,7 +334,7 @@ export default function Teacher() {
             </div>
 
             {/* Panel content */}
-            <div className="flex-1 p-8 overflow-y-auto">
+            <div className="flex-1 p-4 md:p-8 overflow-y-auto">
               {level === 'class' && activeTab === 0 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule="" showPresets />}
               {level === 'class' && activeTab === 1 && <AnalyticsPanel analytics={analytics} />}
 
@@ -396,7 +410,7 @@ function EmptyState() {
           </svg>
         </div>
         <h3 className="font-display text-xl text-cream mb-2">Select a node</h3>
-        <p className="text-sm text-cream-secondary">Click a class or lab in the sidebar to manage it.</p>
+        <p className="text-sm text-cream-secondary">Choose a class or lab to manage it.</p>
       </div>
     </div>
   );
@@ -835,4 +849,8 @@ function SimpleModal({ title, value, setValue, placeholder, onConfirm, onClose, 
       </div>
     </div>
   );
+}
+
+function MenuIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
 }

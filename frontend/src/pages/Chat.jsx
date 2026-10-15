@@ -54,6 +54,8 @@ export default function Chat() {
   const closeSource = useCallback(() => setPreview(null), []);
   const restoredLabRef = useRef(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  // Phones: classes and sessions live in a drawer opened from the header.
+  const [navOpen, setNavOpen] = useState(!urlLabId);
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -149,6 +151,7 @@ export default function Chat() {
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
       setMessages([]);
+      setNavOpen(false);
     } catch (err) {
       toast.error(err.message || 'Failed to create session');
     }
@@ -161,6 +164,7 @@ export default function Chat() {
     abortRef.current = null;
     setIsStreaming(false);
     setActiveSessionId(sessionId);
+    setNavOpen(false);
     setIsLoadingMessages(true);
     try {
       const data = await api.get(`/api/student/sessions/${sessionId}`);
@@ -342,9 +346,15 @@ export default function Chat() {
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   return (
-    <div className="flex h-screen bg-ink-deep overflow-hidden">
+    <div className="flex h-dvh bg-ink-deep overflow-hidden">
+      {/* Phones: the two sidebars below form one drawer over the chat. */}
+      {navOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} />
+      )}
+      <div className={`${navOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm flex-col shadow-elevated
+        md:static md:z-auto md:flex md:w-auto md:max-w-none md:flex-row md:shadow-none`}>
       {/* ── Left: Hierarchical Sidebar ── */}
-      <div className="w-60 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base">
+      <div className={`${activeLabId ? 'max-h-[50%]' : 'flex-1'} min-h-0 md:max-h-none md:w-60 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border-subtle bg-ink-base`}>
         <HierarchicalSidebar
           role="student"
           classes={classes}
@@ -373,7 +383,7 @@ export default function Chat() {
 
       {/* ── Middle: Session list (when lab selected) ── */}
       {activeLabId && (
-        <div className="w-48 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base">
+        <div className="flex-1 min-h-0 md:flex-none md:w-48 shrink-0 flex flex-col md:border-r border-border-subtle bg-ink-base">
           <div className="px-3 pt-4 pb-2 border-b border-border-subtle">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
             <button
@@ -430,7 +440,7 @@ export default function Chat() {
                       </span>
                     </button>
                     {/* Hover actions: rename + soft-delete */}
-                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
                         className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
@@ -454,13 +464,19 @@ export default function Chat() {
         </div>
       )}
 
+      </div>
+
       {/* ── Right: Chat panel ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Chat header */}
-        <div className="shrink-0 h-14 px-6 border-b border-border-subtle flex items-center justify-between bg-ink-base/80 backdrop-blur-sm">
-          <div>
+        <div className="shrink-0 h-14 px-3 md:px-6 border-b border-border-subtle flex items-center justify-between gap-2 bg-ink-base/80 backdrop-blur-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            <button type="button" onClick={() => setNavOpen(true)} title="Classes and sessions" aria-label="Classes and sessions"
+              className="md:hidden p-2 -ml-1 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
+              <MenuIcon className="w-5 h-5" />
+            </button>
             {activeSession ? (
-              <h2 className="text-sm font-semibold text-cream">{activeSession.title || 'Untitled Session'}</h2>
+              <h2 className="text-sm font-semibold text-cream truncate">{activeSession.title || 'Untitled Session'}</h2>
             ) : activeLabId ? (
               <h2 className="text-sm font-semibold text-cream-secondary">Select or create a session</h2>
             ) : (
@@ -468,7 +484,7 @@ export default function Chat() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-cream-muted font-mono">{username}</span>
+            <span className="hidden sm:inline text-[11px] text-cream-muted font-mono">{username}</span>
             {isStreaming && (
               <div className="flex items-center gap-1.5 text-[10px] text-cyan">
                 <div className="w-1.5 h-1.5 rounded-full bg-cyan animate-pulse" />
@@ -479,7 +495,7 @@ export default function Chat() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+        <div className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6 space-y-5">
           {!activeLabId && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-xs">
@@ -490,7 +506,7 @@ export default function Chat() {
                 </div>
                 <h3 className="font-display text-xl text-cream mb-2">Select a Lab</h3>
                 <p className="text-sm text-cream-secondary">
-                  Choose a lab from the sidebar to start chatting, or join a class first.
+                  Choose a lab to start chatting, or join a class first.
                 </p>
               </div>
             </div>
@@ -530,7 +546,7 @@ export default function Chat() {
         </div>
 
         {/* Input */}
-        <div className="shrink-0 px-6 py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
+        <div className="shrink-0 px-3 py-3 md:px-6 md:py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
           <div className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
             activeSessionId ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
           } bg-ink-deep`}>
@@ -614,6 +630,9 @@ export default function Chat() {
 }
 
 /* ── Icons ── */
+function MenuIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+}
 function SendIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z" /><path d="M22 2 11 13" /></svg>;
 }

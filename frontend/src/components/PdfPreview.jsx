@@ -87,12 +87,12 @@ export function PdfPreviewModal({ source, onClose }) {
   const labels = source.focusLabel ? [source.focusLabel]
     : pages.find((p) => p.pageNo === page)?.labels || [];
   const tab = (active) => `rounded px-2 py-0.5 text-xs ${active
-    ? 'bg-cyan text-on-accent' : 'text-cream-secondary hover:bg-ink-hover hover:text-on-accent'}`;
+    ? 'bg-cyan text-on-accent' : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'}`;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 md:p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div role="dialog" aria-modal="true" aria-label={`${source.filename}, page ${page}`}
-        className="flex h-[85vh] w-[min(1000px,94vw)] flex-col overflow-hidden rounded-xl border border-border-default bg-ink-base shadow-2xl">
+        className="flex h-dvh w-full flex-col overflow-hidden bg-ink-base shadow-2xl md:h-[85vh] md:w-[min(1000px,94vw)] md:rounded-xl md:border md:border-border-default">
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-4 py-2 text-sm text-cream">
           <span className="max-w-[40%] truncate font-medium" title={source.filename}>{source.filename}</span>
           <span className="text-cream-secondary">· PDF page {page}</span>
@@ -103,7 +103,7 @@ export function PdfPreviewModal({ source, onClose }) {
                 <button key={p.pageNo} type="button" onClick={() => setPage(p.pageNo)}
                   aria-pressed={p.pageNo === page}
                   className={`rounded px-1.5 py-0.5 text-xs ${p.pageNo === page
-                    ? 'bg-cyan text-on-accent' : 'bg-cyan/10 text-cream-secondary hover:text-on-accent'}`}>
+                    ? 'bg-cyan text-on-accent' : 'bg-cyan/10 text-cream-secondary hover:text-cream'}`}>
                   p.{p.pageNo}
                 </button>
               ))}
