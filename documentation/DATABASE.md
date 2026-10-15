@@ -93,6 +93,7 @@ token tracking, and hybrid retrieval over course documents.
 | teacher_id | FK | → Users.id (Must be a teacher) |
 | invite_code | String | Unique, 6-character short code for zero-friction joining |
 | is_deleted | Boolean | Default: False — Soft delete flag for historical retention |
+| exam_mode | Boolean | Default: False (migration `m4f_answer_modes_v1`). True: every lab of the class answers in Direct mode only, without course search |
 | created_at | Timestamp | Timezone-aware (UTC) |
 
 ### 4. Class_Students
@@ -144,6 +145,9 @@ Tracks tokens used per user and per message. `Messages` carries `feedback`
 free golden-set labels; a 👎 links back to that message's `AgentTraceLog`.
 `clarification` (JSON, nullable, migration `m4e_clarification_v1`) is set when a
 research answer is a question back to the student: `{"question", "options"}`.
+`answer_mode` (VARCHAR(16), nullable, migration `m4f_answer_modes_v1`) is the mode
+that wrote an assistant answer: `direct`, `search` or `research` (NULL for answers
+written before the modes).
 
 ---
 
@@ -281,10 +285,11 @@ change lands cleanly. Teacher-edited chunks survive the rebuild.*
 
 ### 16. Research agent tables (opt-in, migration `m4c_research_persistence_v1`)
 
-Written only by the research agent (`AGENTIC_SEARCH_ENABLED`). Apply
-`scripts/ingestion_agent_schema_m4c.sql` and `scripts/ingestion_agent_schema_m4e.sql`
-(`messages.clarification`) with `scripts/migrate_document_snapshots.py`; with the
-flag on, startup checks both.
+Written only by the research agent (`AGENTIC_SEARCH_ENABLED`), in all three answer
+modes. Apply `scripts/ingestion_agent_schema_m4c.sql`,
+`scripts/ingestion_agent_schema_m4e.sql` (`messages.clarification`) and
+`scripts/ingestion_agent_schema_m4f.sql` (`classes.exam_mode`, `messages.answer_mode`)
+with `scripts/migrate_document_snapshots.py`; with the flag on, startup checks them.
 
 | Table | One row per | Main columns |
 | --- | --- | --- |

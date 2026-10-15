@@ -29,6 +29,7 @@ import contextlib
 import os
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
+from types import SimpleNamespace
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status,
@@ -49,6 +50,7 @@ from backend.app.schemas import (
     ClassCreate,
     ClassResponse,
     ClassUpdateRequest,
+    ExamModeRequest,
     InviteCodeResponse,
     LabCreate,
     LabResponse,
@@ -260,23 +262,56 @@ async def upload_document(
     owns; enqueues ingestion.
 
     The form asks for the file and nothing else that matters: `language` selects
-    the BM25 text-search config and `shared` makes the document class-wide.
+    the BM25 text-search config. `shared` (older clients) makes the document
+    class-wide, as an upload to /classes/{class_id}/documents does.
     There is no type to declare and no audience to pick — everything uploaded is
     course material the whole class can read.
     """
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    return await _store_upload(db, response, scope=lab, shared=shared, file=file, language=language,
+                               mode=mode, replace_document_id=replace_document_id,
+                               expected_generation=expected_generation, teacher=teacher,
+                               storage_root=storage_root)
 
+
+@router.post("/classes/{class_id}/documents", response_model=DocumentResponse, status_code=201)
+async def upload_class_document(
+    class_id: uuid.UUID,
+    response: Response,
+    file: UploadFile = File(...),
+    language: str = Form("fr"),
+    mode: str = Form("new"),
+    replace_document_id: uuid.UUID | None = Form(None),
+    expected_generation: int | None = Form(None, ge=0),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+    storage_root: str = Depends(get_storage_root),
+) -> DocumentResponse:
+    """Upload a class-wide course document (lab_id NULL): every lab of the class
+    reads it, e.g. the course handout shared by all TPs."""
+    await _verify_class_ownership(db, class_id, teacher)
+    # The upload code needs a class id and a lab id; a class-wide document has none.
+    scope = SimpleNamespace(id=None, class_id=class_id)
+    return await _store_upload(db, response, scope=scope, shared=True, file=file, language=language,
+                               mode=mode, replace_document_id=replace_document_id,
+                               expected_generation=expected_generation, teacher=teacher,
+                               storage_root=storage_root)
+
+
+async def _store_upload(db, response, *, scope, shared, file, language, mode,
+                        replace_document_id, expected_generation, teacher, storage_root):
+    """One upload in a lab (scope: the Lab) or class-wide (shared)."""
     if (file.filename or "").lower().endswith(".pdf") and settings.PDF_STRUCTURED_INGEST_ENABLED and settings.STRUCTURED_INGEST_ENABLED:
         return await _upload_structured(
-            db, response, lab=lab, file=file, language=language, shared=shared, mode=mode,
+            db, response, lab=scope, file=file, language=language, shared=shared, mode=mode,
             replace_document_id=replace_document_id, expected_generation=expected_generation,
             teacher=teacher, storage_root=storage_root, fmt="pdf")
     if (file.filename or "").lower().endswith(".odp"):
         if settings.PDF_STRUCTURED_INGEST_ENABLED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="odp_not_supported")
         return await _upload_structured(
-            db, response, lab=lab, file=file, language=language, shared=shared, mode=mode,
+            db, response, lab=scope, file=file, language=language, shared=shared, mode=mode,
             replace_document_id=replace_document_id, expected_generation=expected_generation,
             teacher=teacher, storage_root=storage_root, fmt="odp")
     # Replacing a file is part of the structured path only (M2-B, ODP).
@@ -291,14 +326,12 @@ async def upload_document(
             detail="Only PDF, Markdown or HTML uploads are supported. Export slides to PDF first.",
         )
 
-    # Shared → lab_id NULL, reachable from every lab of the class.
-    doc_lab_id = None if shared else lab.id
-
     content = await file.read()
     doc = await document_service.create_document(
         db,
-        class_id=lab.class_id,
-        lab_id=doc_lab_id,
+        class_id=scope.class_id,
+        # Shared → lab_id NULL, reachable from every lab of the class.
+        lab_id=None if shared else scope.id,
         filename=file.filename,
         content=content,
         uploaded_by=teacher.id,
@@ -355,10 +388,25 @@ async def list_lab_documents(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> list[DocumentSummaryResponse]:
-    """List a lab's documents with status + processing summary (ownership enforced)."""
+    """List the documents a lab uses with status + processing summary (ownership
+    enforced): the class-wide documents first (scope "class"), then the lab's own."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
-    rows = await document_service.list_lab_documents(db, lab_id)
+    return _document_summaries(await document_service.list_lab_documents(db, lab_id, lab.class_id))
+
+
+@router.get("/classes/{class_id}/documents", response_model=list[DocumentSummaryResponse])
+async def list_class_documents(
+    class_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> list[DocumentSummaryResponse]:
+    """The class-wide documents of a class the teacher owns."""
+    await _verify_class_ownership(db, class_id, teacher)
+    return _document_summaries(await document_service.list_class_documents(db, class_id))
+
+
+def _document_summaries(rows) -> list[DocumentSummaryResponse]:
     return [
         DocumentSummaryResponse(
             id=r["doc"].id,
@@ -373,6 +421,7 @@ async def list_lab_documents(
             structured=r["doc"].structured,
             current_revision_id=r["doc"].current_revision_id,
             latest_revision=r["latest_revision"],
+            scope=r["scope"],
         )
         for r in rows
     ]
@@ -780,6 +829,22 @@ async def update_class(
     """Rename a class (ownership enforced)."""
     cls = await _verify_class_ownership(db, class_id, teacher)
     cls = await class_service.rename_class(db, cls, name=body.name)
+    return ClassResponse.model_validate(cls)
+
+
+@router.put("/classes/{class_id}/exam-mode", response_model=ClassResponse)
+async def set_exam_mode(
+    class_id: uuid.UUID,
+    body: ExamModeRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> ClassResponse:
+    """Turn exam mode on or off: on, every lab of the class answers in direct
+    mode only (no course search), enforced by the chat endpoint."""
+    cls = await _verify_class_ownership(db, class_id, teacher)
+    cls.exam_mode = body.exam_mode
+    await db.commit()
+    await db.refresh(cls)
     return ClassResponse.model_validate(cls)
 
 

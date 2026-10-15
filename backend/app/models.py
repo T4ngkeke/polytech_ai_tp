@@ -276,6 +276,8 @@ class Class(Base):
     )
     invite_code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Exam mode: every lab of the class answers in Direct mode only (no course search).
+    exam_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
@@ -513,6 +515,8 @@ class Message(Base):
     )
     # [M4-E] An answer that is a question back (ask_student): {question, options}.
     clarification: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # The answer mode of an assistant answer: direct, search or research (NULL: older answers).
+    answer_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

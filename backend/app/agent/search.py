@@ -57,6 +57,9 @@ CHECK_TURN = ('The student has not seen this reply yet. If it states course cont
               'only with the word DONE.')
 NO_PAGES = '(The course search found no page for this question.)'
 
+# The product's settings, chosen from the 2026-10-15 comparison (M4_AGENT_EVALUATION.md).
+REWRITE = False
+MIN_SCORE: float | None = None
 SEARCH_TOP_K = 10      # blocks per query (the search tool allows at most 12)
 PAGE_CHARS = 6000      # text of one page
 CONTEXT_CHARS = 24000  # text of all pages
@@ -153,7 +156,7 @@ class SearchRunner:
 
         def result(text, citations, reason, unresolved=()):
             return ResearchResult(text, citations, reason, list(unresolved), len(tools.trace),
-                                  model_calls, tools.trace + trace, usage)
+                                  model_calls, tools.trace + trace, usage, mode='search')
 
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
         system = SEARCH_PROMPT + '\n' + teaching_rules + '\n' + research_note

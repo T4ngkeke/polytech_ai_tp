@@ -565,3 +565,86 @@ async def test_a_question_back_is_saved_shown_and_answered_in_the_next_turn(pg_s
             assert 'ask_student' in offered[3]
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
+
+
+async def _mode_chat(db, tmp_path, monkeypatch, replies):
+    """A student chat whose model records each call and returns `replies` in order."""
+    doc, rev, teacher, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+    db.add_all(models('http://example.invalid/v1'))
+    await db.commit()
+    import backend.app.routers.chat as chat_api
+    monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
+    calls = []
+    class FakeModel:
+        def __init__(self, endpoint):
+            pass
+        async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+            calls.append({'purpose': purpose, 'tools': tools, 'messages': messages})
+            return ModelReply(replies.pop(0), [], 'ornith', 40, 10)
+    monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
+    return doc, student, chat, calls
+
+
+@pytest.mark.asyncio
+async def test_search_mode_answers_from_found_pages_and_records_the_mode(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        _, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].'])
+        client = await make_client(db, student)
+        async with client:
+            stream = events((await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Définition θ₁', 'mode': 'search'})).text)
+            assert ('status', {'route': 'agent', 'phase': 'thinking', 'mode': 'search',
+                               'exam_mode': False}) in stream
+            assert ('token', 'Voir [E1].') in stream
+            cited = next(data for name, data in stream if name == 'citations')
+            assert [c['label'] for c in cited] == ['E1']
+            # One answer call without tools, the found page in the message.
+            assert [c['purpose'] for c in calls] == ['search_answer'] and calls[0]['tools'] is None
+            assert '[E1]' in calls[0]['messages'][-1]['content']
+            stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
+            assert stored[-1]['answer_mode'] == 'search' and stored[-1]['citations']
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_reads_nothing_and_cites_nothing(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        _, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Une récursion [E3] appelle…'])
+        client = await make_client(db, student)
+        async with client:
+            stream = events((await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'La récursion ?', 'mode': 'direct'})).text)
+            # An ID copied from nowhere is removed: no page was read.
+            assert ('token', 'Une récursion  appelle…') in stream and ('citations', []) in stream
+            assert [c['purpose'] for c in calls] == ['direct_answer'] and calls[0]['tools'] is None
+            assert 'Search or Research' in calls[0]['messages'][0]['content']
+            stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
+            assert stored[-1]['answer_mode'] == 'direct'
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Réponse.'])
+        from backend.app.models import Class
+        cls = await db.get(Class, doc.class_id)
+        cls.exam_mode = True
+        await db.commit()
+        client = await make_client(db, student)
+        async with client:
+            stream = events((await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Définition θ₁', 'mode': 'research'})).text)
+            assert ('status', {'route': 'agent', 'phase': 'thinking', 'mode': 'direct',
+                               'exam_mode': True}) in stream
+            assert [c['purpose'] for c in calls] == ['direct_answer']
+            assert 'exam mode' in calls[0]['messages'][0]['content']
+            classes = (await client.get('/api/student/classes')).json()
+            assert classes[0]['exam_mode'] is True
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)

@@ -18,12 +18,14 @@ import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
 import SkillPresetManager from '../components/SkillPresetManager';
 import CitationReport from '../components/CitationReport';
+import ModeSwitch from '../components/ModeSwitch';
+import { DEFAULT_MODE, modeLabel, offersResearch } from '../lib/answerModes';
 
 // Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
 // it in when a test-drive is actually opened.
 const MessageContent = lazy(() => import('../components/MessageContent'));
 
-const TABS_CLASS = ['Rules', 'Analytics'];
+const TABS_CLASS = ['Settings', 'Rules', 'Analytics', 'Documents'];
 // New tabs appended last so existing tab indices stay stable.
 const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive'];
 
@@ -95,6 +97,12 @@ export default function Teacher() {
     setNavOpen(false);
   }, [classes]);
 
+  // A class changed on the server (exam mode): keep its labs, take the new fields.
+  const handleClassChanged = useCallback((updated) => {
+    setClasses((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+    setSelectedClass((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+  }, []);
+
   // ── When class node clicked (no lab): set selectedClass, clear lab ──
   const handleSelectClass = useCallback((cls) => {
     setSelectedClass(cls);
@@ -111,11 +119,11 @@ export default function Teacher() {
     const targetId = selectedLab ? selectedLab.id : selectedClass?.id;
 
     if (level === 'class') {
-      if (activeTab === 0) {
+      if (activeTab === 1) {
         api.get(`/api/teacher/rules?level=class&target_id=${selectedClass.id}`)
           .then((rules) => { const r = rules[0] || null; setRule(r); setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true); })
           .catch(() => { setRule(null); setRuleText(''); });
-      } else if (activeTab === 1) {
+      } else if (activeTab === 2) {
         api.get(`/api/teacher/analytics/classes/${selectedClass.id}`).then(setAnalytics).catch(() => setAnalytics(null));
       }
     } else {
@@ -335,8 +343,10 @@ export default function Teacher() {
 
             {/* Panel content */}
             <div className="flex-1 p-4 md:p-8 overflow-y-auto">
-              {level === 'class' && activeTab === 0 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule="" showPresets />}
-              {level === 'class' && activeTab === 1 && <AnalyticsPanel analytics={analytics} />}
+              {level === 'class' && activeTab === 0 && <ClassSettingsPanel cls={selectedClass} onChange={handleClassChanged} />}
+              {level === 'class' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule="" showPresets />}
+              {level === 'class' && activeTab === 2 && <AnalyticsPanel analytics={analytics} />}
+              {level === 'class' && activeTab === 3 && <DocumentManager classId={selectedClass.id} />}
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
@@ -344,7 +354,7 @@ export default function Teacher() {
               {level === 'lab' && activeTab === 3 && <AuditPanel lab={selectedLab} sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
-              {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} />}
+              {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} examMode={!!selectedClass?.exam_mode} />}
             </div>
           </>
         )}
@@ -513,7 +523,42 @@ function LabSettingsPanel({ lab, onToggle }) {
 // the real agent as a preview. The server excludes these writes from analytics
 // and LearnerProfile, and the token cost is charged to the teacher, not a
 // student.
-function TestDrivePanel({ labId, labName }) {
+function ClassSettingsPanel({ cls, onChange }) {
+  const [saving, setSaving] = useState(false);
+  const toggle = async () => {
+    setSaving(true);
+    try {
+      onChange(await api.put(`/api/teacher/classes/${cls.id}/exam-mode`, { exam_mode: !cls.exam_mode }));
+      toast.success(cls.exam_mode ? 'Exam mode off' : 'Exam mode on');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="max-w-2xl p-5 rounded-xl bg-ink-raised border border-border-subtle">
+      <h3 className="text-sm font-semibold text-cream mb-4">Class Settings</h3>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-cream">Exam mode</p>
+          <p className="mt-1 text-xs text-cream-muted">
+            {cls.exam_mode
+              ? 'On: in every lab of this class, students get Direct answers only. The course files are not searched.'
+              : 'Off: students choose Direct, Search or Research. Turn it on during an exam to stop course search in every lab.'}
+          </p>
+        </div>
+        <button type="button" role="switch" aria-checked={!!cls.exam_mode} aria-label="Exam mode"
+          onClick={toggle} disabled={saving}
+          className={`shrink-0 w-9 h-5 rounded-full transition-colors relative cursor-pointer disabled:opacity-50 ${cls.exam_mode ? 'bg-gold' : 'bg-ink-surface border border-border-default'}`}>
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${cls.exam_mode ? 'left-[18px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TestDrivePanel({ labId, labName, examMode = false }) {
   // The same agent, stream and message bubbles as the student chat: research
   // phases, the answer draft, a question back with clickable options, and
   // cited pages that open in the source preview.
@@ -525,6 +570,7 @@ function TestDrivePanel({ labId, labName }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [phase, setPhase] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [mode, setMode] = useState(DEFAULT_MODE);
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
 
@@ -556,8 +602,9 @@ function TestDrivePanel({ labId, labName }) {
     }
   }, [labId]);
 
-  // picked: an option clicked under a question back; otherwise the input box.
-  const send = useCallback(async (picked) => {
+  // picked: an option clicked under a question back, or a question sent again
+  // (modeOverride: Research again after an uncited Search); otherwise the input box.
+  const send = useCallback(async (picked, modeOverride) => {
     const text = (typeof picked === 'string' ? picked : input).trim();
     if (!text || isStreaming || !sessionId) return;
 
@@ -578,7 +625,8 @@ function TestDrivePanel({ labId, labName }) {
       await fetchEventSource('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId, message: text, client_request_id: createRequestId() }),
+        body: JSON.stringify({ session_id: sessionId, message: text, client_request_id: createRequestId(),
+          mode: examMode ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
         signal: ctrl.signal,
         openWhenHidden: true,
         onmessage(ev) {
@@ -586,6 +634,9 @@ function TestDrivePanel({ labId, labName }) {
           switch (action.type) {
             case 'status':
               setPhase(action.phase);
+              if (action.mode) {
+                setMessages((prev) => prev.map((m) => (m.id === assistantMsgId ? { ...m, answer_mode: action.mode } : m)));
+              }
               return;
             case 'done':
               setPhase(null);
@@ -610,7 +661,7 @@ function TestDrivePanel({ labId, labName }) {
       setPhase(null);
       setIsStreaming(false);
     }
-  }, [input, isStreaming, sessionId, token]);
+  }, [input, isStreaming, sessionId, token, mode, examMode]);
 
   if (!sessionId) {
     return (
@@ -648,11 +699,18 @@ function TestDrivePanel({ labId, labName }) {
               streaming={isStreaming && m.sender === 'llm' && last}
               phase={isStreaming && m.sender === 'llm' && last ? phase : null}
               canRate={false}
-              onPick={!isStreaming && last && m.clarification ? send : null} />
+              onPick={!isStreaming && last && m.clarification ? send : null}
+              onResearch={!isStreaming && !examMode && last && offersResearch(m) ? () => {
+                const question = messages.slice(0, i).reverse().find((x) => x.sender === 'user');
+                if (question) send(question.content, 'research');
+              } : null} />
           );
         })}
       </div>
-      <div className="flex gap-2 p-3 border-t border-border-subtle">
+      <div className="px-3 pt-3 border-t border-border-subtle">
+        <ModeSwitch mode={mode} onChange={setMode} examMode={examMode} disabled={isStreaming} />
+      </div>
+      <div className="flex gap-2 p-3">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -800,7 +858,9 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
                               <div className={`max-w-[80%] px-3 py-2 rounded-xl text-xs ${
                                 m.sender === 'user' ? 'bg-cyan-muted text-cream' : 'bg-ink-base border border-border-default text-cream-secondary'
                               }`}>
-                                <p className="text-[9px] text-cream-muted mb-1 font-mono uppercase">{m.sender}</p>
+                                <p className="text-[9px] text-cream-muted mb-1 font-mono uppercase">
+                                  {m.sender}{m.sender !== 'user' && modeLabel(m.answer_mode) ? ` · ${modeLabel(m.answer_mode)}` : ''}
+                                </p>
                                 {/* Answers are Markdown (tables, code, formulas), as the student saw them. */}
                                 {m.sender === 'user'
                                   ? <span className="whitespace-pre-wrap">{m.content}</span>

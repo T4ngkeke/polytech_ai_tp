@@ -85,10 +85,29 @@ async def _count(db: AsyncSession, model, document_id: uuid.UUID) -> int:
     return (await db.execute(stmt)).scalar_one()
 
 
-async def list_lab_documents(db: AsyncSession, lab_id: uuid.UUID) -> list[dict]:
-    """Documents in a lab with their status + processing summary (pages/chunks)."""
+async def list_lab_documents(db: AsyncSession, lab_id: uuid.UUID,
+                             class_id: uuid.UUID | None = None) -> list[dict]:
+    """Documents a lab uses, with status + processing summary (pages/chunks).
+
+    With class_id, the class-wide documents (lab_id NULL) come first: the
+    research tools of every lab of the class read them too. Each summary
+    names its scope, "class" or "lab".
+    """
+    where = Document.lab_id == lab_id
+    if class_id is not None:
+        where = where | ((Document.class_id == class_id) & Document.lab_id.is_(None))
+    return await _summaries(db, where)
+
+
+async def list_class_documents(db: AsyncSession, class_id: uuid.UUID) -> list[dict]:
+    """The class-wide documents of a class (lab_id NULL), with their summaries."""
+    return await _summaries(db, (Document.class_id == class_id) & Document.lab_id.is_(None))
+
+
+async def _summaries(db: AsyncSession, where) -> list[dict]:
     docs = (await db.execute(
-        select(Document).where(Document.lab_id == lab_id, Document.lifecycle != "deleted").order_by(Document.id)
+        select(Document).where(where, Document.lifecycle != "deleted")
+        .order_by(Document.lab_id.is_not(None), Document.id)
     )).scalars().all()
 
     summaries: list[dict] = []
@@ -112,6 +131,7 @@ async def list_lab_documents(db: AsyncSession, lab_id: uuid.UUID) -> list[dict]:
             "doc": doc,
             "chunk_count": chunk_count,
             "latest_revision": latest,
+            "scope": "class" if doc.lab_id is None else "lab",
         })
     return summaries
 

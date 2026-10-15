@@ -1,6 +1,8 @@
 """One persisted research run: commit the answer before returning it.
 
-The chat endpoint calls run_persisted_research. Every model call is billed on
+The chat endpoint calls run_persisted_research for each answer mode: direct
+(agent/direct.py), search (agent/search.py) and research (agent/runner.py).
+Every model call is billed on
 the student's quota as it happens; embedding and rerank calls are counted.
 Duplicate request IDs return the existing run, never a second model
 invocation or charge. A cancelled run stops before its next tool call.
@@ -14,10 +16,13 @@ from dataclasses import dataclass, fields
 
 from sqlalchemy import select
 
+from backend.app.agent import search as search_mode
 from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.direct import DirectRunner
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.result import ResearchRunStopped
 from backend.app.agent.runner import ResearchRunner
+from backend.app.agent.search import SearchRunner
 from backend.app.agent.tools import PerCallTools, ResearchScope
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import AgentRun
@@ -97,8 +102,13 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  tool_factory=None, on_phase=None, on_draft=None, vision_fn=None,
                                  allow_ask: bool = False,
                                  vision_model: str = '',
+                                 mode: str = 'research', exam_mode: bool = False,
                                  limits: ResearchLimits = ResearchLimits()) -> dict:
-    """model: agent.model.ResearchModel (or a test double with the same call)."""
+    """model: agent.model.ResearchModel (or a test double with the same call).
+    mode: direct, search or research; exam_mode only changes the direct prompt
+    (the chat endpoint already chose direct for a class in exam mode)."""
+    if mode not in ('direct', 'search', 'research'):
+        raise ValueError('unknown_mode')
     runs = ResearchRuns(session_factory)
     usage = ResearchUsage(session_factory)
     started = await runs.begin_run(scope=scope, question=question,
@@ -165,16 +175,28 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
     # The run exists from here on: every failure, also before the model is
     # called, must close it, or the session stays blocked.
     try:
-        course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
-                                   research_seconds=limits.research_seconds,
-                                   max_visual_calls=limits.visual_calls,
-                                   first_evidence=await runs.next_evidence_number(scope.session_id))
-        runner = ResearchRunner(course_tools,
-            usage.wrap_model(run_id=started.run_id, model=model_name,
-                             alpha=token_alpha, beta=token_beta, call=model),
-            max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
-            total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
-            max_input_tokens=limits.input_tokens, on_phase=on_phase, on_draft=on_draft)
+        billed = usage.wrap_model(run_id=started.run_id, model=model_name,
+                                  alpha=token_alpha, beta=token_beta, call=model)
+        if mode == 'direct':
+            runner = DirectRunner(billed, exam_mode=exam_mode, total_timeout=limits.total_seconds,
+                                  model_timeout=limits.call_seconds, on_draft=on_draft)
+        elif mode == 'search':
+            # Searches and page reads are not research tool calls: no tool budget.
+            course_tools = CourseTools(tools, max_tool_calls=40, research_seconds=limits.total_seconds,
+                                       max_visual_calls=0,
+                                       first_evidence=await runs.next_evidence_number(scope.session_id))
+            runner = SearchRunner(course_tools, billed, rewrite=search_mode.REWRITE,
+                                  min_score=search_mode.MIN_SCORE, total_timeout=limits.total_seconds,
+                                  model_timeout=limits.call_seconds, on_phase=on_phase, on_draft=on_draft)
+        else:
+            course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
+                                       research_seconds=limits.research_seconds,
+                                       max_visual_calls=limits.visual_calls,
+                                       first_evidence=await runs.next_evidence_number(scope.session_id))
+            runner = ResearchRunner(course_tools, billed,
+                max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
+                total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
+                max_input_tokens=limits.input_tokens, on_phase=on_phase, on_draft=on_draft)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations,
                                   allow_ask=allow_ask)

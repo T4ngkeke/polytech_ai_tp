@@ -28,8 +28,12 @@ function safeParse(data) {
  */
 export function interpretStreamEvent(ev) {
   switch (ev.event) {
-    case 'status':
-      return { type: 'status', route: safeParse(ev.data)?.route ?? null, phase: safeParse(ev.data)?.phase ?? null };
+    case 'status': {
+      // mode: the answer mode the server applies (exam mode may turn it into direct).
+      const parsed = safeParse(ev.data);
+      return { type: 'status', route: parsed?.route ?? null, phase: parsed?.phase ?? null,
+        mode: parsed?.mode ?? null, examMode: parsed?.exam_mode === true };
+    }
     case 'done':
       return { type: 'done', messageId: safeParse(ev.data)?.message_id ?? null };
     case 'error':

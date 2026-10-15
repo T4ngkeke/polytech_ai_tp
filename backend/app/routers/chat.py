@@ -555,6 +555,9 @@ async def chat_stream(
     if settings.AGENTIC_SEARCH_ENABLED and lab_id is not None:
         # All source scope and focus IDs are resolved from the authenticated
         # session. The model never supplies a URL or a revision map.
+        # A class in exam mode answers in direct mode only, whatever the client asks.
+        exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == class_id)))
+        mode = 'direct' if exam_mode else body.mode
         try:
             scope = await create_scope(db, user_id=current_user.id,
                                        session_id=body.session_id)
@@ -598,7 +601,7 @@ async def chat_stream(
             def draft(text):
                 # None withdraws the draft shown so far.
                 queue.put_nowait(('draft', text))
-            yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking'})}\n\n"
+            yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
             task = asyncio.create_task(run_persisted_research(
                 scope=scope, question=body.message, client_request_id=request_id,
                 model=ResearchModel(agent), model_name=agent.model,
@@ -611,7 +614,8 @@ async def chat_stream(
                 embed_model=llm_config['embedding_model'],
                 rerank_model=llm_config['rerank_model'], on_phase=phase,
                 vision_fn=vision, vision_model=vlm.model, limits=limits,
-                on_draft=draft, allow_ask=allow_ask, session_factory=research_factory))
+                on_draft=draft, allow_ask=allow_ask and mode == 'research',
+                mode=mode, exam_mode=exam_mode, session_factory=research_factory))
             last_sent = time.monotonic()
             try:
                 while not task.done():

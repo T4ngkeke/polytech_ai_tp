@@ -59,6 +59,7 @@
 | PUT | `/api/teacher/classes/{class_id}` | require_teacher | Rename/update class details (ownership enforced). |
 | DELETE | `/api/teacher/classes/{class_id}` | require_teacher | Soft-delete own class. |
 | POST | `/api/teacher/classes/{class_id}/reset-code` | require_teacher | Generate new invite code (invalidating the old one). |
+| PUT | `/api/teacher/classes/{class_id}/exam-mode` | require_teacher | Body `{exam_mode: bool}`. On: every lab of the class answers in Direct mode only (no course search), enforced by `POST /api/chat/stream`. Returns the class. |
 | GET | `/api/teacher/students` | require_teacher | List every student across the teacher's own classes. |
 | GET | `/api/teacher/classes/{class_id}/students` | require_teacher | List the students in one owned class. |
 | DELETE | `/api/teacher/classes/{class_id}/students/{student_id}` | require_teacher | Kick/Remove a student from the class. |
@@ -76,8 +77,10 @@
 | GET | `/api/teacher/chat-history` | require_teacher | Fetch chat history. Filters: `?class_id=X&lab_id=Y&student_id=Z&session_id=W`. **Includes student soft-deleted sessions** (each row carries `is_deleted` so the UI can flag the hidden ones). |
 | GET | `/api/teacher/labs/{lab_id}/citation-report` | require_teacher (lab owner) | Which course files, pages and passages the lab's research answers cite, with the students and their questions; the lab's published files no answer cited; questions without a verified answer (`partial_*` or failed runs); answers a student marked down. `?start=YYYY-MM-DD&end=YYYY-MM-DD` (days included, UTC; 422 if end is before start). Test drives are left out; sessions a student deleted are kept. Counts are distinct answers (assistant messages), students and passages. Shape: `backend/app/services/citation_report.py`. |
 | GET | `/api/teacher/analytics/classes/{class_id}` | require_teacher | Hierarchical token usage: class → lab → student breakdown. |
-| POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | Upload course material (**PDF / Markdown / HTML**). Multipart form; the file is the only required field. Optional `language` (BM25 config, default `fr`) and `shared` (class-wide → `lab_id=NULL`). Stored + enqueued. |
-| GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | List documents + status + summary + `ingest_report`. |
+| POST | `/api/teacher/labs/{lab_id}/documents` | require_teacher | Upload course material (**PDF / Markdown / HTML**) for this lab only. Multipart form; the file is the only required field. Optional `language` (BM25 config, default `fr`); `shared` (older clients) makes it class-wide, as the class upload does. Stored + enqueued. |
+| GET | `/api/teacher/labs/{lab_id}/documents` | require_teacher | The documents the lab uses + status + summary + `ingest_report`: the class-wide documents first, then the lab's own. Each row has `scope`: `class` or `lab`. |
+| POST | `/api/teacher/classes/{class_id}/documents` | require_teacher | Upload a class-wide document (`lab_id=NULL`), read by every lab of the class (e.g. the course handout). Same form as the lab upload, without `shared`. |
+| GET | `/api/teacher/classes/{class_id}/documents` | require_teacher | The class-wide documents of a class (`scope` = `class`). |
 | GET | `/api/teacher/documents/{document_id}/chunks` | require_teacher | Paginated chunk text + `page_no` (+ generated `context`). |
 | PUT | `/api/teacher/documents/{document_id}/chunks/{chunk_id}` | require_teacher | Correct a chunk's text; re-embeds + rebuilds the BM25 `tsv`; sets `edited_by_teacher`. |
 | POST | `/api/teacher/labs/{lab_id}/test-session` | require_teacher | Open a **test-drive** session (`is_test`) on an owned lab — chat as a preview (membership bypassed). |
@@ -93,7 +96,7 @@
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
 | POST | `/api/student/classes/join` | get_current_user | Submit 6-char `invite_code` to instantly join a Class. |
-| GET | `/api/student/classes` | get_current_user | List all joined classes (with labs). |
+| GET | `/api/student/classes` | get_current_user | List all joined classes (with labs). Each class has `exam_mode`. |
 | GET | `/api/student/classes/{class_id}/labs` | get_current_user | List active labs for a joined class. |
 | DELETE | `/api/student/classes/{class_id}/leave` | get_current_user | Voluntarily leave a joined class. |
 | POST | `/api/student/labs/{lab_id}/sessions` | get_current_user | Create a new Chat Session specifically within a Lab. |
@@ -107,21 +110,30 @@
 
 #### Research agent (opt-in: `AGENTIC_SEARCH_ENABLED`)
 
-For a session in a lab, `POST /api/chat/stream` runs the research agent
-(`backend/app/agent/runner.py`) over the published PDF revisions of the lab
-and its class. The answer is saved, with its citations, before any of it is
-sent.
+For a session in a lab, `POST /api/chat/stream` answers in one of three
+modes over the published PDF revisions of the lab and its class. The answer
+is saved, with its citations, before any of it is sent.
 
 Request body, besides `session_id` and `message`:
 
 - `client_request_id` (UUID, optional): the same ID returns the saved run
   again, without a second model call or charge.
+- `mode` (optional, default `research`):
+  - `research`: the research agent (`backend/app/agent/runner.py`), several
+    searches and reads, may ask the student back;
+  - `search`: one search, the found pages and their neighbours, one answer
+    (`backend/app/agent/search.py`); same citations;
+  - `direct`: one answer without the course files and without citations
+    (`backend/app/agent/direct.py`).
+
+  A class in exam mode answers in `direct` mode whatever is sent. The
+  teacher's rules apply in every mode.
 
 Server-sent events, in order:
 
 | Event | Data |
 | --- | --- |
-| `status` | `{"route": "agent", "phase": ...}`; phase is `thinking`, then `finding` (search), `reading` (read, open, grep), `checking_image` (view_image) or `checking_sources` (answer). |
+| `status` | `{"route": "agent", "phase": ..., "mode": ..., "exam_mode": ...}`; phase is `thinking`, then `finding` (search), `reading` (read, open, grep), `checking_image` (view_image) or `checking_sources` (answer). The first status names the mode the server applies and whether the class is in exam mode. |
 | `draft` | Reply text as the model writes it, as a JSON string; append it. Its sources are not checked yet; show it as a draft. |
 | `draft_reset` | `{}`: the draft so far is withdrawn (the model went on researching). |
 | (default) | The whole checked answer text, as one JSON string. It replaces the draft. |
@@ -132,8 +144,9 @@ Server-sent events, in order:
 | (comment) | `: keep-alive`, every 15 s without another event, so proxies keep the stream open. SSE clients ignore it. |
 
 `GET /api/student/sessions/{session_id}` returns the same citations on each
-message, with `available` and `href` rechecked against current access, and
-`clarification` on a question back.
+message, with `available` and `href` rechecked against current access,
+`clarification` on a question back, and `answer_mode` (`direct`, `search`,
+`research`; `null` for answers written before the modes).
 
 The chat shows a cited page with its passages highlighted from
 `GET /api/documents/{document_id}/revisions/{revision_id}/pages/{page_no}/image?session_id=`:

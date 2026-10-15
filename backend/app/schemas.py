@@ -232,10 +232,15 @@ class ClassResponse(BaseModel):
     invite_code: str
     is_deleted: bool
     created_at: datetime
+    exam_mode: bool = False
 
 
 class ClassUpdateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+
+
+class ExamModeRequest(BaseModel):
+    exam_mode: bool
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +296,8 @@ class DocumentSummaryResponse(BaseModel):
     # M2-B: the newest revision of a structured document, which may be a draft.
     # processing_state "parsed" means: content stored, waiting for indexing.
     latest_revision: dict | None = None
+    # "class": shared by every lab of the class (lab_id NULL); "lab": this lab only.
+    scope: str = "lab"
 
 
 class ChunkResponse(BaseModel):
@@ -454,6 +461,8 @@ class MessageResponse(BaseModel):
     citations: list[dict] = []
     # A question back to the student: {"question": ..., "options": [...]}.
     clarification: dict | None = None
+    # direct, search or research; None for answers written before the modes.
+    answer_mode: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +474,9 @@ class ChatStreamRequest(BaseModel):
     session_id: uuid.UUID
     message: str = Field(..., min_length=1)
     client_request_id: uuid.UUID | None = None
+    # direct: no course material; search: one search; research: the agent.
+    # A class in exam mode answers in direct mode whatever is asked.
+    mode: Literal['direct', 'search', 'research'] = 'research'
 
 
 # ---------------------------------------------------------------------------

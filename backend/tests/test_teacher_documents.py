@@ -234,3 +234,45 @@ async def test_upload_accepts_html(db_session, tmp_path):
 
     assert resp.status_code == 201
     assert resp.json()["filename"] == "cours.html"
+
+
+@pytest.mark.asyncio
+async def test_class_upload_is_class_wide(db_session, tmp_path):
+    """An upload at the class level belongs to no lab: every lab reads it."""
+    teacher, cls, lab = await _teacher_with_lab(db_session)
+    app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
+    client = await make_client(db_session, teacher)
+    try:
+        resp = await client.post(
+            f"/api/teacher/classes/{cls.id}/documents",
+            files={"file": ("poly.pdf", b"handout", "application/pdf")},
+        )
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    assert resp.json()["lab_id"] is None
+    docs = (await db_session.execute(select(Document))).scalars().all()
+    assert [(d.class_id, d.lab_id) for d in docs] == [(cls.id, None)]
+
+
+@pytest.mark.asyncio
+async def test_teacher_cannot_upload_to_foreign_class(db_session, tmp_path):
+    owner, cls, lab = await _teacher_with_lab(db_session)
+    intruder = make_user(role=UserRole.teacher)
+    db_session.add(intruder)
+    await db_session.commit()
+    app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
+    client = await make_client(db_session, intruder)
+    try:
+        resp = await client.post(
+            f"/api/teacher/classes/{cls.id}/documents",
+            files={"file": ("poly.pdf", b"handout", "application/pdf")},
+        )
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 403
+    assert (await db_session.execute(select(Document))).scalars().all() == []

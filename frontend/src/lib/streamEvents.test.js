@@ -70,3 +70,13 @@ test('a question back carries its string options, never as a token', () => {
   assert.deepEqual(action, { type: 'clarification', clarification: { question: 'Quel cours ?', options: ['SQL', 'Graphes'] } });
   assert.deepEqual(interpretStreamEvent({ event: 'clarification', data: 'oops' }).clarification.options, []);
 });
+
+test('a status names the answer mode the server applies', () => {
+  const action = interpretStreamEvent({ event: 'status',
+    data: '{"route": "agent", "phase": "thinking", "mode": "direct", "exam_mode": true}' });
+  assert.equal(action.mode, 'direct');
+  assert.equal(action.examMode, true);
+  const older = interpretStreamEvent({ event: 'status', data: '{"route": "agent"}' });
+  assert.equal(older.mode, null);
+  assert.equal(older.examMode, false);
+});

@@ -22,7 +22,9 @@ import { applyToMessage } from '../lib/streamMessage';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import { PdfPreviewModal } from '../components/PdfPreview';
 import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
+import ModeSwitch from '../components/ModeSwitch';
 import useMediaQuery from '../lib/useMediaQuery';
+import { DEFAULT_MODE, MODES, offersResearch, saveMode, storedMode } from '../lib/answerModes';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
 // assistant message renders as real markdown instead of the raw-text
@@ -58,6 +60,13 @@ export default function Chat() {
   // Phones: classes and sessions live in a drawer opened from the header.
   const [navOpen, setNavOpen] = useState(!urlLabId);
   const isWide = useMediaQuery('(min-width: 768px)');
+  // Answer mode of the next question (Direct / Search / Research), per session.
+  const [mode, setMode] = useState(DEFAULT_MODE);
+  useEffect(() => { setMode(storedMode(activeSessionId)); }, [activeSessionId]);
+  const chooseMode = (next) => { setMode(next); saveMode(activeSessionId, next); };
+  // Exam mode (set by the teacher for the class): answers without course search.
+  const activeClass = classes.find((c) => c.labs?.some((l) => l.id === activeLabId));
+  const examMode = !!activeClass?.exam_mode;
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -188,7 +197,9 @@ export default function Chat() {
 
   // ── Send message ──
   // text: an option the student picked under a question back; otherwise the input box.
-  const handleSend = useCallback(async (picked) => {
+  // picked: an option of a question back, or a question sent again;
+  // modeOverride: that question's mode (Research again after an empty Search).
+  const handleSend = useCallback(async (picked, modeOverride) => {
     const text = (typeof picked === 'string' ? picked : input).trim();
     if (!text || !activeSessionId || isStreaming) return;
 
@@ -228,7 +239,8 @@ export default function Chat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: currentSessionId, message: text,
-          client_request_id: createRequestId() }),
+          client_request_id: createRequestId(),
+          mode: examMode ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
         signal: ctrl.signal,
         // Keep the stream open while the tab is hidden; by default the library
         // closes it and resends the question when the tab is shown again.
@@ -241,6 +253,13 @@ export default function Chat() {
           switch (action.type) {
             case 'status':
               setResearchPhase(action.phase);
+              if (action.mode) {
+                setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, answer_mode: action.mode } : m));
+              }
+              // The teacher may have turned exam mode on or off since the page loaded.
+              if (activeClass && action.examMode !== !!activeClass.exam_mode) {
+                setClasses((prev) => prev.map((c) => c.id === activeClass.id ? { ...c, exam_mode: action.examMode } : c));
+              }
               return;
             case 'done':
               if (action.messageId) {
@@ -281,7 +300,7 @@ export default function Chat() {
       setResearchPhase(null);
       setIsStreaming(false);
     }
-  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage]);
+  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage, mode, examMode, activeClass]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -555,6 +574,12 @@ export default function Chat() {
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
               // Only the latest question back can still be answered with a click.
               onPick={!isStreaming && i === messages.length - 1 && msg.clarification ? handleSend : null}
+              // An uncited Search answer offers the same question in Research.
+              onResearch={!isStreaming && !examMode && i === messages.length - 1 && offersResearch(msg)
+                ? () => {
+                  const question = messages.slice(0, i).reverse().find((m) => m.sender === 'user');
+                  if (question) handleSend(question.content, 'research');
+                } : null}
             />
           ))}
           <div ref={messagesEndRef} />
@@ -562,6 +587,11 @@ export default function Chat() {
 
         {/* Input */}
         <div className="shrink-0 px-3 py-3 md:px-6 md:py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
+          {activeSessionId && (
+            <div className="mb-2">
+              <ModeSwitch mode={mode} onChange={chooseMode} examMode={examMode} disabled={isStreaming} />
+            </div>
+          )}
           <div className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
             activeSessionId ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
           } bg-ink-deep`}>

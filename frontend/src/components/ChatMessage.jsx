@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useMemo, memo, lazy, Suspense } from 'react';
 import api from '../lib/api';
 import { distinctImages, groupCitations, linkCitations } from '../lib/citations';
+import { modeLabel } from '../lib/answerModes';
 
 // Heavy (markdown + KaTeX + highlight): loaded on demand; pages may preload it.
 export const loadMessageContent = () => import('./MessageContent');
@@ -33,7 +34,7 @@ function FeedbackButtons({ messageId, initial }) {
   };
 
   return (
-    <div className="mt-2 flex gap-1.5">
+    <div className="flex gap-1.5">
       <button type="button" disabled={busy} onClick={() => rate('up')} aria-label="Helpful"
         className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
           value === 'up' ? 'bg-success-muted text-success' : 'text-cream-muted hover:bg-ink-hover'}`}>
@@ -62,7 +63,7 @@ function sourceOf(citations, c, sessionId, focusLabel = null) {
     pages: groupCitations(sameFile)[0]?.pages || [], citations: sameFile, focusLabel };
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource, onPick }) {
+export const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource, onPick, onResearch }) {
   const isUser = message.sender === 'user';
   const citations = message.citations;
   // [E#] in the text: open that passage alone, highlighted on its page.
@@ -134,8 +135,19 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, p
             ))}
           </div>
         )}
-        {!isUser && !streaming && canRate && (
-          <FeedbackButtons messageId={message.id} initial={message.feedback} />
+        {!isUser && onResearch && (
+          <button type="button" onClick={onResearch}
+            className="mt-3 px-3 py-1.5 rounded-lg border border-cyan/30 text-xs text-cream hover:bg-cyan-muted cursor-pointer transition-colors">
+            Research this question
+          </button>
+        )}
+        {!isUser && (canRate || modeLabel(message.answer_mode)) && !streaming && (
+          <div className="mt-2 flex items-center gap-2">
+            {canRate && <FeedbackButtons messageId={message.id} initial={message.feedback} />}
+            {modeLabel(message.answer_mode) && (
+              <span className="text-[10px] text-cream-muted">{modeLabel(message.answer_mode)}</span>
+            )}
+          </div>
         )}
       </div>
     </div>

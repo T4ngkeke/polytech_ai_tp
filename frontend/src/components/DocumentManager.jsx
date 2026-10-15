@@ -13,12 +13,16 @@
  * can read. So are the exercise editor, the hint review lifecycle and the
  * segmentation compare-and-confirm panel — there are no exercise rows to review.
  *
- * Props:
- *   labId: string — the lab whose documents are shown (required)
+ * Props (one of them):
+ *   classId: string — the class-wide documents of a class, shared by all its labs
+ *   labId: string — the documents a lab uses: the class-wide ones (read-only
+ *     here, marked Class) and the lab's own (marked Lab)
  *
  * Backed by:
+ *   GET    /api/teacher/classes/{classId}/documents
+ *   POST   /api/teacher/classes/{classId}/documents (multipart: file, language)
  *   GET    /api/teacher/labs/{labId}/documents
- *   POST   /api/teacher/labs/{labId}/documents     (multipart: file, language, shared)
+ *   POST   /api/teacher/labs/{labId}/documents     (multipart: file, language)
  *   GET    /api/teacher/documents/{id}/chunks
  *   PUT    /api/teacher/documents/{id}/chunks/{chunkId}   (edit + re-index)
  *   DELETE /api/teacher/documents/{id}
@@ -60,32 +64,33 @@ function displayStatus(doc) {
   return doc.status;
 }
 
-export default function DocumentManager({ labId }) {
+export default function DocumentManager({ labId, classId }) {
+  const base = classId ? `/api/teacher/classes/${classId}/documents` : labId ? `/api/teacher/labs/${labId}/documents` : null;
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null); // document summary being inspected
   const [uploading, setUploading] = useState(false);
 
   const fileRef = useRef(null);
-  const [shared, setShared] = useState(false);             // class-wide material
+  const [fileName, setFileName] = useState('');
   const [language, setLanguage] = useState('fr');          // BM25 tsvector config
 
   const loadDocuments = useCallback(async () => {
-    if (!labId) return [];
-    const rows = await api.get(`/api/teacher/labs/${labId}/documents`);
+    if (!base) return [];
+    const rows = await api.get(base);
     setDocuments(rows);
     return rows;
-  }, [labId]);
+  }, [base]);
 
-  // Initial load when the lab changes.
+  // Initial load when the class or lab changes.
   useEffect(() => {
-    if (!labId) return;
+    if (!base) return;
     setSelected(null);
     setLoading(true);
     loadDocuments()
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
-  }, [labId, loadDocuments]);
+  }, [base, loadDocuments]);
 
   // Poll only while something is still being ingested (pending → indexed).
   useEffect(() => {
@@ -106,12 +111,12 @@ export default function DocumentManager({ labId }) {
     const form = new FormData();
     form.append('file', file);
     form.append('language', language);
-    if (shared) form.append('shared', 'true');
 
     setUploading(true);
     try {
-      await api.upload(`/api/teacher/labs/${labId}/documents`, form);
+      await api.upload(base, form);
       if (fileRef.current) fileRef.current.value = '';
+      setFileName('');
       toast.success('Uploaded — ingestion queued.');
       await loadDocuments();
     } catch (err) {
@@ -137,9 +142,11 @@ export default function DocumentManager({ labId }) {
     }
   };
 
-  if (!labId) {
+  if (!base) {
     return <p className="text-sm text-cream-muted">Select a lab to manage its documents.</p>;
   }
+  // In a lab, the class-wide documents are shown but managed at the class level.
+  const readOnly = (doc) => !classId && doc.scope === 'class';
 
   if (selected) {
     const Detail = selected.structured ? StructuredDocumentDetail : DocumentDetail;
@@ -158,10 +165,23 @@ export default function DocumentManager({ labId }) {
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-cream-muted">
+        {classId
+          ? 'Documents uploaded here are shared by every lab of this class, e.g. the course handout.'
+          : "Upload this lab's own material here. Documents marked Class come from the class Documents tab, shared by every lab; manage them there."}
+      </p>
       <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3 rounded-lg border border-border-default bg-ink-deep/30 p-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-cream-muted">Course material</label>
-          <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/markdown,.md,text/html,.html,.htm" className="max-w-full text-sm text-cream-secondary file:mr-2 file:rounded file:border-0 file:bg-ink-surface file:px-2 file:py-1 file:text-cream-secondary" />
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-xs font-medium text-cream-muted">{classId ? 'Class material' : 'Lab material'}</span>
+          <label className="flex min-w-0 cursor-pointer items-center gap-2">
+            <input ref={fileRef} type="file" className="sr-only"
+              accept="application/pdf,.pdf,text/markdown,.md,text/html,.html,.htm"
+              onChange={(e) => setFileName(e.target.files?.[0]?.name || '')} />
+            <span className="shrink-0 rounded border border-border-default bg-ink-surface px-3 py-1 text-sm text-cream-secondary hover:border-cyan/40 hover:text-cream">
+              Choose file
+            </span>
+            <span className="truncate text-sm text-cream-muted">{fileName || 'PDF, Markdown or HTML'}</span>
+          </label>
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-cream-muted">Language</label>
@@ -169,11 +189,6 @@ export default function DocumentManager({ labId }) {
             {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
         </div>
-        <label className="flex items-center gap-1.5 pb-1.5 text-xs text-cream-muted">
-          <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)}
-            className="accent-cyan" />
-          Share class-wide
-        </label>
         <button
           type="submit"
           disabled={uploading}
@@ -190,13 +205,16 @@ export default function DocumentManager({ labId }) {
       ) : (
         <ul className="divide-y divide-border-subtle rounded-lg border border-border-default">
           {documents.map((doc) => (
-            <li key={doc.id} className="flex items-stretch hover:bg-ink-hover">
+            <li key={doc.id} className={`flex items-stretch ${readOnly(doc) ? '' : 'hover:bg-ink-hover'}`}>
               <button
                 type="button"
                 onClick={() => setSelected(doc)}
-                className="flex min-w-0 flex-1 flex-col items-start gap-1 px-3 py-2 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                disabled={readOnly(doc)}
+                title={readOnly(doc) ? 'Shared by the class: open the class Documents tab to manage it' : undefined}
+                className="flex min-w-0 flex-1 flex-col items-start gap-1 px-3 py-2 text-left disabled:cursor-default sm:flex-row sm:items-center sm:justify-between sm:gap-3"
               >
                 <span className="flex min-w-0 max-w-full items-center gap-2">
+                  {!classId && <ScopeBadge scope={doc.scope} />}
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
                   {(doc.status === 'needs_review' || doc.status === 'failed' || doc.status === 'partially_indexed') && (
                     <span title={doc.error_message || ''} className="text-gold">⚠</span>
@@ -207,21 +225,29 @@ export default function DocumentManager({ labId }) {
                   <SummaryChips doc={doc} />
                 </span>
               </button>
-              <button
-                type="button"
-                onClick={(e) => deleteDocument(doc, e)}
-                title="Delete document"
-                aria-label={`Delete ${doc.filename}`}
-                className="shrink-0 px-3 text-cream-muted hover:text-danger"
-              >
-                🗑
-              </button>
+              {readOnly(doc) ? <span className="w-[42px] shrink-0" /> : (
+                <button
+                  type="button"
+                  onClick={(e) => deleteDocument(doc, e)}
+                  title="Delete document"
+                  aria-label={`Delete ${doc.filename}`}
+                  className="shrink-0 px-3 text-cream-muted hover:text-danger"
+                >
+                  🗑
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
     </div>
   );
+}
+
+function ScopeBadge({ scope }) {
+  return scope === 'class'
+    ? <span className="shrink-0 rounded bg-gold-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold">Class</span>
+    : <span className="shrink-0 rounded bg-cyan-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan">Lab</span>;
 }
 
 function StatusBadge({ status }) {

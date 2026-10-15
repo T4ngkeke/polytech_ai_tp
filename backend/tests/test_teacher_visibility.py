@@ -134,3 +134,47 @@ async def test_document_chunks_ownership_enforced(db_session):
         await client.aclose()
 
     assert resp.status_code in (403, 404)
+
+
+def _doc(cls, lab_id, filename, teacher):
+    return Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab_id, filename=filename,
+                    storage_path="/x", content_hash=uuid.uuid4().hex,
+                    status=DocumentStatus.indexed, page_count=1, uploaded_by=teacher.id)
+
+
+@pytest.mark.asyncio
+async def test_lab_list_shows_class_documents_first_and_names_the_scope(db_session):
+    teacher, cls, lab, own = await _seed_doc(db_session, chunks=0)
+    other_lab = Lab(id=uuid.uuid4(), class_id=cls.id, name="Lab 2")
+    other_class = Class(id=uuid.uuid4(), name="Autre", teacher_id=teacher.id,
+                        invite_code=uuid.uuid4().hex[:6])
+    db_session.add_all([other_lab, other_class])
+    await db_session.flush()
+    db_session.add_all([_doc(cls, None, "poly.pdf", teacher),
+                        _doc(cls, other_lab.id, "tp2.pdf", teacher),
+                        _doc(other_class, None, "autre.pdf", teacher)])
+    await db_session.commit()
+    client = await make_client(db_session, teacher)
+    try:
+        lab_rows = (await client.get(f"/api/teacher/labs/{lab.id}/documents")).json()
+        class_rows = (await client.get(f"/api/teacher/classes/{cls.id}/documents")).json()
+    finally:
+        await client.aclose()
+
+    # The class handout, then this lab's own file; never another lab or class.
+    assert [(r["filename"], r["scope"]) for r in lab_rows] == [("poly.pdf", "class"), ("cm.pdf", "lab")]
+    assert [(r["filename"], r["scope"]) for r in class_rows] == [("poly.pdf", "class")]
+
+
+@pytest.mark.asyncio
+async def test_class_documents_need_the_owner(db_session):
+    teacher, cls, lab, doc = await _seed_doc(db_session, chunks=0)
+    intruder = make_user(role=UserRole.teacher)
+    db_session.add(intruder)
+    await db_session.commit()
+    client = await make_client(db_session, intruder)
+    try:
+        resp = await client.get(f"/api/teacher/classes/{cls.id}/documents")
+    finally:
+        await client.aclose()
+    assert resp.status_code == 403
