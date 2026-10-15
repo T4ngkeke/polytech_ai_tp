@@ -21,6 +21,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
 import ThemeToggle from './ThemeToggle';
+import Icon from './Icon';
 
 export default function HierarchicalSidebar({
   role = 'student',
@@ -210,7 +211,6 @@ function ClassNode({
             {showMenu && (
               <ClassMenu
                 role={role}
-                cls={cls}
                 onAction={(action) => { setShowMenu(false); onClassAction?.(action, cls); }}
                 onClose={() => setShowMenu(false)}
               />
@@ -229,7 +229,6 @@ function ClassNode({
               <LabNode
                 key={lab.id}
                 lab={lab}
-                classId={cls.id}
                 role={role}
                 isSelected={selectedLabId === lab.id}
                 onSelect={() => onSelectLab?.(lab.id, cls.id)}
@@ -256,7 +255,7 @@ function ClassNode({
    LAB NODE
    ═══════════════════════════════════════════ */
 
-function LabNode({ lab, classId, role, isSelected, onSelect, onLabAction }) {
+function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
   const [showMenu, setShowMenu] = useState(false);
   const isLocked = lab.is_deleted || !lab.is_active;
 
@@ -307,15 +306,15 @@ function LabNode({ lab, classId, role, isSelected, onSelect, onLabAction }) {
    CONTEXT MENUS
    ═══════════════════════════════════════════ */
 
-function ClassMenu({ role, cls, onAction, onClose }) {
+function ClassMenu({ role, onAction, onClose }) {
   return (
     <DropdownMenu onClose={onClose}>
-      <MenuItem label="✏️ Rename" onClick={() => onAction('rename')} />
-      <MenuItem label="🔑 Reset Code" onClick={() => onAction('reset-code')} />
+      <MenuItem icon="pencil" label="Rename" onClick={() => onAction('rename')} />
+      <MenuItem icon="key" label="Reset Code" onClick={() => onAction('reset-code')} />
       {role === 'admin' && (
-        <MenuItem label="🔁 Transfer" onClick={() => onAction('transfer')} />
+        <MenuItem icon="transfer" label="Transfer" onClick={() => onAction('transfer')} />
       )}
-      <MenuItem label="🗑️ Archive" danger onClick={() => onAction('delete')} />
+      <MenuItem icon="archive" label="Archive" danger onClick={() => onAction('delete')} />
     </DropdownMenu>
   );
 }
@@ -323,12 +322,13 @@ function ClassMenu({ role, cls, onAction, onClose }) {
 function LabMenu({ lab, onAction, onClose }) {
   return (
     <DropdownMenu onClose={onClose}>
-      <MenuItem label="✏️ Rename" onClick={() => onAction('rename')} />
+      <MenuItem icon="pencil" label="Rename" onClick={() => onAction('rename')} />
       <MenuItem
-        label={lab.is_active ? '🔒 Lock' : '🔓 Unlock'}
+        icon={lab.is_active ? 'lock' : 'unlock'}
+        label={lab.is_active ? 'Lock' : 'Unlock'}
         onClick={() => onAction('toggle')}
       />
-      <MenuItem label="🗑️ Archive" danger onClick={() => onAction('delete')} />
+      <MenuItem icon="archive" label="Archive" danger onClick={() => onAction('delete')} />
     </DropdownMenu>
   );
 }
@@ -344,14 +344,15 @@ function DropdownMenu({ children, onClose }) {
   );
 }
 
-function MenuItem({ label, onClick, danger }) {
+function MenuItem({ icon, label, onClick, danger }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
+      className={`w-full flex items-center gap-2 text-left px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
         danger ? 'text-danger hover:bg-danger-muted' : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
       }`}
     >
+      {icon && <Icon name={icon} className="w-3.5 h-3.5 shrink-0" />}
       {label}
     </button>
   );

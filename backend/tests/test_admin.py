@@ -665,6 +665,16 @@ class TestAdminPrune:
         assert (await db_session.execute(select(RouterQueryLog))).scalars().all() == []
         assert (await db_session.execute(select(AgentTraceLog))).scalars().all() == []
 
+    async def test_dry_run_counts_and_deletes_nothing(self, admin_full_client, seed_full, db_session):
+        old_id = seed_full["old_session"].id
+        resp = await admin_full_client.post("/api/admin/maintenance/prune",
+                                            json={"older_than_days": 30, "dry_run": True})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["dry_run"] is True and body["sessions_deleted"] >= 1
+        r = await db_session.execute(select(Session).where(Session.id == old_id))
+        assert r.scalar_one_or_none() is not None
+
     async def test_nothing_to_prune(self, admin_full_client):
         resp = await admin_full_client.post("/api/admin/maintenance/prune",
                                             json={"older_than_days": 9999})

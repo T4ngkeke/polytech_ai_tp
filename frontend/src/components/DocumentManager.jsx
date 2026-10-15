@@ -34,6 +34,7 @@ import api from '../lib/api';
 import DocumentReviews from './DocumentReviews';
 import StructuredDocumentDetail from './DocumentBlockEditor';
 import { ingestReportWarnings } from '../lib/ingestReport';
+import Icon from './Icon';
 
 // Document language selects the BM25 tsvector config; ingest and query sides
 // must match. fr is the backend default.
@@ -217,7 +218,7 @@ export default function DocumentManager({ labId, classId }) {
                   {!classId && <ScopeBadge scope={doc.scope} />}
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
                   {(doc.status === 'needs_review' || doc.status === 'failed' || doc.status === 'partially_indexed') && (
-                    <span title={doc.error_message || ''} className="text-gold">⚠</span>
+                    <span title={doc.error_message || ''} className="text-gold"><Icon name="warning" className="w-4 h-4" /></span>
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
@@ -233,7 +234,7 @@ export default function DocumentManager({ labId, classId }) {
                   aria-label={`Delete ${doc.filename}`}
                   className="shrink-0 px-3 text-cream-muted hover:text-danger"
                 >
-                  🗑
+                  <Icon name="trash" className="w-4 h-4" />
                 </button>
               )}
             </li>
@@ -277,8 +278,8 @@ function SummaryChips({ doc }) {
   const pages = currentPages(doc.ingest_report);
   return (
     <span className="hidden gap-1 text-xs text-cream-muted sm:flex">
-      <span title="pages">📄 {doc.page_count ?? '–'}</span>
-      <span title="chunks">🧩 {doc.chunk_count}</span>
+      <span title="pages" className="inline-flex items-center gap-1"><Icon name="file" className="w-3.5 h-3.5" />{doc.page_count ?? '–'}</span>
+      <span title="chunks" className="inline-flex items-center gap-1"><Icon name="layers" className="w-3.5 h-3.5" />{doc.chunk_count}</span>
       {pages && <span>{pages.usable} usable · {pages.unavailable} unavailable{pages.noIndex ? ` · ${pages.noIndex} not indexed` : ''}</span>}
       {pages?.pending != null && <span>{pages.pending} visual reviews pending</span>}
     </span>
@@ -301,7 +302,7 @@ function IngestReport({ report }) {
   if (warnings.length === 0) return null;
   return (
     <ul className="mt-2 space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
-      {warnings.map((w, i) => <li key={i}>⚠ {w}</li>)}
+      {warnings.map((w, i) => <li key={i}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {w}</li>)}
     </ul>
   );
 }

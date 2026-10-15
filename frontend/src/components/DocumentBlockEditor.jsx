@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 
 import api, { responseError } from '../lib/api';
+import Icon from './Icon';
 
 const KINDS = ['heading', 'text', 'code', 'formula', 'table', 'figure', 'navigation'];
 const DESCRIBABLE = new Set(['figure', 'formula', 'table']);
@@ -157,7 +158,7 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
               <button key={p.page_id} type="button" onClick={() => setPageId(p.page_id)}
                 className={`block w-full rounded px-2 py-1 text-left text-xs ${p.page_id === pageId ? 'bg-ink-hover text-cream' : 'text-cream-secondary hover:bg-ink-hover'}`}>
                 <span className="font-medium">Slide {p.source_slide_no}</span>
-                {p.state !== 'usable' && <span className="ml-1 text-gold">⚠</span>}
+                {p.state !== 'usable' && <span className="ml-1 text-gold"><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /></span>}
                 <span className="block truncate text-cream-muted">{p.title || p.summary || '—'}</span>
               </button>
             ))}
@@ -208,7 +209,7 @@ function PageView({ page, base, busy, change, docId }) {
         : <p className="rounded bg-ink-surface p-2 text-xs text-cream-muted">No verified preview for this slide.</p>}
       {page.unavailable.length > 0 && (
         <ul className="space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
-          {page.unavailable.map((u, i) => <li key={i}>⚠ {u.message}{u.type ? ` (${u.type})` : ''}</li>)}
+          {page.unavailable.map((u, i) => <li key={i}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {u.message}{u.type ? ` (${u.type})` : ''}</li>)}
         </ul>
       )}
       {page.reviews?.map((r) => <ReviewCard key={r.id} review={r} busy={busy} change={change} docId={docId} base={base} />)}
@@ -308,7 +309,7 @@ function BlockCard({ block, busy, change, docId }) {
           <pre className="whitespace-pre-wrap font-mono">{block.source_text}</pre></details>
       )}
       {block.issues.length > 0 && (
-        <ul className="mt-1 text-xs text-gold">{block.issues.map((i, n) => <li key={n}>⚠ {i.message}</li>)}</ul>
+        <ul className="mt-1 text-xs text-gold">{block.issues.map((i, n) => <li key={n}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {i.message}</li>)}</ul>
       )}
       <p className="mt-1 text-[10px] text-cream-muted">source: {block.source.extraction_method} · {block.source.native_object_ids.join(', ')}</p>
     </li>

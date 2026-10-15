@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback, useMemo, memo, lazy, Suspense } from 
 import api from '../lib/api';
 import { distinctImages, groupCitations, linkCitations } from '../lib/citations';
 import { modeLabel } from '../lib/answerModes';
+import Icon from './Icon';
 
 // Heavy (markdown + KaTeX + highlight): loaded on demand; pages may preload it.
 export const loadMessageContent = () => import('./MessageContent');
@@ -38,12 +39,12 @@ function FeedbackButtons({ messageId, initial }) {
       <button type="button" disabled={busy} onClick={() => rate('up')} aria-label="Helpful"
         className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
           value === 'up' ? 'bg-success-muted text-success' : 'text-cream-muted hover:bg-ink-hover'}`}>
-        👍
+        <Icon name="thumbsUp" className="w-3.5 h-3.5" />
       </button>
       <button type="button" disabled={busy} onClick={() => rate('down')} aria-label="Not helpful"
         className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
           value === 'down' ? 'bg-danger-muted text-danger' : 'text-cream-muted hover:bg-ink-hover'}`}>
-        👎
+        <Icon name="thumbsDown" className="w-3.5 h-3.5" />
       </button>
     </div>
   );

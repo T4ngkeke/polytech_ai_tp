@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import useAuthStore from '../store/authStore';
 import ThemeToggle from '../components/ThemeToggle';
+import Icon from '../components/Icon';
 
 const NAV = [
   { key: 'users', label: 'Users', icon: UsersIcon },
@@ -46,7 +47,7 @@ export default function Admin() {
         md:static md:z-auto md:flex md:w-56 md:shadow-none md:bg-ink-base/50 shrink-0 flex-col border-r border-border-subtle`}>
         <div className="px-5 pt-6 pb-5">
           <h1 className="font-display text-lg text-cream leading-tight">Admin Console</h1>
-          <p className="text-[11px] text-cream-muted mt-0.5">God-mode oversight</p>
+          <p className="text-[11px] text-cream-muted mt-0.5">System administration</p>
         </div>
         <nav className="flex-1 px-3 space-y-1">
           {NAV.map(({ key, label, icon: Icon }) => {
@@ -432,7 +433,7 @@ function OversightTab() {
         {!selectedClass ? (
           /* ── Level 0: class list ── */
           <>
-            <PageHeader title="Oversight" subtitle={`${classes.length} classes across the platform`} />
+            <PageHeader title="Oversight" subtitle={`${plural(classes.length, 'class', 'classes')} across the platform`} />
             {loading ? <Spinner /> : classes.length === 0 ? (
               <EmptyState icon={<GridIcon className="w-7 h-7" />} message="No classes on the platform yet." />
             ) : (
@@ -442,7 +443,7 @@ function OversightTab() {
                     className="group flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-ink-hover/50 transition-colors">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-cream truncate">{cls.name}</p>
-                      <p className="text-[11px] text-cream-muted mt-0.5">{cls.labs?.length || 0} labs</p>
+                      <p className="text-[11px] text-cream-muted mt-0.5">{plural(cls.labs?.length || 0, 'lab')}</p>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={(e) => e.stopPropagation()}>
@@ -467,7 +468,7 @@ function OversightTab() {
               <ChevronIcon className="w-3.5 h-3.5 rotate-180" /> Classes
             </button>
             <PageHeader title={selectedClass.name}
-              subtitle={`${selectedClass.labs?.length || 0} labs · ${students.length} students`} />
+              subtitle={`${plural(selectedClass.labs?.length || 0, 'lab')} · ${plural(students.length, 'student')}`} />
 
             {/* Labs */}
             <SectionLabel>Labs ({selectedClass.labs?.length || 0})</SectionLabel>
@@ -646,7 +647,7 @@ const MAP_SOURCES = [
 // the research agent is on).
 const MAP_NODES = [
   {
-    id: 'agent', x: 34, y: 14, icon: '🧠', name: 'Research agent', sources: ['students'],
+    id: 'agent', x: 34, y: 14, icon: 'bot', name: 'Research agent', sources: ['students'],
     tag: 'Answers every student question in a lab: it searches and reads the course PDFs, '
       + 'may ask the student back, then answers with citations. The limits below apply to each question.',
     status: (c) => (c.agent_model ? 'set' : 'inherits'),
@@ -664,7 +665,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'vlm', x: 34, y: 48, icon: '👁️', name: 'Vision (VLM)', sources: ['agent', 'teachers', 'worker'],
+    id: 'vlm', x: 34, y: 48, icon: 'eye', name: 'Vision (VLM)', sources: ['agent', 'teachers', 'worker'],
     tag: 'Looks at images: page images and figures the research agent views, figure descriptions '
       + 'teachers ask for, and the worker’s repair of garbled formulas. Empty model = off; it never '
       + 'falls back to a text-only model.',
@@ -676,7 +677,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'chat', x: 85, y: 48, icon: '💬', name: 'Default model', sources: [],
+    id: 'chat', x: 85, y: 48, icon: 'message', name: 'Default model', sources: [],
     tag: 'Every empty model slot uses this model (dashed lines). It also answers chats outside a lab '
       + '(the old chat path) and holds the billing weights α/β applied to every model call.',
     status: () => 'live',
@@ -690,7 +691,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'embedding', x: 58, y: 48, icon: '🧲', name: 'Embedding', sources: ['agent', 'worker'],
+    id: 'embedding', x: 58, y: 48, icon: 'network', name: 'Embedding', sources: ['agent', 'worker'],
     tag: 'bge-m3 vectors. The worker indexes documents with it and the research search queries with it: '
       + 'both must use the same model.',
     status: (c) => (c.embedding_url ? 'set' : 'inherits'),
@@ -701,7 +702,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'rerank', x: 58, y: 14, icon: '⚖️', name: 'Reranker', sources: ['agent'],
+    id: 'rerank', x: 58, y: 14, icon: 'sort', name: 'Reranker', sources: ['agent'],
     tag: 'Reorders the research search results (bge-reranker behind a /rerank endpoint, not the chat '
       + 'base URL). Empty URL = off: fusion order only. The score threshold applies only to the old chat path.',
     status: (c) => (c.rerank_url ? 'set' : 'off'),
@@ -713,7 +714,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'aux', x: 85, y: 82, icon: '🧭', name: 'Old chat path', sources: [],
+    id: 'aux', x: 85, y: 82, icon: 'compass', name: 'Old chat path', sources: [],
     tag: 'Router, self-evaluation and rewrite of the chat path without the research agent (chats outside '
       + 'a lab, or the agent turned off). Not used while the research agent is on.',
     status: (c) => (c.features?.research_agent ? 'legacy' : c.router_model ? 'set' : 'inherits'),
@@ -724,7 +725,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'ingest', x: 34, y: 82, icon: '📥', name: 'Ingest model', sources: ['worker'],
+    id: 'ingest', x: 34, y: 82, icon: 'download', name: 'Ingest model', sources: ['worker'],
     tag: 'Writes one line of context for each chunk when a document is indexed (worker, off-peak). '
       + 'The token budget per document is recorded in the ingest report.',
     status: (c) => (c.ingest_model ? 'set' : 'inherits'),
@@ -736,7 +737,7 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'mineru', x: 58, y: 82, icon: '📄', name: 'MinerU (PDF)', sources: ['worker'],
+    id: 'mineru', x: 58, y: 82, icon: 'file', name: 'MinerU (PDF)', sources: ['worker'],
     tag: 'Reads each page of an uploaded PDF (layout, text, tables, formulas) through a MinerU vision '
       + 'server. Only the server can change here, without a restart; the MinerU client, its local models '
       + 'and mineru.json are part of the worker deployment.',
@@ -793,9 +794,12 @@ function MapNode({ node, config, selected, onSelect }) {
         ? 'border-cyan ring-2 ring-cyan/30 shadow-glow'
         : 'border-border-default'}`}>
       <div className="flex items-center justify-between gap-1">
-        <span className="text-sm">{node.icon} <span className="text-xs font-semibold text-cream">{node.name}</span></span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Icon name={node.icon} className="w-4 h-4 shrink-0 text-cyan" />
+          <span className="truncate text-xs font-semibold text-cream">{node.name}</span>
+        </span>
         {node.warnEmpty && st === 'inherits' ? (
-          <span className="text-danger" title={node.warnEmpty}>⚠</span>
+          <span className="text-danger" title={node.warnEmpty}><Icon name="warning" className="w-3.5 h-3.5" /></span>
         ) : null}
       </div>
       <p className="mt-1 truncate font-mono text-[10px] text-cream-muted">
@@ -823,7 +827,9 @@ function NodePanel({ node, config, set, onSave, saving }) {
   return (
     <div className="space-y-3 rounded-xl border border-border-default bg-ink-deep/30 p-4">
       <div>
-        <h3 className="text-sm font-semibold text-cream">{node.icon} {node.name}</h3>
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-cream">
+          <Icon name={node.icon} className="w-4 h-4 text-cyan" />{node.name}
+        </h3>
         <p className="mt-1 text-xs leading-relaxed text-cream-muted">{node.tag}</p>
       </div>
       {node.fields.map((f, i) => {
@@ -858,7 +864,7 @@ function NodePanel({ node, config, set, onSave, saving }) {
         ) : field;
       })}
       {node.warnEmpty && st === 'inherits' ? (
-        <p className="text-xs text-gold">⚠ {node.warnEmpty}</p>
+        <p className="text-xs text-gold"><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {node.warnEmpty}</p>
       ) : null}
       <button type="button" onClick={onSave} disabled={saving}
         className="w-full rounded-lg gradient-cyan py-2 text-sm font-semibold text-on-accent transition-all hover:brightness-110 disabled:opacity-40">
@@ -1015,13 +1021,26 @@ function MaintenanceTab() {
   const [pruning, setPruning] = useState(false);
   const [result, setResult] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [preview, setPreview] = useState(null); // what the prune would delete
+
+  // Count first (dry run), so the confirmation names what will be deleted.
+  const openConfirm = async () => {
+    setPreview(null);
+    setConfirmOpen(true);
+    try {
+      setPreview(await api.post('/api/admin/maintenance/prune', { older_than_days: days, dry_run: true }));
+    } catch (err) {
+      toast.error(err.message);
+      setConfirmOpen(false);
+    }
+  };
 
   const handlePrune = async () => {
     setPruning(true);
     try {
-      const res = await api.post('/api/admin/maintenance/prune', { days });
+      const res = await api.post('/api/admin/maintenance/prune', { older_than_days: days });
       setResult(res);
-      toast.success(`Pruned ${res.sessions_deleted} sessions`);
+      toast.success(`Pruned ${plural(res.sessions_deleted, 'session')}`);
       setConfirmOpen(false);
     } catch (err) { toast.error(err.message); } finally { setPruning(false); }
   };
@@ -1041,7 +1060,7 @@ function MaintenanceTab() {
               className="w-16 text-center bg-ink-deep border border-border-default text-cream text-sm px-2 py-1 rounded-lg focus:outline-none focus:border-danger/40" />
             <span className="text-sm text-cream-secondary">days</span>
           </div>
-          <button onClick={() => setConfirmOpen(true)} disabled={pruning}
+          <button onClick={openConfirm} disabled={pruning || !(days >= 1)}
             className="w-full py-2.5 rounded-lg bg-danger text-on-accent text-sm font-semibold hover:bg-danger-hover transition-all cursor-pointer disabled:opacity-40">
             Run Prune
           </button>
@@ -1055,8 +1074,13 @@ function MaintenanceTab() {
       </div>
 
       {confirmOpen && (
-        <ConfirmModal title="Prune old sessions" danger busy={pruning}
-          message={<>Permanently delete all sessions and messages older than <span className="text-cream font-medium">{days} days</span>? This cannot be undone.</>}
+        <ConfirmModal title="Prune old sessions" danger busy={pruning || !preview}
+          message={preview
+            ? <>Permanently delete what is older than <span className="text-cream font-medium">{plural(days, 'day')}</span>:{' '}
+                <span className="text-cream font-medium">{plural(preview.sessions_deleted, 'session')}</span> with{' '}
+                <span className="text-cream font-medium">{plural(preview.messages_deleted, 'message')}</span>, and{' '}
+                {plural(preview.router_logs_deleted + preview.trace_logs_deleted, 'log row')}. This cannot be undone.</>
+            : <>Counting what is older than {plural(days, 'day')}…</>}
           confirmLabel={pruning ? 'Pruning…' : 'Run Prune'}
           onConfirm={handlePrune} onCancel={() => setConfirmOpen(false)} />
       )}
@@ -1232,4 +1256,9 @@ function SortIcon({ className, dir }) {
 
 function MenuIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+}
+
+/** "1 lab", "3 labs"; many: the plural when it is not word + "s". */
+function plural(n, word, many = `${word}s`) {
+  return `${n} ${n === 1 ? word : many}`;
 }

@@ -160,7 +160,7 @@ export default function Login() {
 
         {/* Footer */}
         <p className="text-center text-[11px] text-cream-muted mt-6 font-body tracking-wide">
-          Edu-LLM v7.2 Class-Lab Architecture — Polytech AI
+          Edu-LLM · Polytech
         </p>
       </div>
     </div>

@@ -521,9 +521,13 @@ class TransferClassRequest(BaseModel):
 
 class PruneRequest(BaseModel):
     older_than_days: int = Field(..., ge=1)
+    # True: count what would be deleted, delete nothing (shown before confirming).
+    dry_run: bool = False
 
 
 class PruneResponse(BaseModel):
+    # With dry_run, the rows that would be deleted.
+    dry_run: bool = False
     sessions_deleted: int
     messages_deleted: int
     router_logs_deleted: int = 0

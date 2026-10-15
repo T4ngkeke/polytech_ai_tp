@@ -24,7 +24,7 @@ import { PdfPreviewModal } from '../components/PdfPreview';
 import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
 import ModeSwitch from '../components/ModeSwitch';
 import useMediaQuery from '../lib/useMediaQuery';
-import { DEFAULT_MODE, MODES, offersResearch, saveMode, storedMode } from '../lib/answerModes';
+import { DEFAULT_MODE, offersResearch, saveMode, storedMode } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
@@ -42,7 +42,6 @@ export default function Chat() {
 
   // ── Active context ──
   const [activeLabId, setActiveLabId] = useState(urlLabId || null);
-  const [activeClassId, setActiveClassId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -99,7 +98,7 @@ export default function Chat() {
         })
       );
       setClasses(withLabs);
-    } catch (err) {
+    } catch {
       toast.error('Failed to load classes');
     } finally {
       setClassesLoading(false);
@@ -117,16 +116,17 @@ export default function Chat() {
     try {
       const data = await api.get('/api/student/usage');
       setUsage(data);
-    } catch {}
+    } catch {
+      // The quota bar keeps its last value.
+    }
   }, []);
 
   useEffect(() => { loadUsage(); }, [loadUsage]);
 
   // ── When a lab is selected ──
-  const handleSelectLab = useCallback(async (labId, classId) => {
+  const handleSelectLab = useCallback(async (labId) => {
     restoredLabRef.current = true;
     setActiveLabId(labId);
-    setActiveClassId(classId);
     setMessages([]);
     setActiveSessionId(null);
     navigate(`/chat/${labId}`, { replace: true });
@@ -148,7 +148,7 @@ export default function Chat() {
     } catch {
       setSessions([]);
     }
-  }, [navigate]);
+  }, [navigate, follow]);
 
   // The URL survives a reload; restore its latest session and persisted citations.
   useEffect(() => {
@@ -189,7 +189,7 @@ export default function Chat() {
     } finally {
       setIsLoadingMessages(false);
     }
-  }, []);
+  }, [follow]);
 
   // ── Scroll while an answer is written (lib/chatScroll.js) ──
   useEffect(() => { updateScroll(); }, [messages, updateScroll]);
@@ -213,7 +213,7 @@ export default function Chat() {
         setSessions((prev) => [newSession, ...prev]);
         setActiveSessionId(newSession.id);
         currentSessionId = newSession.id;
-      } catch (err) {
+      } catch {
         toast.error('Could not start session');
         return;
       }
@@ -295,7 +295,7 @@ export default function Chat() {
         },
         onerror(err) { throw err; },
       });
-    } catch (err) {
+    } catch {
       if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
       // An unchecked draft never stays on screen once the stream ends.
@@ -303,7 +303,7 @@ export default function Chat() {
       setResearchPhase(null);
       setIsStreaming(false);
     }
-  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage, mode, examMode, activeClass]);
+  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage, mode, examMode, activeClass, follow]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }

@@ -21,6 +21,7 @@ import CitationReport from '../components/CitationReport';
 import ModeSwitch from '../components/ModeSwitch';
 import { DEFAULT_MODE, modeLabel, offersResearch } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
+import Icon from '../components/Icon';
 
 // Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
 // it in when a test-drive is actually opened.
@@ -42,7 +43,6 @@ export default function Teacher() {
 
   // ── Right panel data ──
   const [students, setStudents] = useState([]);
-  const [rule, setRule] = useState(null);
   const [ruleText, setRuleText] = useState('');
   const [ruleActive, setRuleActive] = useState(true);
   const [analytics, setAnalytics] = useState(null);
@@ -117,13 +117,12 @@ export default function Teacher() {
   useEffect(() => {
     if (!selectedClass && !selectedLab) return;
     const level = selectedLab ? 'lab' : 'class';
-    const targetId = selectedLab ? selectedLab.id : selectedClass?.id;
 
     if (level === 'class') {
       if (activeTab === 1) {
         api.get(`/api/teacher/rules?level=class&target_id=${selectedClass.id}`)
-          .then((rules) => { const r = rules[0] || null; setRule(r); setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true); })
-          .catch(() => { setRule(null); setRuleText(''); });
+          .then((rules) => { const r = rules[0] || null; setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true); })
+          .catch(() => { setRuleText(''); });
       } else if (activeTab === 2) {
         api.get(`/api/teacher/analytics/classes/${selectedClass.id}`).then(setAnalytics).catch(() => setAnalytics(null));
       }
@@ -135,10 +134,10 @@ export default function Teacher() {
         ])
           .then(([labRules, classRules]) => {
             const r = labRules[0] || null; 
-            setRule(r); setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true);
+            setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true);
             setInheritedClassRule(classRules[0]?.rules_text || '');
           })
-          .catch(() => { setRule(null); setRuleText(''); setInheritedClassRule(''); });
+          .catch(() => { setRuleText(''); setInheritedClassRule(''); });
       } else if (activeTab === 2) {
         api.get(`/api/teacher/analytics/classes/${selectedClass.id}`).then(setAnalytics).catch(() => setAnalytics(null));
       } else if (activeTab === 3 || activeTab === 4) {
@@ -242,8 +241,7 @@ export default function Teacher() {
     const level = selectedLab ? 'lab' : 'class';
     const targetId = selectedLab ? selectedLab.id : selectedClass?.id;
     try {
-      const r = await api.put('/api/teacher/rules', { level, target_id: targetId, rules_text: ruleText, is_active: ruleActive });
-      setRule(r);
+      await api.put('/api/teacher/rules', { level, target_id: targetId, rules_text: ruleText, is_active: ruleActive });
       toast.success('Rule saved');
     } catch (err) { toast.error(err.message); }
   };
@@ -513,7 +511,10 @@ function LabSettingsPanel({ lab, onToggle }) {
           className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
             lab.is_active ? 'bg-danger-muted text-danger hover:bg-danger/20' : 'bg-success-muted text-success hover:bg-success/25'
           }`}>
-          {lab.is_active ? '🔒 Lock' : '🔓 Unlock'}
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name={lab.is_active ? 'lock' : 'unlock'} className="w-3.5 h-3.5" />
+            {lab.is_active ? 'Lock' : 'Unlock'}
+          </span>
         </button>
       </div>
     </div>
@@ -656,7 +657,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
         },
         onerror(err) { throw err; },
       });
-    } catch (err) {
+    } catch {
       if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
       // An unchecked draft never stays on screen once the stream ends.
@@ -664,7 +665,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
       setPhase(null);
       setIsStreaming(false);
     }
-  }, [input, isStreaming, sessionId, token, mode, examMode]);
+  }, [input, isStreaming, sessionId, token, mode, examMode, follow]);
 
   if (!sessionId) {
     return (
@@ -693,7 +694,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
       </div>
       <div ref={scrollRef} onScroll={onScroll} className="relative flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <p className="text-sm text-cream-muted">Ask as if you were a student — e.g. “comment faire l'exercice 3 ?”.</p>
+          <p className="text-sm text-cream-muted">Ask as if you were a student — e.g. “comment faire l’exercice 3 ?”.</p>
         )}
         {messages.map((m, i) => {
           const last = i === messages.length - 1;
@@ -824,7 +825,7 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
             >
               <div>
                 <p className="text-sm font-medium text-cream">{student.username}</p>
-                <p className="text-xs text-cream-muted font-mono">{studentSessions.length} sessions</p>
+                <p className="text-xs text-cream-muted font-mono">{studentSessions.length} session{studentSessions.length === 1 ? '' : 's'}</p>
               </div>
               <span className={`text-cream-muted transition-transform ${isStudentExpanded ? 'rotate-90' : ''}`}>›</span>
             </button>

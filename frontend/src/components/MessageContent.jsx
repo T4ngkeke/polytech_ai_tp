@@ -47,23 +47,35 @@ function CopyButton({ value }) {
   };
   return (
     <button
+      type="button"
       onClick={onCopy}
-      className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-ink-surface/80 border border-border-default text-[10px] text-cream-muted hover:text-cream cursor-pointer"
+      className="px-2 py-0.5 rounded-md text-[10px] text-cream-muted hover:text-cream hover:bg-ink-hover cursor-pointer"
     >
       {copied ? 'Copied' : 'Copy'}
     </button>
   );
 }
 
+// A bar above the code with its language and the copy button, so the button
+// never covers the first line.
+function CodeBar({ language, value }) {
+  return (
+    <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-border-subtle bg-ink-surface px-3 py-1">
+      <span className="font-mono text-[10px] text-cream-muted">{language || 'code'}</span>
+      <CopyButton value={value} />
+    </div>
+  );
+}
+
 const CodeBlock = memo(function CodeBlock({ language, value }) {
   const theme = useTheme();
   return (
-    <div className="relative my-2 text-[13px]">
-      <CopyButton value={value} />
+    <div className="my-2 text-[13px]">
+      <CodeBar language={language} value={value} />
       <SyntaxHighlighter
         language={language}
         style={theme === 'dark' ? oneDark : oneLight}
-        customStyle={{ margin: 0, borderRadius: '0.5rem', padding: '0.9rem 1rem' }}
+        customStyle={{ margin: 0, borderRadius: '0 0 0.5rem 0.5rem', padding: '0.9rem 1rem' }}
         PreTag="div"
       >
         {value}
@@ -76,9 +88,9 @@ const CodeBlock = memo(function CodeBlock({ language, value }) {
 // token, so a growing/unclosed fence can't blow up memory.
 function PlainCodeBlock({ value }) {
   return (
-    <div className="relative my-2 text-[13px]">
-      <CopyButton value={value} />
-      <pre className="overflow-x-auto rounded-lg border border-border-subtle bg-ink-deep p-3.5 font-mono text-[13px] leading-relaxed text-cream-secondary">
+    <div className="my-2 text-[13px]">
+      <CodeBar value={value} />
+      <pre className="overflow-x-auto rounded-b-lg border border-border-subtle bg-ink-deep p-3.5 font-mono text-[13px] leading-relaxed text-cream-secondary">
         <code>{value}</code>
       </pre>
     </div>

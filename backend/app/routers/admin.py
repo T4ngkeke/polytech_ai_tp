@@ -645,7 +645,8 @@ async def prune_old_data(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PruneResponse:
-    """Hard-delete sessions and messages older than `older_than_days`."""
+    """Hard-delete sessions and messages older than `older_than_days`; with
+    dry_run, only count them."""
     from datetime import datetime, timedelta, timezone
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=body.older_than_days)
@@ -654,11 +655,12 @@ async def prune_old_data(
     router_logs_deleted = (await db.execute(
         select(func.count(RouterQueryLog.id)).where(RouterQueryLog.created_at < cutoff)
     )).scalar_one()
-    await db.execute(delete(RouterQueryLog).where(RouterQueryLog.created_at < cutoff))
     trace_logs_deleted = (await db.execute(
         select(func.count(AgentTraceLog.id)).where(AgentTraceLog.created_at < cutoff)
     )).scalar_one()
-    await db.execute(delete(AgentTraceLog).where(AgentTraceLog.created_at < cutoff))
+    if not body.dry_run:
+        await db.execute(delete(RouterQueryLog).where(RouterQueryLog.created_at < cutoff))
+        await db.execute(delete(AgentTraceLog).where(AgentTraceLog.created_at < cutoff))
 
     old_sessions_result = await db.execute(select(Session.id).where(Session.created_at < cutoff))
     old_session_ids = [row[0] for row in old_sessions_result.all()]
@@ -669,12 +671,14 @@ async def prune_old_data(
             select(func.count(Message.id)).where(Message.session_id.in_(old_session_ids))
         )
         messages_deleted = msg_count_result.scalar_one()
-        await db.execute(delete(Message).where(Message.session_id.in_(old_session_ids)))
-        await db.execute(delete(Session).where(Session.id.in_(old_session_ids)))
+        if not body.dry_run:
+            await db.execute(delete(Message).where(Message.session_id.in_(old_session_ids)))
+            await db.execute(delete(Session).where(Session.id.in_(old_session_ids)))
 
     await db.flush()
 
     return PruneResponse(
+        dry_run=body.dry_run,
         sessions_deleted=len(old_session_ids),
         messages_deleted=messages_deleted,
         router_logs_deleted=router_logs_deleted,
