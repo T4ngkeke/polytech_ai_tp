@@ -49,7 +49,7 @@ function CopyButton({ value }) {
     <button
       type="button"
       onClick={onCopy}
-      className="px-2 py-0.5 rounded-md text-[10px] text-cream-muted hover:text-cream hover:bg-ink-hover cursor-pointer"
+      className="px-2 py-1 rounded-md text-[11px] text-cream-muted hover:text-cream hover:bg-ink-hover cursor-pointer"
     >
       {copied ? 'Copied' : 'Copy'}
     </button>

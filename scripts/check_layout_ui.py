@@ -5,6 +5,7 @@ themes at desktop (1440 px) and phone (390 px) width. The check fails when the
 page scrolls sideways, the theme is not applied, the phone menu does not open
 the navigation drawer, the student drawer is not ordered classes, sessions,
 account, the token quota is pushed off screen, or the admin model map is missing.
+In a teacher lab, the class name in the breadcrumb must open the class.
 The admin Monitoring tab shows the real Grafana dashboards (not mocked), in the
 app's theme; it needs the monitoring containers running.
 
@@ -180,6 +181,22 @@ def check_toggle(browser, target):
         context.close()
 
 
+def check_breadcrumb(browser, target):
+    # In a lab, the class name above the tabs opens the class.
+    context, page, errors = open_page(browser, target, 'teacher', '/teacher', 'light', DESKTOP)
+    try:
+        page.get_by_text('TP agent', exact=True).first.click()
+        expect(page.get_by_role('button', name='Audit', exact=True)).to_be_visible()
+        crumb = page.get_by_role('navigation', name='Breadcrumb').get_by_role('button', name='Informatique')
+        crumb.click()
+        expect(page.get_by_role('button', name='Audit', exact=True)).to_have_count(0)
+        expect(page.get_by_role('navigation', name='Breadcrumb').get_by_text('TP agent')).to_have_count(0)
+        assert not errors, errors
+        print('PASS: the class name in the breadcrumb opens the class')
+    finally:
+        context.close()
+
+
 def check_monitoring(browser, target, shots):
     """Both dashboards load inside the admin page, in the app's theme, at both widths."""
     for theme in ('light', 'dark'):
@@ -223,6 +240,7 @@ def main():
                     for size in (DESKTOP, PHONE):
                         check_view(browser, target, shots, role, path, ready, steps, menu, theme, size)
             check_toggle(browser, target)
+            check_breadcrumb(browser, target)
             check_monitoring(browser, target, shots)
             check_long_answer_stays_at_its_start(browser, target)
         finally:

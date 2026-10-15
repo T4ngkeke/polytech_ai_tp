@@ -399,14 +399,14 @@ export default function Chat() {
                 <span className="flex-1 truncate text-danger">Delete this chat?</span>
                 <button
                   onClick={() => handleDeleteSession(s.id)}
-                  className="w-5 h-5 flex items-center justify-center text-danger hover:text-danger-hover transition-colors cursor-pointer"
+                  className="w-7 h-7 rounded flex items-center justify-center text-danger hover:text-danger-hover hover:bg-ink-hover transition-colors cursor-pointer"
                   title="Confirm delete"
                 >
                   <CheckIcon className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setConfirmingDeleteId(null)}
-                  className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
+                  className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
                   title="Cancel"
                 >
                   <XIcon className="w-3.5 h-3.5" />
@@ -416,7 +416,7 @@ export default function Chat() {
               <>
                 <button
                   onClick={() => handleSelectSession(s.id)}
-                  className={`w-full text-left px-3 py-2 pr-14 text-xs transition-all cursor-pointer ${
+                  className={`w-full text-left px-3 py-2 pr-16 text-xs transition-all cursor-pointer ${
                     activeSessionId === s.id
                       ? 'bg-cyan-muted text-cyan'
                       : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
@@ -431,17 +431,17 @@ export default function Chat() {
                 <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
-                    className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-colors cursor-pointer"
+                    className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
                     title="Rename session"
                   >
-                    <PencilIcon className="w-3 h-3" />
+                    <PencilIcon className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => setConfirmingDeleteId(s.id)}
-                    className="w-5 h-5 flex items-center justify-center text-cream-muted hover:text-danger transition-colors cursor-pointer"
+                    className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-danger hover:bg-ink-hover transition-colors cursor-pointer"
                     title="Delete session"
                   >
-                    <TrashIcon className="w-3 h-3" />
+                    <TrashIcon className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </>

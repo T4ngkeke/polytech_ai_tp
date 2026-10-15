@@ -316,7 +316,10 @@ export default function Teacher() {
             className="p-2 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
             <MenuIcon className="w-5 h-5" />
           </button>
-          <span className="min-w-0 truncate text-sm font-medium text-cream">{context || 'Teacher'}</span>
+          {selectedClass
+            ? <Breadcrumb cls={selectedClass} lab={selectedLab} onClass={() => handleSelectClass(selectedClass)}
+                className="min-w-0 truncate text-sm font-medium text-cream" />
+            : <span className="min-w-0 truncate text-sm font-medium text-cream">Teacher</span>}
         </div>
         {!selectedClass && !selectedLab ? (
           <EmptyState />
@@ -324,7 +327,8 @@ export default function Teacher() {
           <>
             {/* Panel header */}
             <div className="shrink-0 px-4 pt-2 md:px-8 md:pt-6 pb-0 border-b border-border-subtle bg-ink-base/60">
-              <p className="hidden md:block text-[10px] text-cream-muted uppercase tracking-widest mb-1 font-mono">{context}</p>
+              <Breadcrumb cls={selectedClass} lab={selectedLab} onClass={() => handleSelectClass(selectedClass)}
+                className="hidden md:block mb-1 text-[11px] text-cream-muted uppercase tracking-widest font-mono" />
               <div className="flex gap-5 md:gap-6 overflow-x-auto no-scrollbar">
                 {tabs.map((tab, i) => (
                   <button
@@ -447,6 +451,28 @@ function StudentsPanel({ students, onKick, onSetRule }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// "Class › Lab" above the tabs. The class name opens the class; the lab is the
+// page already shown.
+function Breadcrumb({ cls, lab, onClass, className }) {
+  if (!cls) return null;
+  return (
+    <nav aria-label="Breadcrumb" className={className}>
+      {lab ? (
+        <button type="button" onClick={onClass} title={`Open ${cls.name}`}
+          className="-my-1 py-1 cursor-pointer hover:text-cyan hover:underline underline-offset-2">
+          {cls.name}
+        </button>
+      ) : <span aria-current="page">{cls.name}</span>}
+      {lab && (
+        <>
+          <span aria-hidden="true" className="mx-1.5">›</span>
+          <span aria-current="page" className="text-cream-secondary">{lab.name}</span>
+        </>
+      )}
+    </nav>
   );
 }
 

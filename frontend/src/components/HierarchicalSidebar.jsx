@@ -204,7 +204,8 @@ function ClassNode({
           <div className="relative shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-              className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream rounded transition-all cursor-pointer"
+              aria-label={`Actions for ${cls.name}`} title="Class actions"
+              className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded transition-all cursor-pointer"
             >
               <EllipsisIcon className="w-3.5 h-3.5" />
             </button>
@@ -285,9 +286,10 @@ function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
         <div className="relative shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-            className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream rounded cursor-pointer transition-all"
+            aria-label={`Actions for ${lab.name}`} title="Lab actions"
+            className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded cursor-pointer transition-all"
           >
-            <EllipsisIcon className="w-3 h-3" />
+            <EllipsisIcon className="w-3.5 h-3.5" />
           </button>
           {showMenu && (
             <LabMenu
