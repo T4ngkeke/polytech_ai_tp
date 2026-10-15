@@ -150,7 +150,10 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
         "questions_given_to_model": len(recent),
         "students": len(per_student),
         "questions_per_student": sorted(per_student.values(), reverse=True),
-        "modes": dict(Counter(q["mode"] or "unknown" for q in questions)),
+        # Answers older than the modes (2026-10-15) have none: counted apart, so a
+        # report does not read "unknown" as a mode students chose.
+        "modes": dict(Counter(q["mode"] for q in questions if q["mode"])),
+        "answers_before_modes_were_recorded": sum(1 for q in questions if not q["mode"]),
         "thumbs_down": sum(q["down"] for q in questions),
         "answers_not_finished": len([q for q in questions if q["id"] in problem]),
         "documents_in_lab": sorted(name for _, name in documents.values()),
