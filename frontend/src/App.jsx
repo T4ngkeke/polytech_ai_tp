@@ -6,8 +6,12 @@
  *   /register        → Register page (public, student self-signup)
  *   /                → MainLayout (requires auth)
  *     /admin         → Admin Dashboard (admin only)
- *     /teacher       → Teacher Workspace (teacher + admin)
- *     /chat/:labId?  → Student chat with hierarchical sidebar
+ *     /teacher       → Teacher Workspace (teacher only)
+ *     /chat/:labId?  → Student chat with hierarchical sidebar (student only)
+ *     /source, /account → every role
+ *
+ * Each role has its own workspace: an admin or a teacher who opens another
+ * one is sent back to their own (they have no classes or labs there).
  */
 
 import { Routes, Route, Navigate } from 'react-router-dom';
@@ -37,16 +41,18 @@ export default function App() {
             <Route path="/admin" element={<Admin />} />
           </Route>
 
-          {/* Teacher + Admin */}
-          <Route element={<ProtectedRoute allowedRoles={['admin', 'teacher']} />}>
+          <Route element={<ProtectedRoute allowedRoles={['teacher']} />}>
             <Route path="/teacher" element={<Teacher />} />
           </Route>
 
-          {/* All authenticated users — Chat is the unified student workspace */}
-          <Route element={<ProtectedRoute allowedRoles={['admin', 'teacher', 'student']} />}>
-            <Route path="/source/:documentId" element={<SourcePdf />} />
+          <Route element={<ProtectedRoute allowedRoles={['student']} />}>
             <Route path="/chat" element={<Chat />} />
             <Route path="/chat/:labId" element={<Chat />} />
+          </Route>
+
+          {/* Every role: a cited page, the account settings */}
+          <Route element={<ProtectedRoute allowedRoles={['admin', 'teacher', 'student']} />}>
+            <Route path="/source/:documentId" element={<SourcePdf />} />
             <Route path="/account" element={<Account />} />
           </Route>
         </Route>

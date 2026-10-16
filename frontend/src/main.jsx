@@ -10,10 +10,10 @@
 import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 
 import App from './App';
-import useAuthStore from './store/authStore';
+import useAuthStore, { takeTabNote } from './store/authStore';
 import { applyTheme, storedTheme } from './lib/theme';
 import './index.css';
 
@@ -22,10 +22,18 @@ applyTheme(storedTheme());
 function Root() {
   const hydrate = useAuthStore((s) => s.hydrate);
   const isHydrated = useAuthStore((s) => s.isHydrated);
+  const followOtherTabs = useAuthStore((s) => s.followOtherTabs);
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  useEffect(() => followOtherTabs(), [followOtherTabs]);
+
+  useEffect(() => {
+    const note = takeTabNote();
+    if (note) toast(note, { duration: 5000 });
+  }, []);
 
   if (!isHydrated) {
     return (

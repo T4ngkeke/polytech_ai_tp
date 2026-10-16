@@ -184,3 +184,20 @@ async def require_admin(
             detail="Admin access required",
         )
     return current_user
+
+
+async def require_student(
+    current_user=Depends(get_current_user),
+):
+    """
+    Allow access only to students. Teachers and admins do not join classes:
+    their questions would count as a student's in the class analytics.
+    """
+    from backend.app.models import UserRole
+
+    if current_user.role != UserRole.student:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students join a class",
+        )
+    return current_user

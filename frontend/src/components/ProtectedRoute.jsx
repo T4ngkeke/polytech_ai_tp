@@ -26,7 +26,7 @@ export default function ProtectedRoute({ allowedRoles }) {
 
   // Authenticated but wrong role → redirect to their default route
   if (allowedRoles && !allowedRoles.includes(userRole)) {
-    const fallback = DEFAULT_ROUTES[userRole] || '/chat';
+    const fallback = DEFAULT_ROUTES[userRole] || '/account';
     return <Navigate to={fallback} replace />;
   }
 

@@ -97,7 +97,7 @@
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
-| POST | `/api/student/classes/join` | get_current_user | Submit 6-char `invite_code` to instantly join a Class. |
+| POST | `/api/student/classes/join` | require_student | Submit 6-char `invite_code` to instantly join a Class. Teachers and admins get `403` (their questions would count in the class analytics). |
 | GET | `/api/student/classes` | get_current_user | List all joined classes (with labs). Each class has `exam_mode`. |
 | GET | `/api/student/classes/{class_id}/labs` | get_current_user | List active labs for a joined class. |
 | DELETE | `/api/student/classes/{class_id}/leave` | get_current_user | Voluntarily leave a joined class. |

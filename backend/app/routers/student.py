@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from backend.app.auth import get_current_user
+from backend.app.auth import get_current_user, require_student
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import Class, ClassStudent, Lab, User
@@ -54,13 +54,13 @@ router = APIRouter(prefix="/api/student", tags=["student"])
 @router.post("/classes/join", response_model=JoinClassResponse, status_code=201)
 async def join_class(
     body: JoinClassRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> JoinClassResponse:
     """
     Join a class using a 6-character invite code.
 
-    Returns 404 if the invite code is invalid.
+    Returns 403 for a teacher or an admin, 404 if the invite code is invalid.
     Returns 409 if the student has already joined this class.
     """
     # Look up class by invite code

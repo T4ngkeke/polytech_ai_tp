@@ -20,6 +20,7 @@ for a human look.
 """
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -235,6 +236,45 @@ def check_breadcrumb(browser, target):
         context.close()
 
 
+def check_roles_and_tabs(browser, target):
+    # Each role stays in its own workspace, and every tab follows a sign-in or
+    # sign-out made in another tab. The token names the role ("as-teacher").
+    context = browser.new_context(viewport={'width': DESKTOP[0], 'height': DESKTOP[1]})
+
+    def api(route):
+        path = urlsplit(route.request.url).path
+        if path == '/api/auth/me':
+            role = (route.request.headers.get('authorization') or '').removeprefix('Bearer as-')
+            route.fulfill(json={'id': role, 'username': role, 'role': role})
+        else:
+            route.fulfill(json=MOCKS.get(path, []))
+
+    context.route(lambda url: urlsplit(url).path.startswith('/api/'), api)
+    try:
+        page = context.new_page()
+        page.goto(target + '/login')
+        for token, path, lands in (('as-admin', '/teacher', '/admin'), ('as-admin', '/chat/lab', '/admin'),
+                                   ('as-teacher', '/chat', '/teacher'), ('as-student', '/teacher', '/chat')):
+            page.evaluate(f"localStorage.setItem('edu_llm_token', '{token}')")
+            page.goto(target + path)
+            expect(page).to_have_url(re.compile(re.escape(lands)))
+        print('PASS: an admin or a teacher who opens another workspace goes back to their own')
+
+        page.evaluate("localStorage.setItem('edu_llm_token', 'as-teacher')")
+        page.goto(target + '/teacher')
+        other = context.new_page()
+        other.goto(target + '/login')
+        other.evaluate("localStorage.setItem('edu_llm_token', 'as-student')")
+        expect(page).to_have_url(re.compile('/chat'))
+        expect(page.get_by_text('Signed in as student in another tab.')).to_be_visible()
+        other.evaluate("localStorage.removeItem('edu_llm_token')")
+        expect(page).to_have_url(re.compile('/login'))
+        expect(page.get_by_text('Signed out in another tab.')).to_be_visible()
+        print('PASS: a tab follows a sign-in and a sign-out made in another tab')
+    finally:
+        context.close()
+
+
 def check_exam_documents(browser, target, shots):
     # Exam mode keeps uploads open and says the documents wait; the note leads to the class settings.
     classes = MOCKS['/api/teacher/classes']
@@ -421,6 +461,7 @@ def main():
                         check_view(browser, target, shots, role, path, ready, steps, menu, theme, size)
             check_toggle(browser, target)
             check_breadcrumb(browser, target)
+            check_roles_and_tabs(browser, target)
             check_exam_documents(browser, target, shots)
             check_document_progress(browser, target, shots)
             check_analytics(browser, target, shots)

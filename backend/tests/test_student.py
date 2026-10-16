@@ -134,6 +134,25 @@ class TestJoinClass:
         app.dependency_overrides.clear()
         assert resp.status_code == 401
 
+    async def test_teacher_and_admin_do_not_join_403(self, db_session, seed_data):
+        # Their questions would count as a student's in the class analytics.
+        admin = make_user(role=UserRole.admin, username="admin1")
+        db_session.add(admin)
+        await db_session.commit()
+
+        async def override():
+            yield db_session
+        app.dependency_overrides[get_db] = override
+        transport = ASGITransport(app=app)
+        try:
+            for user in (seed_data["teacher"], admin):
+                headers = {"Authorization": f"Bearer {create_access_token(user.id)}"}
+                async with AsyncClient(transport=transport, base_url="http://test", headers=headers) as c:
+                    resp = await c.post("/api/student/classes/join", json={"invite_code": "TEST01"})
+                assert resp.status_code == 403, user.role
+        finally:
+            app.dependency_overrides.clear()
+
 
 class TestListJoinedClasses:
     async def test_student1_sees_joined(self, client_s1, seed_data):
