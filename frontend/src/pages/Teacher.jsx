@@ -219,6 +219,9 @@ export default function Teacher() {
       try {
         const updated = await api.put(`/api/teacher/labs/${lab.id}`, { is_active: !lab.is_active });
         setClasses((prev) => prev.map((c) => ({ ...c, labs: c.labs?.map((l) => l.id === lab.id ? updated : l) })));
+        // The open lab too: its Settings button must offer the other action next.
+        setSelectedLab((prev) => (prev?.id === lab.id ? { ...prev, ...updated } : prev));
+        setSelectedClass((prev) => (prev?.labs ? { ...prev, labs: prev.labs.map((l) => (l.id === lab.id ? updated : l)) } : prev));
         toast.success(updated.is_active ? 'Lab unlocked' : 'Lab locked');
       } catch (err) { toast.error(err.message); }
     } else if (action === 'delete') {

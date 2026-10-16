@@ -259,18 +259,24 @@ function ClassNode({
 function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
   const [showMenu, setShowMenu] = useState(false);
   const isLocked = lab.is_deleted || !lab.is_active;
+  // A locked lab is closed to students only: its teacher opens it to unlock it
+  // or to read its conversations.
+  const closed = lab.is_deleted || (isLocked && role === 'student');
 
   return (
     <div className="group relative flex items-center">
       <button
-        onClick={!isLocked ? onSelect : undefined}
-        disabled={isLocked}
+        onClick={!closed ? onSelect : undefined}
+        disabled={closed}
+        title={isLocked && !closed ? 'Locked: students cannot write in this lab' : undefined}
         className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer text-left
           ${isSelected
             ? 'bg-cyan-muted text-cyan font-medium'
-            : isLocked
+            : closed
               ? 'text-cream-muted opacity-50 cursor-not-allowed'
-              : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
+              : isLocked
+                ? 'text-cream-muted hover:text-cream hover:bg-ink-hover'
+                : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
           }`}
       >
         {/* Status dot */}

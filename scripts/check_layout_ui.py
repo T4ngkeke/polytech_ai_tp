@@ -281,6 +281,33 @@ def check_roles_and_tabs(browser, target):
         context.close()
 
 
+def check_lab_lock(browser, target):
+    # Lock, then Unlock, from the lab settings; a locked lab stays open to its teacher.
+    context, page, errors = open_page(browser, target, 'teacher', '/teacher', 'light', DESKTOP)
+
+    def put_lab(route):
+        if route.request.method != 'PUT':
+            return route.fallback()
+        body = json.loads(route.request.post_data or '{}')
+        route.fulfill(json={'id': 'lab', 'name': 'TP agent', 'class_id': 'class', 'is_deleted': False,
+                            'is_active': body.get('is_active', True)})
+
+    page.route('**/api/teacher/labs/lab', put_lab)
+    try:
+        page.get_by_text('TP agent', exact=True).first.click()
+        page.get_by_role('button', name='Lock', exact=True).click()
+        expect(page.get_by_text('Lab is locked', exact=False)).to_be_visible()
+        expect(page.get_by_role('button', name='Unlock', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='TP agent', exact=True)).to_be_enabled()
+        page.get_by_role('button', name='Unlock', exact=True).click()
+        expect(page.get_by_text('Students can chat in this lab', exact=False)).to_be_visible()
+        expect(page.get_by_role('button', name='Lock', exact=True)).to_be_visible()
+        assert not errors, errors
+        print('PASS: a lab locks and unlocks from its settings, and stays open to its teacher')
+    finally:
+        context.close()
+
+
 def check_exam_documents(browser, target, shots):
     # Exam mode keeps uploads open and says the documents wait; the note leads to the class settings.
     classes = MOCKS['/api/teacher/classes']
@@ -533,6 +560,7 @@ def main():
             check_toggle(browser, target)
             check_breadcrumb(browser, target)
             check_roles_and_tabs(browser, target)
+            check_lab_lock(browser, target)
             check_exam_documents(browser, target, shots)
             check_document_progress(browser, target, shots)
             check_document_pictures(browser, target, shots)
