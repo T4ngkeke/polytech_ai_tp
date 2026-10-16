@@ -7,8 +7,10 @@ The order of work, and why it is this order:
 2. Mark the revision "processing". A short transaction under the document lock.
 3. Copy the source out of storage, check its hash, and read it with MinerU.
    No transaction is open during this step. Every few seconds the job writes
-   only how many pages are read (ingestion_jobs.payload["progress"]), guarded
-   by its lock token, so the teacher sees the reading move.
+   only how many pages are read (ingestion_jobs.payload["progress"]) and
+   extends its lease, guarded by its lock token: the teacher sees the reading
+   move, and a long PDF keeps its claim while pages are being read (a worker
+   that dies stops extending it, and the job can be claimed again).
 4. Stage. Record every file key in document_staged_objects and commit, then
    write the files. A file never exists without a row that says it may be
    deleted.
@@ -105,6 +107,9 @@ class StructuredSettings:
     pdf_server_url: str = ""
     pdf_config_path: str = ""
     pdf_page_timeout_seconds: int = 240
+    # The longest a PDF may take to read; the pages after it are kept as not
+    # read. Not tied to the lease, which the reading extends.
+    pdf_read_budget_seconds: int = 7200
     # Stop writing files this long before the lease ends, so the sweep never
     # removes a file that is still being written.
     write_margin_seconds: int = 120
@@ -119,7 +124,8 @@ class StructuredSettings:
                    pdf_python=env.get('PDF_MINERU_PYTHON') or '',
                    pdf_server_url=env.get('PDF_MINERU_SERVER_URL') or '',
                    pdf_config_path=env.get('PDF_MINERU_CONFIG') or '',
-                   pdf_page_timeout_seconds=int(env.get('PDF_MINERU_PAGE_TIMEOUT_SECONDS') or 240))
+                   pdf_page_timeout_seconds=int(env.get('PDF_MINERU_PAGE_TIMEOUT_SECONDS') or 240),
+                   pdf_read_budget_seconds=int(env.get('PDF_READ_BUDGET_SECONDS') or 7200))
 
 
 @dataclass
@@ -161,7 +167,7 @@ def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
                         if frozen_mineru else None)
     try:
         document, metrics = read_pdf(source, expected_sha256, work_dir, extractor,
-                                     budget_seconds=max(1, settings.lease_seconds - settings.write_margin_seconds - 300),
+                                     budget_seconds=settings.pdf_read_budget_seconds,
                                      reader_identity='pdf-mineru-text-m3a-1-' + model_config_sha[:16]
                                      if model_config_sha else 'pdf-mineru-text-m3a-1',
                                      on_page=on_page)
@@ -347,10 +353,13 @@ class PageProgress:
 
 
 async def _write_progress(db, claim: StructuredClaim, progress: PageProgress, stop: asyncio.Event,
-                          every: float | None = None) -> None:
-    """Store the progress in the job row until `stop` is set. Runs only while
-    the job waits for the reader thread, so it never shares the session with
-    other work. A write that fails is skipped: progress is only for display."""
+                          every: float | None = None, *, lease_seconds: int = DEFAULT_LEASE_SECONDS,
+                          now_fn=_utcnow) -> None:
+    """Store the progress in the job row, and extend the lease, until `stop`
+    is set. Runs only while the job waits for the reader thread, so it never
+    shares the session with other work. A write that fails is skipped; the
+    next one tries again (a page takes at most the page timeout, far below
+    the lease)."""
     written = None
     while True:
         try:
@@ -363,7 +372,9 @@ async def _write_progress(db, claim: StructuredClaim, progress: PageProgress, st
         try:
             await db.execute(update(IngestionJob).where(
                 IngestionJob.id == claim.job_id, IngestionJob.lock_token == claim.lock_token,
-                IngestionJob.status == JobStatus.processing).values(payload={'progress': progress.payload()}))
+                IngestionJob.status == JobStatus.processing).values(
+                    payload={'progress': progress.payload()},
+                    lease_expires_at=now_fn() + timedelta(seconds=lease_seconds)))
             await db.commit()
             written = progress.done
         except Exception:
@@ -392,7 +403,9 @@ async def _source_row(db, claim: StructuredClaim) -> DocumentSource:
 
 
 async def _stage(db, claim: StructuredClaim, planned: list[PlannedAsset], settings: StructuredSettings, now_fn):
-    await _locked(db, claim, now=now_fn())
+    _, job, _ = await _locked(db, claim, now=now_fn())
+    # The lease as the reading left it (it extends it), not as it was claimed.
+    lease_expires_at = aware(job.lease_expires_at)
     existing = {row.id: row for row in (await db.scalars(select(DocumentAsset).where(
         DocumentAsset.source_version_id == claim.source_version_id,
         DocumentAsset.id.in_([p.db_id for p in planned])))).all()} if planned else {}
@@ -405,9 +418,9 @@ async def _stage(db, claim: StructuredClaim, planned: list[PlannedAsset], settin
             item.reuse = True
             continue
         db.add(DocumentStagedObject(storage_key=item.key, document_id=claim.document_id, job_id=claim.job_id,
-                                    purpose='parse_asset', lease_expires_at=claim.lease_expires_at))
+                                    purpose='parse_asset', lease_expires_at=lease_expires_at))
     await db.commit()
-    stop_at = claim.lease_expires_at - timedelta(seconds=settings.write_margin_seconds)
+    stop_at = lease_expires_at - timedelta(seconds=settings.write_margin_seconds)
     for item in planned:
         if item.reuse:
             continue
@@ -528,7 +541,8 @@ async def process_structured_job(db, *, settings: StructuredSettings, extractor=
         except storage.StorageError as exc:
             raise JobFailed(str(exc)) from exc
         progress, stop = PageProgress(now_fn), asyncio.Event()
-        writer = asyncio.create_task(_write_progress(db, claim, progress, stop))
+        writer = asyncio.create_task(_write_progress(db, claim, progress, stop,
+                                                     lease_seconds=settings.lease_seconds, now_fn=now_fn))
         try:
             outcome = await asyncio.to_thread(
                 run_pdf_pipeline, copy, source.sha256, work_dir, settings=settings, extractor=extractor,

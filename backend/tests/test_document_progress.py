@@ -10,13 +10,15 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import select
 
-from backend.app.models import IngestionJob, JobStatus, _utcnow
+from backend.app.models import DocumentPage, DocumentRevision, IngestionJob, JobStatus, _utcnow
+from backend.app.services.document_cleanup import aware
 from backend.app.services.document_service import reading_progress
 from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_client
 from backend.tests.test_structured_ingest import (  # noqa: F401  (fixtures)
-    run_job, seed, storage, structured_on, upload,
+    run_job, seed, storage, structured_on, upload, worker_settings,
 )
 from backend.worker import structured_ingest as si
 from backend.worker.queue import claim_structured_job
@@ -75,6 +77,8 @@ async def test_only_the_claim_that_holds_the_job_writes_progress(db_session, sto
     await db_session.refresh(job)
     assert {k: job.payload['progress'][k] for k in ('stage', 'done', 'total')} == {
         'stage': 'reading', 'done': 2, 'total': 5}
+    # Each write also extends the lease from now.
+    assert aware(job.lease_expires_at) > aware(claim.lease_expires_at)
     # A claim that lost the job (another lock token) writes nothing.
     await write(dataclasses.replace(claim, lock_token=uuid.uuid4()), 4)
     await db_session.refresh(job)
@@ -108,3 +112,26 @@ async def test_the_document_list_shows_jobs_ahead_then_pages_read(db_session, st
     assert 290 <= progress['seconds_left'] <= 320
     assert rows[second['id']]['jobs_ahead'] == 1
     assert job.status == JobStatus.processing
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_longer_to_read_than_the_lease_is_still_stored(db_session, storage, tmp_path, monkeypatch):
+    # The reading extends the lease: a long PDF is not cut at the lease, and
+    # its pages are not dropped by a read budget derived from it.
+    import time
+    monkeypatch.setattr(si, 'PROGRESS_SECONDS', 0.2)
+    base = pdf_fixtures.extractor()
+
+    def slow(path, number, output):
+        time.sleep(1.5)
+        return base(path, number, output)
+
+    teacher, _, lab, _ = await seed(db_session)
+    body = (await upload(db_session, teacher, lab, pdf_fixtures.course_pdf(3))).json()
+    settings = worker_settings(storage, tmp_path, lease_seconds=3, write_margin_seconds=1)
+    assert await si.process_structured_job(db_session, settings=settings, extractor=slow)
+    rev = await db_session.get(DocumentRevision, uuid.UUID(body['revision_id']))
+    await db_session.refresh(rev)
+    assert rev.processing_state == 'parsed'
+    states = (await db_session.scalars(select(DocumentPage.state).where(DocumentPage.revision_id == rev.id))).all()
+    assert states == ['usable'] * 3
