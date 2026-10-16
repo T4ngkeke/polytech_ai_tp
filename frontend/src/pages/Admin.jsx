@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
+import { contextLength, serverState } from '../lib/modelServers';
 import useAuthStore from '../store/authStore';
 import ThemeToggle from '../components/ThemeToggle';
 import Icon from '../components/Icon';
@@ -946,8 +947,71 @@ function LLMConfigTab() {
           <NodePanel node={selected} config={config} set={set}
             onSave={() => saveNode(selected)} saving={saving} />
         </div>
+        <ServersPanel version={config} />
       </div>
     </div>
+  );
+}
+
+const TONE = { ok: 'text-success', bad: 'text-danger', warn: 'text-gold', muted: 'text-cream-muted' };
+
+// What each slot's server really serves: a model name the server does not
+// have makes every call fail, and the context length is not set here.
+function ServersPanel({ version }) {
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    setBusy(true);
+    try {
+      setRows((await api.get('/api/admin/llm/servers')).servers);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load, version]);
+  return (
+    <section className="mt-6 rounded-xl border border-border-default bg-ink-raised p-4">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-cream">What the servers serve</h3>
+        <button type="button" onClick={load} disabled={busy}
+          className="text-xs text-cyan hover:underline disabled:opacity-50">{busy ? 'Checking…' : 'Check again'}</button>
+      </div>
+      <p className="mb-3 text-xs text-cream-muted">
+        Asked from each server now. The context length is set when the model server starts (vLLM --max-model-len),
+        not on this page.
+      </p>
+      {!rows ? <p className="text-xs text-cream-muted">Checking…</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-xs">
+            <thead>
+              <tr className="border-b border-border-subtle text-left text-cream-muted">
+                <th className="px-2 py-1.5 font-medium">Slot</th>
+                <th className="px-2 py-1.5 font-medium">Model</th>
+                <th className="px-2 py-1.5 font-medium">Server</th>
+                <th className="px-2 py-1.5 font-medium">State</th>
+                <th className="px-2 py-1.5 font-medium">Context length</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const state = serverState(r);
+                return (
+                  <tr key={r.slot} className="border-b border-border-subtle last:border-0">
+                    <td className="px-2 py-1.5 text-cream">{r.label}</td>
+                    <td className="px-2 py-1.5 font-mono text-cream-secondary">{r.model || '—'}</td>
+                    <td className="px-2 py-1.5 font-mono text-cream-muted">{r.server || '—'}</td>
+                    <td className={`px-2 py-1.5 ${TONE[state.tone]}`}>{state.text}</td>
+                    <td className="px-2 py-1.5 font-mono text-cream-secondary">{contextLength(r.max_model_len)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

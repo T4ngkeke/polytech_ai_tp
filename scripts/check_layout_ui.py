@@ -51,6 +51,11 @@ MOCKS = {
     '/api/teacher/classes': [{'id': 'class', 'name': 'Informatique'}],
     '/api/teacher/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True}],
     '/api/admin/llm/config': {'llm_model': 'ornith', 'features': {'research_agent': True, 'pdf_documents': True}},
+    '/api/admin/llm/servers': {'servers': [
+        {'slot': 'llm', 'label': 'Main model', 'model': 'ornith', 'server': 'm4-flashnext-v030:8000', 'status': 'ok',
+         'served': ['ornith'], 'max_model_len': 65536},
+        {'slot': 'agent', 'label': 'Research agent', 'model': 'qwen3.8-flash-next', 'server': 'm4-flashnext-v030:8000',
+         'status': 'model_missing', 'served': ['ornith'], 'max_model_len': None}]},
     '/api/teacher/analytics/classes/class/details': {
         'class_id': 'class', 'lab_id': 'lab', 'period_days': 30,
         'overview': {'members': 3, 'active_7d': 2, 'active_ever': 2, 'questions': 41, 'questions_7d': 12,

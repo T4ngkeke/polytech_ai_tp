@@ -12,6 +12,7 @@ PUT    /api/admin/users/{user_id}/quota
 PUT    /api/admin/users/{user_id}/role
 DELETE /api/admin/users/{user_id}
 GET    /api/admin/llm/config
+GET    /api/admin/llm/servers
 PUT    /api/admin/llm/config
 POST   /api/admin/users/import
 GET    /api/admin/classes
@@ -67,7 +68,7 @@ from backend.app.schemas import (
     UserCreateRequest,
     UserResponse,
 )
-from backend.app.services import class_service, lab_service, analytics_service
+from backend.app.services import class_service, lab_service, analytics_service, model_servers
 from backend.app.services.model_routing import resolve_model_routing
 from backend.app.services.research_service import DEFAULT_LIMITS, LIMIT_KEYS, limit_value
 
@@ -302,6 +303,18 @@ async def get_llm_config(
                 "min": LIMIT_KEYS[key][1], "max": LIMIT_KEYS[key][2]}
         for field, key in _LLM_CONFIG_STR_FIELDS.items() if key in LIMIT_KEYS}
     return LLMConfigResponse(**payload)
+
+
+@router.get("/llm/servers")
+async def get_model_servers(
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """For each slot of the routing map: does its server answer, does it
+    serve the configured model name, and that model's context length."""
+    configs = {row.key: row.value for row in (await db.execute(select(SystemConfig))).scalars().all()}
+    await db.rollback()  # no transaction is held while the servers answer
+    return {"servers": await model_servers.server_status(resolve_model_routing(configs))}
 
 
 # ===================================================================
