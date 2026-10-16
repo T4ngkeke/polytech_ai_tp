@@ -1,78 +1,25 @@
 # Release to the teachers (replacing v6-beta)
 
-The teachers who use v6-beta move to the current version. Classes start in
-exam mode: answers are written directly, without the course files, as in v6.
+**Done on 2026-10-16** (see "The switch of 2026-10-16" below). The teachers'
+address is unchanged: `https://192.168.168.199:18443/` (also on Tailscale,
+`https://100.108.32.29:18443/`), same certificate and CA.
+
+The teachers who used v6-beta moved to the current version on 2026-10-16.
+Classes start in exam mode: answers are written directly, without the course
+files, as in v6.
 Teachers can then try the rest (course PDFs, Search and Research, Test drive,
 Analytics, AI reports) and report what they find.
 
-## What is ready
+Everyone logs in again once (new JWT secret); passwords are unchanged. The
+former Tailscale address on port 80 (v6-stable) is closed: use port 18443.
 
-| Part | Where |
-|---|---|
-| New classes start in exam mode (setting `NEW_CLASS_EXAM_MODE`, on by default) | `backend/app/services/class_service.py` |
-| Copy accounts, classes, memberships, labs and rules from v6; every copied class in exam mode | `scripts/migrate_from_v6.py` |
-| Grafana open to app admins only | `backend/app/routers/monitoring.py`, `frontend/nginx.conf`, [MONITORING.md](MONITORING.md) |
+## The former problem in the v6 deployment
 
-`migrate_from_v6.py` was run on a copy of the v6-beta database on 2026-10-15:
-8 accounts (1 admin, 2 teachers, 5 students), 5 classes, 4 memberships, 5 labs,
-0 rules. The copied accounts were identical (ids, names, password hashes,
-roles, quotas), every class was in exam mode, and a second run was refused.
-Conversations are not copied (18 messages, all tests).
-
-## Still to do before the switch
-
-1. A compose file for the new stack, from `docker-compose.beta.yml` (branch
-   `v6-beta`): PostgreSQL with pgvector, backend and worker of this version, the
-   `edullm-models` network (Flash-Next, reranker, MinerU, and embeddings on vLLM,
-   not the Ollama container: see "Embeddings" below), the flags
-   `STRUCTURED_INGEST_ENABLED`, `PDF_STRUCTURED_INGEST_ENABLED`,
-   `AGENTIC_SEARCH_ENABLED` and `STRUCTURED_VISION_ENABLED` ("Write with AI" on a
-   picture), and the TLS nginx config with the `/grafana/` and
-   `/_monitoring_auth` blocks of `frontend/nginx.conf`.
-2. A second PostgreSQL source in Grafana for the new database (the dev stack's
-   Grafana and Prometheus are shared; the System dashboard already covers the
-   whole machine).
-
-## Steps
-
-1. Start the new stack's database and backend once, so the tables exist. Apply
-   the schema migrations (dry run first):
-
-   ```
-   python -m scripts.migrate_document_snapshots --database-url NEW_URL
-   python -m scripts.migrate_document_snapshots --database-url NEW_URL --apply
-   ```
-
-2. Copy from v6-beta (read only on the v6 side; dry run first):
-
-   ```
-   python -m scripts.migrate_from_v6 --source V6_URL --target NEW_URL
-   python -m scripts.migrate_from_v6 --source V6_URL --target NEW_URL --apply
-   ```
-
-   The target must have no user yet: do not run the bootstrap of the beta
-   compose file, the admin account comes from v6.
-
-3. Set the models in Admin > LLM Config (the model map), or in the private
-   environment file.
-4. Create the Grafana login on the new database (`scripts/monitoring_reader.py`)
-   and add it as a data source.
-5. Check with a teacher account: the classes are there and in exam mode, a
-   student can ask, a PDF upload is indexed and published.
-6. Switch: stop the v6-beta frontend and start the new one on the same LAN
-   address and port (`https://192.168.168.199:18443/`) with the same
-   certificate, so teachers keep their address and their CA.
-7. Going back: the v6-beta database volume is not touched; stop the new
-   frontend and start the v6-beta one again.
-
-## Known problem in the current v6 deployment
-
-The v6 frontend on port 80 (Tailscale) sends `/api/` to the name `backend`.
-On the network `edullm-v6_default` two containers answer to that name:
-`edullm-v6-backend` (database `edullm-v6-db`) and `edullm-v6-beta-backend-1`
-(the beta database). nginx sends requests to both in turn, so a user can be
-logged in on one and refused by the other. The new stack must not join
-`edullm-v6_default`; the old entry should be stopped at the switch.
+The v6 frontend on port 80 (Tailscale) sent `/api/` to the name `backend`,
+which two containers answered on `edullm-v6_default` (`edullm-v6-backend` and
+`edullm-v6-beta-backend-1`, two databases): requests went to both in turn.
+Both are stopped; the release stack never joins `edullm-v6_default`. The
+v6-beta frontend (LAN 18443) had been stopped since 2026-10-09.
 
 ## Embeddings
 
@@ -92,3 +39,60 @@ Admin settings: `EMBEDDING_URL = http://edullm-embeddings:8000/v1`,
 `EMBEDDING_MODEL = BAAI/bge-m3`. On the same text it gives the vectors of the
 former Ollama server within cosine 0.9999. After a change of embedding server,
 `scripts/reembed_documents.py` computes every document again (see its header).
+
+## The switch of 2026-10-16
+
+What runs (`docker-compose.release.yml`, project `edullm-release`, private
+settings in `~/.local/share/polytech-release/.env`, mode 0600):
+
+| Container | What |
+|---|---|
+| `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`: HTTPS on 192.168.168.199:18443 and 100.108.32.29:18443 (v6-beta certificate, `RELEASE_TLS_DIR`), HTTP on 127.0.0.1:18080 only |
+| `edullm-release-backend`, `edullm-release-worker` | this version; models on `edullm-models` (Flash-Next as `ornith`, Qwen3 reranker, bge-m3 on vLLM, MinerU) |
+| `edullm-release-db` | PostgreSQL with pgvector, volume `edullm-release_release_postgres_data` |
+| `edullm-release-backup` | a checked `pg_dump` every 24 h in volume `edullm-release_release_backups`, 14 days kept |
+
+Every service has its own name: the frontend and the database also join the
+dev network `polytech_ai_tp_default` (Grafana), where a generic `backend` or
+`postgres` would answer for a dev container.
+
+Steps as run:
+
+1. Tables created once with the feature flags off, then
+   `migrate_document_snapshots` (8 versions) on the empty database.
+2. `migrate_from_v6` from the v6-beta database (read only): 8 accounts (1
+   admin, 2 teachers, 5 students), 5 classes (all in exam mode), 4
+   memberships, 5 labs, 0 rules, 5 conversations with their 18 messages,
+   4 days of usage. Checksums of the accounts (id, name, password hash, role)
+   and of the messages are the same on both sides. The teachers' passwords do
+   not change.
+3. Model settings copied from the dev database (`system_configs`).
+4. `monitoring_reader` on the new database; Grafana has a second source
+   "EduLLM (teachers)" (`edudb-release`), chosen by "Database" on the Answers
+   dashboard (default Teachers). The System dashboard shows the four release
+   containers.
+5. Checked inside the network, then over HTTPS with the CA: the teachers'
+   classes in exam mode, the five model slots served, a 4-page PDF indexed and
+   published in 40 s, Direct and Search answers (in a temporary admin class,
+   removed), Grafana refused without the admin cookie, Monitoring and LLM
+   Config in a browser.
+6. Stopped (containers and volumes kept): `edullm-v6-beta-backend-1`, and the
+   v6-stable stack (`edullm-v6-frontend` on port 80, `edullm-v6-backend`,
+   `edullm-v6-db`, test data of 2026-09-08). The v6-beta frontend had been
+   stopped since 2026-10-09; its nginx file was in /tmp and is gone.
+   `edullm-v6-beta-postgres-1` and its backup container still run, unchanged.
+
+Going back to v6-beta:
+
+```sh
+docker compose -f docker-compose.release.yml --env-file ~/.local/share/polytech-release/.env stop release-frontend
+cd ~/worktrees/polytech_ai_tp/v6-stable   # branch v6-beta
+docker compose -f docker-compose.beta.yml --env-file ~/.local/share/polytech-v6-beta/.env up -d backend frontend
+```
+
+Anything written in the new version since the switch is then not in v6-beta.
+
+Updating the release to a newer commit: `docker compose -f
+docker-compose.release.yml --env-file … up -d --build release-backend
+release-worker release-frontend` (apply new schema migrations first, as in
+step 1). The release does not follow the dev stack by itself.

@@ -1,0 +1,140 @@
+# The teachers' installation (replaces v6-beta), see documentation/RELEASE_TEACHERS.md.
+#
+#   docker compose -f docker-compose.release.yml --env-file ~/.local/share/polytech-release/.env up -d --build
+#
+# Every service and container has its own name (release-*, edullm-release-*):
+# the frontend and the database also join the dev network, where Grafana runs,
+# and a generic name such as "backend" or "postgres" would answer there twice
+# (the v6 problem: two backends behind one name). The model servers are on the
+# external network edullm-models. Secrets and addresses come from the private
+# env file (RELEASE_DB_PASSWORD, RELEASE_JWT_SECRET, RELEASE_TLS_DIR,
+# RELEASE_LAN_IP, RELEASE_TAILSCALE_IP).
+name: edullm-release
+
+services:
+  release-db:
+    image: pgvector/pgvector:pg16
+    container_name: edullm-release-db
+    environment:
+      POSTGRES_USER: release
+      POSTGRES_PASSWORD: ${RELEASE_DB_PASSWORD:?set RELEASE_DB_PASSWORD in the private env file}
+      POSTGRES_DB: edudb
+    volumes:
+      - release_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U release -d edudb"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    # monitoring: Grafana reads the answers through its read-only login.
+    networks: [default, monitoring]
+    restart: unless-stopped
+
+  release-backend:
+    image: edullm-release-backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: edullm-release-backend
+    environment: &app-env
+      DATABASE_URL: postgresql+asyncpg://release:${RELEASE_DB_PASSWORD}@edullm-release-db:5432/edudb
+      JWT_SECRET: ${RELEASE_JWT_SECRET:?set RELEASE_JWT_SECRET in the private env file}
+      DOCUMENTS_STORAGE_ROOT: /data/documents
+      AGENTIC_SEARCH_ENABLED: "true"
+      STRUCTURED_INGEST_ENABLED: "true"
+      PDF_STRUCTURED_INGEST_ENABLED: "true"
+      # "Write with AI": VLM_MODEL (Flash-Next) reads images.
+      STRUCTURED_VISION_ENABLED: "true"
+      NEW_CLASS_EXAM_MODE: "true"
+      PDF_MINERU_SERVER_URL: http://edullm-mineru-vlm:8000/v1
+    volumes:
+      - release_documents:/data/documents
+    depends_on:
+      release-db:
+        condition: service_healthy
+    networks: [default, models]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  release-worker:
+    image: edullm-release-worker
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        WITH_MINERU: "1"
+    container_name: edullm-release-worker
+    command: ["python", "-m", "backend.worker.main"]
+    environment:
+      <<: *app-env
+      PDF_MINERU_PYTHON: /opt/mineru/bin/python
+      PDF_MINERU_CONFIG: /opt/mineru-data/mineru.json
+    volumes:
+      - release_documents:/data/documents
+      - /home/spark-1/edullm-mineru:/opt/mineru-data:ro
+    depends_on:
+      release-db:
+        condition: service_healthy
+    networks: [default, models]
+    restart: unless-stopped
+
+  release-frontend:
+    image: edullm-release-frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: edullm-release-frontend
+    ports:
+      - "127.0.0.1:18080:80"
+      - "${RELEASE_LAN_IP:?set RELEASE_LAN_IP}:18443:443"
+      - "${RELEASE_TAILSCALE_IP:?set RELEASE_TAILSCALE_IP}:18443:443"
+    volumes:
+      - ./frontend/nginx.release.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${RELEASE_TLS_DIR:?set RELEASE_TLS_DIR}:/etc/nginx/tls:ro
+    depends_on:
+      release-backend:
+        condition: service_healthy
+    networks: [default, monitoring]
+    restart: unless-stopped
+
+  # A dump every 24 h, checked, kept 14 days (as v6-beta did).
+  release-backup:
+    image: pgvector/pgvector:pg16
+    container_name: edullm-release-backup
+    environment:
+      PGPASSWORD: ${RELEASE_DB_PASSWORD}
+    volumes:
+      - release_backups:/backups
+    depends_on:
+      release-db:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        while true; do
+          backup_file="/backups/release-$$(date -u +%Y%m%dT%H%M%SZ).dump"
+          pg_dump -h edullm-release-db -U release -d edudb -Fc > "$$backup_file"
+          pg_restore -l "$$backup_file" > /dev/null
+          find /backups -type f -name 'release-*.dump' -mtime +13 -delete
+          sleep 86400
+        done
+    restart: unless-stopped
+
+networks:
+  models:
+    external: true
+    name: edullm-models
+  monitoring:
+    external: true
+    name: polytech_ai_tp_default
+
+volumes:
+  release_postgres_data:
+  release_documents:
+  release_backups:
