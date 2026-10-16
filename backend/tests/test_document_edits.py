@@ -281,6 +281,9 @@ async def test_a_description_is_a_candidate_until_the_teacher_confirms(db_sessio
     app.dependency_overrides[get_describe_fn] = lambda: describe
     try:
         figure = await figure_block(db_session, ids['rev_id'])
+        # A figure with native labels: the model text stays a description beside them.
+        figure.content, figure.index_state = 'A  B  C  D', 'searchable'
+        await db_session.commit()
         figure_id, figure_content = figure.block_id, figure.content
         code_id = (await code_block(db_session, ids['rev_id'])).block_id
         resp = await call(db_session, teacher, 'POST', f"{T}/{ids['doc_id']}/blocks/{figure_id}/describe",
@@ -312,6 +315,36 @@ async def test_a_description_is_a_candidate_until_the_teacher_confirms(db_sessio
         refused = await call(db_session, teacher, 'POST', f"{T}/{ids['doc_id']}/blocks/{code_id}/describe",
                              await target(db_session, ids))
         assert refused.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_describe_fn, None)
+
+
+@pytest.mark.asyncio
+async def test_a_checked_description_of_a_picture_without_text_is_its_searchable_text(
+        db_session, storage, tmp_path, deck_bytes):
+    # A photo or a diagram with no labels has nothing Search can find: the text
+    # the teacher accepts becomes its content, as if the teacher had typed it.
+    teacher, _, _, ids = await parsed(db_session, storage, tmp_path, deck_bytes)
+    describe, _ = fake_vision()
+    app.dependency_overrides[get_describe_fn] = lambda: describe
+    try:
+        figure = await figure_block(db_session, ids['rev_id'])
+        figure_id = figure.block_id
+        figure.content, figure.index_state = '', 'needs_review'
+        await db_session.commit()
+        resp = await call(db_session, teacher, 'POST', f"{T}/{ids['doc_id']}/blocks/{figure_id}/describe",
+                          await target(db_session, ids))
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        confirm = await call(db_session, teacher, 'PUT',
+                             f"{T}/{ids['doc_id']}/revisions/{ids['rev_id']}/reviews/{out['id']}",
+                             {'expected_generation': await generation(db_session, ids['doc_id']),
+                              'review_revision': out['revision'], 'status': 'confirmed'})
+        assert confirm.status_code == 200, confirm.text
+        described = (await blocks_of(db_session, uuid.UUID(confirm.json()['revision']['revision_id'])))[figure_id]
+        assert described.content == out['candidate_content'] and described.index_state == 'searchable'
+        assert described.content_description is None and described.edited_by_teacher
+        assert described.source_ref['content_origin'] == 'model_checked_by_teacher'
     finally:
         app.dependency_overrides.pop(get_describe_fn, None)
 

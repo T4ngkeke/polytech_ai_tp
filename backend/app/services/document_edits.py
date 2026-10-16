@@ -319,8 +319,10 @@ async def resolve_review(db, *, document_id, teacher_id, revision_id, review_id,
                          expected_generation, status, content=None):
     """ignored: mark it. confirmed: apply it as a teacher change -> new draft.
 
-    A vision candidate becomes the block description, never its content. A
-    confirmed text equal to the candidate keeps "model" as its origin; an
+    A vision candidate becomes the block description, never its content,
+    except for a picture without text: there the checked text becomes the
+    content, as if the teacher had typed it, so Search finds the picture. A
+    confirmed text equal to the candidate keeps the model as its origin; an
     edited one is the teacher's.
     """
     doc = await _structured(db, document_id, teacher_id)
@@ -340,7 +342,18 @@ async def resolve_review(db, *, document_id, teacher_id, revision_id, review_id,
         text_value = content if content is not None else row.candidate_content
         if not isinstance(text_value, str) or not text_value.strip():
             raise EditRejected('confirmation_needs_content')
+        bare = False
         if row.kind == 'vision_description':
+            shown = await _block(db, await db.get(DocumentRevision, revision_id), row.block_id)
+            bare = not (shown.content or '').strip()
+        if row.kind == 'vision_description' and bare:
+            new_rev = await edit_block(db, document_id=doc.id, teacher_id=teacher_id, block_id=row.block_id,
+                expected_revision_id=revision_id, expected_generation=expected_generation,
+                content=text_value, resolve_review=row.id)
+            if text_value == row.candidate_content:
+                block = await _block(db, new_rev, row.block_id)
+                block.source_ref = {**block.source_ref, 'content_origin': 'model_checked_by_teacher'}
+        elif row.kind == 'vision_description':
             new_rev = await edit_block(db, document_id=doc.id, teacher_id=teacher_id, block_id=row.block_id,
                 expected_revision_id=revision_id, expected_generation=expected_generation,
                 content_description=text_value, resolve_review=row.id)

@@ -360,7 +360,7 @@ function BlockCard({ block, number, busy, change, docId, preview, pageRatio, act
           )}
           {DESCRIBABLE.has(block.type) && (
             <button type="button" disabled={busy}
-              onClick={() => change('Describe', (target) => api.post(`${url}/describe`, { expected_revision_id: target.expected_revision_id }))}
+              onClick={() => change('Describe', (target) => api.post(`${url}/describe`, target))}
               title="The model looks at the picture and proposes a text; you check it before it is used"
               className="hover:underline">Write with AI</button>
           )}

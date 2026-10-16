@@ -24,8 +24,9 @@ Conversations are not copied (18 messages, all tests).
 1. A compose file for the new stack, from `docker-compose.beta.yml` (branch
    `v6-beta`): PostgreSQL with pgvector, backend and worker of this version, the
    `edullm-models` network (Flash-Next, reranker, MinerU, embeddings), the flags
-   `STRUCTURED_INGEST_ENABLED`, `PDF_STRUCTURED_INGEST_ENABLED` and
-   `AGENTIC_SEARCH_ENABLED`, and the TLS nginx config with the `/grafana/` and
+   `STRUCTURED_INGEST_ENABLED`, `PDF_STRUCTURED_INGEST_ENABLED`,
+   `AGENTIC_SEARCH_ENABLED` and `STRUCTURED_VISION_ENABLED` ("Write with AI" on a
+   picture), and the TLS nginx config with the `/grafana/` and
    `/_monitoring_auth` blocks of `frontend/nginx.conf`.
 2. A second PostgreSQL source in Grafana for the new database (the dev stack's
    Grafana and Prometheus are shared; the System dashboard already covers the

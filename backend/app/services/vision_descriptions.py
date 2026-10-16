@@ -11,9 +11,11 @@ The model is used only when all of these are true:
 
 The result is stored as a pending review with the model, prompt version,
 time and usage. Missing usage is marked "missing", never guessed. The cost
-is ingestion cost: nothing here touches a student's quota. The description can
-only ever become the block's description, never its content, so native code
-and tables are not replaced by what a model saw.
+is ingestion cost: nothing here touches a student's quota. Once the teacher
+checks it, the text becomes the block's description, so native labels, code
+and tables are never replaced by what a model saw; only a picture with no
+text at all gets it as its content (document_edits.resolve_review), so that
+Search can find the picture.
 """
 import base64
 import json
