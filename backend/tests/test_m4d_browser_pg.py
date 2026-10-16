@@ -162,7 +162,7 @@ async def real_course_pdf(db, tmp_path, monkeypatch):
         item = json.loads((cache / f'page-{page_no}.json').read_text())
         assert item['pdf_sha256'] == digest and item['page_no'] == page_no
         return item['content_list']
-    def cached_pipeline(path, source_digest, work_dir, *, settings, extractor=None):
+    def cached_pipeline(path, source_digest, work_dir, *, settings, extractor=None, on_page=None):
         parsed, metrics = read_pdf(path, source_digest, work_dir, cached_page)
         return ingest.ParseOutcome(parsed, {'status': 'source_pdf', 'extractor': metrics},
                                    {'kind': 'same_pdf_physical_page', 'pages': 14}, True)

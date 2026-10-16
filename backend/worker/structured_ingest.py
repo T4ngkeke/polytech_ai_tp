@@ -6,7 +6,9 @@ The order of work, and why it is this order:
    lock token, the document generation it saw, and a lease.
 2. Mark the revision "processing". A short transaction under the document lock.
 3. Copy the source out of storage, check its hash, and read it with MinerU.
-   No transaction is open during this step, and it never touches the database.
+   No transaction is open during this step. Every few seconds the job writes
+   only how many pages are read (ingestion_jobs.payload["progress"]), guarded
+   by its lock token, so the teacher sees the reading move.
 4. Stage. Record every file key in document_staged_objects and commit, then
    write the files. A file never exists without a row that says it may be
    deleted.
@@ -36,7 +38,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from backend.app.models import (
     Document, DocumentAsset, DocumentBlock, DocumentBlockAsset, DocumentPage, DocumentRevision,
@@ -54,6 +56,8 @@ from backend.worker.queue import DEFAULT_LEASE_SECONDS, StructuredClaim, claim_s
 logger = logging.getLogger(__name__)
 
 PDF_PIPELINE_VERSION = 'm3a-pdf-1'
+# How often a PDF job writes how many pages it has read (seconds).
+PROGRESS_SECONDS = 5
 
 # IR asset kinds to database asset kinds. Written out so that a new IR kind
 # fails here instead of reaching the database under a wrong name.
@@ -142,7 +146,7 @@ def asset_db_id(source_version_id: uuid.UUID, ir_asset_id: str) -> uuid.UUID:
 # --------------------------------------------------------------------------
 
 def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
-                     settings: StructuredSettings, extractor=None) -> ParseOutcome:
+                     settings: StructuredSettings, extractor=None, on_page=None) -> ParseOutcome:
     frozen_mineru = extractor is None
     if extractor is None:
         if not settings.pdf_python or not settings.pdf_server_url or not settings.pdf_config_path:
@@ -159,7 +163,8 @@ def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
         document, metrics = read_pdf(source, expected_sha256, work_dir, extractor,
                                      budget_seconds=max(1, settings.lease_seconds - settings.write_margin_seconds - 300),
                                      reader_identity='pdf-mineru-text-m3a-1-' + model_config_sha[:16]
-                                     if model_config_sha else 'pdf-mineru-text-m3a-1')
+                                     if model_config_sha else 'pdf-mineru-text-m3a-1',
+                                     on_page=on_page)
     except PDFReadError as exc:
         raise JobFailed(str(exc)) from exc
     if model_config_sha:
@@ -324,6 +329,48 @@ async def _locked(db, claim: StructuredClaim, *, now):
     return doc, job, rev
 
 
+class PageProgress:
+    """Pages read so far. The reader thread calls it; the job writes it."""
+
+    def __init__(self, now_fn=_utcnow):
+        self.now_fn = now_fn
+        self.done, self.total, self.started_at = 0, None, None
+
+    def __call__(self, done: int, total: int) -> None:
+        if self.started_at is None:
+            self.started_at = self.now_fn()
+        self.done, self.total = done, total
+
+    def payload(self) -> dict:
+        return {'stage': 'reading', 'done': self.done, 'total': self.total,
+                'started_at': self.started_at.isoformat()}
+
+
+async def _write_progress(db, claim: StructuredClaim, progress: PageProgress, stop: asyncio.Event,
+                          every: float | None = None) -> None:
+    """Store the progress in the job row until `stop` is set. Runs only while
+    the job waits for the reader thread, so it never shares the session with
+    other work. A write that fails is skipped: progress is only for display."""
+    written = None
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=every or PROGRESS_SECONDS)
+            return
+        except asyncio.TimeoutError:
+            pass
+        if progress.total is None or progress.done == written:
+            continue
+        try:
+            await db.execute(update(IngestionJob).where(
+                IngestionJob.id == claim.job_id, IngestionJob.lock_token == claim.lock_token,
+                IngestionJob.status == JobStatus.processing).values(payload={'progress': progress.payload()}))
+            await db.commit()
+            written = progress.done
+        except Exception:
+            await db.rollback()
+            logger.warning('structured job %s: progress not written', claim.job_id, exc_info=True)
+
+
 async def _mark_processing(db, claim: StructuredClaim, *, now) -> None:
     try:
         _, _, rev = await _locked(db, claim, now=now)
@@ -407,7 +454,7 @@ async def _commit_parsed(db, claim, outcome: ParseOutcome, planned: list[Planned
     # Reuse the unique revision-bound job for indexing. A crash between
     # parse and index leaves a queued task, not a silent parsed draft.
     job.task_kind, job.status = 'pdf_index', JobStatus.queued
-    job.attempts = 0
+    job.attempts, job.payload = 0, None
     job.lock_token = job.claimed_generation = job.lease_expires_at = None
     job.error_message = None
     await db.commit()
@@ -430,7 +477,7 @@ async def _requeue(db, claim, *, count_attempt: bool) -> None:
                           .execution_options(populate_existing=True))
     if job is not None and job.lock_token == claim.lock_token and job.status == JobStatus.processing:
         job.status = JobStatus.queued
-        job.lease_expires_at = None
+        job.lease_expires_at = job.payload = None
         if not count_attempt:
             job.attempts = max(0, job.attempts - 1)
     await db.commit()
@@ -480,8 +527,15 @@ async def process_structured_job(db, *, settings: StructuredSettings, extractor=
                                     source.sha256, copy)
         except storage.StorageError as exc:
             raise JobFailed(str(exc)) from exc
-        outcome = await asyncio.to_thread(
-            run_pdf_pipeline, copy, source.sha256, work_dir, settings=settings, extractor=extractor)
+        progress, stop = PageProgress(now_fn), asyncio.Event()
+        writer = asyncio.create_task(_write_progress(db, claim, progress, stop))
+        try:
+            outcome = await asyncio.to_thread(
+                run_pdf_pipeline, copy, source.sha256, work_dir, settings=settings, extractor=extractor,
+                on_page=progress)
+        finally:
+            stop.set()
+            await writer
         outcome.document.source_filename = source.original_filename
         planned = plan_assets(outcome, claim)
         await _stage(db, claim, planned, settings, now_fn)

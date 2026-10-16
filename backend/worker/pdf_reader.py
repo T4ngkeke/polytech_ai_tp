@@ -63,7 +63,9 @@ def _content(item, page, rect):
 
 def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
              extract_page: Callable[[Path, int, Path], list[dict]], *, max_pages: int = 150, budget_seconds: int | None = None,
-             preview_scale: float = 1.2, reader_identity: str = IDENTITY_VERSION) -> tuple[ParsedDocument, dict]:
+             preview_scale: float = 1.2, reader_identity: str = IDENTITY_VERSION,
+             on_page: Callable[[int, int], None] | None = None) -> tuple[ParsedDocument, dict]:
+    """on_page(done, total) is called before the first page and after each page."""
     path, work_dir = Path(path), Path(work_dir)
     hasher=hashlib.sha256()
     with path.open('rb') as handle:
@@ -92,6 +94,7 @@ def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
             size_bytes=path.stat().st_size, source_entry=str(path), access_class='student_visible'))
         timing=[]
         deadline=time.monotonic()+budget_seconds if budget_seconds is not None else None
+        if on_page: on_page(0, len(pdf))
         for page_no in range(1, len(pdf)+1):
             page = pdf[page_no-1]
             page_id = stable_id(reader_identity,digest,'page',str(page_no))
@@ -163,5 +166,6 @@ def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
                 parsed_page.issues.append(ParseIssue(code='extraction_failure',scope='page',page_id=page_id,
                     message='MinerU returned no blocks for this page'))
             doc.pages.append(parsed_page)
+            if on_page: on_page(page_no, len(pdf))
         return doc.validate(), {'extractor':READER_VERSION,'config_hash':CONFIG_HASH,'pages':timing,
                                 'model_calls':None,'model_usage':None}

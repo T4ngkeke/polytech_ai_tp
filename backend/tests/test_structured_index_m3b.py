@@ -40,7 +40,7 @@ async def _parsed_pdf(db,tmp_path,monkeypatch):
             files={'file':('lecture.pdf',pdf_bytes(),'application/pdf')})
     assert response.status_code==201,response.text
     body=response.json()
-    def fake_pipeline(source,digest,work_dir,*,settings,extractor=None):
+    def fake_pipeline(source,digest,work_dir,*,settings,extractor=None,on_page=None):
         doc,metrics=read_pdf(source,digest,work_dir,items)
         # Long block also checks split ranges in the database.
         doc.pages[0].blocks[0].content = 'Définition θ₁ et texte visible\n' * 35

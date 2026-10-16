@@ -6,13 +6,42 @@ lists what a lab or class uses and deletes a document with what came from it.
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import (
-    Class, DocChunk, Document, DocumentReview, DocumentRevision, IngestionJob,
+    Class, DocChunk, Document, DocumentReview, DocumentRevision, IngestionJob, JobStatus, _utcnow,
 )
+from backend.app.services.document_cleanup import aware
+
+# The jobs that read a file (worker/queue.py claims them in this order).
+READING_TASK_KINDS = ("odp_parse", "pdf_parse")
+# The time left is guessed only after this many pages.
+PAGES_BEFORE_ESTIMATE = 3
+
+
+def reading_progress(progress: dict | None, now: datetime) -> dict | None:
+    """Pages read of a PDF job (worker/structured_ingest.py writes them), with
+    the seconds left at the pace of the pages read so far."""
+    if not progress or not progress.get("total"):
+        return None
+    done, total = progress["done"], progress["total"]
+    seconds_left = None
+    if PAGES_BEFORE_ESTIMATE <= done < total:
+        elapsed = (now - aware(datetime.fromisoformat(progress["started_at"]))).total_seconds()
+        seconds_left = max(0, round(elapsed / done * (total - done)))
+    return {"done": done, "total": total, "seconds_left": seconds_left}
+
+
+async def _jobs_ahead(db: AsyncSession, job: IngestionJob) -> int:
+    """Reading jobs the worker takes before this queued one."""
+    return await db.scalar(select(func.count()).select_from(IngestionJob).where(
+        IngestionJob.task_kind.in_(READING_TASK_KINDS), IngestionJob.id != job.id,
+        IngestionJob.status.in_((JobStatus.queued, JobStatus.processing)),
+        or_(IngestionJob.priority < job.priority,
+            and_(IngestionJob.priority == job.priority, IngestionJob.created_at < job.created_at)))) or 0
 
 async def _count(db: AsyncSession, model, document_id: uuid.UUID) -> int:
     stmt = select(func.count()).select_from(model).where(model.document_id == document_id)
@@ -61,6 +90,8 @@ async def _summaries(db: AsyncSession, where) -> list[dict]:
                           "publication_state": rev.publication_state,
                           "parse_quality": (rev.report or {}).get("parse_quality"),
                           "error_code": (rev.report or {}).get("error_code")}
+                if rev.processing_state in ("queued", "processing"):
+                    latest.update(await _reading_state(db, rev))
         summaries.append({
             "doc": doc,
             "chunk_count": chunk_count,
@@ -68,6 +99,18 @@ async def _summaries(db: AsyncSession, where) -> list[dict]:
             "scope": "class" if doc.lab_id is None else "lab",
         })
     return summaries
+
+
+async def _reading_state(db: AsyncSession, rev: DocumentRevision) -> dict:
+    """Where a revision waiting to be read stands: jobs ahead, or pages read."""
+    job = await db.scalar(select(IngestionJob).where(IngestionJob.revision_id == rev.id))
+    if job is None or job.task_kind not in READING_TASK_KINDS:
+        return {}
+    if job.status == JobStatus.queued:
+        return {"jobs_ahead": await _jobs_ahead(db, job)}
+    if job.status == JobStatus.processing:
+        return {"progress": reading_progress((job.payload or {}).get("progress"), _utcnow())}
+    return {}
 
 
 async def get_owned_document(

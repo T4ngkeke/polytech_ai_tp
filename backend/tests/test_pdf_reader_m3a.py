@@ -94,7 +94,7 @@ async def test_pdf_upload_and_worker_write_only_a_readable_draft(db_session,tmp_
         job=await db_session.get(IngestionJob,uuid.UUID(body['job_id']))
         assert job.task_kind=='pdf_parse'
         real=si.run_pdf_pipeline
-        def fake_pipeline(source,digest,work_dir,*,settings,extractor=None):
+        def fake_pipeline(source,digest,work_dir,*,settings,extractor=None,on_page=None):
             doc,metrics=read_pdf(source,digest,work_dir,items)
             return si.ParseOutcome(doc,{'status':'source_pdf','extractor':metrics},
                                    {'kind':'same_pdf_physical_page','pages':1},True)

@@ -262,6 +262,47 @@ def check_exam_documents(browser, target, shots):
         MOCKS['/api/teacher/classes'] = classes
 
 
+def reading_doc(name, state, **latest):
+    return {'id': name, 'filename': name, 'status': 'pending', 'page_count': None, 'error_message': None,
+            'chunk_count': 0, 'lifecycle': 'active', 'generation': 1, 'structured': True,
+            'current_revision_id': None, 'scope': 'lab',
+            'latest_revision': {'id': f'r-{name}', 'processing_state': state, 'publication_state': 'draft',
+                                'parse_quality': None, 'error_code': None, **latest}}
+
+
+def check_document_progress(browser, target, shots):
+    # A document being read shows the jobs ahead, the pages read and the time left, then indexing.
+    MOCKS['/api/teacher/labs/lab/documents'] = [
+        reading_doc('CM_reseaux_2025_chapitre_3_routage_dynamique.pdf', 'processing',
+                    progress={'done': 20, 'total': 40, 'seconds_left': 300}),
+        reading_doc('TD4.pdf', 'queued', jobs_ahead=1),
+        reading_doc('TP2.pdf', 'parsed'),
+    ]
+    try:
+        for theme, size in (('light', DESKTOP), ('dark', PHONE)):
+            name = f'document-progress-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'teacher', '/teacher', theme, size)
+            try:
+                page.get_by_text('TP agent', exact=True).first.click()
+                page.get_by_role('button', name='Documents', exact=True).click()
+                expect(page.get_by_text('20 of 40 pages read · about 5 min left', exact=True)).to_be_visible()
+                expect(page.get_by_text('Waiting: 1 document ahead', exact=True)).to_be_visible()
+                expect(page.get_by_text('Indexing…', exact=True)).to_be_visible()
+                expect(page.get_by_text('You can leave this page', exact=False)).to_be_visible()
+                bar = page.get_by_role('progressbar').first
+                expect(bar).to_have_attribute('aria-valuenow', '48')
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+    finally:
+        MOCKS.pop('/api/teacher/labs/lab/documents')
+
+
 def check_analytics(browser, target, shots):
     # The lab Analytics tab: charts, the student table and a quota refill, at every width.
     for theme in ('light', 'dark'):
@@ -381,6 +422,7 @@ def main():
             check_toggle(browser, target)
             check_breadcrumb(browser, target)
             check_exam_documents(browser, target, shots)
+            check_document_progress(browser, target, shots)
             check_analytics(browser, target, shots)
             check_report(browser, target, shots)
             check_monitoring(browser, target, shots)

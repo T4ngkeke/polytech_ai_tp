@@ -28,7 +28,7 @@ async def test_pg_pdf_job_is_fenced_and_persists_draft(m1_pg,tmp_path,monkeypatc
             filename='lecture.pdf',content=content,storage_root=storage)
         job=await db.scalar(select(IngestionJob).where(IngestionJob.revision_id==result.revision.id))
         assert job.task_kind=='pdf_parse' and job.status==JobStatus.queued
-        def fake_pipeline(source,digest,work_dir,*,settings,extractor=None):
+        def fake_pipeline(source,digest,work_dir,*,settings,extractor=None,on_page=None):
             doc,metrics=read_pdf(source,digest,work_dir,items)
             return si.ParseOutcome(doc,{'status':'source_pdf','extractor':metrics},
                                    {'kind':'same_pdf_physical_page','pages':1},True)

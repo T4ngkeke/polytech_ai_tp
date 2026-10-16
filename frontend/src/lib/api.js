@@ -82,6 +82,31 @@ const api = {
     jsonRequest(`${endpoint}${queryParams}`, { method: 'POST', body: formData }),
 
   /**
+   * Upload with onProgress(share 0..1) while the file is sent. fetch cannot
+   * report upload progress, so this one uses XMLHttpRequest.
+   */
+  uploadWithProgress: (endpoint, formData, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE_URL}${endpoint}`);
+    const token = useAuthStore.getState().token;
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    xhr.onerror = () => reject(new Error('Network error: the file was not sent'));
+    xhr.onload = async () => {
+      if (xhr.status === 401) {
+        useAuthStore.getState().logout();
+        window.location.href = '/login';
+        reject(new Error('Unauthorized'));
+        return;
+      }
+      const res = new Response(xhr.responseText || null, { status: xhr.status });
+      if (!res.ok) reject(await responseError(res));
+      else resolve(xhr.status === 204 ? null : JSON.parse(xhr.responseText));
+    };
+    xhr.send(formData);
+  }),
+
+  /**
    * Raw fetch for non-JSON responses (SSE streams).
    */
   raw: (endpoint, options = {}) => request(endpoint, options),

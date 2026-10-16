@@ -211,7 +211,7 @@ any code yet**, so both recalls sequential-scan. See the note at the top.
 | document_id | FK | → Documents.id `ON DELETE CASCADE` |
 | status | Enum | `queued` → `processing` → `done` → `failed` |
 | job_type | Enum | `ingest` — the only kind. The column stays as the worker's dispatch point if a second kind is ever added |
-| payload | JSON | Free-form job arguments (nullable) |
+| payload | JSON | Nullable. A PDF job being read holds `{"progress": {"stage": "reading", "done", "total", "started_at"}}`, written every 5 s by the claim that holds the job (lock token checked) and cleared when the job moves to indexing or is given back |
 | priority | Integer | Lower = higher priority. An urgent job uses `priority=0`, which is claimed first and bypasses both worker gates |
 | attempts | Integer | Retry counter |
 | locked_at | Timestamp | Set when a worker claims the job — used for stale-lock reclaim |

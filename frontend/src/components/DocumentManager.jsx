@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
+import { readingLine } from '../lib/documentProgress';
 import StructuredDocumentDetail from './DocumentBlockEditor';
 import Icon from './Icon';
 
@@ -42,7 +43,7 @@ const STATUS_BADGE = {
 };
 
 const STATUS_LABEL = {
-  parsed: 'parsed · waiting for indexing',
+  parsed: 'indexing',
   needs_review: 'needs review',
   partially_indexed: 'some pages not read',
 };
@@ -54,7 +55,7 @@ const WARNING_HINT = {
   failed: 'Processing failed. Open the document to reprocess it.',
 };
 
-const IN_PROGRESS = new Set(['pending', 'processing']);
+const IN_PROGRESS = new Set(['pending', 'processing', 'parsed']);
 
 // A structured document has no published version until indexing
 // exists (M3). Until then its newest draft tells what is going on.
@@ -72,6 +73,7 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null); // document summary being inspected
   const [uploading, setUploading] = useState(false);
+  const [sent, setSent] = useState(0); // share of the file sent, while uploading
 
   const fileRef = useRef(null);
   const [fileName, setFileName] = useState('');
@@ -113,11 +115,12 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
     form.append('file', file);
 
     setUploading(true);
+    setSent(0);
     try {
-      await api.upload(base, form);
+      await api.uploadWithProgress(base, form, setSent);
       if (fileRef.current) fileRef.current.value = '';
       setFileName('');
-      toast.success('Uploaded — ingestion queued.');
+      toast.success('Uploaded. The pages are being read; you can leave this page meanwhile.', { duration: 6000 });
       await loadDocuments();
     } catch (err) {
       toast.error(err.message);
@@ -206,10 +209,16 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
           disabled={uploading}
           className="rounded gradient-cyan px-3 py-1.5 text-sm font-medium text-on-accent hover:brightness-110 disabled:opacity-50"
         >
-          {uploading ? 'Uploading…' : 'Upload'}
+          {uploading ? `Uploading ${Math.round(100 * sent)}%` : 'Upload'}
         </button>
       </form>
 
+      {documents.some((d) => IN_PROGRESS.has(displayStatus(d))) && (
+        <p className="text-xs text-cream-muted">
+          A PDF takes about 15 seconds per page to read. You can leave this page: reading goes on
+          without it.
+        </p>
+      )}
       {loading ? (
         <p className="text-sm text-cream-muted">Loading documents…</p>
       ) : documents.length === 0 ? (
@@ -224,8 +233,9 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
                 disabled={!opens(doc)}
                 title={readOnly(doc) ? 'Shared by the class: open the class Documents tab to manage it'
                   : !doc.structured ? 'Uploaded before the PDF path: it can only be deleted' : undefined}
-                className="flex min-w-0 flex-1 flex-col items-start gap-1 px-3 py-2 text-left disabled:cursor-default sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                className="flex min-w-0 flex-1 flex-col gap-1.5 px-3 py-2 text-left disabled:cursor-default"
               >
+                <span className="flex w-full min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <span className="flex min-w-0 max-w-full items-center gap-2">
                   {!classId && <ScopeBadge scope={doc.scope} />}
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
@@ -237,6 +247,8 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
                   <StatusBadge status={status} />
                   <SummaryChips doc={doc} />
                 </span>
+                </span>
+                <ReadingLine line={readingLine(status, doc.latest_revision)} />
               </button>
               {readOnly(doc) ? <span className="w-[42px] shrink-0" /> : (
                 <button
@@ -261,6 +273,21 @@ function ScopeBadge({ scope }) {
   return scope === 'class'
     ? <span className="shrink-0 rounded bg-gold-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold">Class</span>
     : <span className="shrink-0 rounded bg-cyan-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan">Lab</span>;
+}
+
+// The pages read so far and the time left, under a document being processed.
+function ReadingLine({ line }) {
+  if (!line) return null;
+  return (
+    <span className="flex w-full items-center gap-3">
+      <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded bg-ink-surface sm:w-48" role="progressbar"
+        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(100 * line.share)} aria-label="Processing">
+        <span className={`block h-full rounded bg-cyan transition-[width] duration-700 ${line.share ? '' : 'w-1/4 animate-pulse'}`}
+          style={line.share ? { width: `${100 * line.share}%` } : undefined} />
+      </span>
+      <span className="min-w-0 text-[11px] leading-snug text-cream-muted">{line.text}</span>
+    </span>
+  );
 }
 
 function StatusBadge({ status }) {

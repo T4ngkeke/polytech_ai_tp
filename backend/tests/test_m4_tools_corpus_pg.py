@@ -61,7 +61,7 @@ async def publish_frozen_pdf(db, teacher, lab_id, storage, tmp_path, monkeypatch
         assert page['pdf_sha256'] == digest and page['page_no'] == page_no
         return page['content_list']
 
-    def cached_pipeline(source, source_digest, work_dir, *, settings, extractor=None):
+    def cached_pipeline(source, source_digest, work_dir, *, settings, extractor=None, on_page=None):
         parsed, metrics = read_pdf(source, source_digest, work_dir, cached_page)
         return si.ParseOutcome(parsed, {'status': 'source_pdf', 'extractor': metrics},
             {'kind': 'same_pdf_physical_page', 'pages': page_count}, True)
