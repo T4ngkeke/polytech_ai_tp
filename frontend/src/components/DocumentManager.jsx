@@ -66,7 +66,7 @@ function displayStatus(doc) {
   return doc.status;
 }
 
-export default function DocumentManager({ labId, classId }) {
+export default function DocumentManager({ labId, classId, examMode = false, onOpenClassSettings }) {
   const base = classId ? `/api/teacher/classes/${classId}/documents` : labId ? `/api/teacher/labs/${labId}/documents` : null;
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -166,6 +166,23 @@ export default function DocumentManager({ labId, classId }) {
 
   return (
     <div className="space-y-4">
+      {examMode && (
+        // Exam mode stops course search, not uploads: documents can be made ready for later.
+        <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-gold/40 bg-gold-muted px-3 py-2 text-xs text-cream">
+          <Icon name="lock" className="h-4 w-4 shrink-0 text-gold" />
+          <p className="min-w-0 flex-1">
+            <span className="font-semibold text-gold">Exam mode is on.</span>{' '}
+            Students get answers without these documents for now. You can still upload and publish them;
+            they will be used when exam mode is turned off.
+          </p>
+          {onOpenClassSettings && (
+            <button type="button" onClick={onOpenClassSettings}
+              className="shrink-0 cursor-pointer rounded-lg border border-gold/40 px-2.5 py-1 text-xs text-cream hover:bg-gold/10">
+              Class settings
+            </button>
+          )}
+        </div>
+      )}
       <p className="text-xs text-cream-muted">
         {classId
           ? 'Documents uploaded here are shared by every lab of this class, e.g. the course handout.'

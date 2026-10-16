@@ -370,7 +370,8 @@ export default function Teacher() {
                 <TeacherAnalytics data={analytics} classId={selectedClass.id} onReload={loadAnalytics}
                   onOpenConversation={openConversation} />
               )}
-              {level === 'class' && activeTab === 3 && <DocumentManager classId={selectedClass.id} />}
+              {level === 'class' && activeTab === 3 && <DocumentManager classId={selectedClass.id}
+                examMode={!!selectedClass.exam_mode} onOpenClassSettings={() => setActiveTab(0)} />}
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
@@ -381,7 +382,8 @@ export default function Teacher() {
               )}
               {level === 'lab' && activeTab === 3 && <AuditPanel lab={selectedLab} sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
-              {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id} />}
+              {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id}
+                examMode={!!selectedClass?.exam_mode} onOpenClassSettings={() => handleSelectClass(selectedClass)} />}
               {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} examMode={!!selectedClass?.exam_mode} />}
             </div>
           </>

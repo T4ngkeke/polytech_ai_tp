@@ -235,6 +235,33 @@ def check_breadcrumb(browser, target):
         context.close()
 
 
+def check_exam_documents(browser, target, shots):
+    # Exam mode keeps uploads open and says the documents wait; the note leads to the class settings.
+    classes = MOCKS['/api/teacher/classes']
+    MOCKS['/api/teacher/classes'] = [{**classes[0], 'exam_mode': True}]
+    try:
+        for theme, size in (('light', DESKTOP), ('dark', PHONE)):
+            name = f'exam-documents-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'teacher', '/teacher', theme, size)
+            try:
+                page.get_by_text('TP agent', exact=True).first.click()
+                page.get_by_role('button', name='Documents', exact=True).click()
+                expect(page.get_by_text('Exam mode is on.', exact=True)).to_be_visible()
+                expect(page.get_by_role('button', name='Upload', exact=False).first).to_be_enabled()
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+                page.get_by_role('button', name='Class settings', exact=True).click()
+                expect(page.get_by_role('switch', name='Exam mode')).to_be_checked()
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+    finally:
+        MOCKS['/api/teacher/classes'] = classes
+
+
 def check_analytics(browser, target, shots):
     # The lab Analytics tab: charts, the student table and a quota refill, at every width.
     for theme in ('light', 'dark'):
@@ -353,6 +380,7 @@ def main():
                         check_view(browser, target, shots, role, path, ready, steps, menu, theme, size)
             check_toggle(browser, target)
             check_breadcrumb(browser, target)
+            check_exam_documents(browser, target, shots)
             check_analytics(browser, target, shots)
             check_report(browser, target, shots)
             check_monitoring(browser, target, shots)
