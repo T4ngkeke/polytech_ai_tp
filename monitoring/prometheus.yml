@@ -28,3 +28,5 @@ scrape_configs:
         labels: {server: "Reranker"}
       - targets: ["edullm-mineru-vlm:8000"]
         labels: {server: "MinerU"}
+      - targets: ["edullm-embeddings:8000"]
+        labels: {server: "Embeddings"}

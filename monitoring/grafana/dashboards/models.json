@@ -391,7 +391,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (server, le) (rate(vllm:inter_token_latency_seconds_bucket{server!=\"Reranker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (server, le) (rate(vllm:inter_token_latency_seconds_bucket{server!~\"Reranker|Embeddings\"}[$__rate_interval])))",
           "legendFormat": "{{server}} median",
           "range": true,
           "instant": false,
@@ -402,7 +402,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (server, le) (rate(vllm:inter_token_latency_seconds_bucket{server!=\"Reranker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (server, le) (rate(vllm:inter_token_latency_seconds_bucket{server!~\"Reranker|Embeddings\"}[$__rate_interval])))",
           "legendFormat": "{{server}} 95%",
           "range": true,
           "instant": false,
@@ -578,7 +578,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (server) (rate(vllm:generation_tokens_total{server!=\"Reranker\"}[$__rate_interval]))",
+          "expr": "sum by (server) (rate(vllm:generation_tokens_total{server!~\"Reranker|Embeddings\"}[$__rate_interval]))",
           "legendFormat": "{{server}}",
           "range": true,
           "instant": false,
@@ -1313,7 +1313,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (server, le) (rate(vllm:request_generation_tokens_bucket{server!=\"Reranker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (server, le) (rate(vllm:request_generation_tokens_bucket{server!~\"Reranker|Embeddings\"}[$__rate_interval])))",
           "legendFormat": "{{server}} median",
           "range": true,
           "instant": false,
@@ -1324,7 +1324,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (server, le) (rate(vllm:request_generation_tokens_bucket{server!=\"Reranker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (server, le) (rate(vllm:request_generation_tokens_bucket{server!~\"Reranker|Embeddings\"}[$__rate_interval])))",
           "legendFormat": "{{server}} 95%",
           "range": true,
           "instant": false,

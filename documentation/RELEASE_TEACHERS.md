@@ -23,7 +23,8 @@ Conversations are not copied (18 messages, all tests).
 
 1. A compose file for the new stack, from `docker-compose.beta.yml` (branch
    `v6-beta`): PostgreSQL with pgvector, backend and worker of this version, the
-   `edullm-models` network (Flash-Next, reranker, MinerU, embeddings), the flags
+   `edullm-models` network (Flash-Next, reranker, MinerU, and embeddings on vLLM,
+   not the Ollama container: see "Embeddings" below), the flags
    `STRUCTURED_INGEST_ENABLED`, `PDF_STRUCTURED_INGEST_ENABLED`,
    `AGENTIC_SEARCH_ENABLED` and `STRUCTURED_VISION_ENABLED` ("Write with AI" on a
    picture), and the TLS nginx config with the `/grafana/` and
@@ -72,3 +73,22 @@ On the network `edullm-v6_default` two containers answer to that name:
 (the beta database). nginx sends requests to both in turn, so a user can be
 logged in on one and refused by the other. The new stack must not join
 `edullm-v6_default`; the old entry should be stopped at the switch.
+
+## Embeddings
+
+Since 2026-10-16 bge-m3 runs on vLLM, like the reranker and MinerU (one pinned
+image; Prometheus scrapes it as "Embeddings"):
+
+```sh
+docker run -d --name edullm-embeddings --gpus all --ipc=host --restart unless-stopped \
+  --network edullm-models -e HF_HOME=/hf -e HOME=/tmp --user "$(id -u):$(id -g)" \
+  -v $HOME/.cache/hf-retrieval-eval:/hf \
+  nvcr.io/nvidia/vllm:26.07-py3 \
+  vllm serve BAAI/bge-m3 --host 0.0.0.0 --port 8000 \
+  --runner pooling --gpu-memory-utilization 0.02 --max-model-len 8192 --max-num-seqs 32
+```
+
+Admin settings: `EMBEDDING_URL = http://edullm-embeddings:8000/v1`,
+`EMBEDDING_MODEL = BAAI/bge-m3`. On the same text it gives the vectors of the
+former Ollama server within cosine 0.9999. After a change of embedding server,
+`scripts/reembed_documents.py` computes every document again (see its header).
