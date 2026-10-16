@@ -91,7 +91,7 @@ async def chat_stream(
     request: Request,
     body: ChatStreamRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     The answer of the research agent, in the requested mode, as server-sent events.
@@ -313,7 +313,7 @@ async def rate_message(
     message_id: uuid.UUID,
     body: MessageFeedbackRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Thumbs up/down on an assistant message. A student may only rate a
     message in a session they own."""

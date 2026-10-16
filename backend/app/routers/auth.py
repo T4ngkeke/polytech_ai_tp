@@ -45,7 +45,7 @@ _INVALID_CREDENTIALS = HTTPException(
 @router.post("/signup", response_model=TokenResponse, status_code=201)
 async def signup(
     body: SignupRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TokenResponse:
     """
     Student self-registration.
@@ -86,7 +86,7 @@ async def signup(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TokenResponse:
     """
     Validate username + password, return a signed JWT.
@@ -140,7 +140,7 @@ async def get_me(
 async def change_password(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict[str, str]:
     """
     Self-service password change for any authenticated user.

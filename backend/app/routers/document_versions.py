@@ -34,7 +34,7 @@ async def require_structured(db, document_id, teacher_id):
 
 
 @router.get('/{document_id}/revisions')
-async def revisions(document_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+async def revisions(document_id: uuid.UUID, db: AsyncSession = Depends(get_db, scope="function"),
                     teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     rows = (await db.scalars(select(DocumentRevision).where(DocumentRevision.document_id == doc.id)
@@ -50,7 +50,7 @@ async def revisions(document_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 
 @router.post('/{document_id}/revisions/{revision_id}/publish')
 async def publish(document_id: uuid.UUID, revision_id: uuid.UUID, body: PublishRequest,
-                  db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                  db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     try:
         await publish_revision(db, document_id=doc.id, revision_id=revision_id,
@@ -76,13 +76,13 @@ async def archive_change(document_id, body, db, teacher, archived):
 
 @router.post('/{document_id}/archive')
 async def archive(document_id: uuid.UUID, body: GenerationRequest,
-                  db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                  db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     return await archive_change(document_id, body, db, teacher, True)
 
 
 @router.post('/{document_id}/restore')
 async def restore(document_id: uuid.UUID, body: GenerationRequest,
-                  db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                  db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     return await archive_change(document_id, body, db, teacher, False)
 
 
@@ -151,7 +151,7 @@ async def _run(db, action):
 
 @router.put('/{document_id}/blocks/{block_id}')
 async def edit_block(document_id: uuid.UUID, block_id: uuid.UUID, body: BlockEditRequest,
-                     db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                     db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     fields = {name: getattr(body, name) for name in ('content', 'kind', 'content_format', 'content_description')
               if getattr(body, name) is not None}
@@ -164,7 +164,7 @@ async def edit_block(document_id: uuid.UUID, block_id: uuid.UUID, body: BlockEdi
 
 @router.post('/{document_id}/blocks/{block_id}/exclude')
 async def exclude_block(document_id: uuid.UUID, block_id: uuid.UUID, body: ExcludeRequest,
-                        db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                        db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     rev = await _run(db, lambda: edits.set_excluded(db, document_id=doc.id, teacher_id=teacher.id, block_id=block_id,
         expected_revision_id=body.expected_revision_id, expected_generation=body.expected_generation,
@@ -181,14 +181,14 @@ async def _reparse(db, doc, teacher, body, block_id=None):
 
 @router.post('/{document_id}/blocks/{block_id}/reprocess')
 async def reprocess_block(document_id: uuid.UUID, block_id: uuid.UUID, body: RevisionTarget,
-                          db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                          db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     return await _reparse(db, doc, teacher, body, block_id)
 
 
 @router.post('/{document_id}/revisions/{revision_id}/reprocess')
 async def reprocess_revision(document_id: uuid.UUID, revision_id: uuid.UUID, body: GenerationRequest,
-                             db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                             db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     return await _reparse(db, doc, teacher, RevisionTarget(expected_generation=body.expected_generation,
                                                            expected_revision_id=revision_id))
@@ -196,7 +196,7 @@ async def reprocess_revision(document_id: uuid.UUID, revision_id: uuid.UUID, bod
 
 @router.get('/{document_id}/revisions/{revision_id}/reviews')
 async def revision_reviews(document_id: uuid.UUID, revision_id: uuid.UUID, status: str | None = None,
-                           db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher)):
+                           db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     rev = await db.get(DocumentRevision, revision_id)
     if rev is None or rev.document_id != doc.id:
@@ -206,7 +206,7 @@ async def revision_reviews(document_id: uuid.UUID, revision_id: uuid.UUID, statu
 
 @router.put('/{document_id}/revisions/{revision_id}/reviews/{review_id}')
 async def resolve_structured_review(document_id: uuid.UUID, revision_id: uuid.UUID, review_id: uuid.UUID,
-                                    body: ReviewResolveRequest, db: AsyncSession = Depends(get_db),
+                                    body: ReviewResolveRequest, db: AsyncSession = Depends(get_db, scope="function"),
                                     teacher: User = Depends(require_teacher)):
     doc = await require_structured(db, document_id, teacher.id)
     row, rev = await _run(db, lambda: edits.resolve_review(db, document_id=doc.id, teacher_id=teacher.id,
@@ -215,7 +215,7 @@ async def resolve_structured_review(document_id: uuid.UUID, revision_id: uuid.UU
     return {'review': review_view(row), 'revision': _revision_out(rev, doc) if rev else None}
 
 
-async def get_describe_fn(db: AsyncSession = Depends(get_db)):
+async def get_describe_fn(db: AsyncSession = Depends(get_db, scope="function")):
     """The verified vision client, or None when none is configured."""
     rows = (await db.scalars(select(SystemConfig))).all()
     try:
@@ -226,7 +226,7 @@ async def get_describe_fn(db: AsyncSession = Depends(get_db)):
 
 @router.post('/{document_id}/blocks/{block_id}/describe')
 async def describe_block(document_id: uuid.UUID, block_id: uuid.UUID, body: RevisionTarget,
-                         db: AsyncSession = Depends(get_db), teacher: User = Depends(require_teacher),
+                         db: AsyncSession = Depends(get_db, scope="function"), teacher: User = Depends(require_teacher),
                          describe_fn=Depends(get_describe_fn), root: str = Depends(get_storage_root)):
     """One model description of one picture, stored as a candidate to check."""
     doc = await require_structured(db, document_id, teacher.id)

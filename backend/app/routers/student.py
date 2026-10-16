@@ -55,7 +55,7 @@ router = APIRouter(prefix="/api/student", tags=["student"])
 async def join_class(
     body: JoinClassRequest,
     current_user: User = Depends(require_student),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> JoinClassResponse:
     """
     Join a class using a 6-character invite code.
@@ -111,7 +111,7 @@ async def join_class(
 @router.get("/classes", response_model=list[ClassResponse])
 async def list_joined_classes(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ClassResponse]:
     """List all classes the student has joined."""
     result = await db.execute(
@@ -136,7 +136,7 @@ async def list_joined_classes(
 async def list_labs_for_class(
     class_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[LabResponse]:
     """List labs for a class the student has joined."""
     # Verify membership
@@ -175,7 +175,7 @@ async def create_session_in_lab(
     lab_id: uuid.UUID,
     body: SessionCreateRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     """
     Create a new chat session within a specific lab.
@@ -222,7 +222,7 @@ async def create_session_in_lab(
 async def list_sessions(
     lab_id: uuid.UUID | None = Query(None, description="Filter by lab ID"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[SessionResponse]:
     """Return all non-deleted sessions belonging to the authenticated user."""
     sessions = await session_service.list_sessions_for_student(
@@ -243,7 +243,7 @@ async def list_sessions(
 async def get_session(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionWithMessagesResponse:
     """
     Return the message history for a session.
@@ -285,7 +285,7 @@ async def get_session(
 @router.get("/usage")
 async def get_usage(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Return the current user's daily token limit (quota plus today's
     teacher grants) and used amount."""
@@ -302,7 +302,7 @@ async def get_usage(
 async def leave_class(
     class_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Student voluntarily leaves a class."""
     mem_result = await db.execute(
@@ -333,7 +333,7 @@ async def update_session_title(
     session_id: uuid.UUID,
     body: SessionUpdateRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     """Update the title of a session owned by the authenticated user."""
     session = await session_service.get_session_by_id(db, session_id)
@@ -361,7 +361,7 @@ async def update_session_title(
 async def soft_delete_own_session(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Soft-delete (hide) the student's own session.
 

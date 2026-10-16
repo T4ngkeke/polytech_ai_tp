@@ -159,7 +159,7 @@ async def _build_student_summaries(
 async def create_class(
     body: ClassCreate,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassResponse:
     """Create a new class owned by the authenticated teacher."""
     new_class = await class_service.create_class(db, teacher_id=teacher.id, name=body.name)
@@ -174,7 +174,7 @@ async def create_class(
 @router.get("/classes", response_model=list[ClassResponse])
 async def list_classes(
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ClassResponse]:
     """List all non-deleted classes owned by the authenticated teacher."""
     classes = await class_service.list_classes_for_teacher(db, teacher_id=teacher.id)
@@ -191,7 +191,7 @@ async def create_lab(
     class_id: uuid.UUID,
     body: LabCreate,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LabResponse:
     """Create a new lab within a class the teacher owns."""
     await _verify_class_ownership(db, class_id, teacher)
@@ -208,7 +208,7 @@ async def create_lab(
 async def list_labs(
     class_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[LabResponse]:
     """List all labs for a class owned by the teacher."""
     await _verify_class_ownership(db, class_id, teacher)
@@ -231,7 +231,7 @@ async def upload_document(
     replace_document_id: uuid.UUID | None = Form(None),
     expected_generation: int | None = Form(None, ge=0),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage_root: str = Depends(get_storage_root),
 ) -> DocumentResponse:
     """Upload a course document (PDF, Markdown or HTML) to a lab the teacher
@@ -260,7 +260,7 @@ async def upload_class_document(
     replace_document_id: uuid.UUID | None = Form(None),
     expected_generation: int | None = Form(None, ge=0),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage_root: str = Depends(get_storage_root),
 ) -> DocumentResponse:
     """Upload a class-wide course document (lab_id NULL): every lab of the class
@@ -337,7 +337,7 @@ async def _upload_structured(db, response, *, lab, file, shared, mode,
 async def list_lab_documents(
     lab_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[DocumentSummaryResponse]:
     """List the documents a lab uses with status + processing summary (ownership
     enforced): the class-wide documents first (scope "class"), then the lab's own."""
@@ -350,7 +350,7 @@ async def list_lab_documents(
 async def list_class_documents(
     class_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[DocumentSummaryResponse]:
     """The class-wide documents of a class the teacher owns."""
     await _verify_class_ownership(db, class_id, teacher)
@@ -393,7 +393,7 @@ async def delete_document(
     document_id: uuid.UUID,
     expected_generation: int | None = Query(default=None, ge=0),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Delete an uploaded document and everything derived from it — its chunks
     and ingestion jobs — plus the stored file. Ownership-checked."""
@@ -426,7 +426,7 @@ async def delete_document(
 async def create_test_session(
     lab_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TestSessionResponse:
     """[v8.0 §11A] Open a test-drive session on a lab the teacher owns — chat as a
     preview (membership bypassed, writes excluded from
@@ -444,7 +444,7 @@ async def create_test_session(
 async def upsert_rule(
     body: RuleUpsertRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> RuleResponse:
     """Create or update a 3-tier rule based on (level, target_id)."""
     await _verify_rule_target_ownership(db, body.level, body.target_id, teacher)
@@ -468,7 +468,7 @@ async def list_rules(
     level: str | None = Query(None, description="Filter by level: class, lab, student"),
     target_id: uuid.UUID | None = Query(None, description="Filter by target ID"),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[RuleResponse]:
     """List rules with optional level and target_id filters."""
     # [v7.2] When asking for a specific target's rule, verify the teacher owns it.
@@ -486,7 +486,7 @@ async def list_rules(
 @router.get("/skill-presets", response_model=list[SkillPresetResponse])
 async def list_skill_presets(
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[SkillPresetResponse]:
     presets = await skill_preset_service.list_presets(db, owner_teacher_id=teacher.id)
     return [SkillPresetResponse.model_validate(p) for p in presets]
@@ -496,7 +496,7 @@ async def list_skill_presets(
 async def create_skill_preset(
     body: SkillPresetUpsertRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SkillPresetResponse:
     preset = await skill_preset_service.create_preset(
         db, owner_teacher_id=teacher.id, name=body.name, content=body.content)
@@ -508,7 +508,7 @@ async def update_skill_preset(
     preset_id: uuid.UUID,
     body: SkillPresetUpsertRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SkillPresetResponse:
     try:
         preset = await skill_preset_service.update_preset(
@@ -525,7 +525,7 @@ async def update_skill_preset(
 async def delete_skill_preset(
     preset_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     try:
         await skill_preset_service.delete_preset(
@@ -542,7 +542,7 @@ async def apply_class_skill(
     class_id: uuid.UUID,
     body: ApplySkillRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> RuleResponse:
     """Apply a preset (snapshot-copy) or ad-hoc content to a class's skill rule."""
     await _verify_class_ownership(db, class_id, teacher)
@@ -577,7 +577,7 @@ async def get_chat_history(
     student_id: uuid.UUID | None = Query(None),
     session_id: uuid.UUID | None = Query(None),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[SessionWithMessagesResponse]:
     """Fetch chat sessions and messages with flexible filters for audit.
 
@@ -635,7 +635,7 @@ async def get_citation_report(
     start: date | None = Query(None, description="First day included (UTC)."),
     end: date | None = Query(None, description="Last day included (UTC)."),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """Which course files, pages and passages the lab's research answers cite,
     with the students and their questions (audit; ownership enforced).
@@ -657,7 +657,7 @@ async def get_citation_report(
 @router.get("/students", response_model=list[StudentSummaryResponse])
 async def list_students(
     _teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[StudentSummaryResponse]:
     """List active students with their current daily token consumption."""
     result = await db.execute(
@@ -676,7 +676,7 @@ async def list_students(
 async def list_class_students(
     class_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[StudentSummaryResponse]:
     """List active students enrolled in a specific class."""
     await _verify_class_ownership(db, class_id, teacher)
@@ -703,7 +703,7 @@ async def unenroll_student(
     class_id: uuid.UUID,
     student_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Remove a student from a class (ownership enforced)."""
     await _verify_class_ownership(db, class_id, teacher)
@@ -721,7 +721,7 @@ async def refill_student_quota(
     class_id: uuid.UUID,
     student_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """Give a student of this class a full daily quota again for today.
 
@@ -747,7 +747,7 @@ async def refill_student_quota(
 async def reset_invite_code(
     class_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> InviteCodeResponse:
     """Generate and save a new 6-character invite code for a class."""
     cls = await _verify_class_ownership(db, class_id, teacher)
@@ -765,7 +765,7 @@ async def update_class(
     class_id: uuid.UUID,
     body: ClassUpdateRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassResponse:
     """Rename a class (ownership enforced)."""
     cls = await _verify_class_ownership(db, class_id, teacher)
@@ -778,7 +778,7 @@ async def set_exam_mode(
     class_id: uuid.UUID,
     body: ExamModeRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassResponse:
     """Turn exam mode on or off: on, every lab of the class answers in direct
     mode only (no course search), enforced by the chat endpoint."""
@@ -798,7 +798,7 @@ async def set_exam_mode(
 async def soft_delete_class(
     class_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Soft-delete a class (ownership enforced)."""
     cls = await _verify_class_ownership(db, class_id, teacher)
@@ -816,7 +816,7 @@ async def update_lab(
     lab_id: uuid.UUID,
     body: LabUpdateRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LabResponse:
     """Update a lab's name and/or toggle its is_active status (ownership enforced)."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
@@ -834,7 +834,7 @@ async def update_lab(
 async def soft_delete_lab(
     lab_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Soft-delete a lab (ownership enforced)."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
@@ -852,7 +852,7 @@ async def soft_delete_lab(
 async def get_class_analytics(
     class_id: uuid.UUID,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassAnalyticsResponse:
     """Hierarchical token usage: class → lab → student breakdown."""
     cls = await _verify_class_ownership(db, class_id, teacher)
@@ -865,7 +865,7 @@ async def get_class_analytics_details(
     class_id: uuid.UUID,
     lab_id: uuid.UUID | None = Query(None),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """Activity, students, quotas and answers that went wrong, for a class or one of its labs."""
     await _verify_class_ownership(db, class_id, teacher)
@@ -902,7 +902,7 @@ async def create_report(
     lab_id: uuid.UUID,
     body: ReportRequest,
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """Start a report on the lab, or on one student with `student_id`. The
     model writes it in the background (tens of seconds); poll the GET."""
@@ -935,7 +935,7 @@ async def get_report(
     lab_id: uuid.UUID,
     student_id: uuid.UUID | None = Query(None),
     teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """The latest report on the lab (or on one student), or `{"report": null}`."""
     from backend.app.services import teaching_reports

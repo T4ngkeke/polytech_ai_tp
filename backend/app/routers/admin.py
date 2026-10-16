@@ -95,7 +95,7 @@ async def _get_active_user_or_404(
 @router.get("/users", response_model=list[UserResponse])
 async def list_users(
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[UserResponse]:
     """Return all non-deleted users."""
     result = await db.execute(select(User).where(User.is_deleted.is_(False)))
@@ -112,7 +112,7 @@ async def list_users(
 async def create_user(
     body: UserCreateRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
     """Create a new platform user. Returns 409 if username already exists."""
     existing = await db.execute(select(User).where(User.username == body.username))
@@ -143,7 +143,7 @@ async def update_quota(
     user_id: uuid.UUID,
     body: UpdateQuotaRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
     """Update the daily token quota for a user."""
     user = await _get_active_user_or_404(db, user_id)
@@ -164,7 +164,7 @@ async def update_role(
     user_id: uuid.UUID,
     body: UpdateRoleRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
     """Change a user's role."""
     user = await _get_active_user_or_404(db, user_id)
@@ -185,7 +185,7 @@ async def reset_user_password(
     user_id: uuid.UUID,
     body: AdminResetPasswordRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
     """Admin reset of a user's password — no old password required."""
     user = await _get_active_user_or_404(db, user_id)
@@ -205,7 +205,7 @@ async def reset_user_password(
 async def delete_user(
     user_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Soft-delete a user."""
     user = await _get_active_user_or_404(db, user_id, detail="User not found or already deleted")
@@ -273,7 +273,7 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
 @router.get("/llm/config", response_model=LLMConfigResponse)
 async def get_llm_config(
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LLMConfigResponse:
     """Read the full LLM/model-routing config from the SystemConfig table.
 
@@ -313,7 +313,7 @@ async def get_llm_config(
 async def update_llm_config(
     body: LLMConfigRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LLMConfigResponse:
     """Zero-downtime upsert of the model-routing table.
 
@@ -350,7 +350,7 @@ async def import_users_csv(
     file: UploadFile = File(...),
     force: bool = Query(False, description="If true, execute the import. Otherwise dry-run."),
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CSVImportPreviewResponse:
     """CSV bulk import: username, password, role (optional). Dry-run by default."""
     content = await file.read()
@@ -431,7 +431,7 @@ async def list_all_classes(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ClassResponse]:
     """List all non-deleted classes system-wide."""
     classes = await class_service.list_all_classes(db, skip=skip, limit=limit)
@@ -447,7 +447,7 @@ async def list_all_classes(
 async def list_class_labs(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[LabResponse]:
     """List all labs in a class (no ownership check)."""
     await class_service.get_class_by_id(db, class_id)  # 404 if not found
@@ -464,7 +464,7 @@ async def list_class_labs(
 async def list_class_students(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[UserResponse]:
     """List all students enrolled in a specific class."""
     await class_service.get_class_by_id(db, class_id)  # 404 if not found
@@ -482,7 +482,7 @@ async def transfer_class(
     class_id: uuid.UUID,
     body: TransferClassRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassResponse:
     """Force-change the teacher_id of any class."""
     cls = await class_service.get_class_by_id(db, class_id)
@@ -499,7 +499,7 @@ async def transfer_class(
 async def force_delete_class(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Force soft-delete any class system-wide (no ownership check)."""
     cls = await class_service.get_class_by_id(db, class_id)
@@ -517,7 +517,7 @@ async def list_all_labs(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[LabResponse]:
     """List all non-deleted labs system-wide."""
     labs = await lab_service.list_all_labs(db, skip=skip, limit=limit)
@@ -533,7 +533,7 @@ async def list_all_labs(
 async def force_delete_lab(
     lab_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Force soft-delete any lab system-wide (no ownership check)."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
@@ -551,7 +551,7 @@ async def force_update_lab(
     lab_id: uuid.UUID,
     body: LabUpdateRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LabResponse:
     """[v7.2] God-mode lab update: lock/unlock (``is_active``) or rename any lab
     system-wide, bypassing ownership. Mirrors the ``DELETE /api/admin/labs``
@@ -569,7 +569,7 @@ async def force_update_lab(
 @router.get("/analytics", response_model=AdminAnalyticsResponse)
 async def get_global_analytics(
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> AdminAnalyticsResponse:
     """Global token usage dashboard with 30-day daily breakdown."""
     result = await analytics_service.get_global_analytics(db)
@@ -592,7 +592,7 @@ async def get_global_analytics(
 async def get_class_analytics(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassAnalyticsResponse:
     """Per-class hierarchical analytics (class→lab→student). No ownership check."""
     cls = await class_service.get_class_by_id(db, class_id)
@@ -609,7 +609,7 @@ async def get_class_analytics(
 async def hard_delete_session(
     session_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Hard-delete a session and all its messages to purge inappropriate content."""
     result = await db.execute(select(Session).where(Session.id == session_id))
@@ -631,7 +631,7 @@ async def hard_delete_session(
 async def prune_old_data(
     body: PruneRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> PruneResponse:
     """Hard-delete sessions and messages older than `older_than_days`; with
     dry_run, only count them."""

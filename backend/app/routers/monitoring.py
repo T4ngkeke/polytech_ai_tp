@@ -60,7 +60,7 @@ async def open_session(request: Request, admin: User = Depends(require_admin)) -
 
 
 @router.get("/check")
-async def check(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
+async def check(request: Request, db: AsyncSession = Depends(get_db, scope="function")) -> Response:
     user_id = token_user(request.cookies.get(COOKIE))
     user = await db.get(User, user_id) if user_id else None
     allowed = user is not None and not user.is_deleted and user.role == UserRole.admin

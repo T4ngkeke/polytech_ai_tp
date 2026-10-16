@@ -73,7 +73,7 @@ def _tool_error(exc: reader.ReaderError):
 @teacher_router.get('/{document_id}/revisions/{revision_id}/outline')
 async def teacher_outline(document_id: uuid.UUID, revision_id: uuid.UUID, cursor: str | None = None,
                           page_id: uuid.UUID | None = None, teacher: User = Depends(require_teacher),
-                          db: AsyncSession = Depends(get_db)):
+                          db: AsyncSession = Depends(get_db, scope="function")):
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
     try:
         return await reader.open_document(db, rev, reader=f'teacher:{teacher.id}', page_id=page_id, cursor=cursor)
@@ -83,7 +83,7 @@ async def teacher_outline(document_id: uuid.UUID, revision_id: uuid.UUID, cursor
 
 @teacher_router.get('/{document_id}/revisions/{revision_id}/pages/{page_id}')
 async def teacher_page(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: uuid.UUID,
-                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
+                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function")):
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
     try:
         return await reader.page_view(db, rev, page_id, teacher=True)
@@ -96,7 +96,7 @@ async def teacher_read(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: 
                        block_id: uuid.UUID | None = None, start: int | None = Query(None, ge=0),
                        end: int | None = Query(None, ge=0), cursor: str | None = None,
                        budget: int = Query(reader.DEFAULT_BUDGET, ge=1, le=reader.MAX_BUDGET),
-                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
+                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function")):
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
     try:
         return await reader.read(db, rev, reader=f'teacher:{teacher.id}', teacher=True, page_id=page_id,
@@ -108,7 +108,7 @@ async def teacher_read(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: 
 @teacher_router.get('/{document_id}/revisions/{revision_id}/navigate')
 async def teacher_navigate(document_id: uuid.UUID, revision_id: uuid.UUID, anchor_block_id: uuid.UUID,
                            direction: str = 'next', unit: str = 'block', count: int = 1,
-                           teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
+                           teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function")):
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
     try:
         return await reader.navigate(db, rev, reader=f'teacher:{teacher.id}', anchor_block_id=anchor_block_id,
@@ -120,7 +120,7 @@ async def teacher_navigate(document_id: uuid.UUID, revision_id: uuid.UUID, ancho
 @teacher_router.get('/{document_id}/revisions/{revision_id}/grep')
 async def teacher_grep(document_id: uuid.UUID, revision_id: uuid.UUID, pattern: str,
                        case_sensitive: bool = False, cursor: str | None = None,
-                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
+                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function")):
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
     try:
         return await reader.grep(db, rev, reader=f'teacher:{teacher.id}', pattern=pattern,
@@ -131,7 +131,7 @@ async def teacher_grep(document_id: uuid.UUID, revision_id: uuid.UUID, pattern: 
 
 @teacher_router.get('/{document_id}/revisions/{revision_id}/assets/{asset_id}')
 async def teacher_asset(document_id: uuid.UUID, revision_id: uuid.UUID, asset_id: uuid.UUID,
-                        teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db),
+                        teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function"),
                         root: str = Depends(get_storage_root)):
     try:
         asset = await readable_asset(db, asset_id=asset_id, document_id=document_id, user_id=teacher.id,
@@ -143,7 +143,7 @@ async def teacher_asset(document_id: uuid.UUID, revision_id: uuid.UUID, asset_id
 
 @teacher_router.get('/{document_id}/revisions/{revision_id}/preview')
 async def teacher_preview(document_id: uuid.UUID, revision_id: uuid.UUID,
-                          teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db),
+                          teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function"),
                           root: str = Depends(get_storage_root)):
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
     asset = await db.get(DocumentAsset, rev.preview_pdf_asset_id) if rev.preview_pdf_asset_id else None
@@ -154,7 +154,7 @@ async def teacher_preview(document_id: uuid.UUID, revision_id: uuid.UUID,
 
 @teacher_router.get('/{document_id}/revisions/{revision_id}/source')
 async def teacher_source(document_id: uuid.UUID, revision_id: uuid.UUID,
-                         teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db),
+                         teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function"),
                          root: str = Depends(get_storage_root)):
     """The uploaded source file. Teachers only."""
     rev = await _teacher_rev(db, document_id, revision_id, teacher)
@@ -174,7 +174,7 @@ async def teacher_source(document_id: uuid.UUID, revision_id: uuid.UUID,
 @student_router.get('/{document_id}/revisions/{revision_id}/pages/{page_id}')
 async def student_page(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: uuid.UUID,
                        session_id: uuid.UUID, user: User = Depends(get_current_user),
-                       db: AsyncSession = Depends(get_db)):
+                       db: AsyncSession = Depends(get_db, scope="function")):
     rev = await _student_rev(db, document_id, revision_id, user, session_id)
     try:
         view = await reader.page_view(db, rev, page_id, teacher=False)
@@ -188,7 +188,7 @@ async def student_page(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: 
 
 @student_router.get('/{document_id}/revisions/{revision_id}/preview')
 async def student_preview(document_id: uuid.UUID, revision_id: uuid.UUID, session_id: uuid.UUID,
-                          user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function"),
                           root: str = Depends(get_storage_root)):
     rev = await _student_rev(db, document_id, revision_id, user, session_id)
     if rev.preview_pdf_asset_id is None:
@@ -204,7 +204,7 @@ async def student_preview(document_id: uuid.UUID, revision_id: uuid.UUID, sessio
 @student_router.get('/{document_id}/revisions/{revision_id}/assets/{asset_id}')
 async def student_asset(document_id: uuid.UUID, revision_id: uuid.UUID, asset_id: uuid.UUID,
                         session_id: uuid.UUID, user: User = Depends(get_current_user),
-                        db: AsyncSession = Depends(get_db), root: str = Depends(get_storage_root)):
+                        db: AsyncSession = Depends(get_db, scope="function"), root: str = Depends(get_storage_root)):
     try:
         asset = await readable_asset(db, asset_id=asset_id, document_id=document_id, user_id=user.id,
                                      revision_id=revision_id, session_id=session_id)
@@ -216,7 +216,7 @@ async def student_asset(document_id: uuid.UUID, revision_id: uuid.UUID, asset_id
 @student_router.get('/{document_id}/revisions/{revision_id}/pages/{page_no}/image')
 async def student_page_image(document_id: uuid.UUID, revision_id: uuid.UUID, page_no: int,
                              session_id: uuid.UUID, user: User = Depends(get_current_user),
-                             db: AsyncSession = Depends(get_db),
+                             db: AsyncSession = Depends(get_db, scope="function"),
                              root: str = Depends(get_storage_root)):
     """One page of a revision's PDF as a PNG, for the citation preview: the
     chat draws the cited blocks' regions over it. Access as for the PDF."""
@@ -246,7 +246,7 @@ async def student_page_image(document_id: uuid.UUID, revision_id: uuid.UUID, pag
 async def student_original_pdf(document_id: uuid.UUID, session_id: uuid.UUID,
                                revision_id: uuid.UUID | None = None,
                                user: User = Depends(get_current_user),
-                               db: AsyncSession = Depends(get_db),
+                               db: AsyncSession = Depends(get_db, scope="function"),
                                root: str = Depends(get_storage_root)):
     """Serve the complete course PDF, with current session access checked anew.
 

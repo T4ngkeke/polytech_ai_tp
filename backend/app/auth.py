@@ -112,7 +112,7 @@ def decode_access_token(token: str) -> uuid.UUID:
 
 async def get_current_user(
     auth: HTTPAuthorizationCredentials = Depends(_security),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Decode the bearer token and return the matching **active** User row.
