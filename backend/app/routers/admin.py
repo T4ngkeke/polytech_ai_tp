@@ -38,7 +38,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.config import settings
-from backend.app.auth import hash_password, require_admin
+from backend.app.auth import hash_password_async, require_admin
 from backend.app.database import get_db
 from backend.app.models import (
     Class,
@@ -123,7 +123,7 @@ async def create_user(
         )
     user = User(
         username=body.username,
-        hashed_password=hash_password(body.password),
+        hashed_password=await hash_password_async(body.password),
         role=body.role,
         daily_token_quota=body.daily_token_quota,
     )
@@ -189,7 +189,7 @@ async def reset_user_password(
 ) -> UserResponse:
     """Admin reset of a user's password — no old password required."""
     user = await _get_active_user_or_404(db, user_id)
-    user.hashed_password = hash_password(body.new_password)
+    user.hashed_password = await hash_password_async(body.new_password)
     db.add(user)
     await db.flush()
     await db.refresh(user)
@@ -407,13 +407,13 @@ async def import_users_csv(
 
     if force:
         for entry in to_create:
-            db.add(User(username=entry["username"], hashed_password=hash_password(entry["password"]), role=entry["role"]))
+            db.add(User(username=entry["username"], hashed_password=await hash_password_async(entry["password"]), role=entry["role"]))
         response.created = len(to_create)
 
         for entry in to_update:
             res = await db.execute(select(User).where(User.username == entry["username"]))
             user = res.scalar_one()
-            user.hashed_password = hash_password(entry["password"])
+            user.hashed_password = await hash_password_async(entry["password"])
             db.add(user)
         response.updated = len(to_update)
         await db.flush()

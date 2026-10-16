@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.auth import (
     create_access_token,
     get_current_user,
-    hash_password,
-    verify_password,
+    hash_password_async,
+    verify_password_async,
 )
 from backend.app.database import get_db
 from backend.app.models import User, UserRole
@@ -67,7 +67,7 @@ async def signup(
 
     user = User(
         username=body.username,
-        hashed_password=hash_password(body.password),
+        hashed_password=await hash_password_async(body.password),
         role=UserRole.student,
     )
     db.add(user)
@@ -105,7 +105,7 @@ async def login(
     )
     user: User | None = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.hashed_password):
+    if user is None or not await verify_password_async(body.password, user.hashed_password):
         raise _INVALID_CREDENTIALS
 
     access_token = create_access_token(user_id=user.id)
@@ -149,12 +149,12 @@ async def change_password(
     so a stolen/active session alone cannot silently re-key the account.
     Returns HTTP 400 if the old password is incorrect.
     """
-    if not verify_password(body.old_password, current_user.hashed_password):
+    if not await verify_password_async(body.old_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Old password is incorrect",
         )
-    current_user.hashed_password = hash_password(body.new_password)
+    current_user.hashed_password = await hash_password_async(body.new_password)
     db.add(current_user)
     await db.flush()
     return {"detail": "Password changed"}
