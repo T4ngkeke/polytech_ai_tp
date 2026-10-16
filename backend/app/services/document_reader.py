@@ -138,7 +138,22 @@ def block_view(block, page, *, teacher: bool, assets=()):
     if teacher:
         view['source_text'] = block.source_text
         view['structure'] = block.structure
+        view['region'] = page_region(ref)
     return view
+
+
+def page_region(ref: dict) -> list[float] | None:
+    """Where MinerU found the block on its page, [x0, y0, x1, y1] in thousandths
+    of the page width and height (the page preview has the same shape), so a
+    teacher sees which picture a block is. None when MinerU gave no valid box."""
+    box = ((ref.get('legacy_ref') or {}).get('mineru_bbox_per_mille'))
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(v) for v in box)
+    except (TypeError, ValueError):
+        return None
+    return [x0, y0, x1, y1] if 0 <= x0 < x1 <= 1000 and 0 <= y0 < y1 <= 1000 else None
 
 
 async def _block_assets(db, rev, block_ids, *, teacher: bool):

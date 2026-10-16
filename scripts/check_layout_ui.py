@@ -18,6 +18,7 @@ PLAYWRIGHT_CHROMIUM may name a Chromium executable when Playwright's own build
 is not installed. UI_SHOTS_DIR, when set, receives a screenshot of each view
 for a human look.
 """
+import base64
 import json
 import os
 import re
@@ -343,6 +344,68 @@ def check_document_progress(browser, target, shots):
         MOCKS.pop('/api/teacher/labs/lab/documents')
 
 
+# A 640x360 PNG with a blue picture: the page preview of the mocked document.
+PREVIEW_PNG = base64.b64decode(
+    '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LL1fAYZh9Q8Fh6X3K8AwrP6h4LD0fgUYhtU/FByW3q8Aw7D6h4LD0vsVYBhW/1BwWHq/AgzD6h8KDkvvV4BhWP1DwWHp/QowDKt/KDgsvV8BhmH1DwWHpfcrwDCs/qHgsPR+BRiG1T8UHJberwDDsPqHgsPS+xVgGFb/UHBYer8CDMPqHwoOS+9XgGFY/UPBYen9CjAMq38oOCy9XwGGYfUPBYel9yvAMKz+oeCw9H4FGIbVPxQclt6vAMOw+oeCw9L7FWAYVv9QcFh6vwIMw+ofCg5L71eAYVj9Q8Fh6f0KMAyrfyg4LL1fAYZh9Q8Fh6X3K8AwrP6h4LD0fgUYhtU/FByW3q8Aw7D6h4LD0vsVYBhW/1BwWHq/AgzD6h8KDkvvV4BhWP1DwWHp/QowDKt/KDgsvV8BhmH1DwWHpfcrwDCs/qHgsPR+BRiG1T8UHJberwDDsPqHgsPS+xVgGFb/UHBYer8CDMPqHwoOS+9XgGFY/UPBYen9CjAMq38oOCy9XwGGYfUPBYel9yvAMKz+oeCw9H4FGIbVPxQclt6vAMOw+oeCw9L7FWAYVv9QcFh6vwIMw+ofCg5L71eAYVj9Q8Fh6f0KMAyrfyg4LL1fAYZh9Q8Fh6X3K8AwrP6h4LD0fgUYhtU/FByW3q8Aw7D6h4LD0vsVYBhW/1BwWHq/AgzD6h8KDkvvV4BhWP1DwWHp/QowDKt/KDgsvV8BhmH1DwWHpfcrwDCs/qHgsPR+BRiG1T8UHJberwDDsPqHgsPS+xVgGFb/UHBYer8CDMPqHwoOS+9XgGFY/UPBYen9CjAMq38oOCy9XwGGYfUPBYel9yvAMKz+oeCw9H4FGIbVPxQclt6vAMOw+oeCw9L7FWAYVv9QcFh6vwIMw+ofCg5L71eAYVj9Q8Fh6f0KMAyrfyg4LL1fAYZh9Q8Fh6X3K8AwrP6h4LD0fgUYhtU/FByW3q8Aw7D6h4LD0vsVYBhW/1BwWHq/AgzD6h8KDkvvV4BhWP1DwWHp/QowDKt/KDgsvV8BhmH1DwWHpfcrwDCs/qHgsPR+BRiG1T8UHJberwDDsPqHgsPS+xVgGFb/UHBYer8CDMPqHwoOS+9XgGFY/UPBYen9CjAMq38oOCy9XwGGYfUPBYel9yvAMKz+oeCw9H4FGIbVPxQclt6vAMOw+oeCw9L7FWAYVv9QcFh6vwIMw+ofCg5L71eAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoECAAaBAgAGgQIABoOALxBZd/WnbaWsAAAAASUVORK5CYII=')
+DOC_BASE = '/api/teacher/documents/d1/revisions/r1'
+PICTURE = {'block_id': 'b2', 'order_index': 1, 'type': 'figure', 'content': '', 'content_format': 'plain',
+           'content_description': None, 'context_description': None, 'description_origin': 'none',
+           'section_path': [], 'source_completeness': 'unknown', 'index_state': 'needs_review',
+           'edited_by_teacher': False, 'region': [500, 250, 950, 900], 'source_text': None, 'structure': {},
+           'issues': [{'code': 'content_review', 'message': 'Figure has no native PDF labels; use page preview'}],
+           'source': {'format': 'pdf', 'extraction_method': 'mineru_hybrid', 'native_object_ids': []}, 'assets': []}
+DOCUMENT_MOCKS = {
+    '/api/teacher/labs/lab/documents': [{**reading_doc('cours.pdf', 'ready'), 'id': 'd1', 'status': 'indexed',
+                                         'current_revision_id': 'r1'}],
+    '/api/teacher/documents/d1/revisions': {'generation': 1, 'current_revision_id': 'r1', 'revisions': [
+        {'id': 'r1', 'reason': 'upload', 'processing_state': 'ready', 'publication_state': 'published',
+         'index_ready': True, 'report': {'totals': {'pages': 1}}}]},
+    DOC_BASE + '/outline': {'items': [{'page_id': 'p1', 'source_slide_no': 1, 'state': 'usable', 'title': 'Cover'}],
+                            'next_cursor': None},
+    DOC_BASE + '/pages/p1': {
+        'page': {'page_id': 'p1', 'source_slide_no': 1, 'preview_page_no': 1, 'state': 'usable', 'issues': [],
+                 'width_cm': 33.9, 'height_cm': 19.1, 'preview_asset_id': 'a1', 'preview_mapping': 'verified'},
+        'blocks': [{**PICTURE, 'block_id': 'b1', 'order_index': 0, 'type': 'heading', 'content': 'Introduction',
+                    'source_completeness': 'complete', 'index_state': 'searchable', 'issues': [],
+                    'region': [50, 50, 450, 150]}, PICTURE],
+        'unavailable': [{'scope': 'block', 'block_id': 'b2', 'type': 'figure', 'code': 'source_unknown',
+                         'message': 'this block was not read completely from the source; see the page preview'}],
+        'reviews': []},
+}
+
+
+def check_document_pictures(browser, target, shots):
+    # A picture without text is numbered on the page preview, cropped beside its
+    # block and said plainly, without a warning; the teacher can describe it.
+    MOCKS.update(DOCUMENT_MOCKS)
+    try:
+        for theme, size in (('light', DESKTOP), ('dark', PHONE)):
+            name = f'document-pictures-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'teacher', '/teacher', theme, size)
+            page.route(f'**{DOC_BASE}/assets/a1', lambda route: route.fulfill(body=PREVIEW_PNG, content_type='image/png'))
+            try:
+                page.get_by_text('TP agent', exact=True).first.click()
+                page.get_by_role('button', name='Documents', exact=True).click()
+                page.get_by_text('cours.pdf', exact=True).click()
+                expect(page.get_by_role('button', name='Picture 1')).to_be_visible()
+                expect(page.get_by_text('no text · not searched', exact=True)).to_be_visible()
+                expect(page.get_by_role('button', name='Add a description')).to_be_visible()
+                expect(page.get_by_role('img', name='Picture 1')).to_have_count(1)
+                expect(page.get_by_text('not read completely', exact=False)).to_have_count(0)
+                expect(page.get_by_text('no native PDF labels', exact=False)).to_be_hidden()
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+    finally:
+        for key in DOCUMENT_MOCKS:
+            MOCKS.pop(key, None)
+
+
 def check_analytics(browser, target, shots):
     # The lab Analytics tab: charts, the student table and a quota refill, at every width.
     for theme in ('light', 'dark'):
@@ -467,6 +530,7 @@ def main():
             check_roles_and_tabs(browser, target)
             check_exam_documents(browser, target, shots)
             check_document_progress(browser, target, shots)
+            check_document_pictures(browser, target, shots)
             check_analytics(browser, target, shots)
             check_report(browser, target, shots)
             check_monitoring(browser, target, shots)

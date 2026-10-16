@@ -11,12 +11,15 @@ import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 
 import api, { responseError } from '../lib/api';
+import {
+  KIND_NAME, boxStyle, cropStyle, pictureNumbers, searchNote, visibleIssues, withoutText,
+} from '../lib/documentBlocks';
 import Icon from './Icon';
 
 const KINDS = ['heading', 'text', 'code', 'formula', 'table', 'figure', 'navigation'];
 const DESCRIBABLE = new Set(['figure', 'formula', 'table']);
 const STATE_LABEL = {
-  queued: 'queued', processing: 'processing', parsed: 'parsed · waiting for indexing',
+  queued: 'queued', processing: 'processing', parsed: 'indexing',
   ready: 'ready', partial: 'partial', failed: 'failed',
 };
 
@@ -221,28 +224,63 @@ function RevisionSummary({ revision }) {
 
 function PageView({ page, base, busy, change, docId }) {
   const preview = useAssetUrl(page.page.preview_asset_id ? `${base}/assets/${page.page.preview_asset_id}` : null);
+  const [ratio, setRatio] = useState(null); // page width / height, from the preview
+  const [active, setActive] = useState(null); // block under the pointer
+  const numbers = pictureNumbers(page.blocks);
+  const unsearched = page.blocks.filter(withoutText).length;
+  const pageRatio = ratio || (page.page.width_cm && page.page.height_cm ? page.page.width_cm / page.page.height_cm : null);
+  // Reviews tied to a block are shown under it; the others above the blocks.
+  const loose = (page.reviews || []).filter((r) => !page.blocks.some((b) => b.block_id === r.block_id));
+  const show = (blockId) => window.document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm text-cream">
         <span className="font-medium">Page {page.page.source_slide_no}</span>
-        <span className="text-xs text-cream-muted">
-          {page.page.preview_mapping === 'verified'
-            ? `preview page ${page.page.preview_page_no}`
-            : 'preview page not verified'}
-          {' · '}{page.page.state}
-        </span>
+        {page.page.preview_mapping !== 'verified' && <span className="text-xs text-cream-muted">preview page not verified</span>}
       </div>
-      {preview
-        ? <img src={preview} alt={`Preview of page ${page.page.source_slide_no}`} className="max-h-96 rounded border border-border-default" />
-        : <p className="rounded bg-ink-surface p-2 text-xs text-cream-muted">No verified preview for this page.</p>}
-      {page.unavailable.length > 0 && (
+      {preview ? (
+        <div className="relative inline-block max-w-full overflow-hidden rounded">
+          <img src={preview} alt={`Preview of page ${page.page.source_slide_no}`}
+            onLoad={(e) => setRatio(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)}
+            className="block max-h-[28rem] max-w-full rounded border border-border-default" />
+          {page.blocks.filter((b) => b.region && (numbers[b.block_id] || b.block_id === active)).map((b) => (
+            <button key={b.block_id} type="button" onClick={() => show(b.block_id)}
+              onMouseEnter={() => setActive(b.block_id)} onMouseLeave={() => setActive(null)}
+              aria-label={numbers[b.block_id] ? `Picture ${numbers[b.block_id]}` : KIND_NAME[b.type]}
+              style={boxStyle(b.region)}
+              className={`absolute cursor-pointer rounded-sm border-2 ${b.block_id === active
+                ? 'z-10 border-[3px] border-cyan bg-cyan/25 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]'
+                : 'border-cyan/60 hover:border-cyan'}`}>
+              {numbers[b.block_id] && (
+                <span className="absolute -left-0.5 -top-0.5 rounded-br bg-cyan px-1 text-[10px] font-semibold leading-4 text-on-accent">
+                  {numbers[b.block_id]}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      ) : <p className="rounded bg-ink-surface p-2 text-xs text-cream-muted">No preview for this page.</p>}
+      {page.unavailable.filter((u) => u.scope === 'page').length > 0 && (
         <ul className="space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
-          {page.unavailable.map((u, i) => <li key={i}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {u.message}{u.type ? ` (${u.type})` : ''}</li>)}
+          {page.unavailable.filter((u) => u.scope === 'page').map((u, i) => (
+            <li key={i}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {u.message}</li>
+          ))}
         </ul>
       )}
-      {page.reviews?.map((r) => <ReviewCard key={r.id} review={r} busy={busy} change={change} docId={docId} base={base} />)}
+      {unsearched > 0 && (
+        <p className="text-xs text-cream-muted">
+          {unsearched === 1 ? 'One picture on this page has no text, so Search does not find it'
+            : `${unsearched} pictures on this page have no text, so Search does not find them`}; Research can still
+          look at the page image. Describe a diagram if Search should find it.
+        </p>
+      )}
+      {loose.map((r) => <ReviewCard key={r.id} review={r} busy={busy} change={change} base={base} />)}
       <ul className="space-y-2">
-        {page.blocks.map((b) => <BlockCard key={b.block_id} block={b} busy={busy} change={change} docId={docId} base={base} />)}
+        {page.blocks.map((b) => (
+          <BlockCard key={b.block_id} block={b} number={numbers[b.block_id]} busy={busy} change={change} docId={docId}
+            preview={preview} pageRatio={pageRatio} active={b.block_id === active} onActive={setActive}
+            reviews={(page.reviews || []).filter((r) => r.block_id === b.block_id)} base={base} />
+        ))}
       </ul>
     </section>
   );
@@ -256,7 +294,7 @@ function ReviewCard({ review, busy, change, base }) {
       ...(status === 'confirmed' ? { content: text } : {}),
     }));
   return (
-    <div className="rounded border border-gold/40 p-2 text-xs">
+    <div className="mt-2 rounded border border-gold/40 p-2 text-xs">
       <p className="text-gold">
         {review.kind === 'vision_description' ? `Model description (${review.model}) — check it against the picture` : review.reason}
       </p>
@@ -271,13 +309,28 @@ function ReviewCard({ review, busy, change, base }) {
   );
 }
 
-function BlockCard({ block, busy, change, docId }) {
+// The region of the page preview where the block is.
+function Crop({ preview, region, pageRatio, label }) {
+  if (!preview || !region || !pageRatio) return null;
+  const crop = cropStyle(region, pageRatio);
+  return (
+    <div style={crop.frame} className="relative max-h-40 w-40 shrink-0 overflow-hidden rounded border border-border-default bg-white">
+      <img src={preview} alt={label} style={crop.image} className="absolute max-w-none" />
+    </div>
+  );
+}
+
+function BlockCard({ block, number, busy, change, docId, preview, pageRatio, active, onActive, reviews, base }) {
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(block.content);
   const [kind, setKind] = useState(block.type);
   const [description, setDescription] = useState(block.content_description || '');
   const url = `/api/teacher/documents/${docId}/blocks/${block.block_id}`;
   const excluded = block.index_state === 'excluded';
+  const bare = withoutText(block);
+  const note = searchNote(block);
+  const issues = visibleIssues(block);
+  const name = number ? `Picture ${number}` : KIND_NAME[block.type] || block.type;
 
   const save = async () => {
     const body = {};
@@ -292,54 +345,74 @@ function BlockCard({ block, busy, change, docId }) {
   };
 
   return (
-    <li className={`rounded border p-2 ${excluded ? 'border-dashed border-border-default opacity-70' : 'border-border-default'}`}>
+    <li id={`block-${block.block_id}`} onMouseEnter={() => onActive(block.block_id)} onMouseLeave={() => onActive(null)}
+      className={`rounded border p-2 ${active ? 'border-cyan/60' : 'border-border-default'} ${excluded ? 'border-dashed opacity-70' : ''}`}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-cream-muted">
-        <span className="font-medium text-cream-secondary">{block.type}</span>
-        <span>{block.source_completeness}</span>
-        <span>{block.index_state}</span>
+        {number && <span className="rounded bg-cyan px-1 text-[10px] font-semibold leading-4 text-on-accent">{number}</span>}
+        <span className="font-medium text-cream-secondary">{name}</span>
+        {note && <span className="rounded bg-ink-surface px-1.5">{note}</span>}
         {block.edited_by_teacher && <span className="text-cyan">teacher revised</span>}
-        {block.description_origin !== 'none' && <span>description: {block.description_origin}</span>}
-        <span className="ml-auto flex gap-2">
-          {!editing && <button type="button" disabled={busy} onClick={() => setEditing(true)} className="text-cyan hover:underline">Edit</button>}
-          <button type="button" disabled={busy}
-            onClick={() => change(excluded ? 'Include' : 'Exclude', (target) => api.post(`${url}/exclude`, { ...target, excluded: !excluded }))}
-            className="hover:underline">{excluded ? 'Index again' : 'No indexing needed'}</button>
+        <span className="ml-auto flex flex-wrap gap-x-3 gap-y-1">
+          {!editing && (
+            <button type="button" disabled={busy} onClick={() => setEditing(true)} className="text-cyan hover:underline">
+              {bare ? 'Add a description' : 'Edit'}
+            </button>
+          )}
           {DESCRIBABLE.has(block.type) && (
             <button type="button" disabled={busy}
               onClick={() => change('Describe', (target) => api.post(`${url}/describe`, { expected_revision_id: target.expected_revision_id }))}
-              className="hover:underline">Ask model to describe</button>
+              title="The model looks at the picture and proposes a text; you check it before it is used"
+              className="hover:underline">Write with AI</button>
           )}
+          <button type="button" disabled={busy}
+            onClick={() => change(excluded ? 'Include' : 'Exclude', (target) => api.post(`${url}/exclude`, { ...target, excluded: !excluded }))}
+            title={excluded ? 'Search finds this block again' : 'Search skips this block; it stays on the page'}
+            className="hover:underline">{excluded ? 'Search again' : 'Leave out of search'}</button>
         </span>
       </div>
-      {editing ? (
-        <div className="space-y-2">
-          <select value={kind} onChange={(e) => setKind(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-xs text-cream">
-            {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-          </select>
-          <textarea value={content} onChange={(e) => setContent(e.target.value)}
-            rows={Math.min(16, Math.max(3, content.split('\n').length + 1))}
-            className="w-full resize-y rounded border border-border-default bg-ink-deep p-2 font-mono text-sm text-cream" />
-          <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={400}
-            placeholder="What this block is for (optional, max 400 characters)"
-            className="w-full rounded border border-border-default bg-ink-deep p-1 text-xs text-cream" />
-          <div className="flex gap-2">
-            <button type="button" onClick={save} disabled={busy} className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50">Save as new draft</button>
-            <button type="button" disabled={busy} onClick={() => { setEditing(false); setContent(block.content); setKind(block.type); setDescription(block.content_description || ''); }}
-              className="rounded border border-border-default px-3 py-1 text-xs text-cream-secondary">Cancel</button>
-          </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        {block.type === 'figure' && <Crop preview={preview} region={block.region} pageRatio={pageRatio} label={name} />}
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <div className="space-y-2">
+              <select value={kind} onChange={(e) => setKind(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-xs text-cream">
+                {KINDS.map((k) => <option key={k} value={k}>{KIND_NAME[k]}</option>)}
+              </select>
+              <textarea value={content} onChange={(e) => setContent(e.target.value)}
+                rows={Math.min(16, Math.max(3, content.split('\n').length + 1))}
+                placeholder={bare ? 'What the picture shows, with its labels. Search finds this text.' : undefined}
+                className="w-full resize-y rounded border border-border-default bg-ink-deep p-2 font-mono text-sm text-cream" />
+              <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={400}
+                placeholder="What this block is for (optional, max 400 characters)"
+                className="w-full rounded border border-border-default bg-ink-deep p-1 text-xs text-cream" />
+              <div className="flex gap-2">
+                <button type="button" onClick={save} disabled={busy} className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50">Save</button>
+                <button type="button" disabled={busy} onClick={() => { setEditing(false); setContent(block.content); setKind(block.type); setDescription(block.content_description || ''); }}
+                  className="rounded border border-border-default px-3 py-1 text-xs text-cream-secondary">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            block.content
+              ? <pre className="whitespace-pre-wrap break-words font-mono text-sm text-cream-secondary">{block.content}</pre>
+              : !bare && <p className="text-sm text-cream-muted">—</p>
+          )}
+          {block.content_description && !editing && <p className="mt-1 text-xs italic text-cyan">{block.content_description}</p>}
+          {block.edited_by_teacher && block.source_text != null && block.source_text !== block.content && (
+            <details className="mt-1 text-xs text-cream-muted"><summary>Text read from the PDF</summary>
+              <pre className="whitespace-pre-wrap font-mono">{block.source_text}</pre></details>
+          )}
+          {issues.length > 0 && (
+            <ul className="mt-1 text-xs text-gold">{issues.map((i, n) => <li key={n}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {i.message}</li>)}</ul>
+          )}
+          {reviews.map((r) => <ReviewCard key={r.id} review={r} busy={busy} change={change} base={base} />)}
+          <details className="mt-1 text-[10px] text-cream-muted">
+            <summary className="cursor-pointer">Details</summary>
+            <p>read from the source: {block.source_completeness} · search: {block.index_state} · {block.source.extraction_method}
+              {block.description_origin !== 'none' ? ` · description: ${block.description_origin}` : ''}</p>
+            {(block.issues || []).filter((i) => !issues.includes(i)).map((i, n) => <p key={n}>{i.code}: {i.message}</p>)}
+          </details>
         </div>
-      ) : (
-        <pre className="whitespace-pre-wrap break-words font-mono text-sm text-cream-secondary">{block.content || '—'}</pre>
-      )}
-      {block.content_description && !editing && <p className="mt-1 text-xs italic text-cyan">{block.content_description}</p>}
-      {block.edited_by_teacher && block.source_text != null && block.source_text !== block.content && (
-        <details className="mt-1 text-xs text-cream-muted"><summary>Native text</summary>
-          <pre className="whitespace-pre-wrap font-mono">{block.source_text}</pre></details>
-      )}
-      {block.issues.length > 0 && (
-        <ul className="mt-1 text-xs text-gold">{block.issues.map((i, n) => <li key={n}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {i.message}</li>)}</ul>
-      )}
-      <p className="mt-1 text-[10px] text-cream-muted">source: {block.source.extraction_method} · {block.source.native_object_ids.join(', ')}</p>
+      </div>
     </li>
   );
 }

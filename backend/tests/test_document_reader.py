@@ -61,6 +61,9 @@ async def test_a_teacher_reads_the_draft_with_its_gaps(db_session, storage, tmp_
     first = await get(db_session, teacher, f"{T}/{ids['doc_id']}/revisions/{ids['rev_id']}/pages/{pages[0].page_id}")
     code = next(b for b in first.json()['blocks'] if 'SELECT' in b['content'])
     assert 'SELECT\tnom,   prix' in code['content'] and code['source']['content_origin'] == 'mineru_model'
+    # The teacher sees where each block is on the page (MinerU's box, thousandths of the page).
+    assert code['region'] == [80, 320, 900, 420]
+    assert next(b for b in first.json()['blocks'] if b['type'] == 'figure')['region'] == [80, 600, 900, 900]
     # Another teacher cannot read it.
     stranger = await get(db_session, await db_session.get(type(teacher), ids['outsider_id']),
                          f"{T}/{ids['doc_id']}/revisions/{ids['rev_id']}/pages/{pages[0].page_id}")
@@ -83,7 +86,8 @@ async def test_a_student_never_reads_a_draft(db_session, storage, tmp_path):
                    session_id=ids['chat_id'])
     assert ok.status_code == 200, ok.text
     view = ok.json()
-    assert 'reviews' not in view and all('source_text' not in b and 'structure' not in b for b in view['blocks'])
+    assert 'reviews' not in view and all('source_text' not in b and 'structure' not in b and 'region' not in b
+                                         for b in view['blocks'])
     assert view['newer_revision_available'] is False
 
 
@@ -269,3 +273,12 @@ async def test_tool_endpoints_return_the_envelope_and_error_codes(db_session, st
     assert bad.status_code == 400 and bad.json()['detail']['code'] == 'invalid_cursor'
     missing = await get(db_session, teacher, f'{base}/read', block_id=uuid.uuid4())
     assert missing.status_code == 404 and missing.json()['detail']['code'] == 'not_found'
+
+
+def test_a_box_outside_the_page_gives_no_region():
+    box = lambda value: {'legacy_ref': {'mineru_bbox_per_mille': value}}  # noqa: E731
+    assert reader.page_region(box([0, 0, 1000, 1000])) == [0, 0, 1000, 1000]
+    assert reader.page_region({}) is None
+    assert reader.page_region(box([10, 10, 5, 20])) is None
+    assert reader.page_region(box([0, 0, 1200, 50])) is None
+    assert reader.page_region(box(['a', 0, 1, 1])) is None
