@@ -13,6 +13,7 @@ test('an embedded dashboard hides the Grafana menus and follows the app theme', 
 test('the full Grafana page keeps its menus; an unknown dashboard opens System', () => {
   assert.equal(dashboardUrl('answers', { embedded: false }), '/grafana/d/edullm-answers/?orgId=1&theme=light');
   assert.match(dashboardUrl('nope'), /edullm-system/);
+  assert.ok(dashboardUrl('models').startsWith('/grafana/d/edullm-models/?'));
 });
 
 test('Grafana is running only when its health check answers; 401 means not allowed', async () => {

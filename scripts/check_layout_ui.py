@@ -404,7 +404,7 @@ def check_report(browser, target, shots):
 
 def check_monitoring(browser, target, shots):
     """Grafana is closed without the monitoring cookie. With MONITORING_COOKIE
-    (an admin's monitoring token), both dashboards load inside the admin page,
+    (an admin's monitoring token), the three dashboards load inside the admin page,
     in the app's theme, at both widths."""
     cookie = os.getenv('MONITORING_COOKIE')
     context, page, errors = open_page(browser, target, 'admin', '/admin', 'light', DESKTOP)
@@ -435,6 +435,9 @@ def check_monitoring(browser, target, shots):
                 page.get_by_role('button', name='Answers').click()
                 answers = page.frame_locator('iframe[title="answers dashboard"]')
                 expect(answers.get_by_text('Students only').first).to_be_visible(timeout=20000)
+                page.get_by_role('button', name='Model servers').click()
+                models = page.frame_locator('iframe[title="models dashboard"]')
+                expect(models.get_by_text('MTP: tokens per step, time range').first).to_be_visible(timeout=20000)
                 overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
                 assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
                 if shots:

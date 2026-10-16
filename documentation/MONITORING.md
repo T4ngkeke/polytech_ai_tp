@@ -1,12 +1,13 @@
 # Monitoring
 
-The admin page has a **Monitoring** tab. It shows two Grafana dashboards inside
+The admin page has a **Monitoring** tab. It shows three Grafana dashboards inside
 the app, without Grafana's menus:
 
 | Dashboard | Shows | Source |
 |---|---|---|
 | System | Which containers run; memory, swap, CPU, GPU use, temperature and power; for each model server the requests running and waiting, KV cache use, time to first token, queue time and tokens per second; memory and CPU by container | Prometheus |
 | Answers | Questions, median time, tool limit reached, failures, questions asked back, thumbs down; questions per hour and answer time by mode; a table by mode; why runs stopped; the latest 200 questions; model calls by purpose; document jobs | PostgreSQL |
+| Model servers | The vLLM servers in detail: time to first token, time between tokens and whole request (median and 95%); prompt and written tokens per second; where the time of an LLM request goes (queue, prompt, writing); prefix cache hits, prompt tokens computed or taken from the cache, KV cache use, image cache hits, preemptions, waiting requests by reason; MTP (speculative decoding): share of guessed tokens accepted, tokens per step, acceptance by guessed position; prompt and answer lengths; the cache settings each server started with. Every panel has an (i) that says what it means | Prometheus |
 
 The Answers dashboard leaves teacher test sessions out unless "Sessions" is set
 to "With teacher tests". "Open in Grafana" opens the full Grafana page in a new
