@@ -8,12 +8,14 @@
  * charts cover the last 30 days. "Today" token figures are the student's
  * quota, which all their classes share.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 
 import api from '../lib/api';
+import Icon from './Icon';
 import {
-  WEEKDAYS, busiestHour, canRefill, heatLevel, lastActive, quotaShare, shortDay, sortStudents,
+  WEEKDAYS, busiestHour, canRefill, heatLevel, lastActive, questionCount, quotaShare, shortDay,
+  sortStudents, tipShift,
 } from '../lib/analytics';
 
 const MODE_LABEL = { direct: 'Direct', search: 'Search', research: 'Research' };
@@ -92,16 +94,55 @@ function Card({ title, note, children }) {
   );
 }
 
+/**
+ * Tooltip shown at once over the bar or cell under the pointer (a tap on a
+ * phone). The browser's own `title` tooltip is late and absent on touch.
+ */
+function useTip() {
+  const ref = useRef(null);
+  const [tip, setTip] = useState(null);
+  const show = (text) => (event) => {
+    const box = ref.current?.getBoundingClientRect();
+    if (!box) return;
+    const r = event.currentTarget.getBoundingClientRect();
+    const x = r.left + r.width / 2 - box.left;
+    setTip({ text, x, y: r.top - box.top, shift: tipShift(x, box.width) });
+  };
+  const hide = () => setTip(null);
+  // A phone sends no mouseleave: a tap elsewhere closes the tooltip.
+  useEffect(() => {
+    if (!tip) return undefined;
+    const away = (event) => { if (!ref.current?.contains(event.target)) setTip(null); };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [tip]);
+  const on = (text) => ({ onMouseEnter: show(text), onClick: show(text), 'aria-label': text });
+  return { ref, tip, on, hide };
+}
+
+function Tip({ tip }) {
+  if (!tip) return null;
+  return (
+    <div role="tooltip" style={{ left: tip.x, top: tip.y - 6, transform: `translate(${tip.shift}, -100%)` }}
+      className="pointer-events-none absolute z-10 whitespace-nowrap rounded-md border border-border-default bg-ink-surface px-2 py-1 text-[11px] text-cream shadow-lg">
+      {tip.text}
+    </div>
+  );
+}
+
 function DailyBars({ days }) {
   const max = Math.max(1, ...days.map((d) => d.questions));
+  const { ref, tip, on, hide } = useTip();
   return (
-    <div>
+    <div ref={ref} className="relative" onMouseLeave={hide}>
       <div className="flex h-28 items-end gap-[2px]" role="img"
         aria-label={`Questions per day, at most ${max} in one day`}>
         {days.map((d) => (
-          <div key={d.date} title={`${shortDay(d.date)}: ${d.questions} question${d.questions === 1 ? '' : 's'}`}
-            className="flex-1 rounded-t bg-cyan/70 hover:bg-cyan"
-            style={{ height: d.questions ? `${Math.max(4, (100 * d.questions) / max)}%` : '1px' }} />
+          <div key={d.date} {...on(`${shortDay(d.date)}: ${questionCount(d.questions)}`)}
+            className="group flex h-full flex-1 cursor-default items-end">
+            <div className="w-full rounded-t bg-cyan/70 group-hover:bg-cyan"
+              style={{ height: d.questions ? `${Math.max(4, (100 * d.questions) / max)}%` : '1px' }} />
+          </div>
         ))}
       </div>
       <div className="mt-1 flex justify-between text-[10px] text-cream-muted">
@@ -109,34 +150,46 @@ function DailyBars({ days }) {
         <span>max {max} / day</span>
         <span>{shortDay(days[days.length - 1].date)}</span>
       </div>
+      <Tip tip={tip} />
     </div>
   );
 }
 
 function BusiestNote({ heatmap }) {
   const best = busiestHour(heatmap);
-  return best ? `Busiest: ${best.day} ${best.hour}:00–${best.hour + 1}:00` : 'No questions yet';
+  return best
+    ? `Busiest: ${best.day} ${best.hour}:00–${best.hour + 1}:00 (${questionCount(best.count)})`
+    : 'No questions yet';
 }
 
 function Heatmap({ heatmap }) {
   const max = Math.max(0, ...heatmap.flat());
+  const { ref, tip, on, hide } = useTip();
   return (
-    <div className="overflow-x-auto">
-      <div className="grid min-w-[420px] grid-cols-[2rem_repeat(24,minmax(0,1fr))] gap-[2px] text-[10px] text-cream-muted">
-        {heatmap.map((hours, day) => (
-          <div key={WEEKDAYS[day]} className="contents">
-            <span className="self-center">{WEEKDAYS[day]}</span>
-            {hours.map((count, hour) => (
-              <div key={hour} title={`${WEEKDAYS[day]} ${hour}:00 — ${count} question${count === 1 ? '' : 's'}`}
-                className={`h-4 rounded-sm ${HEAT[heatLevel(count, max)]}`} />
-            ))}
-          </div>
-        ))}
-        <span />
-        {Array.from({ length: 24 }, (_, hour) => (
-          <span key={hour} className="text-center">{hour % 6 === 0 ? hour : ''}</span>
-        ))}
+    <div ref={ref} className="relative" onMouseLeave={hide}>
+      <div className="overflow-x-auto" onScroll={hide}>
+        <div className="grid min-w-[420px] grid-cols-[2rem_repeat(24,minmax(0,1fr))] gap-[2px] text-[10px] text-cream-muted">
+          {heatmap.map((hours, day) => (
+            <div key={WEEKDAYS[day]} className="contents">
+              <span className="self-center">{WEEKDAYS[day]}</span>
+              {hours.map((count, hour) => (
+                <div key={hour} {...on(`${WEEKDAYS[day]} ${hour}:00–${hour + 1}:00: ${questionCount(count)}`)}
+                  className={`h-4 rounded-sm ${HEAT[heatLevel(count, max)]} hover:ring-1 hover:ring-cream-secondary`} />
+              ))}
+            </div>
+          ))}
+          <span />
+          {Array.from({ length: 24 }, (_, hour) => (
+            <span key={hour} className="text-center">{hour % 6 === 0 ? hour : ''}</span>
+          ))}
+        </div>
       </div>
+      <div className="mt-2 flex items-center justify-end gap-1 text-[10px] text-cream-muted">
+        <span>0</span>
+        {HEAT.map((shade) => <span key={shade} className={`h-3 w-3 rounded-sm ${shade}`} />)}
+        <span>{questionCount(max)} in one hour</span>
+      </div>
+      <Tip tip={tip} />
     </div>
   );
 }
@@ -149,7 +202,8 @@ function Modes({ modes }) {
 
 const COLUMNS = [
   ['username', 'Student'], ['questions', 'Questions'], ['last_active', 'Last active'],
-  ['today', 'Today'], ['thumbs_down', '👎'],
+  ['today', 'Today'],
+  ['thumbs_down', <Icon key="icon" name="thumbsDown" className="inline h-3.5 w-3.5 align-[-2px]" title="Thumbs down" />],
 ];
 
 function StudentTable({ students, classId, onReload, onOpenStudent }) {

@@ -5,6 +5,21 @@
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/** "1 question", "3 questions". */
+export function questionCount(n) {
+  return `${n} question${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * Horizontal shift of a chart tooltip centred on x in a chart `width` wide,
+ * so a tooltip near an edge stays inside the chart.
+ */
+export function tipShift(x, width) {
+  if (x < width * 0.15) return '0%';
+  if (x > width * 0.85) return '-100%';
+  return '-50%';
+}
+
 /** Shade 0 (none) to 4 (busiest hour) of one hour-of-week cell. */
 export function heatLevel(count, max) {
   if (!count || !max) return 0;

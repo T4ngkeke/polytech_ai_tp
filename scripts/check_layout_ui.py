@@ -246,6 +246,17 @@ def check_analytics(browser, target, shots):
                 page.get_by_role('button', name='Analytics', exact=True).click()
                 expect(page.get_by_text('When students ask', exact=True)).to_be_visible()
                 expect(page.get_by_text('Busiest:', exact=False)).to_be_visible()
+                # Each bar and cell shows its number at once, inside the screen (a tap on a phone).
+                for cell, text in ((page.get_by_label('Mon 9:00–10:00: 1 question'), 'Mon 9:00–10:00: 1 question'),
+                                   (page.locator('[aria-label$=": 4 questions"]').first, ': 4 questions'),
+                                   (page.locator('[aria-label^="Sun 22:00"]'), 'Sun 22:00–23:00')):
+                    cell.scroll_into_view_if_needed()
+                    page.wait_for_timeout(200)       # a scroll of the heatmap closes the tooltip
+                    cell.click() if size == PHONE else cell.hover()
+                    tip = page.get_by_role('tooltip')
+                    expect(tip).to_contain_text(text)
+                    box = tip.bounding_box()
+                    assert box['x'] >= 0 and box['x'] + box['width'] <= size[0], f'{name}: tooltip off screen {box}'
                 overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
                 assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
                 refill = page.get_by_role('button', name='Refill')

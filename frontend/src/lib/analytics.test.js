@@ -1,7 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { busiestHour, canRefill, heatLevel, lastActive, quotaShare, shortDay, sortStudents } from './analytics.js';
+import {
+  busiestHour, canRefill, heatLevel, lastActive, questionCount, quotaShare, shortDay, sortStudents, tipShift,
+} from './analytics.js';
+
+test('question counts read as words', () => {
+  assert.equal(questionCount(0), '0 questions');
+  assert.equal(questionCount(1), '1 question');
+  assert.equal(questionCount(7), '7 questions');
+});
+
+test('a tooltip near an edge of the chart stays inside it', () => {
+  assert.equal(tipShift(5, 400), '0%');
+  assert.equal(tipShift(200, 400), '-50%');
+  assert.equal(tipShift(395, 400), '-100%');
+});
 
 test('an hour with questions is never blank; the busiest is the darkest', () => {
   assert.equal(heatLevel(0, 10), 0);
