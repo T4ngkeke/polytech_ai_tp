@@ -88,10 +88,16 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     container_name: edullm-release-frontend
+    # HTTPS on the default port 443; 18443 (the v6-beta port) keeps old links
+    # working; port 80 only redirects to HTTPS; 127.0.0.1:18080 for checks.
     ports:
       - "127.0.0.1:18080:80"
-      - "${RELEASE_LAN_IP:?set RELEASE_LAN_IP}:18443:443"
-      - "${RELEASE_TAILSCALE_IP:?set RELEASE_TAILSCALE_IP}:18443:443"
+      - "${RELEASE_LAN_IP:?set RELEASE_LAN_IP}:443:443"
+      - "${RELEASE_LAN_IP}:18443:443"
+      - "${RELEASE_LAN_IP}:80:8081"
+      - "${RELEASE_TAILSCALE_IP:?set RELEASE_TAILSCALE_IP}:443:443"
+      - "${RELEASE_TAILSCALE_IP}:18443:443"
+      - "${RELEASE_TAILSCALE_IP}:80:8081"
     volumes:
       - ./frontend/nginx.release.conf:/etc/nginx/conf.d/default.conf:ro
       - ${RELEASE_TLS_DIR:?set RELEASE_TLS_DIR}:/etc/nginx/tls:ro

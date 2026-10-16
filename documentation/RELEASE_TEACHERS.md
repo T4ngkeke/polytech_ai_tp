@@ -1,8 +1,9 @@
 # Release to the teachers (replacing v6-beta)
 
 **Done on 2026-10-16** (see "The switch of 2026-10-16" below). The teachers'
-address is unchanged: `https://192.168.168.199:18443/` (also on Tailscale,
-`https://100.108.32.29:18443/`), same certificate and CA.
+address is `https://192.168.168.199/` (also on Tailscale,
+`https://100.108.32.29/`), with the v6-beta certificate and CA. The v6-beta
+address with port 18443 still works, and `http://` redirects to `https://`.
 
 The teachers who used v6-beta moved to the current version on 2026-10-16.
 Classes start in exam mode: answers are written directly, without the course
@@ -11,7 +12,7 @@ Teachers can then try the rest (course PDFs, Search and Research, Test drive,
 Analytics, AI reports) and report what they find.
 
 Everyone logs in again once (new JWT secret); passwords are unchanged. The
-former Tailscale address on port 80 (v6-stable) is closed: use port 18443.
+former Tailscale address on port 80 (v6-stable) now redirects to the HTTPS one.
 
 ## The former problem in the v6 deployment
 
@@ -47,7 +48,7 @@ settings in `~/.local/share/polytech-release/.env`, mode 0600):
 
 | Container | What |
 |---|---|
-| `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`: HTTPS on 192.168.168.199:18443 and 100.108.32.29:18443 (v6-beta certificate, `RELEASE_TLS_DIR`), HTTP on 127.0.0.1:18080 only |
+| `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`: HTTPS on 192.168.168.199 and 100.108.32.29, ports 443 and 18443 (the v6-beta port, for old links), port 80 redirecting to HTTPS (v6-beta certificate, `RELEASE_TLS_DIR`), HTTP on 127.0.0.1:18080 only |
 | `edullm-release-backend`, `edullm-release-worker` | this version; models on `edullm-models` (Flash-Next as `ornith`, Qwen3 reranker, bge-m3 on vLLM, MinerU) |
 | `edullm-release-db` | PostgreSQL with pgvector, volume `edullm-release_release_postgres_data` |
 | `edullm-release-backup` | a checked `pg_dump` every 24 h in volume `edullm-release_release_backups`, 14 days kept |
