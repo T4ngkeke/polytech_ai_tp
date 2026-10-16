@@ -5,7 +5,7 @@
  */
 
 export const DASHBOARDS = [
-  { key: 'system', uid: 'edullm-system', label: 'System', hint: 'Machine, GPU, model servers, containers' },
+  { key: 'system', uid: 'edullm-system', label: 'System', hint: 'Which services run; machine, GPU, containers' },
   { key: 'answers', uid: 'edullm-answers', label: 'Answers', hint: 'Questions, answer times, model calls, documents' },
   { key: 'models', uid: 'edullm-models', label: 'Model servers', hint: 'vLLM: speed, prefix and KV caches, MTP' },
 ];
