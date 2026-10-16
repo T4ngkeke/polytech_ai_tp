@@ -10,10 +10,12 @@ from sqlalchemy import select
 
 from backend.app.main import app
 from backend.app.models import (
-    DocChunk, Document, DocumentBlock, DocumentReview, DocumentRevision, IngestionJob,
+    DocChunk, Document, DocumentAsset, DocumentBlock, DocumentPage, DocumentReview, DocumentRevision, IngestionJob,
 )
 from backend.app.routers.document_versions import get_describe_fn
 from backend.app.services import document_versions as versions
+from backend.app.services import document_storage
+from backend.app.services import vision_descriptions as vision
 from backend.app.services.vision_descriptions import VisionResult
 from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_client
@@ -360,5 +362,55 @@ async def test_a_too_long_description_is_refused_not_cut(db_session, storage, tm
                           await target(db_session, ids))
         assert resp.status_code == 422 and resp.json()['detail'] == 'description_too_long'
         assert await db_session.scalar(select(DocumentReview.id)) is None
+    finally:
+        app.dependency_overrides.pop(get_describe_fn, None)
+
+
+def png_size(data):
+    return int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')
+
+
+def test_a_picture_is_cut_out_of_its_page_with_a_small_margin():
+    import pymupdf
+    page = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 1000, 500), False)
+    page.set_rect(page.irect, (255, 255, 255))
+    page.set_rect(pymupdf.IRect(500, 250, 1000, 500), (0, 0, 255))
+    data = page.tobytes('png')
+    crop = vision.crop_region(data, 'image/png', [500, 500, 1000, 1000])
+    # 2% of the page around the picture, clipped at the page edge.
+    assert png_size(crop) == (520, 260)
+    with pymupdf.open(stream=crop, filetype='png') as doc:
+        pix = doc[0].get_pixmap()
+        assert pix.pixel(pix.width - 2, pix.height - 2) == (0, 0, 255)
+    assert vision.crop_region(data, 'image/png', None) is None
+    assert vision.crop_region(data, 'image/jpeg', [0, 0, 500, 500]) is None
+    assert vision.crop_region(data, 'image/png', [0, 0, 5, 5]) is None   # too small: the whole page goes
+    assert vision.crop_region(b'not a png', 'image/png', [0, 0, 500, 500]) is None
+
+
+@pytest.mark.asyncio
+async def test_the_model_sees_the_picture_not_the_whole_page(db_session, storage, tmp_path, deck_bytes):
+    teacher, _, _, ids = await parsed(db_session, storage, tmp_path, deck_bytes)
+    sent = []
+
+    async def describe(image, mime, context):
+        sent.append((image, mime))
+        return VisionResult(text='Un schema.', model='test-vlm', latency_ms=1, usage=None)
+
+    app.dependency_overrides[get_describe_fn] = lambda: describe
+    try:
+        figure = await figure_block(db_session, ids['rev_id'])
+        page = await db_session.scalar(select(DocumentPage).where(
+            DocumentPage.revision_id == figure.revision_id, DocumentPage.page_id == figure.page_id))
+        preview = await db_session.get(DocumentAsset, page.preview_asset_id)
+        preview_key, preview_sha = preview.storage_key, preview.sha256
+        resp = await call(db_session, teacher, 'POST', f"{T}/{ids['doc_id']}/blocks/{figure.block_id}/describe",
+                          await target(db_session, ids))
+        assert resp.status_code == 200, resp.text
+        image, mime = sent[0]
+        page_w, page_h = png_size(document_storage.verified_path(str(storage), preview_key, preview_sha).read_bytes())
+        crop_w, crop_h = png_size(image)
+        # The fixture picture spans [80, 600, 900, 900] of the page, plus the margin.
+        assert mime == 'image/png' and crop_w < page_w and crop_h < page_h / 2
     finally:
         app.dependency_overrides.pop(get_describe_fn, None)

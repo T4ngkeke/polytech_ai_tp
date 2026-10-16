@@ -99,7 +99,7 @@ from backend.app.routers.teacher import get_storage_root  # noqa: E402
 from backend.app.services import document_edits as edits  # noqa: E402
 from backend.app.services import document_storage  # noqa: E402
 from backend.app.services import vision_descriptions as vision  # noqa: E402
-from backend.app.services.document_reader import review_view  # noqa: E402
+from backend.app.services.document_reader import page_region, review_view  # noqa: E402
 
 
 class RevisionTarget(GenerationRequest):
@@ -245,7 +245,8 @@ async def describe_block(document_id: uuid.UUID, block_id: uuid.UUID, body: Revi
                                                       DocumentPage.page_id == block.page_id))
     image = await db.scalar(select(DocumentAsset).join(DocumentBlockAsset, DocumentBlockAsset.asset_id == DocumentAsset.id)
         .where(DocumentBlockAsset.revision_id == rev.id, DocumentBlockAsset.block_id == block.block_id,
-               DocumentAsset.mime.in_(vision.IMAGE_MIMES)).limit(1))
+               DocumentAsset.mime.in_(vision.IMAGE_MIMES), DocumentAsset.kind != 'page_preview').limit(1))
+    whole_page = image is None
     if image is None and page.preview_asset_id:
         # No picture of its own: the checked page preview, never an unproven page.
         image = await db.get(DocumentAsset, page.preview_asset_id)
@@ -256,9 +257,15 @@ async def describe_block(document_id: uuid.UUID, block_id: uuid.UUID, body: Revi
     except (ValueError, document_storage.StorageError):
         raise HTTPException(410, 'source_unavailable') from None
     data = path.read_bytes()
+    mime, context, image_id = image.mime, {'title': page.title}, image.id
+    if whole_page:
+        # Only the picture, cut out of the page where MinerU found it: the model
+        # describes this picture, not the whole slide.
+        crop = vision.crop_region(data, mime, page_region(block.source_ref or {}))
+        if crop is not None:
+            data, mime = crop, 'image/png'
     if len(data) > vision.MAX_IMAGE_BYTES:
         raise HTTPException(422, 'image_too_large')
-    mime, context, image_id = image.mime, {'title': page.title}, image.id
     rev_id, page_id, teacher_id = rev.id, page.page_id, teacher.id  # the rollback below expires every row
     await db.rollback()  # no transaction is held while the model answers
     try:

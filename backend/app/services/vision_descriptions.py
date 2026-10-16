@@ -66,6 +66,36 @@ class VisionResult:
 
 DescribeFn = Callable[[bytes, str, dict], Awaitable[VisionResult]]
 
+# Space kept around a picture cut out of its page (thousandths of the page),
+# and the smallest cut worth sending (pixels); below it the whole page goes.
+CROP_MARGIN = 20
+MIN_CROP_PIXELS = 48
+
+
+def crop_region(image: bytes, mime: str, region) -> bytes | None:
+    """The part of a page preview where one picture is, as PNG. region is
+    [x0, y0, x1, y1] in thousandths of the page (document_reader.page_region).
+    None when it cannot be cut; the caller then sends the whole page."""
+    if region is None or mime != 'image/png' or image[12:16] != b'IHDR':
+        return None
+    import pymupdf
+
+    x0, y0 = max(0, region[0] - CROP_MARGIN), max(0, region[1] - CROP_MARGIN)
+    x1, y1 = min(1000, region[2] + CROP_MARGIN), min(1000, region[3] + CROP_MARGIN)
+    try:
+        with pymupdf.open(stream=image, filetype='png') as doc:
+            page = doc[0]
+            r = page.rect
+            zoom = int.from_bytes(image[16:20], 'big') / r.width  # back to the preview's pixels
+            clip = pymupdf.Rect(r.x0 + x0 * r.width / 1000, r.y0 + y0 * r.height / 1000,
+                                r.x0 + x1 * r.width / 1000, r.y0 + y1 * r.height / 1000)
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=False)
+            if pix.width < MIN_CROP_PIXELS or pix.height < MIN_CROP_PIXELS:
+                return None
+            return pix.tobytes('png')
+    except (RuntimeError, ValueError):
+        return None
+
 
 def check_result(result: VisionResult) -> VisionResult:
     text = (result.text or '').strip()
