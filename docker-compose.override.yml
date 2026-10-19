@@ -19,7 +19,7 @@ services:
   backend:
     ports: !override
       - "127.0.0.1:8000:8000"
-      - "100.108.32.29:8000:8000"
+      - "${DEV_TAILSCALE_IP:?set DEV_TAILSCALE_IP in .env}:8000:8000"
     environment:
       - AGENTIC_SEARCH_ENABLED=true
       - STRUCTURED_INGEST_ENABLED=true
@@ -52,7 +52,7 @@ services:
   frontend:
     ports: !override
       - "127.0.0.1:8080:80"
-      - "100.108.32.29:8080:80"
+      - "${DEV_TAILSCALE_IP}:8080:80"
 
   # Monitoring (documentation/MONITORING.md): Grafana is shown in the admin
   # Monitoring tab under /grafana/ and can be viewed without a login, so it

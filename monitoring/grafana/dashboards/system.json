@@ -40,7 +40,7 @@
       "type": "stat",
       "id": 2,
       "title": "Teachers' installation",
-      "description": "A container is up when it reported in the last minute. docker-compose.release.yml (https://192.168.168.199:18443).",
+      "description": "A container is up when it reported in the last minute. docker-compose.release.yml (the teachers' site).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

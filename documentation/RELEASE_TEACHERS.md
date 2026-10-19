@@ -6,7 +6,7 @@ This file describes the installation that the teachers use (`docker-compose.rele
 
 ## Address and access
 
-The teachers open `https://192.168.168.199/` (on Tailscale, `https://100.108.32.29/`). It is HTTPS on the default port 443, with the certificate and CA of v6-beta. The v6-beta port 18443 still works, so old links keep working. Plain `http://` on port 80 redirects to HTTPS.
+The teachers open `https://<LAN_IP>/` (on Tailscale, `https://<TAILSCALE_IP>/`). The two addresses are `RELEASE_LAN_IP` and `RELEASE_TAILSCALE_IP` in the private env file. It is HTTPS on the default port 443, with the certificate and CA of v6-beta. The v6-beta port 18443 still works, so old links keep working. Plain `http://` on port 80 redirects to HTTPS.
 
 New classes start in exam mode: answers are written directly, without the course files, as in v6. A teacher turns exam mode off for a class to try the rest: course PDFs, Search and Research modes, Test drive, Analytics and AI reports.
 
@@ -16,7 +16,7 @@ The stack is the Compose project `edullm-release`. The private settings are in `
 
 | Container | What |
 | --- | --- |
-| `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`. HTTPS on 192.168.168.199 and 100.108.32.29, on ports 443 and 18443. Port 80 redirects to HTTPS. Plain HTTP is on 127.0.0.1:18080 only. It also passes `/grafana/` to Grafana for admins (see [MONITORING.md](MONITORING.md)). |
+| `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`. HTTPS on `<LAN_IP>` and `<TAILSCALE_IP>`, on ports 443 and 18443. Port 80 redirects to HTTPS. Plain HTTP is on 127.0.0.1:18080 only. It also passes `/grafana/` to Grafana for admins (see [MONITORING.md](MONITORING.md)). |
 | `edullm-release-backend`, `edullm-release-worker` | The same code as the dev stack, with the feature flags on and `NEW_CLASS_EXAM_MODE` on. The worker is built with MinerU. |
 | `edullm-release-db` | PostgreSQL with `pgvector`, in the volume `edullm-release_release_postgres_data`. |
 | `edullm-release-backup` | A checked `pg_dump` every 24 hours in the volume `edullm-release_release_backups`. Dumps are kept for 14 days. |
