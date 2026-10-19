@@ -9,13 +9,14 @@ the app, without Grafana's menus:
 | Answers | Questions, median time, tool limit reached, failures, questions asked back, thumbs down; questions per hour and answer time by mode; a table by mode; why runs stopped; the latest 200 questions; model calls by purpose; document jobs | PostgreSQL |
 | Model servers | The vLLM servers in detail: time to first token, time between tokens and whole request (median and 95%); prompt and written tokens per second; where the time of an LLM request goes (queue, prompt, writing); prefix cache hits, prompt tokens computed or taken from the cache, KV cache use, image cache hits, preemptions, waiting requests by reason; MTP (speculative decoding): share of guessed tokens accepted, tokens per step, acceptance by guessed position; prompt and answer lengths; the cache settings each server started with. Every panel has an (i) that says what it means | Prometheus |
 
-The Answers dashboard leaves teacher test sessions out unless "Sessions" is set
-to "With teacher tests". "Open in Grafana" opens the full Grafana page in a new
-tab.
+The Answers dashboard has two choices at the top. "Database" picks the dev
+database or the teachers' database (the default is Teachers). "Sessions" leaves
+teacher test sessions out, unless it is set to "With teacher tests". "Open in
+Grafana" opens the full Grafana page in a new tab.
 
 ## What runs
 
-Five containers in `docker-compose.override.yml` (the v9 dev stack):
+Five containers in `docker-compose.override.yml` (the dev stack):
 
 | Container | Role | Memory limit |
 |---|---|---|
@@ -26,8 +27,13 @@ Five containers in `docker-compose.override.yml` (the v9 dev stack):
 | `edullm-cadvisor` | Which containers run, and their memory and CPU | 256 MB |
 
 Together they used about 180 MB on 2026-10-15. None of them has a port on the
-host. The model servers (Flash-Next, reranker, MinerU) already publish vLLM
-metrics; Prometheus reads them on the network `edullm-models`.
+host. The model servers (Flash-Next, reranker, embeddings, MinerU) already
+publish vLLM metrics; Prometheus reads them on the network `edullm-models`.
+
+The teachers' stack ([RELEASE_TEACHERS.md](RELEASE_TEACHERS.md)) has no
+monitoring containers of its own. Its frontend sends `/grafana/` to this
+Grafana over the network `polytech_ai_tp_default`, with the same admin check.
+Grafana reads its database through the second data source "EduLLM (teachers)".
 
 On the DGX Spark the GPU has no memory of its own: it uses the main memory, so
 "Memory available" is also what is left for the models.

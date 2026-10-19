@@ -1,345 +1,172 @@
-# Edu-LLM: v9.0 Class-Lab Tutor
+# Edu-LLM: Class-Lab Tutor
 
----
+Edu-LLM is a web application for a controlled classroom. Teachers upload course PDFs. Students ask questions in a chat, and an AI model answers from those PDFs and cites the pages it used.
 
-> **📌 Status — v9.0 is a deletion release.** The exercise half of the system is
-> gone: no `Exercises` table, no `Answers` table, no hint generation, no document
-> types, no audience filter. What is left is one upload path for course material
-> and a retrieval agent that answers from it. The backend and the teacher UI are
-> shipped; the retrieval golden set is not built yet.
+This file says what the project is, what it does today and how to run it. The details are in the files listed under [Documentation](#documentation).
 
-## 1. Project Overview
+## What it does
 
-**Edu-LLM** is a full-stack educational platform for a controlled classroom. It
-keeps the v6 foundation — strict 3-tier RBAC, invite-code joining, real-time
-DB-based rate limiting, and **three-tier rule injection** (Class → Lab → Student)
-— and the v7 shift from a transparent LLM proxy to a **LangGraph agent**.
+- **Three roles.** An admin manages users, classes, models and monitoring. A teacher owns classes and labs. A student joins a class with an invite code and chats inside a lab. Each role has its own workspace; a user who opens another role's page is sent back to their own.
+- **Class and lab.** A class has an invite code (6 characters). A lab is one activity inside a class (for example one practical session). A chat session always belongs to one lab.
+- **PDF only.** A teacher uploads a PDF to a lab, or to the whole class. A worker reads each page with MinerU (a PDF reading tool), splits the text into passages and indexes them. The new version is published at once when every page was read. Otherwise it stays a draft that the teacher checks and publishes. The teacher can edit blocks, exclude blocks and reread a page.
+- **Three answer modes.** In *Direct* mode the model answers without the course files. In *Search* mode the system makes one search and the model answers from the pages found. In *Research* mode the model searches and reads several times, and may ask the student a question back. Search and Research answers cite the pages they used, and the chat shows each page with the passage highlighted.
+- **Exam mode.** A class in exam mode answers in Direct mode only, whatever the student chooses. New classes start in exam mode (setting `NEW_CLASS_EXAM_MODE`); the teacher turns it off.
+- **Teacher rules.** A teacher writes rules at three levels: class, lab and student. They are added to the instructions of the model in every answer mode.
+- **Quota.** Each user has a daily token quota. A teacher can give a student a full quota again for the day.
+- **Teacher tools.** Analytics for a class or a lab; a report on which course files and pages the answers cite; AI-written reports on a lab or on one student; a test drive that shows answers as students see them; chat history, with the sessions that students deleted.
+- **Admin tools.** Users (also CSV import), classes with their teacher and activity, a model map with the state of each model server, a Monitoring tab with Grafana, and data pruning.
 
-The stack stays minimal: **FastAPI + PostgreSQL (with `pgvector`) + React**,
-orchestrated by Docker Compose, with **no external message queue** — PostgreSQL
-itself is the job queue.
+## How it is built
 
-### What v9.0 removed, and why
-
-The system used to model exercises as data. A teacher uploaded a TD or TP, the
-worker cut it into `Exercises` rows, and a student asking "how do I do exercise
-3?" got that row served back. A `corrigé` upload became `Answers` rows, from
-which a big model generated tiered hints that a teacher reviewed and approved.
-
-Two things were wrong with it.
-
-**Generating hints is harder than it looks.** For a real problem the model has to
-solve it correctly first — which can mean actually computing — and then package
-the solution into tiers without leaking the result. Two hard things stacked, with
-no ground truth to check the output against. A wrong hint reads perfectly well
-and teaches the student something false.
-
-**A document is not reliably one type.** A single PDF can be mostly lecture with
-a few pages of exercises. Everything downstream branched on a type declared at
-upload, so a mixed file was mis-processed by construction.
-
-Removing exercises answers both. Nothing is generated that needs to be correct
-beyond what the retrieved material already says, and with one path there is
-nothing to classify. Teachers who want something specific said about an exercise
-write it into their class or lab **rules** — the prompt-injection path that
-already exists.
-
-The cut goes deep because segmentation only ever existed to serve those rows. An
-`Exercises` row was a hard claim: the system said "this is exercise 3" and served
-it with confidence, so the split had to be exactly right. The LLM line
-classifier, the numbering-anomaly detector, the boundary cache and the
-compare-and-confirm UI were all built to make that claim trustworthy. With no
-rows to build, the exercise-specific segmentation machinery was removed.
-
-### How it works now
-
-- **Agent, not proxy**: `/api/chat/stream` is a LangGraph graph
-  (`router → [rag | direct] → tutor → synthesize → SSE`). With
-  `AGENTIC_SEARCH_ENABLED` (off by default), a lab session uses the research
-  agent instead: one model searches and reads the published course PDFs with
-  tools, answers, and cites the pages it read (see
-  [API.md](documentation/API.md)).
-- **One upload path**: PDF, Markdown or HTML, all becoming Contextual-Retrieval
-  chunks. The form asks for the file, a language and whether to share it
-  class-wide. Nothing else. The worker preserves repeated body text, recognizes
-  Markdown/HTML headings and code fences, validates embedding batches, and
-  matches teacher corrections by source fingerprint. See the
-  [worker change guide](documentation/PDF_INGESTION.md) for examples, limits and the
-  additive schema update required for an existing database.
-- **Hybrid retrieval on a single DB**: `pgvector` and Postgres full-text
-  (`tsvector`) live in one table, fused with RRF and reranked. No third-party
-  vector DB.
-- **Deferred, load-aware ingestion**: a `worker` polls an `IngestionJobs` table
-  and runs at low priority, pausing while students are actively chatting. Chat
-  always preempts; an urgent job (`priority=0`) may bypass both gates.
-- **Reuse the same engine, nothing hardcoded**: chat and ingestion call the same
-  OpenAI-compatible endpoints read from `SystemConfigs` at runtime. No model is
-  hardcoded; **no torch in the image**.
-- **Coaching from the router**: the one routing call also scores effort and flags
-  answer-seeking, so the Socratic guardrail costs no extra request and applies on
-  every route.
-- **Vision repair, opt-in**: garbled formulas in printed PDFs are detected
-  deterministically, cropped, and re-read by a vision model under a
-  transcribe-only prompt. Empty `VLM_MODEL` = off.
-- **PDF layout reader, experimental**: `WORKER_PAGE_READER=1` lets the main
-  multimodal model group native text IDs and request bounded crops. Coverage is
-  checked before indexing; code characters come from the PDF. Successful pages
-  can index independently; failed pages retain prior content. Local formula/table/diagram
-  transcription and stable source provenance are implemented, with real-model quality
-  acceptance still required. Off by default; apply the source-column/status migration first. See
-  [implementation details and limits](documentation/PDF_INGESTION.md).
-
-### Red lines (security and governance)
-
-- **Tenant isolation in SQL, never in the prompt**: every retrieval is filtered
-  by `lab_id` / `class_id` in the **WHERE clause**, re-checked after
-  fusion/rerank. Prompt injection cannot widen a query filter. With `audience`
-  removed, this filter carries the whole access boundary on its own.
-- **Nothing answer-shaped is stored**: there is no solution column and no answer
-  table. The one place model-written text enters the indexed material is a VLM
-  formula repair, which is transcription, refused if it adds prose, and logged
-  before/after for the teacher.
-- **Security in the database, pedagogy in the prompt**: the Socratic guardrail is
-  a *behavioral* guardrail. If a student talks their way past it the harm is low,
-  because there is no stored answer key. Security boundaries must never degrade
-  into prompt guardrails.
-- **Structured-only governance**: store controlled-vocabulary scores only — never
-  free-text judgments about students.
-- **Service layer**: all business/DB logic lives in `backend/app/services/`.
-  Routers are thin, and no router imports another.
-- **Audit integrity**: a student "delete" is a **soft delete** — hidden from the
-  student, permanently retained and visible to teacher/admin audit. Only an admin
-  can hard-delete.
+- **Stack.** FastAPI, PostgreSQL with `pgvector`, React and Docker Compose. There is no message queue: the `ingestion_jobs` table is the queue.
+- **Search.** Vector search (`pgvector`) and full-text search (`tsvector`) run on one table. The results are merged and then reranked by a model.
+- **Models.** Every model is reached through an OpenAI-compatible HTTP endpoint. The addresses and names are stored in the database (`system_configs`) and the admin changes them at run time. The current deployment runs one model for the whole system (Qwen3.8 Flash-Next, served under the name `ornith`) for answers, vision and figure descriptions, with `Qwen3-Reranker` as reranker and `bge-m3` for embeddings (both on vLLM). The image has no torch.
+- **Worker.** A second container runs `backend/worker`. It reads PDFs while students are not chatting, and chat always goes first.
+- **Access rules in SQL.** Every course search filters on `class_id` and `lab_id` in the SQL query, not in the prompt. A prompt cannot widen it.
+- **Pedagogy in the prompt.** The teacher rules shape how the tutor answers. They are not a security boundary.
+- **Soft delete.** When a student deletes a session, it is hidden from the student but kept, and teachers and admins still see it. Only an admin can delete it for good.
+- **Login token.** The token holds only the user id. The role and the quota are read from the database on every request.
 
 ### Known gaps
 
-- **The ANN and full-text indexes are not created.** `DATABASE.md` describes an
-  HNSW index on the embedding and a GIN index on `tsv`; no code builds either, so
-  both recalls sequential-scan today. Correct, but it will not stay fast.
-- **`RERANK_SCORE_THRESHOLD` ships empty (off).** It needs calibrating against a
-  golden set that does not exist yet.
-- **Query rewriting is a stub.** `_identity_rewrite` returns the query unchanged,
-  so the self-eval retry re-runs an identical search and the bounded
-  re-retrieval loop does nothing.
+- The vector index (HNSW) and the full-text index (GIN) are not created by any code. Both searches read the whole table. Results are correct, but they will slow down as the material grows. See [DATABASE.md](documentation/DATABASE.md).
+- There is no migration tool for ordinary tables. The tables are created with `create_all`. Changes to existing tables are SQL files applied by `scripts/migrate_document_snapshots.py`.
+- `backend/requirements.txt` still lists some packages that no code imports any more.
 
----
+## Documentation
 
-## 2. Directory Tree
+| File | What it covers |
+| --- | --- |
+| [documentation/API.md](documentation/API.md) | Every HTTP endpoint, who may call it, and the chat stream events. |
+| [documentation/DATABASE.md](documentation/DATABASE.md) | Every table and column, and the settings stored in the database. |
+| [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) | How a chat request is answered, how a PDF is ingested, the analytics shape. |
+| [documentation/PDF_INGESTION.md](documentation/PDF_INGESTION.md) | The MinerU PDF pipeline: setup, migrations, limits. |
+| [documentation/RELEASE_TEACHERS.md](documentation/RELEASE_TEACHERS.md) | The installation that the teachers use (`docker-compose.release.yml`). |
+| [documentation/MONITORING.md](documentation/MONITORING.md) | Grafana, Prometheus and the admin-only access check. |
+
+## Directory tree
 
 ```text
 polytech_ai_tp/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                  # FastAPI app entry point
-│   │   ├── config.py                # env-backed settings
-│   │   ├── database.py              # SQLAlchemy engine & session (pgvector enabled)
-│   │   ├── models.py                # ORM models (15 tables)
-│   │   ├── schemas.py               # Pydantic request/response schemas
-│   │   ├── auth.py                  # JWT creation & get_current_user deps
-│   │   ├── services/                # Business logic layer
-│   │   │   ├── class_service.py     # Class CRUD + invite code generation
-│   │   │   ├── lab_service.py       # Lab CRUD + active toggle
-│   │   │   ├── rule_service.py      # Rule upsert + queries (skill.md = level=class rule)
-│   │   │   ├── analytics_service.py # Hierarchical token aggregation
-│   │   │   ├── session_service.py   # Session CRUD + student soft-delete
-│   │   │   ├── document_service.py  # Upload + enqueue; chunk read/edit; delete
-│   │   │   ├── router_service.py    # Log every routing decision
-│   │   │   ├── trace_service.py     # TraceBuilder (per-message AgentTraceLog) + health counts
-│   │   │   ├── learner_service.py   # Prompt-literacy effort profiles (per student, lab)
-│   │   │   ├── model_routing.py     # OpenAI-compatible clients from SystemConfigs
-│   │   │   ├── retrieval_service.py # Hybrid (vector+BM25) + rerank, tenant-filtered in SQL
-│   │   │   ├── skill_preset_service.py # Teacher skill-preset library + snapshot-copy
-│   │   │   └── billing.py           # Weighted billed-token helper (prompt·α + completion·β)
-│   │   ├── agent/                   # Chat agents
-│   │   │   ├── runner.py            # Research agent loop: one model, course tools, cited answer
-│   │   │   ├── course_tools.py      # Tools as the model sees them: handles, budget, evidence
-│   │   │   ├── tools.py             # Scoped search/open/read/grep/view_image over published PDFs
-│   │   │   ├── evidence.py          # Evidence IDs (E1, E2, ...) and their citations
-│   │   │   ├── model.py             # Research model client (native tool calls)
-│   │   │   ├── history.py           # Per-turn chat-history token cap (OOM protection)
-│   │   │   └── legacy/              # LangGraph agent: graph, router, selfeval, prompt
-│   │   └── routers/
-│   │       ├── auth.py              # POST /api/auth/signup, /api/auth/login
-│   │       ├── admin.py             # /api/admin/* — no ownership checks
-│   │       ├── teacher.py           # /api/teacher/* — ownership-checked
-│   │       ├── student.py           # /api/student/* — join, sessions
-│   │       └── chat.py              # POST /api/chat/stream (research or LangGraph agent + SSE)
-│   ├── worker/                      # Off-peak ingestion worker
-│   │   ├── main.py                  # Polling loop + production model-client glue
-│   │   ├── queue.py                 # FOR UPDATE SKIP LOCKED claim + stale-lock reclaim
-│   │   ├── ingest.py                # parse → gate → clean → repair → chunk → embed → index
-│   │   ├── parsing.py               # PDF/MD/HTML text extraction + character-yield gate
-│   │   ├── chunking.py              # TOC drop, code-aware split, size control, dedup
-│   │   ├── vlm.py                   # Garbled-formula detection, crop, transcribe, audit
-│   │   └── gpu_gate.py              # Chat-load gate (+ optional pynvml GPU signal)
-│   ├── tests/                       # pytest suite (SQLite + live pgvector fixtures)
-│   ├── seed.py                      # Dev DB bootstrap: schema + SystemConfigs defaults
+│   │   ├── main.py            # FastAPI entry point, startup checks, router mounting
+│   │   ├── config.py          # settings read from the environment
+│   │   ├── database.py        # SQLAlchemy engine and session
+│   │   ├── models.py          # tables (see documentation/DATABASE.md)
+│   │   ├── schemas.py         # request and response shapes
+│   │   ├── schema_versions.py # migrations that the backend requires at startup
+│   │   ├── auth.py            # token creation, get_current_user, require_* checks
+│   │   ├── routers/           # auth, admin, monitoring, teacher, student, chat,
+│   │   │                      # document_versions, document_reader
+│   │   ├── services/          # business logic: classes, labs, rules, quota, analytics,
+│   │   │                      # reports, document reading and editing, research runs, model clients
+│   │   └── agent/             # the three answer modes: runner.py (Research),
+│   │                          # search.py (Search), direct.py (Direct), and their tools
+│   ├── worker/                # PDF ingestion worker: queue, MinerU, indexing, load gate
+│   ├── tests/                 # pytest suite
+│   ├── seed.py                # first-time data: settings, demo accounts, one class
 │   ├── requirements.txt
-│   └── Dockerfile                   # Python 3.12-slim — shared by backend & worker
+│   └── Dockerfile             # shared by backend and worker
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx                  # React Router setup
-│   │   ├── pages/                   # Login, Register, Account, Chat, Teacher, Admin
-│   │   ├── components/
-│   │   │   ├── HierarchicalSidebar.jsx  # Role-aware Class→Lab tree
-│   │   │   ├── DocumentManager.jsx      # Upload + status list + chunk inspector
-│   │   │   ├── SkillPresetManager.jsx   # Teacher skill-preset library
-│   │   │   ├── MessageContent.jsx       # Markdown + highlighted code + KaTeX, stream-safe
-│   │   │   ├── MainLayout.jsx
-│   │   │   └── ProtectedRoute.jsx
-│   │   ├── lib/
-│   │   │   ├── api.js               # Centralized API client
-│   │   │   ├── ingestReport.js      # ingest_report → teacher warnings
-│   │   │   └── streamEvents.js      # SSE frame → UI action
-│   │   └── store/                   # Zustand stores (Auth, etc.)
-│   ├── tailwind.config.js
-│   ├── nginx.conf                   # Nginx reverse proxy config for prod
-│   └── Dockerfile                   # Node builder + Nginx multi-stage build
-├── scripts/
-│   └── vlm_detect_spike.py          # Garbled-line detection spike over the real corpus
-├── documentation/                   # DATABASE.md · API.md · ARCHITECTURE.md
-├── system_architecture.html         # Standalone architecture diagram
-└── docker-compose.yml               # Postgres(pgvector) + Backend + Worker + Frontend
+│   │   ├── pages/             # Login, Register, Account, Chat, Teacher, Admin, SourcePdf
+│   │   ├── components/        # sidebar, document manager, analytics, reports, PDF preview...
+│   │   ├── lib/               # API client, stream events, answer modes, citations
+│   │   └── store/             # Zustand stores
+│   ├── nginx.conf             # nginx for the dev stack
+│   ├── nginx.release.conf     # nginx for the release stack (HTTPS)
+│   └── Dockerfile
+├── monitoring/                # Grafana dashboards, Prometheus config, read-only database grants
+├── scripts/                   # SQL migrations, migrate_document_snapshots.py, benchmark and check scripts
+├── documentation/             # the files listed above, plus plans and test reports
+├── docker-compose.yml         # PostgreSQL, backend, worker, frontend
+├── docker-compose.override.yml # the dev stack: ports, feature flags, MinerU, monitoring
+└── docker-compose.release.yml # the teachers' stack
 ```
 
----
+## Run it
 
-## Documentation
+### With Docker
 
-The full technical reference lives under [`documentation/`](documentation/):
-
-- **[Database Schema](documentation/DATABASE.md)** — the 17 SQLAlchemy / PostgreSQL + pgvector tables (SystemConfigs, Users, Documents, DocChunks, Exercises, Answers, trace logs, …).
-- **[API Reference](documentation/API.md)** — RBAC (JWT + FastAPI `Depends`) and the full auth / admin / teacher / student routing contract.
-- **[Architecture](documentation/ARCHITECTURE.md)** — the `/api/chat/stream` LangGraph agent spec, the ingestion pipeline, prompt-literacy coaching, and the analytics response shape.
-
----
-
-## 10. Deployment & Run Instructions
-
-The application is fully containerized using Docker, allowing for a single-command deployment.
-
-### Prerequisites
-- Docker and Docker Compose installed.
-- A running OpenAI-compatible inference engine (your existing chat engine — vLLM/Ollama;
-  vLLM/SGLang preferred where guided decoding + priority batching are needed):
-  - The **chat path and the ingestion worker share this one engine and the one model
-    configured in `SystemConfigs`** — the model is **not hardcoded** anywhere.
-  - The active endpoint/model is hot-swappable at runtime (e.g. a smaller model for local
-    test, a larger one for production) with zero downtime and no code change.
-  - Reached via `host.docker.internal`.
-- **Models on that engine** (test setup = one Ollama instance):
-  - **Chat:** a generation model — e.g. `qwen3` (35B local / 120B prod) →
-    `LLM_MODEL`. Unless split, it also serves the self-eval verdict and
-    Contextual-Retrieval generation.
-  - **Optional cheap models:** set `INGEST_MODEL` (off-peak Contextual Retrieval)
-    and/or `ROUTER_MODEL` (live routing, self-eval, rewrite) to a smaller model —
-    e.g. `qwen3:30b` / `mistral-small` — to keep the expensive chat model's RPM
-    pool for students. Leave empty to reuse `LLM_MODEL`. Embedding and rerank get
-    optional independent endpoints too (`EMBEDDING_URL`, `RERANK_API_KEY`, …).
-  - **Tiering convention** (write it into your config; the code only provides the
-    slots): **chat = the big model** — non-negotiable, it is the only thing
-    students see. **`ROUTER_*` = one small fast model** shared by every live
-    auxiliary call (routing, self-eval verdict, rewrite — e.g. a 9B).
-    **`INGEST_*` = small model** for context generation. **`AGENT_*` = the big
-    model**, for the reasoning behind retrieval — quality over latency.
-    Auxiliary work should never run on the chat model's live capacity; an empty
-    slot falls back to the main LLM, and the admin UI warns when that silently
-    puts auxiliary load on the big model.
-  - **Embeddings:** `bge-m3` (1024-dim, matches `EMBEDDING_DIM`) →
-    `EMBEDDING_MODEL`. Pull it once: `ollama pull bge-m3`. Indexing and querying
-    must use the same model — swapping it invalidates every stored vector, and
-    nothing currently detects that.
-  - **Reranker:** `bge-reranker-v2-m3`, served behind an OpenAI-compatible rerank
-    endpoint (e.g. TEI / Infinity / vLLM / Albert `…/v1/rerank`) → `RERANK_URL` + `RERANK_MODEL`.
-    Ollama does not expose a rerank API, so point these at whatever rerank server you run.
-    **`RERANK_URL` must be a real rerank endpoint** (the full path that accepts
-    `{query, documents}`, e.g. `https://albert.api.etalab.gouv.fr/v1/rerank`) — **not** the chat
-    `…/v1` base, which 404s on a rerank body. If unset *or failing* (unreachable /
-    4xx-5xx / malformed response), retrieval degrades gracefully to fusion-only ordering and logs
-    a warning — a bad reranker never breaks a student's chat.
-- `pgvector`-enabled PostgreSQL image (e.g. `pgvector/pgvector:pg16`). Postgres
-  full-text (`tsvector`) provides BM25 — no extra extension needed.
-- **OOM protection — two layers.** The app caps each message's chat-history size
-  (`CONTEXT_MAX_TOKENS`, default 8000 estimated tokens; oldest turns silently forgotten).
-  **Also set an engine-side maximum context length** (vLLM `--max-model-len` / SGLang
-  `--context-length`) as the final backstop — the app cap must stay below it.
-
-> **Testing note:** hybrid retrieval (pgvector ANN + `tsvector` BM25 + rerank)
-> cannot run on SQLite. Those tests use the `pg_session` fixture against a live
-> pgvector Postgres (`TEST_PG_URL`, default `localhost:5433/edudb_test`) and skip
-> themselves when it is unreachable — so run it, or you will silently test less
-> than you think. One way:
->
-> ```bash
-> docker run -d --name edullm-test-db \
->   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
->   -e POSTGRES_DB=edudb_test -p 5433:5432 pgvector/pgvector:pg16
-> pytest backend/tests -q
-> ```
->
-> All model calls (embed / rerank / generate) are replaced by injected fakes, so
-> no inference engine is needed to run the suite.
-
-### Persistent Storage (Docker volumes)
-Named volumes persist data across container rebuilds:
-- `pg_data` → PostgreSQL data directory.
-- `documents_data` → uploaded course documents (`Documents.storage_path` points inside this
-  volume). Mounted into **both** `backend` (for upload) and `worker` (for ingestion).
-
-### 🚀 Running with Docker (Production/Demo Mode)
-Spin up Postgres(pgvector) + FastAPI backend + ingestion worker + Nginx/React frontend:
+You need Docker with Compose, and a model server that speaks the OpenAI API. The containers reach the host as `host.docker.internal`. The model names and addresses are set later in the admin page, not in the image.
 
 ```bash
-docker compose up -d --build
+docker compose build
+docker compose up -d postgres
 ```
-- **Frontend**: `http://localhost` (Port 80).
-- **Backend API**: Proxied through Nginx via `/api/`, or directly at `http://localhost:8000`.
-- **Worker**: no exposed port; `restart: always` polling loop.
-- **Database**: Port mapped on `5432`.
 
-#### 🔐 Initialize Database (First Time Only)
-After starting the containers for the first time, enable pgvector + seed initial accounts:
+On a new database, create the tables and the demo data once. Then apply the SQL migrations from the host. The backend refuses to start with the feature flags on until they are applied (see [PDF_INGESTION.md](documentation/PDF_INGESTION.md)).
+
 ```bash
-docker compose exec backend python -m backend.seed
+docker compose run --rm --no-deps backend python -m backend.seed
+python -m scripts.migrate_document_snapshots --database-url "$DB_URL"           # dry run
+python -m scripts.migrate_document_snapshots --database-url "$DB_URL" --apply
+docker compose up -d
 ```
-**Default Accounts Created:**
-- `admin` / `admin123`
-- `teacher` / `teacher123`
-- `student1` / `student123`
-- `student2` / `student123`
 
-*(Note: The backend & worker containers use `host.docker.internal` to reach the host's local
-inference engine without complex networking. Both share the one engine/model set in
-`SystemConfigs` — pick whatever model fits the box; nothing is hardcoded.)*
+`$DB_URL` looks like `postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/edudb`.
 
-### 🛠️ Running Natively (Development Mode)
-If you prefer running services outside of Docker for development:
+`docker compose` also reads `docker-compose.override.yml`. It turns the feature flags on, sets the MinerU settings, serves the site on port 8080 (local and Tailscale addresses only) and adds the monitoring containers. Those need `GRAFANA_ADMIN_PASSWORD` and `GRAFANA_DB_PASSWORD` in an untracked `.env` file (see [MONITORING.md](documentation/MONITORING.md)). Without the override file, the site is on port 80 and the flags are off.
 
-1. **Database**: Start a `pgvector` Postgres server (`docker compose up -d postgres`).
-2. **Backend (from project root)**:
-   ```bash
-   pip install -r backend/requirements.txt
+Demo accounts that `seed.py` creates (change them outside a local test):
 
-   # Initialize the database (first time only)
-   python -m backend.seed
+| User | Password | Role |
+| --- | --- | --- |
+| `admin` | `admin123` | admin |
+| `teacher` | `teacher123` | teacher |
+| `student1`, `student2` | `student123` | student |
 
-   # Start the API
-   uvicorn backend.app.main:app --reload --port 8000
-   ```
-3. **Worker (separate process, from project root)**:
-   ```bash
-   python -m backend.worker.main
-   ```
-4. **Frontend**:
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   Access the dev server at `http://localhost:5173`.
+The default class has the invite code `ABC123`. Set the models in the admin page after the start.
 
-## Structured PDF ingestion
+The teachers do not use this stack. They use `docker-compose.release.yml` over HTTPS, described in [RELEASE_TEACHERS.md](documentation/RELEASE_TEACHERS.md).
 
-The M1-M3 document foundation, page-aware PDF worker, teacher review and student
-PDF view are described in [PDF_INGESTION.md](documentation/PDF_INGESTION.md).
-Structured ingestion is opt-in; later agent work is developed separately.
+### Without Docker (development)
+
+1. Start PostgreSQL with `pgvector`: `docker compose up -d postgres`.
+2. Backend, from the project root: `pip install -r backend/requirements.txt`, then `python -m backend.seed`, then `uvicorn backend.app.main:app --reload --port 8000`.
+3. Worker, in another terminal: `python -m backend.worker.main`.
+4. Frontend: `cd frontend && npm install && npm run dev`. The site is at `http://localhost:5173`.
+
+### Settings in the environment
+
+`backend/app/config.py` reads these from the environment or from `backend/.env`.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | local PostgreSQL | Database address (`postgresql+asyncpg://...`). |
+| `JWT_SECRET` | `change-me-in-production` | Key that signs the login tokens. Change it. |
+| `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256`, `480` | Token settings. |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | a local vLLM address (`http://localhost:8001/v1`) | Used only while `system_configs` has no value for them. |
+| `DOCUMENTS_STORAGE_ROOT` | `/data/documents` | Where uploaded files are stored. Backend and worker share this volume. |
+| `STRUCTURED_INGEST_ENABLED`, `PDF_STRUCTURED_INGEST_ENABLED` | `false` | Both must be `true` to accept PDF uploads (otherwise `409 structured_ingest_disabled`). |
+| `AGENTIC_SEARCH_ENABLED` | `false` | Must be `true` for the chat to answer (otherwise `503 chat_not_enabled`). |
+| `NEW_CLASS_EXAM_MODE` | `true` | New classes start in exam mode. |
+| `STRUCTURED_VISION_ENABLED` | `false` | Allows "Write with AI" descriptions of pictures. Turn it on only after the vision model was checked to read images. |
+
+The worker also reads these:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PDF_MINERU_PYTHON` | none | Python of the MinerU environment (`/opt/mineru/bin/python` in the worker image built with `WITH_MINERU=1`). |
+| `PDF_MINERU_SERVER_URL` | none | MinerU model server. The admin can switch it in the model map. |
+| `PDF_MINERU_CONFIG` | none | Absolute path of `mineru.json`. |
+| `PDF_MINERU_PAGE_TIMEOUT_SECONDS` | `240` | Time allowed for one page. |
+| `PDF_READ_BUDGET_SECONDS` | `7200` | Time allowed for reading one PDF. |
+| `STRUCTURED_LEASE_SECONDS`, `STRUCTURED_MAX_ATTEMPTS` | `1800`, `3` | How long a worker holds a job, and how often a job is tried. |
+| `STRUCTURED_TASK_ROOT` | system temp folder | Working folder of the worker. |
+
+The model addresses, model names, search limits and token weights are not environment variables. They are rows in `system_configs`, listed in [DATABASE.md](documentation/DATABASE.md).
+
+### Data volumes
+
+- `postgres_data`: the PostgreSQL data.
+- `documents_data`: the uploaded PDFs and the files made from them. `DOCUMENTS_STORAGE_ROOT` points into it.
+
+### Tests
+
+```bash
+python -m pytest backend/tests -q
+```
+
+Tests that need PostgreSQL with `pgvector` skip themselves unless `TEST_PG_URL` is set. The database name must end with `_test`, because the tests drop and create tables in it. All model calls in the tests are replaced by fakes, so no model server is needed.
