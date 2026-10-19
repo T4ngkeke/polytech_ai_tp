@@ -56,8 +56,14 @@ async def get_db() -> AsyncSession:  # type: ignore[return]
     Usage::
 
         @router.get("/")
-        async def endpoint(db: AsyncSession = Depends(get_db)):
+        async def endpoint(db: AsyncSession = Depends(get_db, scope="function")):
             ...
+
+    Always with scope="function": the session then commits before the response
+    is sent. With FastAPI's default ("request") the commit runs after the
+    response, so a client's next request (log in right after an account is
+    created, open the labs right after joining a class) could miss what this
+    one wrote. tests/test_db_commit_scope.py checks every route.
     """
     async with AsyncSessionLocal() as session:
         try:

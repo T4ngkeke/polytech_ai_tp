@@ -1,12 +1,12 @@
 /**
- * MessageContent.jsx — [v7.2] markdown rendering for assistant messages.
+ * MessageContent.jsx — markdown rendering for assistant messages.
  *
  * Renders GitHub-flavored markdown, syntax-highlighted fenced code blocks (with a
  * copy button), and KaTeX math. react-markdown re-parses the full accumulated text
  * on each render, so streaming is inherently safe for *text*: a half-streamed ```
  * fence just renders as partial text until it closes — no manual HTML stitching.
  *
- * Streaming + syntax highlighting (v7.2 crash fix):
+ * Streaming + syntax highlighting (crash fix):
  *  - While a message is still streaming we do NOT run Prism. An unclosed ``` fence
  *    makes the entire growing tail one code block, and re-highlighting that from
  *    scratch on every token builds huge React trees → the tab runs out of memory
@@ -29,6 +29,8 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-async';
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
+import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light';
+import { useTheme } from '../lib/theme';
 import 'katex/dist/katex.min.css';
 
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
@@ -45,22 +47,35 @@ function CopyButton({ value }) {
   };
   return (
     <button
+      type="button"
       onClick={onCopy}
-      className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-ink-surface/80 border border-border-default text-[10px] text-cream-muted hover:text-cream cursor-pointer"
+      className="px-2 py-1 rounded-md text-[11px] text-cream-muted hover:text-cream hover:bg-ink-hover cursor-pointer"
     >
       {copied ? 'Copied' : 'Copy'}
     </button>
   );
 }
 
-const CodeBlock = memo(function CodeBlock({ language, value }) {
+// A bar above the code with its language and the copy button, so the button
+// never covers the first line.
+function CodeBar({ language, value }) {
   return (
-    <div className="relative my-2 text-[13px]">
+    <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-border-subtle bg-ink-surface px-3 py-1">
+      <span className="font-mono text-[10px] text-cream-muted">{language || 'code'}</span>
       <CopyButton value={value} />
+    </div>
+  );
+}
+
+const CodeBlock = memo(function CodeBlock({ language, value }) {
+  const theme = useTheme();
+  return (
+    <div className="my-2 text-[13px]">
+      <CodeBar language={language} value={value} />
       <SyntaxHighlighter
         language={language}
-        style={oneDark}
-        customStyle={{ margin: 0, borderRadius: '0.5rem', padding: '0.9rem 1rem' }}
+        style={theme === 'dark' ? oneDark : oneLight}
+        customStyle={{ margin: 0, borderRadius: '0 0 0.5rem 0.5rem', padding: '0.9rem 1rem' }}
         PreTag="div"
       >
         {value}
@@ -73,9 +88,9 @@ const CodeBlock = memo(function CodeBlock({ language, value }) {
 // token, so a growing/unclosed fence can't blow up memory.
 function PlainCodeBlock({ value }) {
   return (
-    <div className="relative my-2 text-[13px]">
-      <CopyButton value={value} />
-      <pre className="overflow-x-auto rounded-lg border border-border-subtle bg-ink-deep p-3.5 font-mono text-[13px] leading-relaxed text-cream-secondary">
+    <div className="my-2 text-[13px]">
+      <CodeBar value={value} />
+      <pre className="overflow-x-auto rounded-b-lg border border-border-subtle bg-ink-deep p-3.5 font-mono text-[13px] leading-relaxed text-cream-secondary">
         <code>{value}</code>
       </pre>
     </div>
@@ -84,29 +99,34 @@ function PlainCodeBlock({ value }) {
 
 // The components map depends on `streaming`, so it is built per-message via
 // useMemo (the inner block components are module-level + stable).
-function makeComponents(streaming) {
+function makeComponents(streaming, onCite) {
   return {
-    // A <pre> marks a fenced block even when it has one line and no language.
-    pre({ children }) {
-      const child = Array.isArray(children) ? children[0] : children;
-      if (!child?.props) return <pre>{children}</pre>;
-      const match = /language-([\w+-]+)/.exec(child.props.className || '');
-      const value = String(child.props.children ?? '').replace(/\n$/, '');
-      return streaming
-        ? <PlainCodeBlock value={value} />
-        : <CodeBlock language={match ? match[1] : 'text'} value={value} />;
-    },
+    // CodeBlock renders its own block wrapper, so collapse the default <pre>.
+    pre: ({ children }) => <>{children}</>,
     code({ className, children }) {
-      return <code className={className || 'rounded bg-ink-surface px-1 py-0.5 text-[0.85em] text-cyan'}>{children}</code>;
+      const match = /language-(\w+)/.exec(className || '');
+      const text = String(children).replace(/\n$/, '');
+      const isBlock = Boolean(match) || text.includes('\n');
+      if (!isBlock) {
+        return <code className="rounded bg-ink-surface px-1 py-0.5 text-[0.85em] text-cyan">{children}</code>;
+      }
+      return streaming
+        ? <PlainCodeBlock value={text} />
+        : <CodeBlock language={match ? match[1] : 'text'} value={text} />;
     },
-    a: ({ children, href }) => (
-      <a href={href} target="_blank" rel="noreferrer" className="text-cyan underline">{children}</a>
-    ),
+    a: ({ children, href }) => (onCite && href?.startsWith('#cite-')
+      // An [E#] marker (lib/citations.js linkCitations): open the cited passage.
+      ? <button type="button" onClick={() => onCite(href.slice(6))}
+          title={`Show source ${href.slice(6)}`}
+          className="rounded px-0.5 text-cyan underline decoration-dotted underline-offset-2 hover:bg-cyan/10">
+          {children}
+        </button>
+      : <a href={href} target="_blank" rel="noreferrer" className="text-cyan underline">{children}</a>),
   };
 }
 
-function MessageContent({ content, streaming = false }) {
-  const components = useMemo(() => makeComponents(streaming), [streaming]);
+function MessageContent({ content, streaming = false, onCite = null }) {
+  const components = useMemo(() => makeComponents(streaming, onCite), [streaming, onCite]);
   return (
     <div className="prose-chat space-y-2 break-words">
       <ReactMarkdown

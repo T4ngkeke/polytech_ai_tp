@@ -1,0 +1,101 @@
+{
+  "purpose": "15 more random pages (seed 20260916) from the same 3 slide PDFs, excluding the 40 pages already tested. Not a new-courseware holdout.",
+  "seed": 20260916,
+  "files": {
+    "main-2.pdf": "c12a6562da5c9d9f64823153a4a46ddb57d48398f65d3f0df766e18b2109d220",
+    "main-3.pdf": "016b7dd160071c09c570d6b92bf182e02e35de338b457ec47d781259908ea5b1",
+    "Heritage.pdf": "96d5885cdb412674d6ce8ef0212388d91581ef00def8e5fc900487fb9c85d021"
+  },
+  "cases": [
+    {
+      "file": "main-2.pdf",
+      "page": 4,
+      "stem": "main-2-p4",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 14,
+      "stem": "main-2-p14",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 28,
+      "stem": "main-2-p28",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 51,
+      "stem": "main-2-p51",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 52,
+      "stem": "main-2-p52",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 9,
+      "stem": "main-3-p9",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 29,
+      "stem": "main-3-p29",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 40,
+      "stem": "main-3-p40",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 51,
+      "stem": "main-3-p51",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 66,
+      "stem": "main-3-p66",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 4,
+      "stem": "Heritage-p4",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 11,
+      "stem": "Heritage-p11",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 16,
+      "stem": "Heritage-p16",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 21,
+      "stem": "Heritage-p21",
+      "set": "extra2-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 22,
+      "stem": "Heritage-p22",
+      "set": "extra2-2026-09-15"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 """
-routers/admin.py — Admin-only endpoints for Edu-LLM v6.
+routers/admin.py — Admin-only endpoints for Edu-LLM.
 
 All DB/business logic is delegated to the services/ layer.
 Admin bypasses ownership checks — no class/lab ownership is verified here.
@@ -12,6 +12,7 @@ PUT    /api/admin/users/{user_id}/quota
 PUT    /api/admin/users/{user_id}/role
 DELETE /api/admin/users/{user_id}
 GET    /api/admin/llm/config
+GET    /api/admin/llm/servers
 PUT    /api/admin/llm/config
 POST   /api/admin/users/import
 GET    /api/admin/classes
@@ -20,46 +21,73 @@ GET    /api/admin/classes/{class_id}/students
 PUT    /api/admin/classes/{class_id}/transfer
 DELETE /api/admin/classes/{class_id}
 GET    /api/admin/labs
+PUT    /api/admin/labs/{lab_id}
 DELETE /api/admin/labs/{lab_id}
 GET    /api/admin/analytics
 GET    /api/admin/analytics/classes/{class_id}
+GET    /api/admin/analytics/classes/{class_id}/details?lab_id=
 DELETE /api/admin/sessions/{session_id}
 POST   /api/admin/maintenance/prune
 """
 
 import csv
 import io
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.auth import hash_password, require_admin
+from backend.app.config import settings
+from backend.app.auth import hash_password_async, require_admin
 from backend.app.database import get_db
-from backend.app.models import Class, Message, Session, SystemConfig, User, UserRole
+from backend.app.models import (
+    Class,
+    Message,
+    Session,
+    SystemConfig,
+    User,
+    UserRole,
+)
 from backend.app.schemas import (
     AdminAnalyticsResponse,
+    AdminClassResponse,
+    AdminResetPasswordRequest,
     ClassAnalyticsResponse,
     ClassResponse,
     CSVImportPreviewResponse,
     DailyUsage,
     LabResponse,
-    LabUsageSummary,
+    LabUpdateRequest,
     LLMConfigRequest,
     LLMConfigResponse,
     PruneRequest,
     PruneResponse,
-    StudentUsageSummary,
     TransferClassRequest,
     UpdateQuotaRequest,
     UpdateRoleRequest,
     UserCreateRequest,
     UserResponse,
 )
-from backend.app.services import class_service, lab_service, analytics_service
+from backend.app.services import class_service, lab_service, analytics_service, model_servers
+from backend.app.services.model_routing import resolve_model_routing
+from backend.app.services.research_service import DEFAULT_LIMITS, LIMIT_KEYS, limit_value
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+async def _get_active_user_or_404(
+    db: AsyncSession, user_id: uuid.UUID, detail: str = "User not found"
+) -> User:
+    """Fetch a non-deleted user by id or raise 404."""
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.is_deleted.is_(False))
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return user
 
 
 # ===================================================================
@@ -70,7 +98,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 @router.get("/users", response_model=list[UserResponse])
 async def list_users(
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[UserResponse]:
     """Return all non-deleted users."""
     result = await db.execute(select(User).where(User.is_deleted.is_(False)))
@@ -87,7 +115,7 @@ async def list_users(
 async def create_user(
     body: UserCreateRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
     """Create a new platform user. Returns 409 if username already exists."""
     existing = await db.execute(select(User).where(User.username == body.username))
@@ -98,7 +126,7 @@ async def create_user(
         )
     user = User(
         username=body.username,
-        hashed_password=hash_password(body.password),
+        hashed_password=await hash_password_async(body.password),
         role=body.role,
         daily_token_quota=body.daily_token_quota,
     )
@@ -118,13 +146,10 @@ async def update_quota(
     user_id: uuid.UUID,
     body: UpdateQuotaRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
     """Update the daily token quota for a user."""
-    result = await db.execute(select(User).where(User.id == user_id, User.is_deleted.is_(False)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = await _get_active_user_or_404(db, user_id)
     user.daily_token_quota = body.daily_token_quota
     db.add(user)
     await db.flush()
@@ -142,14 +167,32 @@ async def update_role(
     user_id: uuid.UUID,
     body: UpdateRoleRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
     """Change a user's role."""
-    result = await db.execute(select(User).where(User.id == user_id, User.is_deleted.is_(False)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = await _get_active_user_or_404(db, user_id)
     user.role = body.role
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return UserResponse.model_validate(user)
+
+
+# ===================================================================
+# PUT /api/admin/users/{user_id}/password  (admin reset)
+# ===================================================================
+
+
+@router.put("/users/{user_id}/password", response_model=UserResponse)
+async def reset_user_password(
+    user_id: uuid.UUID,
+    body: AdminResetPasswordRequest,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> UserResponse:
+    """Admin reset of a user's password — no old password required."""
+    user = await _get_active_user_or_404(db, user_id)
+    user.hashed_password = await hash_password_async(body.new_password)
     db.add(user)
     await db.flush()
     await db.refresh(user)
@@ -165,13 +208,10 @@ async def update_role(
 async def delete_user(
     user_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Soft-delete a user."""
-    result = await db.execute(select(User).where(User.id == user_id, User.is_deleted.is_(False)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or already deleted")
+    user = await _get_active_user_or_404(db, user_id, detail="User not found or already deleted")
     user.is_deleted = True
     db.add(user)
     await db.flush()
@@ -194,6 +234,40 @@ async def _upsert_config(db: AsyncSession, key: str, value: str) -> None:
         db.add(config)
 
 
+# Map LLMConfig request/response field names → SystemConfig keys.
+# String fields (endpoints/models/knobs); token weights are handled separately.
+_LLM_CONFIG_STR_FIELDS: dict[str, str] = {
+    "base_url": "LLM_BASE_URL",
+    "api_key": "LLM_API_KEY",
+    "model": "LLM_MODEL",
+    "embedding_url": "EMBEDDING_URL",
+    "embedding_api_key": "EMBEDDING_API_KEY",
+    "embedding_model": "EMBEDDING_MODEL",
+    "rerank_url": "RERANK_URL",
+    "rerank_api_key": "RERANK_API_KEY",
+    "rerank_model": "RERANK_MODEL",
+    # Agent slot.
+    "agent_base_url": "AGENT_BASE_URL",
+    "agent_api_key": "AGENT_API_KEY",
+    "agent_model": "AGENT_MODEL",
+    # estimated-token budget for chat history (OOM protection).
+    "context_max_tokens": "CONTEXT_MAX_TOKENS",
+    # VLM slot (garbled-formula transcription; empty model = off).
+    "vlm_base_url": "VLM_BASE_URL",
+    "vlm_api_key": "VLM_API_KEY",
+    "vlm_model": "VLM_MODEL",
+    # MinerU server of the PDF worker; empty = the worker's PDF_MINERU_SERVER_URL.
+    "mineru_server_url": "PDF_MINERU_SERVER_URL",
+    # Research agent limits (see research_service.ResearchLimits).
+    "agent_max_tool_calls": "AGENT_MAX_TOOL_CALLS",
+    "agent_max_visual_calls": "AGENT_MAX_VISUAL_CALLS",
+    "agent_research_seconds": "AGENT_RESEARCH_SECONDS",
+    "agent_total_seconds": "AGENT_TOTAL_SECONDS",
+    "agent_call_seconds": "AGENT_CALL_SECONDS",
+    "agent_max_input_tokens": "AGENT_MAX_INPUT_TOKENS",
+}
+
+
 # ===================================================================
 # GET /api/admin/llm/config
 # ===================================================================
@@ -202,16 +276,47 @@ async def _upsert_config(db: AsyncSession, key: str, value: str) -> None:
 @router.get("/llm/config", response_model=LLMConfigResponse)
 async def get_llm_config(
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LLMConfigResponse:
-    """Read the current LLM configuration from the SystemConfig table."""
+    """Read the full LLM/model-routing config from the SystemConfig table.
+
+    Raw stored values are returned — an empty string means the role inherits the
+    main LLM (see ``model_routing.resolve_model_routing``).
+    """
     result = await db.execute(select(SystemConfig))
     configs = {row.key: row.value for row in result.scalars().all()}
-    return LLMConfigResponse(
-        base_url=configs.get("LLM_BASE_URL", ""),
-        api_key=configs.get("LLM_API_KEY", ""),
-        model=configs.get("LLM_MODEL", ""),
-    )
+    payload = {
+        field: configs.get(key, "") for field, key in _LLM_CONFIG_STR_FIELDS.items()
+    }
+    # Token weights: reuse the single source of truth for parsing + defaults.
+    routing = resolve_model_routing(configs)
+    payload["token_alpha"] = routing.token_alpha
+    payload["token_beta"] = routing.token_beta
+    # What the map can show but not change: the deployment's feature flags and
+    # the MinerU server the worker uses when the field is empty.
+    payload["features"] = {
+        "research_agent": settings.AGENTIC_SEARCH_ENABLED,
+        "structured_documents": settings.STRUCTURED_INGEST_ENABLED,
+        "pdf_documents": settings.PDF_STRUCTURED_INGEST_ENABLED,
+    }
+    payload["mineru_default_url"] = os.environ.get("PDF_MINERU_SERVER_URL", "")
+    payload["research_limits"] = {
+        field: {"default": DEFAULT_LIMITS[LIMIT_KEYS[key][0]],
+                "min": LIMIT_KEYS[key][1], "max": LIMIT_KEYS[key][2]}
+        for field, key in _LLM_CONFIG_STR_FIELDS.items() if key in LIMIT_KEYS}
+    return LLMConfigResponse(**payload)
+
+
+@router.get("/llm/servers")
+async def get_model_servers(
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """For each slot of the routing map: does its server answer, does it
+    serve the configured model name, and that model's context length."""
+    configs = {row.key: row.value for row in (await db.execute(select(SystemConfig))).scalars().all()}
+    await db.rollback()  # no transaction is held while the servers answer
+    return {"servers": await model_servers.server_status(resolve_model_routing(configs))}
 
 
 # ===================================================================
@@ -223,14 +328,31 @@ async def get_llm_config(
 async def update_llm_config(
     body: LLMConfigRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LLMConfigResponse:
-    """Upsert LLM connection parameters. Enables zero-downtime model switching."""
-    await _upsert_config(db, "LLM_BASE_URL", body.base_url)
-    await _upsert_config(db, "LLM_API_KEY", body.api_key)
-    await _upsert_config(db, "LLM_MODEL", body.model)
+    """Zero-downtime upsert of the model-routing table.
+
+    Only fields explicitly provided (non-None) are written, so a legacy 3-field
+    PUT (base_url/api_key/model) never wipes the routing config.
+    """
+    for field, key in _LLM_CONFIG_STR_FIELDS.items():
+        value = getattr(body, field)
+        if key in LIMIT_KEYS and value and limit_value(key, value) is None:
+            _, low, high = LIMIT_KEYS[key]
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{field} must be a whole number from {low} to {high}",
+            )
+    for field, key in _LLM_CONFIG_STR_FIELDS.items():
+        value = getattr(body, field)
+        if value is not None:
+            await _upsert_config(db, key, value)
+    if body.token_alpha is not None:
+        await _upsert_config(db, "TOKEN_ALPHA", str(body.token_alpha))
+    if body.token_beta is not None:
+        await _upsert_config(db, "TOKEN_BETA", str(body.token_beta))
     await db.flush()
-    return LLMConfigResponse(base_url=body.base_url, api_key=body.api_key, model=body.model)
+    return await get_llm_config(_admin=_admin, db=db)
 
 
 # ===================================================================
@@ -243,7 +365,7 @@ async def import_users_csv(
     file: UploadFile = File(...),
     force: bool = Query(False, description="If true, execute the import. Otherwise dry-run."),
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CSVImportPreviewResponse:
     """CSV bulk import: username, password, role (optional). Dry-run by default."""
     content = await file.read()
@@ -267,15 +389,21 @@ async def import_users_csv(
     to_create = []
     to_update = []
     conflicts = []
+    seen_in_file: set[str] = set()
 
     for i, row in enumerate(rows, start=2):
-        username = row.get("username", "").strip()
-        password = row.get("password", "").strip()
-        role_str = row.get("role", "student").strip().lower()
+        # DictReader yields None for missing cells on short rows — coerce before strip.
+        username = (row.get("username") or "").strip()
+        password = (row.get("password") or "").strip()
+        role_str = (row.get("role") or "student").strip().lower()
 
         if not username or not password:
             conflicts.append({"row": i, "username": username, "reason": "Missing username or password"})
             continue
+        if username in seen_in_file:
+            conflicts.append({"row": i, "username": username, "reason": "Duplicate username in file"})
+            continue
+        seen_in_file.add(username)
         if role_str not in ("student", "teacher", "admin"):
             role_str = "student"
 
@@ -294,13 +422,13 @@ async def import_users_csv(
 
     if force:
         for entry in to_create:
-            db.add(User(username=entry["username"], hashed_password=hash_password(entry["password"]), role=entry["role"]))
+            db.add(User(username=entry["username"], hashed_password=await hash_password_async(entry["password"]), role=entry["role"]))
         response.created = len(to_create)
 
         for entry in to_update:
             res = await db.execute(select(User).where(User.username == entry["username"]))
             user = res.scalar_one()
-            user.hashed_password = hash_password(entry["password"])
+            user.hashed_password = await hash_password_async(entry["password"])
             db.add(user)
         response.updated = len(to_update)
         await db.flush()
@@ -313,16 +441,29 @@ async def import_users_csv(
 # ===================================================================
 
 
-@router.get("/classes", response_model=list[ClassResponse])
+@router.get("/classes", response_model=list[AdminClassResponse])
 async def list_all_classes(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-) -> list[ClassResponse]:
-    """List all non-deleted classes system-wide."""
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[AdminClassResponse]:
+    """List all non-deleted classes system-wide, with the teacher who owns
+    each one and a few counts."""
     classes = await class_service.list_all_classes(db, skip=skip, limit=limit)
-    return [ClassResponse.model_validate(c) for c in classes]
+    owners = {u.id: u for u in (await db.scalars(
+        select(User).where(User.id.in_({c.teacher_id for c in classes})))).all()} if classes else {}
+    counts = await analytics_service.get_class_overview(db, [c.id for c in classes])
+    out = []
+    for c in classes:
+        owner = owners.get(c.teacher_id)
+        out.append(AdminClassResponse.model_validate(c).model_copy(update={
+            "teacher_username": owner.username if owner else None,
+            "teacher_ok": owner is not None and not owner.is_deleted
+                          and owner.role in (UserRole.teacher, UserRole.admin),
+            **counts[c.id],
+        }))
+    return out
 
 
 # ===================================================================
@@ -334,7 +475,7 @@ async def list_all_classes(
 async def list_class_labs(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[LabResponse]:
     """List all labs in a class (no ownership check)."""
     await class_service.get_class_by_id(db, class_id)  # 404 if not found
@@ -351,7 +492,7 @@ async def list_class_labs(
 async def list_class_students(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[UserResponse]:
     """List all students enrolled in a specific class."""
     await class_service.get_class_by_id(db, class_id)  # 404 if not found
@@ -369,7 +510,7 @@ async def transfer_class(
     class_id: uuid.UUID,
     body: TransferClassRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassResponse:
     """Force-change the teacher_id of any class."""
     cls = await class_service.get_class_by_id(db, class_id)
@@ -386,7 +527,7 @@ async def transfer_class(
 async def force_delete_class(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Force soft-delete any class system-wide (no ownership check)."""
     cls = await class_service.get_class_by_id(db, class_id)
@@ -404,7 +545,7 @@ async def list_all_labs(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[LabResponse]:
     """List all non-deleted labs system-wide."""
     labs = await lab_service.list_all_labs(db, skip=skip, limit=limit)
@@ -420,12 +561,32 @@ async def list_all_labs(
 async def force_delete_lab(
     lab_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Force soft-delete any lab system-wide (no ownership check)."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.soft_delete_lab(db, lab)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ===================================================================
+# PUT /api/admin/labs/{lab_id}
+# ===================================================================
+
+
+@router.put("/labs/{lab_id}", response_model=LabResponse)
+async def force_update_lab(
+    lab_id: uuid.UUID,
+    body: LabUpdateRequest,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> LabResponse:
+    """Admin lab update: lock/unlock (``is_active``) or rename any lab
+    system-wide, bypassing ownership. Mirrors the ``DELETE /api/admin/labs``
+    pattern — the teacher route still enforces ownership."""
+    lab = await lab_service.get_lab_by_id(db, lab_id)
+    lab = await lab_service.update_lab(db, lab, name=body.name, is_active=body.is_active)
+    return LabResponse.model_validate(lab)
 
 
 # ===================================================================
@@ -436,13 +597,14 @@ async def force_delete_lab(
 @router.get("/analytics", response_model=AdminAnalyticsResponse)
 async def get_global_analytics(
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> AdminAnalyticsResponse:
     """Global token usage dashboard with 30-day daily breakdown."""
     result = await analytics_service.get_global_analytics(db)
     return AdminAnalyticsResponse(
         total_tokens=result.total_tokens,
         total_requests=result.total_requests,
+        active_users_7d=result.active_users_7d,
         daily_breakdown=[
             DailyUsage(date=d["date"], tokens=d["tokens"], requests=d["requests"])
             for d in result.daily_breakdown
@@ -459,36 +621,28 @@ async def get_global_analytics(
 async def get_class_analytics(
     class_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassAnalyticsResponse:
     """Per-class hierarchical analytics (class→lab→student). No ownership check."""
     cls = await class_service.get_class_by_id(db, class_id)
     result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
+    return ClassAnalyticsResponse.from_analytics(result)
 
-    return ClassAnalyticsResponse(
-        class_id=result.class_id,
-        class_name=result.class_name,
-        total_tokens=result.total_tokens,
-        total_requests=result.total_requests,
-        labs=[
-            LabUsageSummary(
-                lab_id=lab.lab_id,
-                lab_name=lab.lab_name,
-                tokens=lab.tokens,
-                requests=lab.requests,
-                students=[
-                    StudentUsageSummary(
-                        user_id=s.user_id,
-                        username=s.username,
-                        tokens_used=s.tokens_used,
-                        request_count=s.request_count,
-                    )
-                    for s in lab.students
-                ],
-            )
-            for lab in result.labs
-        ],
-    )
+
+@router.get("/analytics/classes/{class_id}/details")
+async def get_class_analytics_details(
+    class_id: uuid.UUID,
+    lab_id: uuid.UUID | None = Query(None),
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """What the teacher Analytics tab shows, for any class or one of its labs."""
+    await class_service.get_class_by_id(db, class_id)  # 404 if not found
+    if lab_id is not None:
+        lab = await lab_service.get_lab_by_id(db, lab_id)
+        if lab.class_id != class_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+    return await analytics_service.get_teaching_analytics(db, class_id, lab_id)
 
 
 # ===================================================================
@@ -500,7 +654,7 @@ async def get_class_analytics(
 async def hard_delete_session(
     session_id: uuid.UUID,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Hard-delete a session and all its messages to purge inappropriate content."""
     result = await db.execute(select(Session).where(Session.id == session_id))
@@ -522,25 +676,31 @@ async def hard_delete_session(
 async def prune_old_data(
     body: PruneRequest,
     _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> PruneResponse:
-    """Hard-delete sessions and messages older than `older_than_days`."""
+    """Hard-delete sessions and messages older than `older_than_days`; with
+    dry_run, only count them."""
     from datetime import datetime, timedelta, timezone
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=body.older_than_days)
+
     old_sessions_result = await db.execute(select(Session.id).where(Session.created_at < cutoff))
     old_session_ids = [row[0] for row in old_sessions_result.all()]
 
-    if not old_session_ids:
-        return PruneResponse(sessions_deleted=0, messages_deleted=0)
+    messages_deleted = 0
+    if old_session_ids:
+        msg_count_result = await db.execute(
+            select(func.count(Message.id)).where(Message.session_id.in_(old_session_ids))
+        )
+        messages_deleted = msg_count_result.scalar_one()
+        if not body.dry_run:
+            await db.execute(delete(Message).where(Message.session_id.in_(old_session_ids)))
+            await db.execute(delete(Session).where(Session.id.in_(old_session_ids)))
 
-    msg_count_result = await db.execute(
-        select(func.count(Message.id)).where(Message.session_id.in_(old_session_ids))
-    )
-    messages_deleted = msg_count_result.scalar_one()
-
-    await db.execute(delete(Message).where(Message.session_id.in_(old_session_ids)))
-    await db.execute(delete(Session).where(Session.id.in_(old_session_ids)))
     await db.flush()
 
-    return PruneResponse(sessions_deleted=len(old_session_ids), messages_deleted=messages_deleted)
+    return PruneResponse(
+        dry_run=body.dry_run,
+        sessions_deleted=len(old_session_ids),
+        messages_deleted=messages_deleted,
+    )

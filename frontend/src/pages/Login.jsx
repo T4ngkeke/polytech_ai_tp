@@ -1,12 +1,13 @@
 /**
- * Login.jsx — Full-screen login page for Edu-LLM v6.
- * "Dossier Noir" aesthetic: dark editorial with cyan CTA.
+ * Login.jsx — Full-screen login page for Edu-LLM.
+ * Editorial layout with a cyan call to action.
  */
 
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import useAuthStore, { DEFAULT_ROUTES } from '../store/authStore';
+import ThemeToggle from '../components/ThemeToggle';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -48,6 +49,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-ink-deep">
+      <ThemeToggle className="absolute top-4 right-4 z-20" />
       {/* ── Background decoration ── */}
       <div className="absolute inset-0 pointer-events-none select-none">
         {/* Warm cyan glow */}
@@ -71,7 +73,7 @@ export default function Login() {
           <div className="relative z-10 px-8 pt-10 pb-6 text-center">
             {/* Logo */}
             <div className="mx-auto w-14 h-14 rounded-xl gradient-cyan flex items-center justify-center shadow-glow mb-5">
-              <svg className="w-7 h-7 text-cream" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="w-7 h-7 text-on-accent" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2L14.09 8.26L20 9.27L15.55 13.97L16.91 20L12 16.9L7.09 20L8.45 13.97L4 9.27L9.91 8.26L12 2Z" />
               </svg>
             </div>
@@ -134,7 +136,7 @@ export default function Login() {
               id="login-submit"
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 rounded-lg gradient-cyan text-cream text-sm font-semibold tracking-wide transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-glow"
+              className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold tracking-wide transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-glow"
             >
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -158,7 +160,7 @@ export default function Login() {
 
         {/* Footer */}
         <p className="text-center text-[11px] text-cream-muted mt-6 font-body tracking-wide">
-          Edu-LLM v6 Class-Lab Architecture — Polytech AI
+          Edu-LLM · Polytech
         </p>
       </div>
     </div>

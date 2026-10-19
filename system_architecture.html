@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM v5 Class-Lab Architecture</title>
+    <title>Edu-LLM Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -23,16 +23,10 @@
             --surface-2: #f7f8fc;
             --border: #e2e6f0;
             --text: #1a1e2e;
-            --text-muted: #6b7494;
-            --new: #16a34a;
-            --new-bg: #f0fdf4;
-            --new-border: #bbf7d0;
-            --changed: #b45309;
-            --changed-bg: #fffbeb;
-            --changed-border: #fde68a;
-            --kept: #4f46e5;
-            --kept-bg: #eef2ff;
-            --kept-border: #c7d2fe;
+            --text-muted: #5b6484;
+            --accent: #0e7490;
+            --accent-bg: #ecfeff;
+            --accent-border: #a5f3fc;
         }
 
         body {
@@ -40,7 +34,8 @@
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-            padding: 2.5rem 1.5rem;
+            padding: 2.5rem 1rem;
+            line-height: 1.6;
         }
 
         .wrapper {
@@ -50,12 +45,12 @@
 
         header {
             text-align: center;
-            margin-bottom: 3rem;
+            margin-bottom: 2.5rem;
         }
 
         .pill {
             display: inline-block;
-            background: #1a1e2e;
+            background: var(--text);
             color: #fff;
             font-size: 0.65rem;
             font-weight: 700;
@@ -67,184 +62,98 @@
         }
 
         h1 {
-            font-size: 2.5rem;
+            font-size: clamp(1.7rem, 4vw, 2.4rem);
             font-weight: 700;
             letter-spacing: -0.03em;
-            margin-bottom: 0.6rem;
+            line-height: 1.2;
+            margin-bottom: 0.8rem;
         }
 
         .subtitle {
             font-size: 1rem;
             color: var(--text-muted);
-            max-width: 600px;
+            max-width: 680px;
             margin: 0 auto;
-            line-height: 1.6;
         }
 
-        /* Legend */
-        .legend {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-bottom: 2rem;
+        .note {
+            max-width: 680px;
+            margin: 1.2rem auto 0;
+            font-size: 0.82rem;
+            color: var(--text-muted);
         }
 
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            font-size: 0.78rem;
-            font-weight: 500;
-            padding: 0.3rem 0.75rem;
-            border-radius: 6px;
-            border: 1px solid;
+        h2 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin: 2.5rem 0 0.4rem;
         }
 
-        .legend-item.new {
-            background: var(--new-bg);
-            color: var(--new);
-            border-color: var(--new-border);
+        .lead {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            max-width: 780px;
         }
 
-        .legend-item.changed {
-            background: var(--changed-bg);
-            color: var(--changed);
-            border-color: var(--changed-border);
-        }
-
-        .legend-item.kept {
-            background: var(--kept-bg);
-            color: var(--kept);
-            border-color: var(--kept-border);
-        }
-
-        .legend-item .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .dot.new {
-            background: var(--new);
-        }
-
-        .dot.changed {
-            background: var(--changed);
-        }
-
-        .dot.kept {
-            background: var(--kept);
-        }
-
-        /* Diagram Card */
         .diagram-card {
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 16px;
-            padding: 2rem;
+            padding: 1.5rem;
             box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-            margin-bottom: 2.5rem;
             overflow-x: auto;
         }
 
         .diagram-card .mermaid {
-            display: flex;
-            justify-content: center;
+            width: max-content;
+            margin: 0 auto;
         }
 
-        /* Grid cards */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.25rem;
-            margin-bottom: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
         }
 
         .card {
             background: var(--surface);
             border-radius: 12px;
-            padding: 1.4rem;
+            padding: 1.2rem 1.3rem;
             border: 1px solid var(--border);
-            transition: box-shadow 0.2s;
-        }
-
-        .card:hover {
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-        }
-
-        .card.new {
-            border-color: var(--new-border);
-            background: var(--new-bg);
-        }
-
-        .card.changed {
-            border-color: var(--changed-border);
-            background: var(--changed-bg);
-        }
-
-        .card .tag {
-            font-size: 0.6rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            padding: 0.2rem 0.55rem;
-            border-radius: 4px;
-            margin-bottom: 0.8rem;
-            display: inline-block;
-        }
-
-        .card.new .tag {
-            background: var(--new-border);
-            color: var(--new);
-        }
-
-        .card.changed .tag {
-            background: var(--changed-border);
-            color: var(--changed);
         }
 
         .card h3 {
             font-size: 0.95rem;
             font-weight: 700;
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.35rem;
         }
 
         .card p {
-            font-size: 0.82rem;
+            font-size: 0.84rem;
             color: var(--text-muted);
-            line-height: 1.6;
         }
 
-        .card code {
+        code {
             font-family: 'DM Mono', monospace;
             background: rgba(0, 0, 0, 0.05);
-            padding: 0.1rem 0.35rem;
+            padding: 0.05rem 0.3rem;
             border-radius: 4px;
-            font-size: 0.78rem;
+            font-size: 0.8em;
         }
 
-        /* Schema diff table */
-        .schema-section {
+        .table-card {
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 2rem;
-        }
-
-        .schema-section h2 {
-            font-size: 0.9rem;
-            font-weight: 600;
-            padding: 1rem 1.4rem;
-            border-bottom: 1px solid var(--border);
-            background: var(--surface-2);
+            overflow-x: auto;
         }
 
         table {
             width: 100%;
+            min-width: 560px;
             border-collapse: collapse;
-            font-size: 0.82rem;
+            font-size: 0.84rem;
         }
 
         th {
@@ -269,38 +178,20 @@
             border-bottom: none;
         }
 
-        .badge {
-            font-size: 0.65rem;
-            font-weight: 700;
-            padding: 0.15rem 0.5rem;
-            border-radius: 4px;
-            display: inline-block;
+        td:first-child {
+            font-weight: 600;
+            white-space: nowrap;
         }
 
-        .badge.new {
-            background: var(--new-bg);
-            color: var(--new);
-            border: 1px solid var(--new-border);
+        a {
+            color: var(--accent);
         }
 
-        .badge.changed {
-            background: var(--changed-bg);
-            color: var(--changed);
-            border: 1px solid var(--changed-border);
-        }
-
-        .badge.kept {
-            background: var(--kept-bg);
-            color: var(--kept);
-            border: 1px solid var(--kept-border);
-        }
-
-        td code {
-            font-family: 'DM Mono', monospace;
-            background: rgba(0, 0, 0, 0.04);
-            padding: 0.1rem 0.3rem;
-            border-radius: 3px;
-            font-size: 0.78rem;
+        footer {
+            margin-top: 2.5rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
         }
     </style>
 </head>
@@ -309,184 +200,295 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v5 — Class-Lab Architecture</div>
-            <h1>Edu-LLM: Hierarchical Rules & Zero-Downtime Architecture</h1>
-            <p class="subtitle">Streamlined design optimized for a 20-student class. Redis layer removed to reduce
-                overhead. Ollama is retained as a compute placeholder for seamless API migration.</p>
+            <div class="pill">System architecture</div>
+            <h1>Edu-LLM: a course tutor that answers from the teacher's PDFs</h1>
+            <p class="subtitle">Teachers upload course PDFs to a class or a lab. Students ask questions in a chat.
+                The model answers from those PDFs and cites the pages it used.</p>
+            <p class="note">This page draws what runs today. The details are in
+                <a href="documentation/ARCHITECTURE.md">ARCHITECTURE.md</a>, the endpoints in
+                <a href="documentation/API.md">API.md</a> and the tables in
+                <a href="documentation/DATABASE.md">DATABASE.md</a>.</p>
         </header>
 
-        <div class="legend">
-            <div class="legend-item new">
-                <div class="dot new"></div> New feature
-            </div>
-            <div class="legend-item changed">
-                <div class="dot changed"></div> Modified component
-            </div>
-            <div class="legend-item kept">
-                <div class="dot kept"></div> Unchanged
-            </div>
-        </div>
-
+        <!-- 1. What runs -->
+        <h2>1. What runs</h2>
+        <p class="lead">Five kinds of containers. The browser only talks to nginx. The backend and the worker share
+            one database and the same model servers. The database table <code>ingestion_jobs</code> is the job
+            queue; there is no other queue.</p>
         <div class="diagram-card">
             <div class="mermaid">
-                %%{init: {'theme': 'base', 'themeVariables':
-                {'primaryColor':'#f8fafc','primaryEdgeColor':'#475569','lineColor':'#94a3b8','fontFamily':'DM Sans,
-                sans-serif','fontSize':'13px'}}}%%
-                graph TD
-                classDef default fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#1e293b;
-                classDef newNode fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d,font-weight:bold;
-                classDef changedNode fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#78350f,font-weight:bold;
-                classDef auth fill:#fef9c3,stroke:#eab308,stroke-width:2px,color:#713f12,font-weight:bold;
-                classDef streaming fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold;
-                classDef route fill:#f3e8ff,stroke:#c084fc,stroke-width:1.5px,color:#581c87;
-                classDef danger fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
+                %%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'DM Sans, sans-serif', 'fontSize': '13px',
+                'lineColor': '#94a3b8'}}}%%
+                flowchart TB
+                classDef people fill:#f1f5f9,stroke:#94a3b8,color:#1e293b;
+                classDef web fill:#ecfeff,stroke:#0e7490,stroke-width:1.5px,color:#164e63;
+                classDef app fill:#eef2ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81;
+                classDef db fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+                classDef model fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#78350f;
+                classDef mon fill:#fdf4ff,stroke:#a21caf,stroke-width:1.5px,color:#701a75;
 
-                subgraph FE ["① Frontend Layer"]
-                UI_S["Student UI"]
-                UI_T["Teacher UI"]
-                UI_A["Admin UI"]
+                P["Students · Teachers · Admins<br/>in a web browser"]
+                NG["Frontend container · nginx<br/>serves the React app<br/>/api/ → backend · /grafana/ → Grafana (admins only)"]
+
+                subgraph BACK["Backend container · FastAPI"]
+                direction LR
+                CHAT["Chat<br/>research agent<br/>Direct · Search · Research"]
+                ROUTES["Pages of teachers and admins<br/>classes, labs, rules, documents,<br/>analytics, reports, model settings"]
                 end
 
-                subgraph BE ["② Backend Layer (FastAPI)"]
-                Auth["JWT Gateway"]
-                R_Admin["Admin Routes\n(CSV Import, LLM Config)"]
-                R_Teacher["Teacher Routes\n(Classes, Labs, Rules)"]
-                R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
-                RateLimit["Rate Limiter\n(In-Memory/DB Check)"]
-                PromptCtrl["Prompt Controller\nMerge Class+Lab+Student rules"]
-                Proxy["Streaming Proxy\nSSE forwarding"]
-                AsyncDB["Background Task\ntoken-aware write"]
+                WORK["Worker container · same image<br/>reads PDFs, one job at a time,<br/>waits while students chat"]
+
+                subgraph PG["PostgreSQL + pgvector"]
+                direction LR
+                DATA["Users, classes, rules,<br/>chats, quota"]
+                DOCS["Documents and<br/>searchable passages"]
+                QUEUE["ingestion_jobs<br/>the job queue"]
+                CFG["system_configs<br/>model settings"]
                 end
 
-                subgraph DB ["③ Database Layer (PostgreSQL)"]
-                DB_SysConf["SystemConfigs\nLLM_BASE_URL, Model (0-Downtime)"]
-                DB_Classes["Classes & Labs\ninvite_code, teacher_id"]
-                DB_Users["Users\nid · role · daily_token_quota"]
-                DB_Rules["Hierarchical Rules\nlevel(class/lab/student) · target_id"]
-                DB_Sessions["Sessions\nid · user_id · lab_id"]
-                DB_Messages["Messages & Usage Stats"]
+                subgraph MODELS["Model servers · Docker network edullm-models"]
+                direction LR
+                LLM["Qwen3.8 Flash-Next<br/>served as 'ornith'"]
+                RR["Qwen3-Reranker-0.6B"]
+                EMB["bge-m3<br/>embeddings"]
+                MU["MinerU<br/>reads PDF pages"]
                 end
 
-                subgraph COMPUTE ["④ Compute Layer"]
-                LLM["Model Endpoint\n(MVP: Ollama | Future: API)"]
-                end
+                MON["Monitoring<br/>Grafana + Prometheus"]
 
-                UI_S & UI_T & UI_A == "JWT Token" ==> Auth
+                P --> NG
+                NG --> BACK
+                NG -.->|"admin check"| MON
+                BACK -->|"reads and writes"| PG
+                BACK -->|"answers, scores, embeddings"| MODELS
+                WORK -->|"takes jobs, writes revisions"| PG
+                WORK -->|"MinerU, embeddings"| MODELS
+                MON -.->|"metrics"| MODELS
+                MON -.->|"read-only"| PG
 
-                Auth -.->|"validate role"| DB_Users
-                Auth ==>|"admin"| R_Admin
-                Auth ==>|"teacher"| R_Teacher
-                Auth ==>|"student"| R_Student
-
-                R_Admin -.->|"CSV Upsert"| DB_Users
-                R_Admin -.->|"write LLM config"| DB_SysConf
-                R_Teacher -.->|"write Class/Lab"| DB_Classes
-                R_Teacher -.->|"write 3-tier rules"| DB_Rules
-
-                R_Student -.->|"join via invite code"| DB_Classes
-                R_Student ==>|"chat in lab"| RateLimit
-                RateLimit -.->|"read quota"| DB_Users
-                RateLimit ==>|"quota OK"| PromptCtrl
-                RateLimit -->|"429 — over limit"| UI_S
-
-                PromptCtrl -.->|"fetch Class+Lab+Student rules"| DB_Rules
-                PromptCtrl -.->|"fetch session ctx"| DB_Sessions
-                PromptCtrl ==>|"assembled payload"| Proxy
-
-                Proxy -.->|"read dynamic URL/Key"| DB_SysConf
-                Proxy ==>|"POST request"| LLM
-                LLM ==>|"stream tokens"| Proxy
-                Proxy ==>|"SSE to browser"| UI_S
-
-                Proxy -.->|"stream ended — trigger"| AsyncDB
-                AsyncDB -.->|"save msg + tokens"| DB_Messages
-
-                class DB_SysConf,DB_Classes,DB_Rules newNode;
-                class Auth auth;
-                class PromptCtrl danger;
-                class Proxy,LLM streaming;
-                class R_Admin,R_Teacher,R_Student route;
-                class DB_Users,DB_Sessions changedNode;
+                class P people;
+                class NG web;
+                class CHAT,ROUTES,WORK app;
+                class DATA,DOCS,QUEUE,CFG db;
+                class LLM,RR,EMB,MU model;
+                class MON mon;
             </div>
         </div>
 
+        <!-- 2. A chat question -->
+        <h2>2. How a question is answered</h2>
+        <p class="lead">There is one chat path, the research agent in <code>backend/app/agent/</code>. The student
+            picks a mode. A class in exam mode always gets Direct. Search and Research only cite what was read
+            in this run.</p>
+        <div class="diagram-card">
+            <div class="mermaid">
+                %%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'DM Sans, sans-serif', 'fontSize': '13px',
+                'lineColor': '#94a3b8'}}}%%
+                flowchart TD
+                classDef step fill:#eef2ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81;
+                classDef mode fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#78350f;
+                classDef stop fill:#fef2f2,stroke:#dc2626,stroke-width:1.5px,color:#7f1d1d;
+                classDef out fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+
+                Q["Student question in a lab"] --> C["Checks<br/>own session · member of the class<br/>lab open · quota left"]
+                C -->|"no"| X["Refused<br/>for example 429 when the quota is used up"]
+                C -->|"yes"| R["Add the teacher rules<br/>class · lab · student"]
+                R --> M{"Mode"}
+                M -->|"direct, or class in exam mode"| D["Direct<br/>one short answer<br/>without the course files"]
+                M -->|"search"| SE["Search<br/>one search with the question<br/>→ read the best pages and their neighbours<br/>→ one answer"]
+                M -->|"research"| RE["Research<br/>the model calls tools as often as it needs, within limits:<br/>search · open · read · grep · view_image<br/>it may ask the student a question back"]
+                SE --> EV["Check the citations<br/>only passages read in this run (E1, E2 …)<br/>unknown IDs are removed"]
+                RE --> EV
+                D --> SAVE["Save the answer, its citations and its mode<br/>bill the tokens on the daily quota"]
+                EV --> SAVE
+                SAVE --> OUT["Stream to the browser (server-sent events)<br/>the chat shows each cited page, passage highlighted"]
+
+                class C,R,EV,SAVE step;
+                class D,SE,RE mode;
+                class X stop;
+                class OUT out;
+            </div>
+        </div>
+
+        <!-- 3. A PDF -->
+        <h2>3. How a PDF becomes searchable</h2>
+        <p class="lead">An upload never changes what students see until a revision is published. A teacher edit
+            makes a new draft; it never changes a published revision.</p>
+        <div class="diagram-card">
+            <div class="mermaid">
+                %%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'DM Sans, sans-serif', 'fontSize': '13px',
+                'lineColor': '#94a3b8'}}}%%
+                flowchart TD
+                classDef step fill:#eef2ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81;
+                classDef out fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+                classDef wait fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#78350f;
+
+                U["Teacher uploads a PDF<br/>to a lab or a whole class<br/>at most 200 MB, 150 pages"] --> J["Job in ingestion_jobs<br/>the teacher sees jobs ahead,<br/>pages read, time left"]
+                J --> P["Read job<br/>MinerU reads each page<br/>→ pages, blocks, pictures<br/>stored as a draft"]
+                P --> I["Index job<br/>cut blocks into passages<br/>bge-m3 embeddings<br/>full-text vector (fr or en)"]
+                I --> F(["Every page read?"])
+                F -->|"yes"| PUB["Published<br/>students and the agent can use it"]
+                F -->|"no"| DR["Stays a draft<br/>the teacher checks it and publishes"]
+                DR --> PUB
+
+                class U,J,P,I step;
+                class PUB out;
+                class DR wait;
+            </div>
+        </div>
+
+        <!-- 4. Design rules -->
+        <h2>4. Design rules</h2>
+        <p class="lead">The choices that the rest of the code relies on.</p>
         <div class="grid">
-            <div class="card changed">
-                <span class="tag">Zero-Friction</span>
-                <h3>Invite Code Workflow</h3>
-                <p>The tedious manual approval process is replaced with 6-character Invite Codes. Students can instantly join a class and access their assigned labs, ensuring a flawless and fast demo experience.</p>
+            <div class="card">
+                <h3>Access is checked in SQL</h3>
+                <p>Every course search filters on <code>class_id</code>, <code>lab_id</code> and the revisions fixed
+                    at the start of the run. A prompt cannot widen it. The model never sends a file address.</p>
             </div>
-
-            <div class="card changed">
-                <span class="tag">Granular Control</span>
-                <h3>Three-Tier Rule Injection</h3>
-                <p>The Prompt Controller dynamically fetches and sequentially merges rules from three levels: <b>Class Rule</b> -> <b>Lab Rule</b> -> <b>Student Rule</b>, injecting highly targeted pedagogy directly into the LLM context.</p>
+            <div class="card">
+                <h3>Citations only from what was read</h3>
+                <p>Only what the model read (<code>read</code>) or looked at (<code>view_image</code>) gets an evidence
+                    ID. Search results are leads, not proof. An answer may cite only those IDs.</p>
             </div>
-
-            <div class="card new">
-                <span class="tag">Zero-Downtime</span>
-                <h3>Dynamic LLM Configuration</h3>
-                <p>Crucial LLM connection details (Base URL, API Key, Model) are now fetched from the <code>SystemConfigs</code> database table rather than a static <code>.env</code> file. Admins can hot-swap AI models on the fly.</p>
+            <div class="card">
+                <h3>Search in one table</h3>
+                <p>A vector search (<code>pgvector</code>) and a full-text search (<code>tsvector</code>) run on the
+                    same passages. The two lists are merged, then the reranker orders them. If the embedding server
+                    fails, the full-text list is used alone.</p>
             </div>
-
-            <div class="card new">
-                <span class="tag">Context Safe</span>
-                <h3>Lab-Scoped Sessions</h3>
-                <p>Chats are no longer infinite global threads. Students create isolated <code>Chat Sessions</code> inside a specific Lab. This clears history safely, preventing catastrophic Context Window overflow for smaller local models.</p>
+            <div class="card">
+                <h3>One model, set in the database</h3>
+                <p>Qwen3.8 Flash-Next answers, looks at pictures and writes figure descriptions. Model addresses
+                    are rows in <code>system_configs</code>; the admin changes them without a restart.</p>
+            </div>
+            <div class="card">
+                <h3>The database is the queue</h3>
+                <p>The worker takes jobs with <code>FOR UPDATE SKIP LOCKED</code> and a lease. It waits while
+                    students chat, so reading PDFs never slows down answers.</p>
+            </div>
+            <div class="card">
+                <h3>Tokens are reserved, then billed</h3>
+                <p>Each model call is reserved on the daily quota before it runs and billed after, as
+                    <code>prompt × 0.2 + completion × 1.0</code> by default. A teacher can refill a student's quota
+                    for the day; usage figures are never rewritten.</p>
+            </div>
+            <div class="card">
+                <h3>Teacher rules shape the tutor</h3>
+                <p>Class, lab and student rules go into every answer mode. They set the teaching style. They are
+                    not a security boundary; access is checked in SQL.</p>
+            </div>
+            <div class="card">
+                <h3>Nothing a student deletes is lost</h3>
+                <p>A deleted session is hidden from the student but kept. Teachers and admins still see it. Only an
+                    admin can delete it for good.</p>
+            </div>
+            <div class="card">
+                <h3>Grafana for admins only</h3>
+                <p>For every <code>/grafana/</code> request, nginx asks the backend to check the admin's signed
+                    cookie. Students on the network cannot read other students' questions.</p>
             </div>
         </div>
 
-        <div class="schema-section">
-            <h2>Database Schema (PostgreSQL)</h2>
+        <!-- 5. Data -->
+        <h2>5. Where the data lives</h2>
+        <p class="lead">The tables in groups. Every table and column is in
+            <a href="documentation/DATABASE.md">DATABASE.md</a>.</p>
+        <div class="table-card">
             <table>
                 <thead>
                     <tr>
-                        <th>Table</th>
-                        <th>Status</th>
-                        <th>Core Fields</th>
-                        <th>Purpose</th>
+                        <th>Group</th>
+                        <th>Tables</th>
+                        <th>What they hold</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
+                        <td>Settings</td>
                         <td><code>system_configs</code></td>
-                        <td><span class="badge new">New</span></td>
-                        <td><code>id, key, value</code></td>
-                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping.</td>
+                        <td>Model addresses and names, token weights, research limits.</td>
                     </tr>
                     <tr>
-                        <td><code>classes & labs</code></td>
-                        <td><span class="badge new">New</span></td>
-                        <td><code>invite_code, teacher_id, class_id</code></td>
-                        <td>Hierarchical structure for organizing students. Uses <code>invite_code</code> for instant join.</td>
+                        <td>People and classes</td>
+                        <td><code>users</code>, <code>classes</code>, <code>labs</code>, <code>class_students</code></td>
+                        <td>Roles, daily quota, invite codes, exam mode, who is in which class.</td>
                     </tr>
                     <tr>
-                        <td><code>rules</code></td>
-                        <td><span class="badge changed">Modified</span></td>
-                        <td><code>level, target_id, rules_text</code></td>
-                        <td>Replaces old <code>teacher_rules</code>. Uses polymorphism to store Class, Lab, and Student-specific AI rules.</td>
+                        <td>Rules</td>
+                        <td><code>rules</code>, <code>skill_presets</code></td>
+                        <td>Teacher rules at class, lab and student level; reusable teaching styles.</td>
                     </tr>
                     <tr>
-                        <td><code>sessions</code></td>
-                        <td><span class="badge changed">Modified</span></td>
-                        <td><code>id, user_id, lab_id</code></td>
-                        <td>Tightly scoped to a <code>lab_id</code>. Allows clearing history to avoid LLM context overflow.</td>
+                        <td>Chat</td>
+                        <td><code>sessions</code>, <code>messages</code>, <code>message_citations</code>,
+                            <code>agent_runs</code></td>
+                        <td>Conversations, answers with their mode and feedback, cited passages, one row per
+                            research run.</td>
                     </tr>
                     <tr>
-                        <td><code>users</code></td>
-                        <td><span class="badge kept">Unchanged</span></td>
-                        <td><code>id, role, daily_token_quota</code></td>
-                        <td>Supports bulk creation via Admin CSV dry-run import.</td>
+                        <td>Usage</td>
+                        <td><code>usage_stats</code>, <code>quota_grants</code>, <code>usage_reservations</code>,
+                            <code>model_call_usage</code></td>
+                        <td>Tokens per user and day, teacher refills, reserved and billed model calls.</td>
+                    </tr>
+                    <tr>
+                        <td>Reports</td>
+                        <td><code>audit_reports</code></td>
+                        <td>AI reports on a lab or one student, written from counted numbers.</td>
+                    </tr>
+                    <tr>
+                        <td>Documents</td>
+                        <td><code>documents</code>, <code>document_revisions</code>, <code>document_pages</code>,
+                            <code>document_blocks</code>, <code>document_assets</code>, <code>document_reviews</code>,
+                            …</td>
+                        <td>Each upload, each reading of it, its pages, blocks and pictures, and the items a teacher
+                            confirms.</td>
+                    </tr>
+                    <tr>
+                        <td>Search</td>
+                        <td><code>doc_chunks</code></td>
+                        <td>The passages, with their embedding and full-text vector.</td>
+                    </tr>
+                    <tr>
+                        <td>Queue</td>
+                        <td><code>ingestion_jobs</code></td>
+                        <td>Read and index jobs, with lock, lease and progress.</td>
                     </tr>
                 </tbody>
             </table>
         </div>
 
+        <!-- 6. Stacks -->
+        <h2>6. Two stacks, one code base</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Teachers' stack</h3>
+                <p><code>docker-compose.release.yml</code>: its own database, files and daily backup, served over
+                    HTTPS on the school network. It is updated only by rebuilding it. See
+                    <a href="documentation/RELEASE_TEACHERS.md">RELEASE_TEACHERS.md</a>.</p>
+            </div>
+            <div class="card">
+                <h3>Dev stack</h3>
+                <p><code>docker-compose.yml</code> with <code>docker-compose.override.yml</code>: feature flags on,
+                    site on port 8080, and the monitoring containers. Grafana serves both stacks.</p>
+            </div>
+            <div class="card">
+                <h3>Shared model servers</h3>
+                <p>Both stacks call the same model servers on the Docker network <code>edullm-models</code>.</p>
+            </div>
+        </div>
+
+        <footer>Checked against the code on 2026-10-19.</footer>
     </div>
 
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.6/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
+        // Draw after the fonts load, so the labels are measured with the right font.
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', flowchart: { htmlLabels: false, useMaxWidth: false } });
+        await Promise.all(['400', '700'].map((w) => document.fonts.load(`${w} 13px "DM Sans"`))).catch(() => {});
+        await document.fonts.ready;
+        await mermaid.run();
     </script>
 </body>
 

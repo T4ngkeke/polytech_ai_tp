@@ -1,5 +1,5 @@
 """
-test_admin.py — Tests for admin endpoints (v5 production-ready).
+test_admin.py — Tests for admin endpoints.
 """
 
 import uuid
@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.auth import create_access_token, hash_password
+from backend.app.auth import create_access_token, hash_password, verify_password
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import (
@@ -299,6 +299,134 @@ class TestLLMConfig:
         })
         assert resp.status_code == 403
 
+    async def test_agent_keys_roundtrip(self, admin_client):
+        """The agent slot (the research agent's model) is admin-configurable and
+        survives a GET after PUT."""
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "agent_base_url": "http://big/v1",
+            "agent_api_key": "big-key",
+            "agent_model": "qwen3-235b",
+        })
+        assert resp.status_code == 200
+
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["agent_model"] == "qwen3-235b"
+        assert got["agent_base_url"] == "http://big/v1"
+
+    async def test_agent_fields_default_empty(self, admin_client):
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+        })
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["agent_model"] == ""
+
+    async def test_hint_keys_are_rejected(self, admin_client):
+        """The hint slot is gone, not aliased — a stale client must not silently
+        write a key nothing reads."""
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert not [k for k in got if k.startswith("hint_")]
+
+    async def test_v81_vlm_slot_roundtrip(self, admin_client):
+        """The VLM slot (garbled-formula transcription, off-peak worker;
+        empty = feature off) is admin-configurable and survives a GET after PUT."""
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "vlm_base_url": "http://vision/v1",
+            "vlm_api_key": "v-key",
+            "vlm_model": "qwen3.5-122b-a10b",
+        })
+        assert resp.status_code == 200
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["vlm_model"] == "qwen3.5-122b-a10b"
+        assert got["vlm_base_url"] == "http://vision/v1"
+
+    async def test_v81_context_max_tokens_roundtrip(self, admin_client):
+        """The per-turn history token budget (OOM protection) is
+        admin-configurable and survives a GET after PUT."""
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "context_max_tokens": "12000",
+        })
+        assert resp.status_code == 200
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["context_max_tokens"] == "12000"
+
+    async def test_mineru_server_roundtrip_and_read_only_deployment_info(self, admin_client, monkeypatch):
+        monkeypatch.setenv("PDF_MINERU_SERVER_URL", "http://edullm-mineru-vlm:8000/v1")
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["mineru_server_url"] == "" and got["mineru_default_url"] == "http://edullm-mineru-vlm:8000/v1"
+        assert set(got["features"]) == {"research_agent", "structured_documents", "pdf_documents"}
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "mineru_server_url": "http://other-mineru:8000/v1"})
+        assert resp.status_code == 200 and resp.json()["mineru_server_url"] == "http://other-mineru:8000/v1"
+
+    async def test_research_limits_roundtrip_and_range_check(self, admin_client):
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m",
+            "agent_max_tool_calls": "20", "agent_total_seconds": "180",
+        })
+        assert resp.status_code == 200
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["agent_max_tool_calls"] == "20" and got["agent_total_seconds"] == "180"
+        assert got["agent_max_visual_calls"] == ""  # default
+        for bad in ("0", "41", "eight"):
+            resp = await admin_client.put("/api/admin/llm/config", json={
+                "base_url": "http://main/v1", "api_key": "k", "model": "m",
+                "agent_max_tool_calls": bad,
+            })
+            assert resp.status_code == 422
+        got = (await admin_client.get("/api/admin/llm/config")).json()
+        assert got["agent_max_tool_calls"] == "20"
+        # The form shows each default and range from the backend.
+        assert got["research_limits"]["agent_max_tool_calls"] == {"default": 30, "min": 1, "max": 40}
+        assert got["research_limits"]["agent_max_input_tokens"]["default"] == 28000
+        assert len(got["research_limits"]) == 6
+        # An empty value goes back to the default.
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "k", "model": "m", "agent_max_tool_calls": "",
+        })
+        assert resp.status_code == 200 and resp.json()["agent_max_tool_calls"] == ""
+
+    # --- full model-routing table ---------------------------------
+
+    async def test_admin_sets_and_reads_routing_fields(self, admin_client):
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big",
+            "embedding_url": "http://embed/v1", "embedding_api_key": "ek",
+            "embedding_model": "bge-m3",
+            "rerank_url": "http://rerank", "rerank_api_key": "rk",
+            "token_alpha": 0.3, "token_beta": 0.8,
+        })
+        assert resp.status_code == 200
+        data = (await admin_client.get("/api/admin/llm/config")).json()
+        assert data["embedding_url"] == "http://embed/v1"
+        assert data["rerank_api_key"] == "rk"
+        assert data["token_alpha"] == 0.3
+        assert data["token_beta"] == 0.8
+
+    async def test_legacy_three_field_put_preserves_routing_fields(self, admin_client):
+        # Set a routing field, then a legacy 3-field PUT must not wipe it.
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big",
+            "agent_model": "big-agent",
+        })
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big2",
+        })
+        data = (await admin_client.get("/api/admin/llm/config")).json()
+        assert data["model"] == "big2"
+        assert data["agent_model"] == "big-agent"  # preserved
+
+    async def test_routing_fields_default_empty(self, admin_client):
+        await admin_client.put("/api/admin/llm/config", json={
+            "base_url": "http://main/v1", "api_key": "mk", "model": "big",
+        })
+        data = (await admin_client.get("/api/admin/llm/config")).json()
+        assert data["agent_model"] == ""         # empty = inherits main LLM
+        assert data["embedding_url"] == ""
+
 
 class TestCSVImport:
     def _csv(self, rows):
@@ -326,6 +454,24 @@ class TestCSVImport:
                                        files={"file": ("e.csv", b"username,password,role\n", "text/csv")})
         assert resp.status_code == 400
 
+    async def test_short_row_is_conflict_not_500(self, admin_client):
+        # A row with fewer columns gives DictReader None values; the old
+        # code did None.strip() → 500. It must be reported as a per-row conflict.
+        csv = self._csv(["username,password,role", "onlyname"])
+        resp = await admin_client.post("/api/admin/users/import?force=false",
+                                       files={"file": ("u.csv", csv, "text/csv")})
+        assert resp.status_code == 200
+        assert resp.json()["conflicts"]  # the short row is flagged, not a crash
+
+    async def test_in_file_duplicate_username_force_no_500(self, admin_client):
+        # The same new username twice in one file must not double-INSERT
+        # and IntegrityError → 500.
+        csv = self._csv(["username,password,role",
+                         "dupuser,pass1234,student", "dupuser,pass1234,student"])
+        resp = await admin_client.post("/api/admin/users/import?force=true",
+                                       files={"file": ("u.csv", csv, "text/csv")})
+        assert resp.status_code == 200
+
     async def test_missing_columns_400(self, admin_client):
         resp = await admin_client.post("/api/admin/users/import",
                                        files={"file": ("b.csv", b"name,pass\nfoo,bar\n", "text/csv")})
@@ -348,6 +494,31 @@ class TestAdminListClasses:
         names = [c["name"] for c in resp.json()]
         assert "Admin Test Class" in names
         assert "Deleted Class" not in names
+
+    async def test_teacher_and_counts(self, admin_full_client, seed_full):
+        resp = await admin_full_client.get("/api/admin/classes")
+        row = next(c for c in resp.json() if c["name"] == "Admin Test Class")
+        assert row["teacher_username"] == "teacher1"
+        assert row["teacher_ok"] is True
+        assert row["lab_count"] == 1                  # the deleted lab is not counted
+        assert row["student_count"] == 2
+        assert row["questions_7d"] == 2          # "Hello" and "Old message"
+        assert row["last_active"] is not None
+
+    async def test_deleted_teacher_is_flagged(self, admin_full_client, seed_full, db_session):
+        seed_full["teacher"].is_deleted = True
+        await db_session.commit()
+        resp = await admin_full_client.get("/api/admin/classes")
+        row = next(c for c in resp.json() if c["name"] == "Admin Test Class")
+        assert row["teacher_username"] == "teacher1"
+        assert row["teacher_ok"] is False
+
+    async def test_owner_no_longer_teacher_is_flagged(self, admin_full_client, seed_full, db_session):
+        seed_full["teacher"].role = UserRole.student
+        await db_session.commit()
+        resp = await admin_full_client.get("/api/admin/classes")
+        row = next(c for c in resp.json() if c["name"] == "Admin Test Class")
+        assert row["teacher_ok"] is False
 
     async def test_pagination(self, admin_full_client, seed_full):
         resp = await admin_full_client.get("/api/admin/classes?skip=0&limit=1")
@@ -421,6 +592,7 @@ class TestAdminAnalytics:
         body = resp.json()
         assert body["total_tokens"] >= 1234
         assert body["total_requests"] >= 5
+        assert body["active_users_7d"] == 1
         assert len(body["daily_breakdown"]) >= 1
 
     async def test_empty_state(self, admin_client):
@@ -464,6 +636,16 @@ class TestAdminPrune:
         await admin_full_client.post("/api/admin/maintenance/prune",
                                      json={"older_than_days": 30})
         r = await db_session.execute(select(Session).where(Session.id == recent_id))
+        assert r.scalar_one_or_none() is not None
+
+    async def test_dry_run_counts_and_deletes_nothing(self, admin_full_client, seed_full, db_session):
+        old_id = seed_full["old_session"].id
+        resp = await admin_full_client.post("/api/admin/maintenance/prune",
+                                            json={"older_than_days": 30, "dry_run": True})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["dry_run"] is True and body["sessions_deleted"] >= 1
+        r = await db_session.execute(select(Session).where(Session.id == old_id))
         assert r.scalar_one_or_none() is not None
 
     async def test_nothing_to_prune(self, admin_full_client):
@@ -523,6 +705,41 @@ class TestAdminDeleteLab:
         assert resp.status_code == 403
 
 
+class TestAdminUpdateLab:
+    """Admin can lock/unlock any lab, bypassing ownership — the
+    lab in seed_full is owned by `teacher`, never by the admin."""
+
+    async def test_admin_locks_lab_it_does_not_own(self, admin_full_client, seed_full, db_session):
+        lid = seed_full["lab"].id
+        resp = await admin_full_client.put(f"/api/admin/labs/{lid}", json={"is_active": False})
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is False
+        r = await db_session.execute(select(Lab).where(Lab.id == lid))
+        assert r.scalar_one().is_active is False
+
+    async def test_admin_unlocks_lab(self, admin_full_client, seed_full):
+        lid = seed_full["lab"].id
+        await admin_full_client.put(f"/api/admin/labs/{lid}", json={"is_active": False})
+        resp = await admin_full_client.put(f"/api/admin/labs/{lid}", json={"is_active": True})
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is True
+
+    async def test_admin_renames_lab(self, admin_full_client, seed_full):
+        lid = seed_full["lab"].id
+        resp = await admin_full_client.put(f"/api/admin/labs/{lid}", json={"name": "Locked Lab"})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Locked Lab"
+
+    async def test_nonexistent_lab_404(self, admin_full_client):
+        resp = await admin_full_client.put(f"/api/admin/labs/{uuid.uuid4()}", json={"is_active": False})
+        assert resp.status_code == 404
+
+    async def test_student_rejected_403(self, student_full_client, seed_full):
+        resp = await student_full_client.put(
+            f"/api/admin/labs/{seed_full['lab'].id}", json={"is_active": False})
+        assert resp.status_code == 403
+
+
 class TestAdminClassAnalytics:
     async def test_returns_hierarchical_analytics(self, admin_full_client, seed_full):
         resp = await admin_full_client.get(
@@ -537,4 +754,82 @@ class TestAdminClassAnalytics:
     async def test_student_rejected_403(self, student_full_client, seed_full):
         resp = await student_full_client.get(
             f"/api/admin/analytics/classes/{seed_full['class'].id}")
+        assert resp.status_code == 403
+
+
+class TestAdminClassAnalyticsDetails:
+    """The teacher Analytics view, for any class, without owning it."""
+
+    async def test_class_details(self, admin_full_client, seed_full):
+        resp = await admin_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["overview"]["members"] == 2
+        assert body["overview"]["questions"] == 2
+        assert {s["username"] for s in body["students"]} == {"student_a", "student_b"}
+
+    async def test_one_lab(self, admin_full_client, seed_full):
+        resp = await admin_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details",
+            params={"lab_id": str(seed_full["lab"].id)})
+        assert resp.status_code == 200
+        assert resp.json()["lab_id"] == str(seed_full["lab"].id)
+
+    async def test_lab_of_another_class_404(self, admin_full_client, seed_full, db_session):
+        other = Class(name="Other", teacher_id=seed_full["teacher2"].id, invite_code="OTH001")
+        db_session.add(other)
+        await db_session.flush()
+        other_lab = Lab(class_id=other.id, name="Other Lab")
+        db_session.add(other_lab)
+        await db_session.commit()
+        resp = await admin_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details",
+            params={"lab_id": str(other_lab.id)})
+        assert resp.status_code == 404
+
+    async def test_unknown_class_404(self, admin_full_client):
+        resp = await admin_full_client.get(f"/api/admin/analytics/classes/{uuid.uuid4()}/details")
+        assert resp.status_code == 404
+
+    async def test_student_rejected_403(self, student_full_client, seed_full):
+        resp = await student_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details")
+        assert resp.status_code == 403
+
+
+# ===================================================================
+# PUT /api/admin/users/{id}/password  (admin reset)
+# ===================================================================
+
+class TestAdminResetPassword:
+    async def test_admin_resets_user_password(self, admin_client, seed_users, db_session):
+        target = seed_users["student_a"]
+        resp = await admin_client.put(
+            f"/api/admin/users/{target.id}/password",
+            json={"new_password": "resetpw123"},
+        )
+        assert resp.status_code == 200
+        await db_session.refresh(target)
+        assert verify_password("resetpw123", target.hashed_password)
+
+    async def test_nonexistent_user_404(self, admin_client):
+        resp = await admin_client.put(
+            f"/api/admin/users/{uuid.uuid4()}/password",
+            json={"new_password": "resetpw123"},
+        )
+        assert resp.status_code == 404
+
+    async def test_short_password_422(self, admin_client, seed_users):
+        resp = await admin_client.put(
+            f"/api/admin/users/{seed_users['student_a'].id}/password",
+            json={"new_password": "123"},
+        )
+        assert resp.status_code == 422
+
+    async def test_student_cannot_reset_403(self, student_client, seed_users):
+        resp = await student_client.put(
+            f"/api/admin/users/{seed_users['student_b'].id}/password",
+            json={"new_password": "resetpw123"},
+        )
         assert resp.status_code == 403

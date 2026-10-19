@@ -1,0 +1,206 @@
+{
+  "main-2-p9": [
+    {
+      "id": "toc",
+      "kind": "text",
+      "fact": "Seven sections in order: 1. Présentation du cours, 2. Le langage C, 3. Un premier programme, 4. Représentation binaire des entiers, 5. Entiers signés : le complément à 2, 6. Nombres à virgule flottante, 7. La chaîne de compilation."
+    },
+    {
+      "id": "current",
+      "kind": "visual_fact",
+      "fact": "2. Le langage C is the current section (shown highlighted; the others are dimmed)."
+    }
+  ],
+  "main-2-p39": [
+    {
+      "id": "intro",
+      "kind": "text",
+      "fact": "Sur un format de n bits : une retenue finale indique un débordement = résultat incorrect."
+    },
+    {
+      "id": "no_overflow",
+      "kind": "native_code",
+      "fact": "SANS débordement : 28 + 5 — Retenue: 11 / 00011100 (28) / + 00000101 (5) / ----- / 00100001 (33) on separate lines, each value with its label."
+    },
+    {
+      "id": "overflow",
+      "kind": "native_code",
+      "fact": "AVEC débordement : 128 + 129 — Retenue: 1 / 10000000 (128) / + 10000001 (129) / ----- / 1 00000001 (1) on separate lines, each value with its label."
+    },
+    {
+      "id": "conclusions",
+      "kind": "visual_fact",
+      "fact": "The two examples stay apart: \"Pas de retenue finale → Correct !\" belongs to 28 + 5; \"Retenue finale = 1 → X DÉBORDEMENT\", \"Résultat théorique : 257\", \"Plage sur 8 bits : 0 à 255\", \"→ 257 non représentable\" belong to 128 + 129."
+    },
+    {
+      "id": "en_c",
+      "kind": "text",
+      "fact": "En C: un unsigned char qui vaut 255 et auquel on ajoute 1 redevient silencieusement 0."
+    }
+  ],
+  "main-2-p44": [
+    {
+      "id": "theorem",
+      "kind": "visual_fact",
+      "fact": "Théorème ᴾ(−N)_B = ᴾ(N)*_B +_B 1: P is a left superscript, B a subscript, * a superscript; not flattened into \"P (−N)B = P (N)∗ B +B 1\"."
+    },
+    {
+      "id": "meaning",
+      "kind": "text",
+      "fact": "C’est-à-dire : Code du négatif = Complément de chaque chiffre + 1."
+    },
+    {
+      "id": "digit_complement",
+      "kind": "visual_fact",
+      "fact": "1*₂ = 0₂, 0*₂ = 1₂ (on inverse chaque bit): subscripts not merged into the digits (not \"02\", \"12\")."
+    },
+    {
+      "id": "method",
+      "kind": "text",
+      "fact": "Méthode pratique: 1. Écrire le positif, 2. Inverser tous les bits, 3. Ajouter 1, in this order."
+    }
+  ],
+  "main-2-p48": [
+    {
+      "id": "range_formula",
+      "kind": "visual_fact",
+      "fact": "Plage sur n bits: [−2^(n−1), 2^(n−1) − 1] with exponents kept (not \"−2n−1; 2n−1 −1\")."
+    },
+    {
+      "id": "eight_bits",
+      "kind": "text",
+      "fact": "Sur 8 bits : [−128, +127] (256 valeurs, asymétrique)."
+    }
+  ],
+  "main-3-p3": [
+    {
+      "id": "toc",
+      "kind": "text",
+      "fact": "Five sections in order: 1. Ce qu’on a déjà, ce qu’il manque, 2. La pile et le tas, 3. Allouer et libérer, 4. Faire grandir une zone, 5. Qui alloue, qui libère."
+    },
+    {
+      "id": "current",
+      "kind": "visual_fact",
+      "fact": "1. Ce qu’on a déjà, ce qu’il manque is the current section (shown highlighted; the others are dimmed)."
+    }
+  ],
+  "main-3-p15": [
+    {
+      "id": "item",
+      "kind": "text",
+      "fact": "Trois raisons de passer par le tas; 1. La taille n’est connue qu’à l’exécution — Saisie utilisateur, lecture d’un fichier, données reçues d’ailleurs."
+    },
+    {
+      "id": "no_invention",
+      "kind": "visual_fact",
+      "fact": "Only reason 1 is on this page; reasons 2 and 3 are not invented."
+    }
+  ],
+  "main-3-p30": [
+    {
+      "id": "prototype",
+      "kind": "native_code",
+      "fact": "void *calloc(size_t nombre, size_t taille_unitaire); on one line (the text layer breaks it)."
+    },
+    {
+      "id": "call",
+      "kind": "native_code",
+      "fact": "int *tab = calloc(n, sizeof(int));  // n entiers, tous a 0 — the comment on the same line."
+    },
+    {
+      "id": "table",
+      "kind": "visual_fact",
+      "fact": "Rows malloc | calloc: Arguments: un total en octets | un nombre × une taille; Contenu initial: indéterminé | tout à zéro; Coût: un peu plus rapide | la mise à zéro se paie; Quand: on remplit juste après | on a besoin de partir de zéro. Cells not swapped."
+    },
+    {
+      "id": "contract",
+      "kind": "text",
+      "fact": "Même contrat que malloc: retour NULL en cas d’échec, à tester, et libération par free."
+    }
+  ],
+  "main-3-p47": [
+    {
+      "id": "intro",
+      "kind": "text",
+      "fact": "realloc peut échouer : il rend NULL, et l’ancienne zone reste valide; d’où le pointeur temporaire."
+    },
+    {
+      "id": "code",
+      "kind": "native_code",
+      "fact": "int *temp = realloc(tab, nouvelle_taille * sizeof(int)); / if (temp == NULL) { / free(tab);  // tab est encore valide / return 1; / } / tab = temp;  // seulement maintenant — each comment on its own code line, body indented."
+    },
+    {
+      "id": "box",
+      "kind": "text",
+      "fact": "Pourquoi le temporaire: tab = realloc(tab, ...) écrase tab avec NULL en cas d’échec; l’ancienne zone est perdue."
+    }
+  ],
+  "Heritage-p5": [
+    {
+      "id": "generalise",
+      "kind": "text",
+      "fact": "Document généralise Livre et Rapport (A/C OO), with the sub-point: Document est une super-classe (classe mère) de Livre et Rapport."
+    },
+    {
+      "id": "inherit",
+      "kind": "text",
+      "fact": "Livre et Rapport héritent de Document (A/C/P OO), with the sub-point: Livre et Rapport sont des sous-classes (classes filles) de Document. Direction not reversed."
+    }
+  ],
+  "Heritage-p9": [
+    {
+      "id": "private_text",
+      "kind": "text",
+      "fact": "Selon les langages, un attribut private est inaccessible ou pas dans la sous-classe; en Java, utilisez protected."
+    },
+    {
+      "id": "code",
+      "kind": "native_code",
+      "fact": "Public class Document / { / protected String titre; / private String auteur; / … / } — one declaration per line, in this order."
+    },
+    {
+      "id": "protected_note",
+      "kind": "text",
+      "fact": "protected rend les attributs visibles dans les sous-classes seulement (source spells \"atributs\")."
+    }
+  ],
+  "Heritage-p12": [
+    {
+      "id": "question",
+      "kind": "text",
+      "fact": "Que se passe-t-il lorsque l’on « mélange » des variables et objets de classes et sous-classes? Dans un langage à typage statique, attention!"
+    },
+    {
+      "id": "code_results",
+      "kind": "native_code",
+      "fact": "String s = l1.getEditeur(); → OK / d1 = l1; → d1 est de type Document / s = d1.getEditeur(); → KO par le compilateur ! / String a = d1.getAuteur(); → OK! — each statement with its own result, in order."
+    },
+    {
+      "id": "static_type",
+      "kind": "text",
+      "fact": "Les propriétés d’une variable sont celles de son type déclaré, appelé le type statique."
+    },
+    {
+      "id": "uml",
+      "kind": "visual_fact",
+      "fact": "The small diagram: Livre and Rapport inherit from Document (arrows point to Document)."
+    }
+  ],
+  "Heritage-p19": [
+    {
+      "id": "intro",
+      "kind": "text",
+      "fact": "Tous les soirs: mettre à jour un tableau de Comptes bancaires de tout type."
+    },
+    {
+      "id": "code",
+      "kind": "native_code",
+      "fact": "ArrayList<CompteBancaire> comptes = new ArrayList<CompteBancaire>(); / ... / for (int i=0; i<comptes.size(); i++) { / comptes.get(i).traitementQuotidien(); / } / OU / for (CompteBancaire cb:comptes) { / cb.traitementQuotidien(); / } — generics kept, loop bodies indented, OU between the two versions."
+    },
+    {
+      "id": "same_code",
+      "kind": "text",
+      "fact": "Même code quelque soit la nature du compte."
+    }
+  ]
+}

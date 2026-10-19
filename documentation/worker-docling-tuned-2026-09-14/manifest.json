@@ -1,0 +1,184 @@
+{
+  "purpose": "Docling configuration test on the 28 pages of the two earlier runs; not whole-corpus accuracy",
+  "git_commit": "6fcc6b1130aa76c44c06b67849349c1f1aff82af",
+  "files": {
+    "main-2.pdf": "c12a6562da5c9d9f64823153a4a46ddb57d48398f65d3f0df766e18b2109d220",
+    "main-3.pdf": "016b7dd160071c09c570d6b92bf182e02e35de338b457ec47d781259908ea5b1",
+    "Heritage.pdf": "96d5885cdb412674d6ce8ef0212388d91581ef00def8e5fc900487fb9c85d021",
+    "INFO501_1.pdf": "62202c0aa3ad12df158fa903c995339b7805b8b7f27ccf4b5170a04e9d6dcf96"
+  },
+  "cases": [
+    {
+      "file": "main-2.pdf",
+      "page": 6,
+      "stem": "main-2-p6",
+      "set": "focus"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 55,
+      "stem": "main-2-p55",
+      "set": "focus"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 27,
+      "stem": "main-3-p27",
+      "set": "focus"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 54,
+      "stem": "main-3-p54",
+      "set": "focus"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 2,
+      "stem": "Heritage-p2",
+      "set": "focus"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 8,
+      "stem": "Heritage-p8",
+      "set": "focus"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 13,
+      "stem": "Heritage-p13",
+      "set": "focus"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 15,
+      "stem": "Heritage-p15",
+      "set": "focus"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 1,
+      "stem": "main-2-p1",
+      "set": "unseen"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 46,
+      "stem": "main-2-p46",
+      "set": "unseen"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 49,
+      "stem": "main-2-p49",
+      "set": "unseen"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 54,
+      "stem": "main-2-p54",
+      "set": "unseen"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 62,
+      "stem": "main-2-p62",
+      "set": "unseen"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 68,
+      "stem": "main-2-p68",
+      "set": "unseen"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 8,
+      "stem": "main-3-p8",
+      "set": "unseen"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 25,
+      "stem": "main-3-p25",
+      "set": "unseen"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 38,
+      "stem": "main-3-p38",
+      "set": "unseen"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 48,
+      "stem": "main-3-p48",
+      "set": "unseen"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 70,
+      "stem": "main-3-p70",
+      "set": "unseen"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 72,
+      "stem": "main-3-p72",
+      "set": "unseen"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 3,
+      "stem": "Heritage-p3",
+      "set": "unseen"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 7,
+      "stem": "Heritage-p7",
+      "set": "unseen"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 10,
+      "stem": "Heritage-p10",
+      "set": "unseen"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 14,
+      "stem": "Heritage-p14",
+      "set": "unseen"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 17,
+      "stem": "Heritage-p17",
+      "set": "unseen"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 18,
+      "stem": "Heritage-p18",
+      "set": "unseen"
+    },
+    {
+      "file": "INFO501_1.pdf",
+      "page": 1,
+      "stem": "INFO501_1-p1",
+      "set": "unseen"
+    },
+    {
+      "file": "INFO501_1.pdf",
+      "page": 2,
+      "stem": "INFO501_1-p2",
+      "set": "unseen"
+    }
+  ],
+  "checks_from": {
+    "focus": "backend/tests/fixtures/worker_visual_cases.json (review_quality excluded)",
+    "unseen": "documentation/worker-docling-unseen-2026-09-14/checks.json"
+  }
+}

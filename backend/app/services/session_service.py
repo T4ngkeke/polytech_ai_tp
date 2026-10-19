@@ -1,7 +1,7 @@
 """
 services/session_service.py — Session management business logic.
 
-Key v6 rule: Students CANNOT delete sessions (audit integrity).
+Key audit rule: Students CANNOT delete sessions (audit integrity).
 Session soft-delete is only available to admin/teacher via their routers.
 """
 
@@ -20,9 +20,13 @@ async def create_session(
     user_id: uuid.UUID,
     lab_id: uuid.UUID,
     title: str | None = None,
+    is_test: bool = False,
 ) -> Session:
-    """Create a new chat session scoped to a specific lab."""
-    session = Session(user_id=user_id, lab_id=lab_id, title=title)
+    """Create a new chat session scoped to a specific lab.
+
+    `is_test` marks a teacher test-drive session — excluded from
+    analytics and the citation report."""
+    session = Session(user_id=user_id, lab_id=lab_id, title=title, is_test=is_test)
     db.add(session)
     await db.flush()
     await db.refresh(session)

@@ -1,8 +1,9 @@
 """
 routers/student.py — Student session management, class-joining, and self-service endpoints.
 
-v6 Rule: Students CANNOT delete their own sessions.
-All sessions are permanently retained for teacher/admin audit.
+Audit rule: a student "delete" is a SOFT delete (is_deleted=True). The session is
+hidden from the student (their list/reads exclude it), but it is permanently retained
+and fully visible to teacher/admin audit, flagged as deleted. Only admin can hard-delete.
 
 Endpoints
 ---------
@@ -14,6 +15,7 @@ POST   /api/student/labs/{lab_id}/sessions     →  Create a session scoped to a
 GET    /api/student/sessions                   →  List own active sessions (optional lab filter).
 GET    /api/student/sessions/{session_id}      →  Fetch message history (IDOR check required).
 PUT    /api/student/sessions/{session_id}      →  Rename session title (cosmetic, no audit impact).
+DELETE /api/student/sessions/{session_id}      →  Soft-delete (hide) own session; retained for audit.
 GET    /api/student/usage                      →  Daily token usage stats.
 """
 
@@ -22,12 +24,12 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from backend.app.auth import get_current_user
+from backend.app.auth import get_current_user, require_student
+from backend.app.config import settings
 from backend.app.database import get_db
-from backend.app.models import Class, ClassStudent, Lab, Session, User, UsageStat
+from backend.app.models import Class, ClassStudent, Lab, User
 from backend.app.schemas import (
     ClassResponse,
     JoinClassRequest,
@@ -38,6 +40,8 @@ from backend.app.schemas import (
     SessionUpdateRequest,
     SessionWithMessagesResponse,
 )
+from backend.app.services import quota_service, session_service
+from backend.app.services.research_runs import ResearchRuns
 
 router = APIRouter(prefix="/api/student", tags=["student"])
 
@@ -50,13 +54,13 @@ router = APIRouter(prefix="/api/student", tags=["student"])
 @router.post("/classes/join", response_model=JoinClassResponse, status_code=201)
 async def join_class(
     body: JoinClassRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> JoinClassResponse:
     """
     Join a class using a 6-character invite code.
 
-    Returns 404 if the invite code is invalid.
+    Returns 403 for a teacher or an admin, 404 if the invite code is invalid.
     Returns 409 if the student has already joined this class.
     """
     # Look up class by invite code
@@ -107,7 +111,7 @@ async def join_class(
 @router.get("/classes", response_model=list[ClassResponse])
 async def list_joined_classes(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ClassResponse]:
     """List all classes the student has joined."""
     result = await db.execute(
@@ -132,7 +136,7 @@ async def list_joined_classes(
 async def list_labs_for_class(
     class_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[LabResponse]:
     """List labs for a class the student has joined."""
     # Verify membership
@@ -171,7 +175,7 @@ async def create_session_in_lab(
     lab_id: uuid.UUID,
     body: SessionCreateRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     """
     Create a new chat session within a specific lab.
@@ -199,19 +203,13 @@ async def create_session_in_lab(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a member of the class that owns this lab",
         )
-    if lab.is_deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
-    if not lab.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Lab is closed")
 
-    session = Session(
-        user_id=current_user.id,
-        lab_id=lab_id,
-        title=body.title,
+    session = await session_service.create_session(
+        db, user_id=current_user.id, lab_id=lab_id, title=body.title
     )
-    db.add(session)
-    await db.flush()
-    await db.refresh(session)
+    # The browser can send the first chat request as soon as it sees 201.
+    # Dependency cleanup may run after that response, so commit before returning.
+    await db.commit()
     return SessionResponse.model_validate(session)
 
 
@@ -224,23 +222,12 @@ async def create_session_in_lab(
 async def list_sessions(
     lab_id: uuid.UUID | None = Query(None, description="Filter by lab ID"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[SessionResponse]:
     """Return all non-deleted sessions belonging to the authenticated user."""
-    query = (
-        select(Session)
-        .where(
-            Session.user_id == current_user.id,
-            Session.is_deleted.is_(False),
-        )
+    sessions = await session_service.list_sessions_for_student(
+        db, user_id=current_user.id, lab_id=lab_id
     )
-
-    if lab_id is not None:
-        query = query.where(Session.lab_id == lab_id)
-
-    query = query.order_by(Session.created_at.desc())
-    result = await db.execute(query)
-    sessions = result.scalars().all()
     return [SessionResponse.model_validate(s) for s in sessions]
 
 
@@ -256,7 +243,7 @@ async def list_sessions(
 async def get_session(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionWithMessagesResponse:
     """
     Return the message history for a session.
@@ -264,18 +251,7 @@ async def get_session(
     IDOR check: verify that session.user_id == current_user.id before
     returning any data. Returns 403 if the session belongs to another user.
     """
-    result = await db.execute(
-        select(Session)
-        .where(Session.id == session_id)
-        .options(selectinload(Session.messages))
-    )
-    session = result.scalar_one_or_none()
-
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
+    session = await session_service.get_session_with_messages(db, session_id)
 
     if session.user_id != current_user.id:
         raise HTTPException(
@@ -283,7 +259,22 @@ async def get_session(
             detail="Not authorized to view this session",
         )
 
-    return SessionWithMessagesResponse.model_validate(session)
+    # A session the student soft-deleted is hidden from them (the "deleted" illusion);
+    # it remains retained and visible to teacher/admin audit.
+    if session.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    response = SessionWithMessagesResponse.model_validate(session)
+    factory = async_sessionmaker(db.bind, expire_on_commit=False)
+    citations = (await ResearchRuns(factory).load_session_citations(
+        session_id=session_id, user_id=current_user.id)
+        if settings.AGENTIC_SEARCH_ENABLED else {})
+    for message in response.messages:
+        message.citations = citations.get(message.id, [])
+    return response
 
 
 # ===================================================================
@@ -294,22 +285,12 @@ async def get_session(
 @router.get("/usage")
 async def get_usage(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
-    """Return the current user's daily token quota limit and used amount."""
-    today = date.today()
-    result = await db.execute(
-        select(UsageStat).where(
-            UsageStat.user_id == current_user.id,
-            UsageStat.date == today,
-        )
-    )
-    usage = result.scalar_one_or_none()
-
-    return {
-        "used": usage.tokens_used if usage else 0,
-        "limit": current_user.daily_token_quota,
-    }
+    """Return the current user's daily token limit (quota plus today's
+    teacher grants) and used amount."""
+    usage = await quota_service.usage(db, current_user, date.today())
+    return {"used": usage.used, "limit": usage.limit}
 
 
 # ===================================================================
@@ -321,7 +302,7 @@ async def get_usage(
 async def leave_class(
     class_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Student voluntarily leaves a class."""
     mem_result = await db.execute(
@@ -352,27 +333,48 @@ async def update_session_title(
     session_id: uuid.UUID,
     body: SessionUpdateRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     """Update the title of a session owned by the authenticated user."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
+    session = await session_service.get_session_by_id(db, session_id)
     if session.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to modify this session",
         )
+    if session.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
 
-    session.title = body.title
-    db.add(session)
-    await db.flush()
-    await db.refresh(session)
+    session = await session_service.rename_session(db, session, body.title)
     return SessionResponse.model_validate(session)
+
+
+# ===================================================================
+# DELETE /api/student/sessions/{session_id}
+# ===================================================================
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def soft_delete_own_session(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    """Soft-delete (hide) the student's own session.
+
+    Sets is_deleted=True: the session disappears from the student's own views, but is
+    permanently retained and remains fully visible to teacher/admin audit (flagged as
+    deleted). Only admin can hard-delete. Idempotent on an already-hidden session.
+    """
+    session = await session_service.get_session_by_id(db, session_id)
+    if session.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this session",
+        )
+    await session_service.soft_delete_session(db, session)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 

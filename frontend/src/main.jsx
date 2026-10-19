@@ -1,28 +1,39 @@
 /**
- * main.jsx — React entry point for Edu-LLM v5.
+ * main.jsx — React entry point for Edu-LLM.
  *
  * Boots up:
  *   1. Auth store hydration (restores JWT from localStorage)
  *   2. BrowserRouter
- *   3. Toast notifications (react-hot-toast) — Dossier Noir themed
+ *   3. Toast notifications (react-hot-toast) in the theme colors
  */
 
 import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 
 import App from './App';
-import useAuthStore from './store/authStore';
+import useAuthStore, { takeTabNote } from './store/authStore';
+import { applyTheme, storedTheme } from './lib/theme';
 import './index.css';
+
+applyTheme(storedTheme());
 
 function Root() {
   const hydrate = useAuthStore((s) => s.hydrate);
   const isHydrated = useAuthStore((s) => s.isHydrated);
+  const followOtherTabs = useAuthStore((s) => s.followOtherTabs);
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  useEffect(() => followOtherTabs(), [followOtherTabs]);
+
+  useEffect(() => {
+    const note = takeTabNote();
+    if (note) toast(note, { duration: 5000 });
+  }, []);
 
   if (!isHydrated) {
     return (
@@ -47,18 +58,18 @@ createRoot(document.getElementById('root')).render(
         toastOptions={{
           duration: 3000,
           style: {
-            background: '#1a1d25',
-            color: '#e8e2d6',
-            border: '1px solid rgba(232, 226, 214, 0.1)',
+            background: 'rgb(var(--ink-raised))',
+            color: 'rgb(var(--cream))',
+            border: '1px solid rgb(var(--line) / var(--line-default))',
             borderRadius: '10px',
             fontSize: '13px',
-            fontFamily: '"Geist", system-ui, sans-serif',
+            fontFamily: 'var(--font-body)',
           },
           success: {
-            iconTheme: { primary: '#3ecf71', secondary: '#e8e2d6' },
+            iconTheme: { primary: 'rgb(var(--success))', secondary: 'rgb(var(--ink-raised))' },
           },
           error: {
-            iconTheme: { primary: '#ff2d2d', secondary: '#e8e2d6' },
+            iconTheme: { primary: 'rgb(var(--danger))', secondary: 'rgb(var(--ink-raised))' },
           },
         }}
       />

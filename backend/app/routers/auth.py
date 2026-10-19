@@ -15,12 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.auth import (
     create_access_token,
     get_current_user,
-    hash_password,
-    verify_password,
+    hash_password_async,
+    verify_password_async,
 )
 from backend.app.database import get_db
 from backend.app.models import User, UserRole
 from backend.app.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     SignupRequest,
     TokenResponse,
@@ -44,7 +45,7 @@ _INVALID_CREDENTIALS = HTTPException(
 @router.post("/signup", response_model=TokenResponse, status_code=201)
 async def signup(
     body: SignupRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TokenResponse:
     """
     Student self-registration.
@@ -66,14 +67,11 @@ async def signup(
 
     user = User(
         username=body.username,
-        hashed_password=hash_password(body.password),
+        hashed_password=await hash_password_async(body.password),
         role=UserRole.student,
     )
     db.add(user)
     await db.flush()
-    # The returned JWT is used immediately for /auth/me; commit before the
-    # signup response so the next request can see the new account.
-    await db.commit()
     await db.refresh(user)
 
     access_token = create_access_token(user_id=user.id)
@@ -88,7 +86,7 @@ async def signup(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TokenResponse:
     """
     Validate username + password, return a signed JWT.
@@ -107,7 +105,7 @@ async def login(
     )
     user: User | None = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.hashed_password):
+    if user is None or not await verify_password_async(body.password, user.hashed_password):
         raise _INVALID_CREDENTIALS
 
     access_token = create_access_token(user_id=user.id)
@@ -131,3 +129,32 @@ async def get_me(
     contains only ``sub``).
     """
     return UserResponse.model_validate(current_user)
+
+
+# ===================================================================
+# POST /api/auth/change-password  (self-service)
+# ===================================================================
+
+
+@router.post("/change-password", status_code=200)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict[str, str]:
+    """
+    Self-service password change for any authenticated user.
+
+    The current (old) password is verified before the new one is stored,
+    so a stolen/active session alone cannot silently re-key the account.
+    Returns HTTP 400 if the old password is incorrect.
+    """
+    if not await verify_password_async(body.old_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Old password is incorrect",
+        )
+    current_user.hashed_password = await hash_password_async(body.new_password)
+    db.add(current_user)
+    await db.flush()
+    return {"detail": "Password changed"}

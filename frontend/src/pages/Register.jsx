@@ -1,10 +1,11 @@
 /**
- * Register.jsx — Student self-registration page for Edu-LLM v6.
+ * Register.jsx — Student self-registration page for Edu-LLM.
  */
 
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import ThemeToggle from '../components/ThemeToggle';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -51,6 +52,7 @@ export default function Register() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-ink-deep relative overflow-hidden">
+      <ThemeToggle className="absolute top-4 right-4 z-20" />
       {/* Background glow */}
       <div className="absolute top-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-cyan/[0.04] blur-[120px] pointer-events-none" />
 
@@ -58,7 +60,7 @@ export default function Register() {
         <div className="bg-ink-base rounded-2xl border border-border-subtle shadow-elevated overflow-hidden noise">
           <div className="relative z-10 px-8 pt-10 pb-6 text-center">
             <div className="mx-auto w-14 h-14 rounded-xl gradient-cyan flex items-center justify-center shadow-glow mb-5">
-              <svg className="w-7 h-7 text-cream" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="w-7 h-7 text-on-accent" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M12 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11l-3 3-3-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
               </svg>
             </div>
@@ -98,7 +100,7 @@ export default function Register() {
             </div>
 
             <button id="register-submit" type="submit" disabled={isLoading}
-              className="w-full py-3 rounded-lg gradient-cyan text-cream text-sm font-semibold tracking-wide transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-glow">
+              className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold tracking-wide transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-glow">
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
                   <div className="w-4 h-4 rounded-full border-2 border-cream/30 border-t-cream animate-[spin_0.8s_linear_infinite]" />

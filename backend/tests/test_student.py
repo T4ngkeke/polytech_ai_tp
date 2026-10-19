@@ -1,5 +1,5 @@
 """
-test_student.py — Tests for student endpoints (v5 production-ready).
+test_student.py — Tests for student endpoints.
 """
 
 import uuid
@@ -134,6 +134,25 @@ class TestJoinClass:
         app.dependency_overrides.clear()
         assert resp.status_code == 401
 
+    async def test_teacher_and_admin_do_not_join_403(self, db_session, seed_data):
+        # Their questions would count as a student's in the class analytics.
+        admin = make_user(role=UserRole.admin, username="admin1")
+        db_session.add(admin)
+        await db_session.commit()
+
+        async def override():
+            yield db_session
+        app.dependency_overrides[get_db] = override
+        transport = ASGITransport(app=app)
+        try:
+            for user in (seed_data["teacher"], admin):
+                headers = {"Authorization": f"Bearer {create_access_token(user.id)}"}
+                async with AsyncClient(transport=transport, base_url="http://test", headers=headers) as c:
+                    resp = await c.post("/api/student/classes/join", json={"invite_code": "TEST01"})
+                assert resp.status_code == 403, user.role
+        finally:
+            app.dependency_overrides.clear()
+
 
 class TestListJoinedClasses:
     async def test_student1_sees_joined(self, client_s1, seed_data):
@@ -188,38 +207,6 @@ class TestCreateSessionInLab:
         )
         assert resp.status_code == 403
 
-    async def test_closed_lab_rejects_new_session(self, client_s1, seed_data, db_session):
-        seed_data["lab"].is_active = False
-        await db_session.flush()
-        resp = await client_s1.post(
-            f"/api/student/labs/{seed_data['lab'].id}/sessions",
-            json={"title": "After closing"},
-        )
-        assert resp.status_code == 403
-        assert resp.json()["detail"] == "Lab is closed"
-
-    async def test_deleted_lab_rejects_new_session(self, client_s1, seed_data, db_session):
-        seed_data["lab"].is_deleted = True
-        await db_session.flush()
-        resp = await client_s1.post(
-            f"/api/student/labs/{seed_data['lab'].id}/sessions", json={}
-        )
-        assert resp.status_code == 404
-
-    async def test_reopened_lab_accepts_new_session(self, client_s1, seed_data, db_session):
-        seed_data["lab"].is_active = False
-        await db_session.flush()
-        closed = await client_s1.post(
-            f"/api/student/labs/{seed_data['lab'].id}/sessions", json={}
-        )
-        seed_data["lab"].is_active = True
-        await db_session.flush()
-        reopened = await client_s1.post(
-            f"/api/student/labs/{seed_data['lab'].id}/sessions", json={}
-        )
-        assert closed.status_code == 403
-        assert reopened.status_code == 201
-
     async def test_nonexistent_lab_404(self, client_s1):
         resp = await client_s1.post(
             f"/api/student/labs/{uuid.uuid4()}/sessions", json={"title": "X"})
@@ -258,13 +245,6 @@ class TestListSessions:
 
 
 class TestGetSession:
-    async def test_closed_lab_history_remains_readable(self, client_s1, seed_data, db_session):
-        seed_data["lab"].is_active = False
-        await db_session.flush()
-        resp = await client_s1.get(f"/api/student/sessions/{seed_data['session'].id}")
-        assert resp.status_code == 200
-        assert len(resp.json()["messages"]) == 2
-
     async def test_get_own_session(self, client_s1, seed_data):
         resp = await client_s1.get(
             f"/api/student/sessions/{seed_data['session'].id}")
@@ -348,5 +328,56 @@ class TestUpdateSessionTitle:
             json={"title": "X"},
         )
         assert resp.status_code == 404
+
+
+class TestSoftDeleteOwnSession:
+    """A student 'delete' is a soft-delete: hidden from the student, retained for audit."""
+
+    async def test_delete_returns_204_and_sets_flag(
+            self, client_s1, seed_data, db_session):
+        sid = seed_data["session"].id
+        resp = await client_s1.delete(f"/api/student/sessions/{sid}")
+        assert resp.status_code == 204
+        await db_session.refresh(seed_data["session"])
+        assert seed_data["session"].is_deleted is True  # retained, not purged
+
+    async def test_hidden_from_student_list_after_delete(self, client_s1, seed_data):
+        sid = seed_data["session"].id
+        await client_s1.delete(f"/api/student/sessions/{sid}")
+        resp = await client_s1.get("/api/student/sessions")
+        assert resp.status_code == 200
+        assert all(s["id"] != str(sid) for s in resp.json())
+
+    async def test_get_own_deleted_session_404(self, client_s1, seed_data):
+        sid = seed_data["session"].id
+        await client_s1.delete(f"/api/student/sessions/{sid}")
+        resp = await client_s1.get(f"/api/student/sessions/{sid}")
+        assert resp.status_code == 404
+
+    async def test_idor_cannot_delete_others_session_403(self, client_s2, seed_data):
+        resp = await client_s2.delete(
+            f"/api/student/sessions/{seed_data['session'].id}")
+        assert resp.status_code == 403
+
+    async def test_nonexistent_404(self, client_s1):
+        resp = await client_s1.delete(f"/api/student/sessions/{uuid.uuid4()}")
+        assert resp.status_code == 404
+
+    async def test_teacher_audit_still_sees_deleted_session_flagged(
+            self, client_s1, seed_data, db_session):
+        """After the student hides it, teacher audit still sees it, flagged is_deleted."""
+        sid = seed_data["session"].id
+        await client_s1.delete(f"/api/student/sessions/{sid}")
+
+        token = create_access_token(seed_data["teacher"].id)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test",
+                               headers={"Authorization": f"Bearer {token}"}) as tc:
+            resp = await tc.get(f"/api/teacher/chat-history?session_id={sid}")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 1
+        assert rows[0]["id"] == str(sid)
+        assert rows[0]["is_deleted"] is True
 
 

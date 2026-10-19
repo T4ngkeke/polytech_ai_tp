@@ -1,5 +1,5 @@
 /**
- * ProtectedRoute.jsx — Role-gated route wrapper for Edu-LLM v5.
+ * ProtectedRoute.jsx — Role-gated route wrapper for Edu-LLM.
  */
 
 import { Navigate, Outlet } from 'react-router-dom';
@@ -26,7 +26,7 @@ export default function ProtectedRoute({ allowedRoles }) {
 
   // Authenticated but wrong role → redirect to their default route
   if (allowedRoles && !allowedRoles.includes(userRole)) {
-    const fallback = DEFAULT_ROUTES[userRole] || '/chat';
+    const fallback = DEFAULT_ROUTES[userRole] || '/account';
     return <Navigate to={fallback} replace />;
   }
 

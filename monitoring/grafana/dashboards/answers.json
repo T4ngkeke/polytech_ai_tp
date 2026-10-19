@@ -1,0 +1,1119 @@
+{
+  "uid": "edullm-answers",
+  "title": "Answers",
+  "description": "Questions, answer times and modes, model calls and document jobs.",
+  "tags": [
+    "edullm"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "db",
+        "label": "Database",
+        "type": "custom",
+        "hide": 0,
+        "query": "Teachers : edudb-release,Dev : edudb",
+        "current": {
+          "text": "Teachers",
+          "value": "edudb-release"
+        },
+        "options": [
+          {
+            "text": "Teachers",
+            "value": "edudb-release",
+            "selected": true
+          },
+          {
+            "text": "Dev",
+            "value": "edudb",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "tests",
+        "label": "Sessions",
+        "type": "custom",
+        "hide": 0,
+        "query": "Students only : false,With teacher tests : true",
+        "current": {
+          "text": "Students only",
+          "value": "false"
+        },
+        "options": [
+          {
+            "text": "Students only",
+            "value": "false",
+            "selected": true
+          },
+          {
+            "text": "With teacher tests",
+            "value": "true",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "id": 17,
+      "title": "Overview",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 18,
+      "title": "Questions",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) AS \"Questions\" FROM runs",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 19,
+      "title": "Median time",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS \"Median\" FROM runs WHERE seconds IS NOT NULL",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 20,
+      "title": "Tool limit reached",
+      "description": "Research runs that stopped because the tool calls ran out, not because the answer was ready.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT avg((stop_reason = 'budget_exhausted')::int) AS \"Share\" FROM runs",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.25
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 21,
+      "title": "Failed",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE status = 'failed') AS \"Failed\" FROM runs",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 22,
+      "title": "Asked the student back",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE stop_reason = 'clarification') AS \"Asked\" FROM runs",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 23,
+      "title": "Thumbs down",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE feedback = 'down') AS \"Down\" FROM runs",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 24,
+      "title": "Questions per hour",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT $__timeGroupAlias(started_at, 1h, 0), mode AS metric, count(*) AS value FROM runs GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal"
+            },
+            "drawStyle": "bars"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 25,
+      "title": "Median answer time per hour",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT $__timeGroupAlias(started_at, 1h, NULL), mode AS metric, percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS value FROM runs WHERE seconds IS NOT NULL GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            },
+            "pointSize": 5
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "table",
+      "id": 26,
+      "title": "By mode",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 14,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT mode AS \"Mode\", count(*) AS \"Questions\",\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS \"Median\",\n       percentile_cont(0.95) WITHIN GROUP (ORDER BY seconds) AS \"95%\",\n       avg(billed_tokens)::int AS \"Tokens (mean)\",\n       avg((stop_reason = 'budget_exhausted')::int) AS \"Tool limit\",\n       count(*) FILTER (WHERE status = 'failed') AS \"Failed\",\n       count(*) FILTER (WHERE feedback = 'down') AS \"Thumbs down\"\nFROM runs GROUP BY mode ORDER BY 2 DESC",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Median"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "95%"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tool limit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "table",
+      "id": 27,
+      "title": "Why runs stopped",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 13,
+        "w": 10,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT coalesce(stop_reason, status) AS \"Reason\", count(*) AS \"Runs\"\nFROM runs GROUP BY 1 ORDER BY 2 DESC",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 28,
+      "title": "Latest questions",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 29,
+      "title": "Latest questions",
+      "description": "The 200 most recent questions in the time range.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT started_at AS \"Time\", class AS \"Class\", lab AS \"Lab\", mode AS \"Mode\",\n       question AS \"Question\", seconds AS \"Seconds\", coalesce(stop_reason, status) AS \"Stopped\",\n       feedback AS \"Feedback\", billed_tokens AS \"Tokens\", CASE WHEN is_test THEN 'teacher' ELSE '' END AS \"Test\"\nFROM runs ORDER BY started_at DESC LIMIT 200",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Class"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Lab"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Mode"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Seconds"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stopped"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Feedback"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tokens"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Test"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Seconds"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 30,
+      "title": "Model calls and documents",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 31,
+      "title": "Model calls",
+      "description": "Every model call made for the questions above, by purpose.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 14,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT u.purpose AS \"Purpose\", u.model AS \"Model\", count(*) AS \"Calls\",\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY u.elapsed_seconds) AS \"Median\",\n       percentile_cont(0.95) WITHIN GROUP (ORDER BY u.elapsed_seconds) AS \"95%\",\n       sum(u.input_tokens) AS \"Input tokens\", sum(u.output_tokens) AS \"Output tokens\",\n       count(*) FILTER (WHERE u.status <> 'ok') AS \"Errors\"\nFROM model_call_usage u\nJOIN agent_runs r ON r.id = u.run_id\nJOIN sessions s ON s.id = r.session_id\nWHERE $__timeFilter(u.created_at) AND (NOT s.is_test OR ${tests})\nGROUP BY 1, 2 ORDER BY 3 DESC",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Median"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "95%"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "table",
+      "id": 32,
+      "title": "Document jobs",
+      "description": "Jobs updated in the time range, and every job still waiting, running or failed.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 34,
+        "w": 10,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT j.updated_at AS \"Updated\", d.filename AS \"File\", coalesce(j.task_kind, 'old') AS \"Step\",\n       j.status::text AS \"Status\", j.attempts AS \"Attempts\", j.error_message AS \"Error\"\nFROM ingestion_jobs j JOIN documents d ON d.id = j.document_id\nWHERE $__timeFilter(j.updated_at) OR j.status::text IN ('queued', 'processing', 'failed')\nORDER BY (j.status::text = 'failed') DESC, j.updated_at DESC LIMIT 50",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Updated"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Updated"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Attempts"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    }
+  ]
+}

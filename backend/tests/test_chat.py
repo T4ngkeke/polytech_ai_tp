@@ -1,27 +1,21 @@
 """
-test_chat.py — Tests for POST /api/chat/stream (v5 Class-Lab Architecture).
+test_chat.py — Tests for POST /api/chat/stream.
 
 Coverage
 --------
 - Gate checks: session ownership, class membership, quota enforcement
-- Three-tier rule injection: class + lab + student rules
-- Dynamic LLM config from SystemConfig
-- SSE streaming + background task (message + usage upsert)
+- The research agent is the only chat path (its answers are tested in
+  test_m4d_chat_pg.py, with the teacher's rules in test_direct_mode.py)
 """
 
-import json
 import uuid
 from datetime import date
-from types import SimpleNamespace
-from unittest.mock import patch
-
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.auth import create_access_token, hash_password
+from backend.app.auth import create_access_token
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import (
@@ -35,10 +29,9 @@ from backend.app.models import (
     Session,
     SystemConfig,
     UsageStat,
-    User,
     UserRole,
 )
-from tests.conftest import make_user
+from tests.conftest import make_client, make_user
 
 
 # ---------------------------------------------------------------------------
@@ -146,67 +139,12 @@ async def client2(db_session: AsyncSession, seed_chat) -> AsyncClient:
     app.dependency_overrides.clear()
 
 
-@pytest_asyncio.fixture
-async def mock_openai():
-    """Mock AsyncOpenAI to return a predictable streaming response."""
-    with patch("backend.app.routers.chat.AsyncOpenAI") as mock:
-        async def mock_create(*args, **kwargs):
-            async def mock_generator():
-                class Delta:
-                    def __init__(self, content):
-                        self.content = content
-                class Choice:
-                    def __init__(self, content):
-                        self.delta = Delta(content)
-                class Usage:
-                    prompt_tokens = 10
-                    completion_tokens = 5
-                class Chunk:
-                    def __init__(self, content, usage=None):
-                        self.choices = [Choice(content)]
-                        self.usage = usage
-
-                yield Chunk("Bonjour")
-                yield Chunk(" monde", Usage())
-
-            return mock_generator()
-
-        instance = mock.return_value
-        instance.chat.completions.create = mock_create
-        yield mock
-
-
 # ===================================================================
 # 1. Gate checks
 # ===================================================================
 
 
 class TestGateChecks:
-    async def test_deleted_lab_rejects_chat_without_calling_model(
-        self, client1, seed_chat, db_session, mock_openai,
-    ):
-        seed_chat["lab"].is_deleted = True
-        await db_session.flush()
-        resp = await client1.post(
-            "/api/chat/stream",
-            json={"session_id": str(seed_chat["sess1"].id), "message": "Can I continue?"},
-        )
-        assert resp.status_code == 404
-        mock_openai.assert_not_called()
-
-    async def test_closed_lab_rejects_chat_without_calling_model(
-        self, client1, seed_chat, db_session, mock_openai,
-    ):
-        seed_chat["lab"].is_active = False
-        await db_session.flush()
-        resp = await client1.post(
-            "/api/chat/stream",
-            json={"session_id": str(seed_chat["sess1"].id), "message": "Can I continue?"},
-        )
-        assert resp.status_code == 403
-        assert resp.json()["detail"] == "Lab is closed"
-        mock_openai.assert_not_called()
-
     async def test_unauthenticated_returns_401(self, db_session):
         async def override_get_db():
             yield db_session
@@ -239,6 +177,34 @@ class TestGateChecks:
         })
         assert resp.status_code == 403
 
+    async def test_owner_test_session_bypasses_membership(self, db_session, seed_chat):
+        """The owning teacher's is_test session bypasses the student
+        membership check — they aren't enrolled in their own class, but a
+        test-drive is theirs to open."""
+        teacher = seed_chat["teacher"]
+        test_sess = Session(user_id=teacher.id, lab_id=seed_chat["lab"].id,
+                            title="Test drive", is_test=True)
+        db_session.add(test_sess)
+        await db_session.commit()
+
+        async def override_get_db():
+            yield db_session
+        app.dependency_overrides[get_db] = override_get_db
+        token = create_access_token(teacher.id)
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(
+                transport=transport, base_url="http://test",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as c:
+                resp = await c.post("/api/chat/stream", json={
+                    "session_id": str(test_sess.id), "message": "hi",
+                })
+            # Not 403: past the membership check (the agent is off in this test).
+            assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
+        finally:
+            app.dependency_overrides.clear()
+
     async def test_quota_exceeded_returns_429(self, client1, seed_chat, db_session):
         # Max out the quota
         usage = UsageStat(user_id=seed_chat["student1"].id, date=date.today(), tokens_used=100)
@@ -250,182 +216,80 @@ class TestGateChecks:
         })
         assert resp.status_code == 429
 
+    async def test_teacher_refill_lets_the_student_ask_again(self, client1, seed_chat, db_session):
+        # The student used the whole quota (100); the teacher refills it.
+        db_session.add(UsageStat(user_id=seed_chat["student1"].id, date=date.today(), tokens_used=100))
+        await db_session.commit()
+        assert (await client1.get("/api/student/usage")).json() == {"used": 100, "limit": 100}
+        class_id, student1, student2 = seed_chat["class"].id, seed_chat["student1"], seed_chat["student2"]
+        teacher = await make_client(db_session, seed_chat["teacher"])
+        async with teacher:
+            refill = await teacher.post(f"/api/teacher/classes/{class_id}/students/{student1.id}/quota-refill")
+            again = await teacher.post(f"/api/teacher/classes/{class_id}/students/{student1.id}/quota-refill")
+            outside = await teacher.post(f"/api/teacher/classes/{class_id}/students/{student2.id}/quota-refill")
+        assert refill.json() == {"used": 100, "limit": 200, "granted": 100}
+        assert again.json() == {"used": 100, "limit": 200, "granted": 100}   # still a full quota left
+        assert outside.status_code == 404                                    # not in this class
+        stranger = make_user(role=UserRole.teacher)
+        db_session.add(stranger)
+        await db_session.commit()
+        other = await make_client(db_session, stranger)
+        async with other:
+            foreign = await other.post(f"/api/teacher/classes/{class_id}/students/{student1.id}/quota-refill")
+        assert foreign.status_code in (403, 404)
+        # Usage is not rewritten; the student is past the quota check (the agent is off here).
+        usage = await db_session.scalar(select(UsageStat).where(UsageStat.user_id == student1.id))
+        assert usage.tokens_used == 100
+        client1.headers["Authorization"] = f"Bearer {create_access_token(student1.id)}"
+        assert (await client1.get("/api/student/usage")).json() == {"used": 100, "limit": 200}
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess1"].id), "message": "hi",
+        })
+        assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
+
+    async def test_locked_lab_rejected_403(self, client1, seed_chat, db_session):
+        # A locked (is_active=False) lab must reject chat.
+        lab = seed_chat["lab"]
+        lab.is_active = False
+        db_session.add(lab)
+        await db_session.commit()
+
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess1"].id), "message": "hi",
+        })
+        assert resp.status_code == 403
+
+    async def test_deleted_lab_rejected_403(self, client1, seed_chat, db_session):
+        lab = seed_chat["lab"]
+        lab.is_deleted = True
+        db_session.add(lab)
+        await db_session.commit()
+
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess1"].id), "message": "hi",
+        })
+        assert resp.status_code == 403
+
 
 # ===================================================================
 # 2. Three-tier rule injection
-# ===================================================================
-
-
-class TestRuleInjection:
-    async def test_system_prompt_contains_all_three_tiers(
-        self, client1, seed_chat, db_session, mock_openai
-    ):
-        """Verify that the LLM is called with class + lab + student rules in the system prompt."""
-        sess = seed_chat["sess1"]
-        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
-
-        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
-            async with client1.stream("POST", "/api/chat/stream", json={
-                "session_id": str(sess.id), "message": "test",
-            }) as resp:
-                assert resp.status_code == 200
-                # Consume the stream
-                async for _ in resp.aiter_text():
-                    pass
-
-        # Inspect what was passed to the mock OpenAI
-        call_kwargs = mock_openai.return_value.chat.completions.create
-        # The mock was called, verify system prompt via the messages kwarg
-        # Since we mock the entire create, we verify the rules are assembled
-        # by checking the _build_system_prompt function directly
-
-    async def test_inactive_rule_not_injected(
-        self, client1, seed_chat, db_session, mock_openai
-    ):
-        """If a rule is inactive, it should not appear in the system prompt."""
-        # Deactivate the lab rule
-        seed_chat["rule_lab"].is_active = False
-        db_session.add(seed_chat["rule_lab"])
-        await db_session.commit()
-
-        from backend.app.routers.chat import _build_system_prompt
-        prompt = await _build_system_prompt(
-            db_session,
-            class_id=str(seed_chat["class"].id),
-            lab_id=str(seed_chat["lab"].id),
-            user_id=str(seed_chat["student1"].id),
-        )
-        assert "Lab: Focus on physics." not in prompt
-        assert "Class: Be educational." in prompt
-        assert "Student: Speak French." in prompt
 
 
 # ===================================================================
-# 3. Dynamic LLM config
+# The research agent is the only chat path
 # ===================================================================
 
 
-class TestDynamicLLMConfig:
-    async def test_llm_config_read_from_system_config(
-        self, client1, seed_chat, db_session, mock_openai
-    ):
-        """Verify that AsyncOpenAI is instantiated with DB-based config."""
-        sess = seed_chat["sess1"]
-        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+class TestResearchAgentOnly:
+    async def test_chat_needs_the_research_agent(self, client1, seed_chat):
+        """With AGENTIC_SEARCH_ENABLED off there is no other path: a clear 503."""
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess1"].id), "message": "hi"})
+        assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
 
-        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
-            async with client1.stream("POST", "/api/chat/stream", json={
-                "session_id": str(sess.id), "message": "config test",
-            }) as resp:
-                assert resp.status_code == 200
-                async for _ in resp.aiter_text():
-                    pass
-
-        # Verify AsyncOpenAI was called with DB config values
-        mock_openai.assert_called_once_with(
-            api_key="test-key",
-            base_url="http://test:11434/v1",
-        )
-
-
-# ===================================================================
-# 4. SSE streaming + background task
-# ===================================================================
-
-
-class TestStreamingAndBackgroundTask:
-    async def test_happy_path_sse_streaming(
-        self, client1, seed_chat, db_session, mock_openai
-    ):
-        """Full end-to-end: stream tokens, then verify DB writes."""
-        sess = seed_chat["sess1"]
-        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
-
-        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
-            async with client1.stream("POST", "/api/chat/stream", json={
-                "session_id": str(sess.id), "message": "stream test",
-            }) as resp:
-                assert resp.status_code == 200
-                assert resp.headers["content-type"] == "text/event-stream; charset=utf-8"
-
-                chunks = []
-                async for chunk in resp.aiter_text():
-                    chunks.append(chunk)
-
-                full_text = "".join(chunks)
-                assert "data: \"Bonjour\"\n\n" in full_text
-                assert "data: \" monde\"\n\n" in full_text
-
-        # Verify DB writes (background task)
-        result = await db_session.execute(
-            select(Message)
-            .where(Message.session_id == sess.id)
-            .order_by(Message.created_at)
-        )
-        messages = result.scalars().all()
-        # 2 old messages + 1 user + 1 llm = 4
-        assert len(messages) == 4
-        assert messages[2].sender == SenderType.user
-        assert messages[2].content == "stream test"
-        assert messages[3].sender == SenderType.llm
-        assert messages[3].content == "Bonjour monde"
-        assert messages[3].prompt_tokens == 10
-        assert messages[3].completion_tokens == 5
-
-        # Verify usage stats
-        usage_result = await db_session.execute(
-            select(UsageStat).where(UsageStat.user_id == seed_chat["student1"].id)
-        )
-        usage = usage_result.scalar_one()
-        assert usage.tokens_used == 15
-        assert usage.request_count == 1
-
-    async def test_multiline_code_token_stays_in_one_sse_event(
-        self, client1, seed_chat, db_session, mock_openai
-    ):
-        """Embedded code newlines must survive SSE framing and DB persistence."""
-        code = '```python\nprint("hello")\n```\n'
-
-        async def create(*args, **kwargs):
-            async def chunks():
-                yield SimpleNamespace(
-                    usage=None,
-                    choices=[SimpleNamespace(delta=SimpleNamespace(content=code))],
-                )
-            return chunks()
-
-        mock_openai.return_value.chat.completions.create = create
-        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
-        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
-            async with client1.stream("POST", "/api/chat/stream", json={
-                "session_id": str(seed_chat["sess1"].id), "message": "show code",
-            }) as resp:
-                assert resp.status_code == 200
-                payload = "".join([part async for part in resp.aiter_text()])
-                frames = [frame for frame in payload.split("\n\n") if frame]
-                assert len(frames) == 1
-                assert frames[0].startswith("data: ")
-                assert json.loads(frames[0][6:]) == code
-
-        result = await db_session.execute(
-            select(Message).where(Message.session_id == seed_chat["sess1"].id)
-            .order_by(Message.created_at)
-        )
-        assert result.scalars().all()[-1].content == code
-
-    async def test_legacy_session_without_lab_works(
-        self, client1, seed_chat, db_session, mock_openai
-    ):
-        """Sessions without lab_id (legacy) should still stream successfully."""
-        sess = seed_chat["sess_legacy"]
-        test_sessionmaker = async_sessionmaker(db_session.bind, expire_on_commit=False)
-
-        with patch("backend.app.routers.chat.AsyncSessionLocal", test_sessionmaker):
-            async with client1.stream("POST", "/api/chat/stream", json={
-                "session_id": str(sess.id), "message": "legacy test",
-            }) as resp:
-                assert resp.status_code == 200
-                chunks = []
-                async for chunk in resp.aiter_text():
-                    chunks.append(chunk)
-                assert "Bonjour" in "".join(chunks)
+    async def test_session_without_lab_is_refused(self, client1, seed_chat, monkeypatch):
+        from backend.app.config import settings
+        monkeypatch.setattr(settings, "AGENTIC_SEARCH_ENABLED", True)
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess_legacy"].id), "message": "hi"})
+        assert resp.status_code == 400 and resp.json()["detail"] == "session_without_lab"

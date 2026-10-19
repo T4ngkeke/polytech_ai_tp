@@ -1,13 +1,12 @@
 /**
- * api.js — Lightweight fetch wrapper with JWT auth for Edu-LLM v6.
+ * api.js — Lightweight fetch wrapper with JWT auth for Edu-LLM.
  *
  * Automatically attaches Authorization header from the auth store.
  * Redirects to /login on 401 responses.
  *
- * v6 changes:
- *   - Student DELETE /sessions removed (audit integrity)
- *   - Admin: DELETE /classes/{id}, DELETE /labs/{id}, GET/PUT /llm/config,
- *            GET /analytics/classes/{id}, GET /classes/{id}/labs
+ * Generic verbs (get/post/put/delete/upload/raw); endpoints live at call sites.
+ * Note: student DELETE /api/student/sessions/{id} is a soft delete (the session
+ * is hidden from the student but retained for teacher/admin audit).
  */
 
 import useAuthStore from '../store/authStore';
@@ -37,16 +36,28 @@ async function request(endpoint, options = {}) {
   return res;
 }
 
+/**
+ * Error for a failed response. `detail` is either a string or
+ * `{ code, message }`; the machine-readable code is kept on `error.code`.
+ */
+export async function responseError(res) {
+  let message = `HTTP ${res.status}`;
+  let code;
+  try {
+    const { detail } = await res.json();
+    if (typeof detail === 'string') message = detail;
+    else if (detail && typeof detail.message === 'string') ({ message, code } = detail);
+  } catch { /* not JSON */ }
+  const error = new Error(message);
+  error.status = res.status;
+  error.code = code;
+  return error;
+}
+
 async function jsonRequest(endpoint, options = {}) {
   const res = await request(endpoint, options);
 
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try { const body = await res.json(); detail = body.detail || detail; } catch {}
-    const error = new Error(detail);
-    error.status = res.status;
-    throw error;
-  }
+  if (!res.ok) throw await responseError(res);
 
   if (res.status === 204) return null;
   return res.json();
@@ -69,6 +80,31 @@ const api = {
    */
   upload: (endpoint, formData, queryParams = '') =>
     jsonRequest(`${endpoint}${queryParams}`, { method: 'POST', body: formData }),
+
+  /**
+   * Upload with onProgress(share 0..1) while the file is sent. fetch cannot
+   * report upload progress, so this one uses XMLHttpRequest.
+   */
+  uploadWithProgress: (endpoint, formData, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE_URL}${endpoint}`);
+    const token = useAuthStore.getState().token;
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    xhr.onerror = () => reject(new Error('Network error: the file was not sent'));
+    xhr.onload = async () => {
+      if (xhr.status === 401) {
+        useAuthStore.getState().logout();
+        window.location.href = '/login';
+        reject(new Error('Unauthorized'));
+        return;
+      }
+      const res = new Response(xhr.responseText || null, { status: xhr.status });
+      if (!res.ok) reject(await responseError(res));
+      else resolve(xhr.status === 204 ? null : JSON.parse(xhr.responseText));
+    };
+    xhr.send(formData);
+  }),
 
   /**
    * Raw fetch for non-JSON responses (SSE streams).

@@ -1,23 +1,35 @@
 /**
- * Chat.jsx — Student unified workspace for Edu-LLM v6.
+ * Chat.jsx — Student unified workspace for Edu-LLM.
  *
  * Layout: Left hierarchical sidebar (Class→Lab tree) + Right chat panel.
  * Students pick a lab from the sidebar; sessions are created automatically.
- * Students CANNOT delete sessions (audit integrity — v6 rule).
+ * Deleting a session is a SOFT delete (DELETE /api/student/sessions/{id}): it
+ * disappears from the student's list but is retained and stays visible to
+ * teacher/admin audit. Only admin can hard-delete.
  *
  * Join class flow is a modal triggered from the sidebar.
  */
 
-import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
+import { createMessageId, createRequestId } from '../lib/messageId';
+import { interpretStreamEvent } from '../lib/streamEvents';
+import { applyToMessage } from '../lib/streamMessage';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
-
-const loadMessageContent = () => import('../components/MessageContent');
-const MessageContent = lazy(loadMessageContent);
+import { PdfPreviewModal } from '../components/PdfPreview';
+import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
+import ModeSwitch from '../components/ModeSwitch';
+import useMediaQuery from '../lib/useMediaQuery';
+import { DEFAULT_MODE, offersResearch, saveMode, storedMode } from '../lib/answerModes';
+import { useChatScroll } from '../lib/chatScroll';
+// The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
+// lazily). We warm that chunk on mount (see effect below) so the first
+// assistant message renders as real markdown instead of the raw-text
+// Suspense fallback ("squished markdown") while the large chunk downloads.
 
 export default function Chat() {
   const { labId: urlLabId } = useParams();
@@ -30,21 +42,36 @@ export default function Chat() {
 
   // ── Active context ──
   const [activeLabId, setActiveLabId] = useState(urlLabId || null);
-  const [activeClassId, setActiveClassId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [usage, setUsage] = useState({ used: 0, limit: 50000 });
-  const activeLab = classes.flatMap((cls) => cls.labs || []).find((lab) => lab.id === activeLabId);
-  const labIsClosed = Boolean(activeLab && (activeLab.is_deleted || !activeLab.is_active));
 
   // ── Chat state ──
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [researchPhase, setResearchPhase] = useState(null);
+  // The cited page shown in the preview window over the chat (null = closed).
+  const [preview, setPreview] = useState(null);
+  const openSource = useCallback((source) => setPreview(source), []);
+  const closeSource = useCallback(() => setPreview(null), []);
+  const restoredLabRef = useRef(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  // Phones: classes and sessions live in a drawer opened from the header.
+  const [navOpen, setNavOpen] = useState(!urlLabId);
+  const isWide = useMediaQuery('(min-width: 768px)');
+  // Answer mode of the next question (Direct / Search / Research), per session.
+  const [mode, setMode] = useState(DEFAULT_MODE);
+  useEffect(() => { setMode(storedMode(activeSessionId)); }, [activeSessionId]);
+  const chooseMode = (next) => { setMode(next); saveMode(activeSessionId, next); };
+  // Exam mode (set by the teacher for the class): answers without course search.
+  const activeClass = classes.find((c) => c.labs?.some((l) => l.id === activeLabId));
+  const examMode = !!activeClass?.exam_mode;
   const abortRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const listRef = useRef(null);
+  const { onScroll, update: updateScroll, follow } = useChatScroll(listRef);
   const inputRef = useRef(null);
+  const streamedIdsRef = useRef(new Set()); // temp ids not yet persisted server-side
 
   // ── Join modal state ──
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -54,6 +81,9 @@ export default function Chat() {
   // ── Rename session state ──
   const [renamingSessionId, setRenamingSessionId] = useState(null);
   const [renameTitle, setRenameTitle] = useState('');
+
+  // ── Soft-delete confirm state (inline, mirrors the rename pattern) ──
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
 
   // ── Load classes with labs ──
   const loadClasses = useCallback(async () => {
@@ -68,7 +98,7 @@ export default function Chat() {
         })
       );
       setClasses(withLabs);
-    } catch (err) {
+    } catch {
       toast.error('Failed to load classes');
     } finally {
       setClassesLoading(false);
@@ -77,7 +107,8 @@ export default function Chat() {
 
   useEffect(() => { loadClasses(); }, [loadClasses]);
 
-  // Warm the Markdown bundle so the first streamed reply formats immediately.
+  // Warm the markdown/highlight/KaTeX chunk immediately so the first message
+  // doesn't fall back to raw-text rendering while it downloads.
   useEffect(() => { loadMessageContent(); }, []);
 
   // ── Load usage stats ──
@@ -85,15 +116,17 @@ export default function Chat() {
     try {
       const data = await api.get('/api/student/usage');
       setUsage(data);
-    } catch {}
+    } catch {
+      // The quota bar keeps its last value.
+    }
   }, []);
 
   useEffect(() => { loadUsage(); }, [loadUsage]);
 
   // ── When a lab is selected ──
-  const handleSelectLab = useCallback(async (labId, classId) => {
+  const handleSelectLab = useCallback(async (labId) => {
+    restoredLabRef.current = true;
     setActiveLabId(labId);
-    setActiveClassId(classId);
     setMessages([]);
     setActiveSessionId(null);
     navigate(`/chat/${labId}`, { replace: true });
@@ -104,6 +137,7 @@ export default function Chat() {
       if (existing.length > 0) {
         const latest = existing[0];
         setActiveSessionId(latest.id);
+        follow('tail');
         setSessions(existing);
         // Load messages
         const sessionData = await api.get(`/api/student/sessions/${latest.id}`);
@@ -114,26 +148,37 @@ export default function Chat() {
     } catch {
       setSessions([]);
     }
-  }, [navigate]);
+  }, [navigate, follow]);
+
+  // The URL survives a reload; restore its latest session and persisted citations.
+  useEffect(() => {
+    if (urlLabId && !restoredLabRef.current) handleSelectLab(urlLabId, null);
+  }, [urlLabId, handleSelectLab]);
 
   // ── Create new session ──
   const handleNewSession = useCallback(async () => {
-    if (!activeLabId || labIsClosed) return;
+    if (!activeLabId) return;
     try {
-      const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {
-        title: `Session ${new Date().toLocaleDateString()}`,
-      });
+      // No title: the first question and answer give it one (server side).
+      const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {});
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
       setMessages([]);
+      setNavOpen(false);
     } catch (err) {
       toast.error(err.message || 'Failed to create session');
     }
-  }, [activeLabId, labIsClosed]);
+  }, [activeLabId]);
 
   // ── Load session messages ──
   const handleSelectSession = useCallback(async (sessionId) => {
+    // Abort any in-flight stream so its tokens never land on the new session.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
     setActiveSessionId(sessionId);
+    follow('tail');
+    setNavOpen(false);
     setIsLoadingMessages(true);
     try {
       const data = await api.get(`/api/student/sessions/${sessionId}`);
@@ -143,38 +188,49 @@ export default function Chat() {
     } finally {
       setIsLoadingMessages(false);
     }
-  }, []);
+  }, [follow]);
 
-  // ── Scroll to bottom ──
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  // ── Scroll while an answer is written (lib/chatScroll.js) ──
+  useEffect(() => { updateScroll(); }, [messages, updateScroll]);
+
+  // ── Abort the SSE stream on unmount (no leaked EventSource / setState) ──
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // ── Send message ──
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
-    if (!text || !activeSessionId || isStreaming || labIsClosed) return;
+  // text: an option the student picked under a question back; otherwise the input box.
+  // picked: an option of a question back, or a question sent again;
+  // modeOverride: that question's mode (Research again after an empty Search).
+  const handleSend = useCallback(async (picked, modeOverride) => {
+    const text = (typeof picked === 'string' ? picked : input).trim();
+    if (!text || !activeSessionId || isStreaming) return;
 
     let currentSessionId = activeSessionId;
     // Auto-create session if none exists
     if (!currentSessionId) {
       try {
-        const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, { title: text.slice(0, 40) });
+        const newSession = await api.post(`/api/student/labs/${activeLabId}/sessions`, {});
         setSessions((prev) => [newSession, ...prev]);
         setActiveSessionId(newSession.id);
         currentSessionId = newSession.id;
-      } catch (err) {
+      } catch {
         toast.error('Could not start session');
         return;
       }
     }
 
-    const userMsg = { id: Date.now(), sender: 'user', content: text, created_at: new Date().toISOString() };
+    // Prefix + sequence keeps pending message IDs distinct, even in the same
+    // millisecond, so streamed tokens reach the correct bubble on HTTP too.
+    const userMsgId = createMessageId();
+    const assistantMsgId = createMessageId();
+    // Client temp ids aren't the server Message ids, so this bubble can't
+    // be rated until the session reloads (feedback endpoint needs the real id).
+    streamedIdsRef.current.add(assistantMsgId);
+    const userMsg = { id: userMsgId, sender: 'user', content: text, created_at: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
-    setInput('');
+    follow('pin');
+    if (typeof picked !== 'string') setInput('');
     setIsStreaming(true);
 
-    const assistantMsgId = Date.now() + 1;
     setMessages((prev) => [...prev, { id: assistantMsgId, sender: 'llm', content: '', created_at: new Date().toISOString() }]);
 
     const ctrl = new AbortController();
@@ -184,33 +240,73 @@ export default function Chat() {
       await fetchEventSource('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: currentSessionId, message: text }),
+        body: JSON.stringify({ session_id: currentSessionId, message: text,
+          client_request_id: createRequestId(),
+          mode: examMode ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
         signal: ctrl.signal,
+        // Keep the stream open while the tab is hidden; by default the library
+        // closes it and resends the question when the tab is shown again.
+        openWhenHidden: true,
         onmessage(ev) {
-          if (ev.event === 'done') { setIsStreaming(false); loadUsage(); return; }
-          if (ev.data) {
-            // The backend JSON-encodes tokens so newlines survive SSE framing.
-            // Accept raw text too while an older backend instance is draining.
-            let tokenText = ev.data;
-            try {
-              const decoded = JSON.parse(ev.data);
-              if (typeof decoded === 'string') tokenText = decoded;
-            } catch {
-              tokenText = ev.data;
-            }
-            setMessages((prev) => prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: m.content + tokenText } : m
-            ));
+          // Named events (status/done/error/citations) are matched before the
+          // content-token branch, so the opening `status` frame is never appended
+          // as text (which would render "[object Object]" atop the reply).
+          const action = interpretStreamEvent(ev);
+          switch (action.type) {
+            case 'status':
+              setResearchPhase(action.phase);
+              if (action.mode) {
+                setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, answer_mode: action.mode } : m));
+              }
+              // The teacher may have turned exam mode on or off since the page loaded.
+              if (activeClass && action.examMode !== !!activeClass.exam_mode) {
+                setClasses((prev) => prev.map((c) => c.id === activeClass.id ? { ...c, exam_mode: action.examMode } : c));
+              }
+              return;
+            case 'done':
+              if (action.messageId) {
+                streamedIdsRef.current.delete(assistantMsgId);
+                setMessages((prev) => prev.map((m) => m.id === assistantMsgId
+                  ? { ...m, id: action.messageId } : m));
+              }
+              setResearchPhase(null);
+              setIsStreaming(false);
+              loadUsage();
+              return;
+            case 'title':
+              setSessions((prev) => prev.map((s) => s.id === (action.sessionId || currentSessionId)
+                ? { ...s, title: action.title } : s));
+              return;
+            case 'error':
+              // Server-side mid-stream failure: stop the spinner and surface it,
+              // never append the error payload as if it were model output.
+              setIsStreaming(false);
+              setMessages((prev) => prev.map((m) => m.id === assistantMsgId ? { ...m, draft: '' } : m));
+              toast.error(action.detail);
+              return;
+            // Draft, answer, citations and a question back change the bubble.
+            case 'draft':
+            case 'draft_reset':
+            case 'token':
+            case 'citations':
+            case 'clarification':
+              setMessages((prev) => prev.map((m) => (m.id === assistantMsgId ? applyToMessage(m, action) : m)));
+              return;
+            default:
+              return;
           }
         },
         onerror(err) { throw err; },
       });
-    } catch (err) {
+    } catch {
       if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
+      // An unchecked draft never stays on screen once the stream ends.
+      setMessages((prev) => prev.map((m) => m.id === assistantMsgId && m.draft ? { ...m, draft: '' } : m));
+      setResearchPhase(null);
       setIsStreaming(false);
     }
-  }, [input, activeSessionId, activeLabId, isStreaming, labIsClosed, token, loadUsage]);
+  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage, mode, examMode, activeClass, follow]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -254,14 +350,121 @@ export default function Chat() {
     }
   };
 
+  // ── Soft-delete session (hidden from student; retained for teacher/admin audit) ──
+  const handleDeleteSession = useCallback(async (sessionId) => {
+    try {
+      await api.delete(`/api/student/sessions/${sessionId}`);
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete session');
+      return;
+    } finally {
+      setConfirmingDeleteId(null);
+    }
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(null);
+      setMessages([]);
+    }
+    toast.success('Chat deleted');
+  }, [activeSessionId]);
+
   // ── Derived ──
   const quotaPct = usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
+  // Desktop: its own column next to the classes. Phones: inside the drawer.
+  const sessionsPanel = (
+    <>
+      <div className="px-3 pt-4 pb-2 border-b border-border-subtle">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
+        <button
+          id="new-session-btn"
+          onClick={handleNewSession}
+          className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
+        >
+          + New Session
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto py-1">
+        {sessions.map((s) => (
+          <div key={s.id} className="group relative">
+            {renamingSessionId === s.id ? (
+              <input
+                autoFocus
+                value={renameTitle}
+                onChange={(e) => setRenameTitle(e.target.value)}
+                onBlur={() => handleRenameSession(s.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSession(s.id); if (e.key === 'Escape') setRenamingSessionId(null); }}
+                className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
+              />
+            ) : confirmingDeleteId === s.id ? (
+              <div className="flex items-center gap-2 px-3 py-2 text-xs bg-danger-deep">
+                <span className="flex-1 truncate text-danger">Delete this chat?</span>
+                <button
+                  onClick={() => handleDeleteSession(s.id)}
+                  className="w-7 h-7 rounded flex items-center justify-center text-danger hover:text-danger-hover hover:bg-ink-hover transition-colors cursor-pointer"
+                  title="Confirm delete"
+                >
+                  <CheckIcon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setConfirmingDeleteId(null)}
+                  className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
+                  title="Cancel"
+                >
+                  <XIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleSelectSession(s.id)}
+                  className={`w-full text-left px-3 py-2 pr-16 text-xs transition-all cursor-pointer ${
+                    activeSessionId === s.id
+                      ? 'bg-cyan-muted text-cyan'
+                      : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
+                  }`}
+                >
+                  <span className="block truncate">{s.title || 'New conversation'}</span>
+                  <span className="block text-[9px] text-cream-muted mt-0.5">
+                    {new Date(s.created_at).toLocaleDateString()}
+                  </span>
+                </button>
+                {/* Hover actions: rename + soft-delete */}
+                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
+                    className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
+                    title="Rename session"
+                  >
+                    <PencilIcon className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDeleteId(s.id)}
+                    className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-danger hover:bg-ink-hover transition-colors cursor-pointer"
+                    title="Delete session"
+                  >
+                    <TrashIcon className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
   return (
-    <div className="flex h-screen bg-ink-deep overflow-hidden">
+    <div className="flex h-dvh bg-ink-deep overflow-hidden">
+      {/* Phones: the two sidebars below form one drawer over the chat. */}
+      {navOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} />
+      )}
+      <div className={`${navOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm flex-col shadow-elevated
+        md:static md:z-auto md:flex md:w-auto md:max-w-none md:flex-row md:shadow-none`}>
       {/* ── Left: Hierarchical Sidebar ── */}
-      <div className="w-60 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base">
+      <div className="flex-1 min-h-0 md:flex-none md:w-60 shrink-0 flex flex-col md:border-r border-border-subtle bg-ink-base">
         <HierarchicalSidebar
           role="student"
           classes={classes}
@@ -269,7 +472,14 @@ export default function Chat() {
           onSelectLab={handleSelectLab}
           onJoinClass={() => setShowJoinModal(true)}
           loading={classesLoading}
-        />
+        >
+          {/* Phones: the sessions sit under the classes, above the account footer. */}
+          {activeLabId && !isWide && (
+            <div className="flex-[1.5] min-h-0 flex flex-col border-t border-border-subtle">
+              {sessionsPanel}
+            </div>
+          )}
+        </HierarchicalSidebar>
 
         {/* Token quota at bottom */}
         <div className="shrink-0 px-4 py-3 border-t border-border-subtle">
@@ -288,69 +498,25 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* ── Middle: Session list (when lab selected) ── */}
-      {activeLabId && (
+      {/* ── Middle: Session list (desktop, when a lab is selected) ── */}
+      {activeLabId && isWide && (
         <div className="w-48 shrink-0 flex flex-col border-r border-border-subtle bg-ink-base">
-          <div className="px-3 pt-4 pb-2 border-b border-border-subtle">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
-            <button
-              id="new-session-btn"
-              onClick={handleNewSession}
-              disabled={labIsClosed}
-              title={labIsClosed ? 'This lab is closed' : undefined}
-              className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              + New Session
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto py-1">
-            {sessions.map((s) => (
-              <div key={s.id} className="group relative">
-                {renamingSessionId === s.id ? (
-                  <input
-                    autoFocus
-                    value={renameTitle}
-                    onChange={(e) => setRenameTitle(e.target.value)}
-                    onBlur={() => handleRenameSession(s.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSession(s.id); if (e.key === 'Escape') setRenamingSessionId(null); }}
-                    className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
-                  />
-                ) : (
-                  <button
-                    onClick={() => handleSelectSession(s.id)}
-                    className={`w-full text-left px-3 py-2 text-xs transition-all cursor-pointer ${
-                      activeSessionId === s.id
-                        ? 'bg-cyan-muted text-cyan'
-                        : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
-                    }`}
-                  >
-                    <span className="block truncate">{s.title || 'Untitled Session'}</span>
-                    <span className="block text-[9px] text-cream-muted mt-0.5">
-                      {new Date(s.created_at).toLocaleDateString()}
-                    </span>
-                  </button>
-                )}
-                {/* Rename button only — NO delete */}
-                <button
-                  onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream transition-all cursor-pointer"
-                  title="Rename session"
-                >
-                  <PencilIcon className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
+          {sessionsPanel}
         </div>
       )}
+      </div>
 
       {/* ── Right: Chat panel ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Chat header */}
-        <div className="shrink-0 h-14 px-6 border-b border-border-subtle flex items-center justify-between bg-ink-base/80 backdrop-blur-sm">
-          <div>
+        <div className="shrink-0 h-14 px-3 md:px-6 border-b border-border-subtle flex items-center justify-between gap-2 bg-ink-base/80 backdrop-blur-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            <button type="button" onClick={() => setNavOpen(true)} title="Classes and sessions" aria-label="Classes and sessions"
+              className="md:hidden p-2 -ml-1 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
+              <MenuIcon className="w-5 h-5" />
+            </button>
             {activeSession ? (
-              <h2 className="text-sm font-semibold text-cream">{activeSession.title || 'Untitled Session'}</h2>
+              <h2 className="text-sm font-semibold text-cream truncate">{activeSession.title || 'New conversation'}</h2>
             ) : activeLabId ? (
               <h2 className="text-sm font-semibold text-cream-secondary">Select or create a session</h2>
             ) : (
@@ -358,7 +524,7 @@ export default function Chat() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-cream-muted font-mono">{username}</span>
+            <span className="hidden sm:inline text-[11px] text-cream-muted font-mono">{username}</span>
             {isStreaming && (
               <div className="flex items-center gap-1.5 text-[10px] text-cyan">
                 <div className="w-1.5 h-1.5 rounded-full bg-cyan animate-pulse" />
@@ -368,25 +534,19 @@ export default function Chat() {
           </div>
         </div>
 
-        {labIsClosed && (
-          <p role="status" className="px-6 py-2 text-xs text-cream-secondary bg-ink-surface border-b border-border-subtle">
-            This lab is closed. You can review previous messages, but cannot start a session or send messages.
-          </p>
-        )}
-
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+        <div ref={listRef} onScroll={onScroll} className="relative flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6 space-y-5">
           {!activeLabId && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-xs">
                 <div className="w-16 h-16 rounded-2xl gradient-cyan mx-auto mb-4 flex items-center justify-center shadow-glow">
-                  <svg className="w-8 h-8 text-cream" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                  <svg className="w-8 h-8 text-on-accent" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
                   </svg>
                 </div>
                 <h3 className="font-display text-xl text-cream mb-2">Select a Lab</h3>
                 <p className="text-sm text-cream-secondary">
-                  Choose a lab from the sidebar to start chatting, or join a class first.
+                  Choose a lab to start chatting, or join a class first.
                 </p>
               </div>
             </div>
@@ -396,11 +556,9 @@ export default function Chat() {
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <p className="text-cream-secondary text-sm mb-3">No sessions yet for this lab.</p>
-                {!labIsClosed && (
-                  <button onClick={handleNewSession} className="px-4 py-2 rounded-lg gradient-cyan text-cream text-sm font-medium cursor-pointer hover:brightness-110 transition-all">
-                    Start First Session
-                  </button>
-                )}
+                <button onClick={handleNewSession} className="px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-medium cursor-pointer hover:brightness-110 transition-all">
+                  Start First Session
+                </button>
               </div>
             </div>
           )}
@@ -411,48 +569,74 @@ export default function Chat() {
             </div>
           )}
 
-          {messages.map((msg, index) => (
+          {messages.map((msg, i) => (
+            // The latest answer: scrolling stops when its first line reaches the top.
+            <div key={msg.id} data-latest-answer={i === messages.length - 1 && msg.sender === 'llm' ? '' : undefined}>
             <MessageBubble
-              key={msg.id}
               message={msg}
-              streaming={isStreaming && msg.sender === 'llm' && index === messages.length - 1}
+              streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
+              phase={isStreaming && msg.sender === 'llm' && i === messages.length - 1 ? researchPhase : null}
+              sessionId={activeSessionId}
+              onOpenSource={openSource}
+              canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
+              // Only the latest question back can still be answered with a click.
+              onPick={!isStreaming && i === messages.length - 1 && msg.clarification ? handleSend : null}
+              // An uncited Search answer offers the same question in Research.
+              onResearch={!isStreaming && !examMode && i === messages.length - 1 && offersResearch(msg)
+                ? () => {
+                  const question = messages.slice(0, i).reverse().find((m) => m.sender === 'user');
+                  if (question) handleSend(question.content, 'research');
+                } : null}
             />
+            </div>
           ))}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
-        <div className="shrink-0 px-6 py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
+        <div className="shrink-0 px-3 py-3 md:px-6 md:py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
+          {activeSessionId && (
+            <div className="mb-2">
+              <ModeSwitch mode={mode} onChange={chooseMode} examMode={examMode} disabled={isStreaming} />
+            </div>
+          )}
           <div className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
-            activeSessionId && !labIsClosed ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
+            activeSessionId ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
           } bg-ink-deep`}>
             <textarea
               ref={inputRef}
               id="chat-input"
               rows={1}
-              disabled={!activeSessionId || isStreaming || labIsClosed}
+              disabled={!activeSessionId || isStreaming}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={labIsClosed ? 'This lab is closed' : activeSessionId ? 'Type your message… (Enter to send)' : 'Select a session first'}
+              placeholder={activeSessionId ? 'Type your message… (Enter to send)' : 'Select a session first'}
               className="flex-1 bg-transparent text-cream text-sm resize-none outline-none placeholder:text-cream-muted max-h-32 min-h-[1.5rem] leading-relaxed"
               style={{ height: 'auto' }}
             />
             <button
               id="send-btn"
               onClick={isStreaming ? () => abortRef.current?.abort() : handleSend}
-              disabled={!activeSessionId || labIsClosed}
+              disabled={!activeSessionId}
               className={`shrink-0 p-2 rounded-lg transition-all cursor-pointer ${
                 isStreaming
-                  ? 'bg-danger-muted text-danger hover:bg-danger-muted/80'
-                  : 'gradient-cyan text-cream hover:brightness-110 shadow-glow disabled:opacity-40 disabled:cursor-not-allowed'
+                  ? 'bg-danger-muted text-danger hover:bg-danger/20'
+                  : 'gradient-cyan text-on-accent hover:brightness-110 shadow-glow disabled:opacity-40 disabled:cursor-not-allowed'
               }`}
             >
               {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
             </button>
           </div>
+          {/* Transparency: students are told their teacher can see the chat. */}
+          <p className="mt-2 text-center text-[11px] text-cream-muted">
+            Your teacher can see this conversation.
+          </p>
         </div>
       </div>
+
+      {preview && preview.sessionId === activeSessionId && (
+        <PdfPreviewModal source={preview} onClose={closeSource} />
+      )}
 
       {/* ── Join Class Modal ── */}
       {showJoinModal && (
@@ -486,7 +670,7 @@ export default function Chat() {
               <button
                 onClick={handleJoinSubmit}
                 disabled={isJoining || joinCode.join('').length !== 6}
-                className="flex-1 py-2.5 rounded-lg gradient-cyan text-cream text-sm font-semibold disabled:opacity-50 cursor-pointer hover:brightness-110 transition-all">
+                className="flex-1 py-2.5 rounded-lg gradient-cyan text-on-accent text-sm font-semibold disabled:opacity-50 cursor-pointer hover:brightness-110 transition-all">
                 {isJoining ? 'Joining…' : 'Join Class'}
               </button>
             </div>
@@ -497,38 +681,10 @@ export default function Chat() {
   );
 }
 
-/* ── Message Bubble ── */
-const MessageBubble = memo(function MessageBubble({ message, streaming }) {
-  const isUser = message.sender === 'user';
-  return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3 animate-fade-in`}>
-      {!isUser && (
-        <div className="w-7 h-7 rounded-lg gradient-cyan flex items-center justify-center shrink-0 mt-0.5 shadow-glow">
-          <span className="text-cream text-[10px] font-bold">AI</span>
-        </div>
-      )}
-      <div className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-        isUser
-          ? 'bg-cyan-muted text-cream rounded-tr-sm border border-cyan/20'
-          : 'bg-ink-raised text-cream-secondary border border-border-subtle rounded-tl-sm'
-      }`}>
-        {message.content
-          ? (isUser
-              ? <span className="whitespace-pre-wrap">{message.content}</span>
-              : <Suspense fallback={<span className="whitespace-pre-wrap">{message.content}</span>}>
-                  <MessageContent content={message.content} streaming={streaming} />
-                </Suspense>)
-          : <span className="inline-flex gap-1"><BlinkDot /><BlinkDot delay="150ms" /><BlinkDot delay="300ms" /></span>}
-      </div>
-    </div>
-  );
-});
-
-function BlinkDot({ delay = '0ms' }) {
-  return <span className="w-1.5 h-1.5 rounded-full bg-cream-muted animate-pulse inline-block" style={{ animationDelay: delay }} />;
-}
-
 /* ── Icons ── */
+function MenuIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+}
 function SendIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z" /><path d="M22 2 11 13" /></svg>;
 }
@@ -537,4 +693,13 @@ function StopIcon({ className }) {
 }
 function PencilIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
+}
+function TrashIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>;
+}
+function CheckIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
+}
+function XIcon({ className }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>;
 }

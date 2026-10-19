@@ -14,6 +14,7 @@ Public API
 ----------
 hash_password(plain: str) -> str
 verify_password(plain: str, hashed: str) -> bool
+hash_password_async / verify_password_async: the same off the event loop (request handlers)
 create_access_token(user_id: UUID) -> str
 decode_access_token(token: str) -> UUID          # raises HTTP 401 on failure
 get_current_user  (FastAPI Depends)              # any valid, non-deleted user
@@ -21,12 +22,13 @@ require_teacher   (FastAPI Depends)              # teacher OR admin
 require_admin     (FastAPI Depends)              # admin only
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import ExpiredSignatureError, JWTError, jwt
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,6 +58,17 @@ def hash_password(plain: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     """Return True if *plain* matches the bcrypt *hashed* string."""
     return _pwd_context.verify(plain, hashed)
+
+
+# bcrypt takes about 0.2 s of CPU on purpose. Request handlers use these two:
+# run on the event loop, it would stop every other request for that time,
+# answers being streamed included (30 students logging in at once ~ 6 s).
+async def hash_password_async(plain: str) -> str:
+    return await asyncio.to_thread(hash_password, plain)
+
+
+async def verify_password_async(plain: str, hashed: str) -> bool:
+    return await asyncio.to_thread(verify_password, plain, hashed)
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +125,7 @@ def decode_access_token(token: str) -> uuid.UUID:
 
 async def get_current_user(
     auth: HTTPAuthorizationCredentials = Depends(_security),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Decode the bearer token and return the matching **active** User row.
@@ -182,5 +195,22 @@ async def require_admin(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
+        )
+    return current_user
+
+
+async def require_student(
+    current_user=Depends(get_current_user),
+):
+    """
+    Allow access only to students. Teachers and admins do not join classes:
+    their questions would count as a student's in the class analytics.
+    """
+    from backend.app.models import UserRole
+
+    if current_user.role != UserRole.student:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students join a class",
         )
     return current_user

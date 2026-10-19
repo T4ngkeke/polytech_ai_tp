@@ -1,0 +1,83 @@
+{
+  "purpose": "12 more random pages (seed 20260915) from the same 3 slide PDFs, excluding the 28 dev pages. Not a new-courseware holdout.",
+  "seed": 20260915,
+  "files": {
+    "main-2.pdf": "c12a6562da5c9d9f64823153a4a46ddb57d48398f65d3f0df766e18b2109d220",
+    "main-3.pdf": "016b7dd160071c09c570d6b92bf182e02e35de338b457ec47d781259908ea5b1",
+    "Heritage.pdf": "96d5885cdb412674d6ce8ef0212388d91581ef00def8e5fc900487fb9c85d021"
+  },
+  "cases": [
+    {
+      "file": "main-2.pdf",
+      "page": 9,
+      "stem": "main-2-p9",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 39,
+      "stem": "main-2-p39",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 44,
+      "stem": "main-2-p44",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "main-2.pdf",
+      "page": 48,
+      "stem": "main-2-p48",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 3,
+      "stem": "main-3-p3",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 15,
+      "stem": "main-3-p15",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 30,
+      "stem": "main-3-p30",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "main-3.pdf",
+      "page": 47,
+      "stem": "main-3-p47",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 5,
+      "stem": "Heritage-p5",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 9,
+      "stem": "Heritage-p9",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 12,
+      "stem": "Heritage-p12",
+      "set": "extra-2026-09-15"
+    },
+    {
+      "file": "Heritage.pdf",
+      "page": 19,
+      "stem": "Heritage-p19",
+      "set": "extra-2026-09-15"
+    }
+  ]
+}

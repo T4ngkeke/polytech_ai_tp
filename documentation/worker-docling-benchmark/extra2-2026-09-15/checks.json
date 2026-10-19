@@ -1,0 +1,222 @@
+{
+  "main-2-p4": [
+    {
+      "id": "identity",
+      "kind": "text",
+      "fact": "Qui enseigne ce cours: Guillaume Ginolhac, Université Savoie Mont Blanc, Polytech Annecy-Chambéry."
+    },
+    {
+      "id": "email",
+      "kind": "native_code",
+      "fact": "Contact : guillaume.ginolhac@univ-smb.fr, every character exact."
+    }
+  ],
+  "main-2-p14": [
+    {
+      "id": "toc",
+      "kind": "text",
+      "fact": "Seven sections in order: 1. Présentation du cours; 2. Le langage C; 3. Un premier programme; 4. Représentation binaire des entiers; 5. Entiers signés : le complément à 2; 6. Nombres à virgule flottante; 7. La chaîne de compilation."
+    },
+    {
+      "id": "current",
+      "kind": "visual_fact",
+      "fact": "3. Un premier programme is the current section (highlighted; others dimmed)."
+    }
+  ],
+  "main-2-p28": [
+    {
+      "id": "intro",
+      "kind": "text",
+      "fact": "Un nombre est une suite de chiffres lus de gauche à droite; pour une base B, chaque chiffre appartient à un ensemble de B symboles."
+    },
+    {
+      "id": "table",
+      "kind": "visual_fact",
+      "fact": "Base 2 Binaire {0, 1}; Base 8 Octale {0..7}; Base 10 Décimale {0..9}; Base 16 Hexadécimale {0−9, A, B, C, D, E, F}. Rows not mixed."
+    },
+    {
+      "id": "notation",
+      "kind": "visual_fact",
+      "fact": "N_B : nombre N exprimé en base B; N (sans indice) : base 10; (N_A)_B : conversion de N de la base A vers la base B. Subscripts kept (not \"NB\", \"(NA)B\")."
+    },
+    {
+      "id": "examples",
+      "kind": "visual_fact",
+      "fact": "(9₁₀)₂ = 1001₂; (11₂)₁₀ = 3; (11101₂)₁₆ = 1D₁₆. Subscripts not merged into the digits (not \"10012\", \"111012\", \"1D16\")."
+    }
+  ],
+  "main-2-p51": [
+    {
+      "id": "range",
+      "kind": "visual_fact",
+      "fact": "Plage sur n bits : [−2^(n−1), 2^(n−1) − 1] with exponents kept."
+    },
+    {
+      "id": "bullets",
+      "kind": "text",
+      "fact": "Bit de poids fort = bit de signe (0 → positif, 1 → négatif); encodage de −X : inverser tous les bits de X puis ajouter 1."
+    },
+    {
+      "id": "advantages",
+      "kind": "text",
+      "fact": "Avantages: un seul zéro (contrairement à signe + valeur absolue); addition/soustraction identiques aux non signés; matériel simplifié."
+    }
+  ],
+  "main-2-p52": [
+    {
+      "id": "toc",
+      "kind": "text",
+      "fact": "Seven sections in order: 1. Présentation du cours; 2. Le langage C; 3. Un premier programme; 4. Représentation binaire des entiers; 5. Entiers signés : le complément à 2; 6. Nombres à virgule flottante; 7. La chaîne de compilation."
+    },
+    {
+      "id": "current",
+      "kind": "visual_fact",
+      "fact": "6. Nombres à virgule flottante is the current section (highlighted; others dimmed)."
+    }
+  ],
+  "main-3-p9": [
+    {
+      "id": "toc",
+      "kind": "text",
+      "fact": "Five sections in order: 1. Ce qu’on a déjà, ce qu’il manque; 2. La pile et le tas; 3. Allouer et libérer; 4. Faire grandir une zone; 5. Qui alloue, qui libère."
+    },
+    {
+      "id": "current",
+      "kind": "visual_fact",
+      "fact": "2. La pile et le tas is the current section (highlighted; others dimmed)."
+    }
+  ],
+  "main-3-p29": [
+    {
+      "id": "prototype",
+      "kind": "native_code",
+      "fact": "void *calloc(size_t nombre, size_t taille_unitaire); on one line (the text layer breaks it)."
+    },
+    {
+      "id": "call",
+      "kind": "native_code",
+      "fact": "int *tab = calloc(n, sizeof(int));  // n entiers, tous a 0 — comment on the same line."
+    },
+    {
+      "id": "table",
+      "kind": "visual_fact",
+      "fact": "Rows malloc | calloc: Arguments: un total en octets | un nombre × une taille; Contenu initial: indéterminé | tout à zéro; Coût: un peu plus rapide | la mise à zéro se paie; Quand: on remplit juste après | on a besoin de partir de zéro."
+    },
+    {
+      "id": "no_invention",
+      "kind": "visual_fact",
+      "fact": "This frame has no \"Même contrat que malloc...\" sentence (it appears only on the next frame); the output does not add it."
+    }
+  ],
+  "main-3-p40": [
+    {
+      "id": "code_lines",
+      "kind": "native_code",
+      "fact": "int *create_array(int n, int valeur) { / int *arr = malloc(n * sizeof(*arr)); / if (arr == NULL) { / return NULL;  // l’appelant testera / } / for (int i = 0; i < n; i++) { / arr[i] = valeur; / } / return arr; / } — one statement per line, in order."
+    },
+    {
+      "id": "nesting",
+      "kind": "native_code",
+      "fact": "Indentation shows the nesting: return NULL; and arr[i] = valeur; deeper than the if/for lines, which are deeper than the function line; the comment stays on the return NULL; line."
+    }
+  ],
+  "main-3-p51": [
+    {
+      "id": "path",
+      "kind": "native_code",
+      "fact": "Voir demo/demo2_realloc.c. — path exact (underscore kept)."
+    },
+    {
+      "id": "bullets",
+      "kind": "text",
+      "fact": "Three bullets: capacité initiale volontairement minuscule (2), pour que les realloc se voient; taille et capacité affichées à chaque ajout; nombre de realloc et taux d’occupation à la fin."
+    }
+  ],
+  "main-3-p66": [
+    {
+      "id": "intro",
+      "kind": "text",
+      "fact": "Il n’y a pas de message d’erreur pour une fuite; le programme marche et fuit; la seule vérification est de compter."
+    },
+    {
+      "id": "box",
+      "kind": "text",
+      "fact": "La question à se poser sur chaque fonction: combien d’allocations et de libérations; si elles diffèrent, la différence part vers l’appelant (choix écrit en commentaire) ou nulle part (fuite)."
+    }
+  ],
+  "Heritage-p4": [
+    {
+      "id": "bullets",
+      "kind": "text",
+      "fact": "Flèche avec triangle creux; les propriétés héritées ne sont pas indiquées dans la classe fille (en général...) (source spells \"par\")."
+    },
+    {
+      "id": "uml_direction",
+      "kind": "visual_fact",
+      "fact": "Livre and Rapport inherit from Document; hollow triangles point to Document."
+    },
+    {
+      "id": "uml_members",
+      "kind": "visual_fact",
+      "fact": "Document: titre, auteur, afficher(), toString(); Livre: editeur, isbn, getEditeur(), afficher(); Rapport: org, numero, setNumero() : void, afficher(). Members stay with their class."
+    }
+  ],
+  "Heritage-p11": [
+    {
+      "id": "code_results",
+      "kind": "native_code",
+      "fact": "Document d1; / Livre l1 = new Livre(...); → l1 est de type Livre / Rapport r1 = new Rapport(...); → r1 est de type de Rapport / ... / d1 = l1; → d1 est de type Document / ... / d1 = r1; → d1 est de type Document — each statement with its own result, names l1, r1, d1 exact."
+    },
+    {
+      "id": "subtype",
+      "kind": "text",
+      "fact": "Le type d’un objet de sous-classe est un sous-type du type des objets de la classe."
+    },
+    {
+      "id": "uml_direction",
+      "kind": "visual_fact",
+      "fact": "The small diagram: Livre and Rapport inherit from Document (arrows point to Document)."
+    }
+  ],
+  "Heritage-p16": [
+    {
+      "id": "bullets",
+      "kind": "text",
+      "fact": "Premier bilan de l’héritage: Héritage pour généraliser; Hiérarchie de classes; Polymorphisme; Liaison dynamique."
+    }
+  ],
+  "Heritage-p21": [
+    {
+      "id": "intro",
+      "kind": "text",
+      "fact": "Soit op une méthode de A redéfinie dans B; exemple: traitementQuotien() (source spelling) est redéfinie dans CompteEpargne; à cause de la liaison dynamique un appel de op sur A peut appeler op d’un objet B."
+    },
+    {
+      "id": "code",
+      "kind": "native_code",
+      "fact": "CompteBancaire cb = new CompteEpargne(...); / cb.traitementQuotidien(); → méthode de CompteEpargne — two lines, result with the call."
+    },
+    {
+      "id": "precondition",
+      "kind": "visual_fact",
+      "fact": "pré(op_A) ==> pré(op_B), and \"les pré(op_B) sont plus faibles que les pré(op_A)\": direction not reversed, A and B not swapped."
+    }
+  ],
+  "Heritage-p22": [
+    {
+      "id": "diagram",
+      "kind": "visual_fact",
+      "fact": "Exactly these inheritance links (hollow triangles point to the parent): Lyceen → Boursier; Etudiant → Boursier and Lecteur (de bibliothèque); Professeur → Lecteur and Employe. No other inheritance link invented."
+    },
+    {
+      "id": "sentence",
+      "kind": "text",
+      "fact": "Etudiant doit se comporter comme un Boursier et comme un Lecteur pour les gestionnaires de bourse ou de bibliothèque."
+    },
+    {
+      "id": "java",
+      "kind": "text",
+      "fact": "Pas d’héritage multiple en Java, Smalltalk."
+    }
+  ]
+}

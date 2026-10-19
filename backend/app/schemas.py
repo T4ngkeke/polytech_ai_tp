@@ -1,5 +1,5 @@
 """
-schemas.py — Pydantic v2 request/response schemas for Edu-LLM v5 Class-Lab Architecture.
+schemas.py — Pydantic v2 request/response schemas for Edu-LLM.
 
 Each router domain has its own section.  Models marked *Request* are used for
 incoming payloads; models marked *Response* are returned to the client.
@@ -9,7 +9,7 @@ All schemas use UUIDs for IDs and datetime with timezone info (UTC).
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +29,16 @@ class UserRole(str, Enum):
 class SenderType(str, Enum):
     user = "user"
     llm = "llm"
+
+
+class MessageFeedbackValue(str, Enum):
+    up = "up"
+    down = "down"
+
+
+class MessageFeedbackRequest(BaseModel):
+    """A student's thumbs on an assistant message."""
+    feedback: MessageFeedbackValue
 
 
 class RuleLevel(str, Enum):
@@ -55,6 +65,17 @@ class SignupRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class ChangePasswordRequest(BaseModel):
+    """Self-service password change — old password is verified."""
+    old_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6)
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """Admin reset of any user's password — no old password required."""
+    new_password: str = Field(..., min_length=6)
 
 
 # ---------------------------------------------------------------------------
@@ -96,15 +117,81 @@ class UpdateRoleRequest(BaseModel):
 
 
 class LLMConfigRequest(BaseModel):
+    # Main generation engine (required — always present).
     base_url: str = Field(..., min_length=1)
     api_key: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
+
+    # model-routing table. All optional: only provided (non-None) fields
+    # are upserted, so a legacy 3-field PUT never wipes the routing config.
+    # Empty string = "inherit the main LLM" (see model_routing.resolve).
+    embedding_url: str | None = None
+    embedding_api_key: str | None = None
+    embedding_model: str | None = None
+    rerank_url: str | None = None
+    rerank_api_key: str | None = None
+    rerank_model: str | None = None
+    # Agent slot (the research agent's model).
+    agent_base_url: str | None = None
+    agent_api_key: str | None = None
+    agent_model: str | None = None
+    # estimated-token budget for chat history (OOM protection).
+    context_max_tokens: str | None = None
+    # VLM slot — images the research agent views and figure descriptions.
+    # Empty model = feature off (never falls back — vision is opt-in).
+    vlm_base_url: str | None = None
+    vlm_api_key: str | None = None
+    vlm_model: str | None = None
+    # MinerU server of the PDF worker (hot-switched; empty = deployment setting).
+    mineru_server_url: str | None = None
+    # Research agent limits (whole numbers; empty = default, see ResearchLimits).
+    agent_max_tool_calls: str | None = None
+    agent_max_visual_calls: str | None = None
+    agent_research_seconds: str | None = None
+    agent_total_seconds: str | None = None
+    agent_call_seconds: str | None = None
+    agent_max_input_tokens: str | None = None
+    token_alpha: float | None = None
+    token_beta: float | None = None
 
 
 class LLMConfigResponse(BaseModel):
     base_url: str
     api_key: str
     model: str
+    # raw stored values — empty means "inherits the main LLM".
+    embedding_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = ""
+    rerank_url: str = ""
+    rerank_api_key: str = ""
+    rerank_model: str = ""
+    # Raw stored values — agent slot empty = inherits main LLM.
+    agent_base_url: str = ""
+    agent_api_key: str = ""
+    agent_model: str = ""
+    # estimated-token budget for chat history (OOM protection).
+    context_max_tokens: str = ""
+    # VLM slot — empty model = vision off.
+    vlm_base_url: str = ""
+    vlm_api_key: str = ""
+    vlm_model: str = ""
+    mineru_server_url: str = ""
+    # Feature flags of the deployment and the worker's own MinerU server (read-only).
+    features: dict[str, bool] = Field(default_factory=dict)
+    mineru_default_url: str = ""
+    # Research agent limits — empty means the default.
+    agent_max_tool_calls: str = ""
+    agent_max_visual_calls: str = ""
+    agent_research_seconds: str = ""
+    agent_total_seconds: str = ""
+    agent_call_seconds: str = ""
+    agent_max_input_tokens: str = ""
+    # Default and allowed range of each research limit field, for the form:
+    # {"agent_max_tool_calls": {"default": 30, "min": 1, "max": 40}, …}.
+    research_limits: dict[str, dict[str, int]] = Field(default_factory=dict)
+    token_alpha: float = 0.2
+    token_beta: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -125,10 +212,29 @@ class ClassResponse(BaseModel):
     invite_code: str
     is_deleted: bool
     created_at: datetime
+    exam_mode: bool = False
+
+
+class AdminClassResponse(ClassResponse):
+    """A class in the admin Classes list: its teacher and a few counts.
+
+    ``teacher_ok`` is false when the owner was deleted or is no longer a
+    teacher or admin: nobody can manage the class until it is transferred.
+    """
+    teacher_username: str | None = None
+    teacher_ok: bool = True
+    lab_count: int = 0
+    student_count: int = 0
+    questions_7d: int = 0
+    last_active: datetime | None = None
 
 
 class ClassUpdateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+
+
+class ExamModeRequest(BaseModel):
+    exam_mode: bool
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +255,65 @@ class LabResponse(BaseModel):
     is_deleted: bool
     is_active: bool
     created_at: datetime
+
+
+class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    class_id: uuid.UUID
+    lab_id: uuid.UUID | None
+    filename: str
+    status: str
+    # Filled for structured (PDF) uploads; legacy uploads leave them empty.
+    structured: bool = False
+    generation: int | None = None
+    source_version_id: uuid.UUID | None = None
+    revision_id: uuid.UUID | None = None
+    processing_state: str | None = None
+    job_id: uuid.UUID | None = None
+
+
+class DocumentSummaryResponse(BaseModel):
+    """A document with its processing status + summary for the teacher list."""
+    id: uuid.UUID
+    filename: str
+    status: str
+    page_count: int | None
+    error_message: str | None
+    chunk_count: int
+    ingest_report: dict | None = None
+    lifecycle: str = "active"
+    generation: int = 0
+    structured: bool = False
+    current_revision_id: uuid.UUID | None = None
+    # M2-B: the newest revision of a structured document, which may be a draft.
+    # processing_state "parsed" means: content stored, waiting for indexing.
+    latest_revision: dict | None = None
+    # "class": shared by every lab of the class (lab_id NULL); "lab": this lab only.
+    scope: str = "lab"
+
+
+class ChunkResponse(BaseModel):
+    """One indexed chunk — the 'is it well processed?' inspector surface."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    chunk_index: int
+    page_no: int | None
+    section: str | None
+    content: str
+    context: str | None
+
+
+class ChunkUpdateRequest(BaseModel):
+    """Teacher correction of a chunk's text (triggers re-embed + re-index)."""
+    content: str = Field(..., min_length=1)
+
+
+class TestSessionResponse(BaseModel):
+    """The id of a freshly created teacher test-drive session."""
+    session_id: uuid.UUID
 
 
 class LabUpdateRequest(BaseModel):
@@ -194,6 +359,30 @@ class RuleResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Skill presets (instructor-style library)
+# ---------------------------------------------------------------------------
+
+
+class SkillPresetUpsertRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1)
+
+
+class SkillPresetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    content: str
+
+
+class ApplySkillRequest(BaseModel):
+    """Apply a preset (by id) or ad-hoc raw content to a class's skill rule."""
+    preset_id: uuid.UUID | None = None
+    content: str | None = None
+
+
+# ---------------------------------------------------------------------------
 # UsageStat
 # ---------------------------------------------------------------------------
 
@@ -211,6 +400,11 @@ class UsageStatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Session
 # ---------------------------------------------------------------------------
+
+
+class ReportRequest(BaseModel):
+    """A teacher report: on the lab, or on one student with student_id."""
+    student_id: uuid.UUID | None = None
 
 
 class SessionCreateRequest(BaseModel):
@@ -257,6 +451,11 @@ class MessageResponse(BaseModel):
     completion_tokens: int | None
     total_tokens: int | None
     created_at: datetime
+    citations: list[dict] = []
+    # A question back to the student: {"question": ..., "options": [...]}.
+    clarification: dict | None = None
+    # direct, search or research; None for answers written before the modes.
+    answer_mode: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +466,10 @@ class MessageResponse(BaseModel):
 class ChatStreamRequest(BaseModel):
     session_id: uuid.UUID
     message: str = Field(..., min_length=1)
+    client_request_id: uuid.UUID | None = None
+    # direct: no course material; search: one search; research: the agent.
+    # A class in exam mode answers in direct mode whatever is asked.
+    mode: Literal['direct', 'search', 'research'] = 'research'
 
 
 # ---------------------------------------------------------------------------
@@ -311,9 +514,13 @@ class TransferClassRequest(BaseModel):
 
 class PruneRequest(BaseModel):
     older_than_days: int = Field(..., ge=1)
+    # True: count what would be deleted, delete nothing (shown before confirming).
+    dry_run: bool = False
 
 
 class PruneResponse(BaseModel):
+    # With dry_run, the rows that would be deleted.
+    dry_run: bool = False
     sessions_deleted: int
     messages_deleted: int
 
@@ -327,11 +534,12 @@ class DailyUsage(BaseModel):
 class AdminAnalyticsResponse(BaseModel):
     total_tokens: int
     total_requests: int
+    active_users_7d: int = 0
     daily_breakdown: list[DailyUsage] = []
 
 
 # ---------------------------------------------------------------------------
-# Analytics — Hierarchical (v6)
+# Analytics — Hierarchical
 # ---------------------------------------------------------------------------
 
 
@@ -340,6 +548,16 @@ class StudentUsageSummary(BaseModel):
     username: str
     tokens_used: int
     request_count: int
+
+    @classmethod
+    def from_analytics(cls, s) -> "StudentUsageSummary":
+        """Build from an analytics_service.StudentUsage dataclass."""
+        return cls(
+            user_id=s.user_id,
+            username=s.username,
+            tokens_used=s.tokens_used,
+            request_count=s.request_count,
+        )
 
 
 class LabUsageSummary(BaseModel):
@@ -350,6 +568,17 @@ class LabUsageSummary(BaseModel):
     requests: int
     students: list[StudentUsageSummary] = []
 
+    @classmethod
+    def from_analytics(cls, lab) -> "LabUsageSummary":
+        """Build from an analytics_service.LabUsage dataclass."""
+        return cls(
+            lab_id=lab.lab_id,
+            lab_name=lab.lab_name,
+            tokens=lab.tokens,
+            requests=lab.requests,
+            students=[StudentUsageSummary.from_analytics(s) for s in lab.students],
+        )
+
 
 class ClassAnalyticsResponse(BaseModel):
     """Hierarchical class analytics: class → lab → student."""
@@ -358,6 +587,17 @@ class ClassAnalyticsResponse(BaseModel):
     total_tokens: int
     total_requests: int
     labs: list[LabUsageSummary] = []
+
+    @classmethod
+    def from_analytics(cls, result) -> "ClassAnalyticsResponse":
+        """Build from an analytics_service.ClassAnalytics dataclass."""
+        return cls(
+            class_id=result.class_id,
+            class_name=result.class_name,
+            total_tokens=result.total_tokens,
+            total_requests=result.total_requests,
+            labs=[LabUsageSummary.from_analytics(lab) for lab in result.labs],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -383,3 +623,22 @@ class StudentUsageResponse(BaseModel):
 
 class InviteCodeResponse(BaseModel):
     invite_code: str
+
+
+class DocumentReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    page_no: int
+    bbox: list[float]
+    reason: str
+    candidate_content: str | None
+    status: Literal['pending','confirmed','ignored']
+    revision: int
+    final_content: str | None
+
+
+class DocumentReviewRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    revision: int = Field(ge=1)
+    status: Literal['confirmed','ignored']
+    content: str | None = Field(default=None,max_length=20000)

@@ -1,5 +1,5 @@
 /**
- * HierarchicalSidebar.jsx — Role-aware Class→Lab tree navigation for Edu-LLM v6.
+ * HierarchicalSidebar.jsx — Role-aware Class→Lab tree navigation for Edu-LLM.
  *
  * Props:
  *   role: 'student' | 'teacher' | 'admin'
@@ -10,6 +10,7 @@
  *   onCreateClass()           — (teacher) triggers class creation
  *   onClassAction(action, cls) — (teacher/admin) rename/delete/reset-code
  *   onLabAction(action, lab)  — (teacher/admin) toggle/rename/delete
+ *   children                  — shown between the tree and the footer (student sessions on phones)
  *   loading: bool
  *
  * ClassNode shape: { id, name, invite_code, labs: LabNode[] }
@@ -19,6 +20,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
+import ThemeToggle from './ThemeToggle';
+import Icon from './Icon';
 
 export default function HierarchicalSidebar({
   role = 'student',
@@ -31,14 +34,15 @@ export default function HierarchicalSidebar({
   onClassAction,
   onLabAction,
   loading = false,
+  children,
 }) {
   const { username, userRole, logout } = useAuthStore();
   const navigate = useNavigate();
 
-  const [expandedClassIds, setExpandedClassIds] = useState(() => {
-    // Auto-expand all classes by default
-    return new Set(classes.map((c) => c.id));
-  });
+  // Classes are expanded by default. Remember the ones the user collapsed: the
+  // class list loads after the first render, so an "expanded" set built then
+  // would be empty and every class would show collapsed after a reload.
+  const [collapsedClassIds, setCollapsedClassIds] = useState(() => new Set());
 
   const handleSignOut = () => {
     logout();
@@ -46,7 +50,7 @@ export default function HierarchicalSidebar({
   };
 
   const toggleClass = (classId) => {
-    setExpandedClassIds((prev) => {
+    setCollapsedClassIds((prev) => {
       const next = new Set(prev);
       if (next.has(classId)) next.delete(classId);
       else next.add(classId);
@@ -55,7 +59,7 @@ export default function HierarchicalSidebar({
   };
 
   return (
-    <div className="flex flex-col h-full bg-ink-base border-r border-border-subtle select-none">
+    <div className="flex flex-col h-full min-h-0 bg-ink-base border-r border-border-subtle select-none">
       {/* Header */}
       <div className="px-4 pt-5 pb-3 border-b border-border-subtle shrink-0">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-cream-muted mb-1">
@@ -99,7 +103,7 @@ export default function HierarchicalSidebar({
               key={cls.id}
               cls={cls}
               role={role}
-              isExpanded={expandedClassIds.has(cls.id)}
+              isExpanded={!collapsedClassIds.has(cls.id)}
               onToggle={() => toggleClass(cls.id)}
               selectedLabId={selectedLabId}
               onSelectClass={onSelectClass}
@@ -111,6 +115,8 @@ export default function HierarchicalSidebar({
         )}
       </div>
 
+      {children}
+
       {/* Footer (User Profile & Sign Out) */}
       <div className="shrink-0 p-4 border-t border-border-subtle bg-ink-base">
         <div className="flex items-center justify-between">
@@ -118,13 +124,23 @@ export default function HierarchicalSidebar({
             <p className="text-sm font-semibold text-cream truncate">{username || 'User'}</p>
             <p className="text-[10px] uppercase tracking-wider text-cyan">{userRole}</p>
           </div>
-          <button
-            onClick={handleSignOut}
-            title="Sign Out"
-            className="shrink-0 ml-3 p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-danger hover:border-danger/30 hover:bg-danger-deep transition-all cursor-pointer"
-          >
-            <LogOutIcon className="w-4 h-4" />
-          </button>
+          <div className="shrink-0 ml-3 flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={() => navigate('/account')}
+              title="Account"
+              className="p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 transition-all cursor-pointer"
+            >
+              <SettingsIcon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleSignOut}
+              title="Sign Out"
+              className="p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-danger hover:border-danger/30 hover:bg-danger-deep transition-all cursor-pointer"
+            >
+              <LogOutIcon className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -153,8 +169,18 @@ function ClassNode({
     <div className="mb-0.5">
       {/* Class row */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
         onClick={() => { onToggle(); onSelectClass?.(cls); }}
-        className="group flex items-center gap-1 px-2 py-2 rounded-lg hover:bg-ink-hover transition-colors cursor-pointer text-left"
+        onKeyDown={(e) => {
+          // The row holds the actions button, so it cannot itself be a <button>.
+          if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          onToggle();
+          onSelectClass?.(cls);
+        }}
+        className="group flex items-center gap-1 px-2 py-2 rounded-lg hover:bg-ink-hover transition-colors cursor-pointer text-left focus-visible:outline focus-visible:outline-cyan"
       >
         {/* Expand toggle */}
         <span className="shrink-0 w-4 h-4 flex items-center justify-center text-cream-muted group-hover:text-cream transition-colors">
@@ -178,14 +204,14 @@ function ClassNode({
           <div className="relative shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-              className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream rounded transition-all cursor-pointer"
+              aria-label={`Actions for ${cls.name}`} title="Class actions"
+              className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded transition-all cursor-pointer"
             >
               <EllipsisIcon className="w-3.5 h-3.5" />
             </button>
             {showMenu && (
               <ClassMenu
                 role={role}
-                cls={cls}
                 onAction={(action) => { setShowMenu(false); onClassAction?.(action, cls); }}
                 onClose={() => setShowMenu(false)}
               />
@@ -204,7 +230,6 @@ function ClassNode({
               <LabNode
                 key={lab.id}
                 lab={lab}
-                classId={cls.id}
                 role={role}
                 isSelected={selectedLabId === lab.id}
                 onSelect={() => onSelectLab?.(lab.id, cls.id)}
@@ -231,22 +256,27 @@ function ClassNode({
    LAB NODE
    ═══════════════════════════════════════════ */
 
-function LabNode({ lab, classId, role, isSelected, onSelect, onLabAction }) {
+function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
   const [showMenu, setShowMenu] = useState(false);
   const isLocked = lab.is_deleted || !lab.is_active;
+  // A locked lab is closed to students only: its teacher opens it to unlock it
+  // or to read its conversations.
+  const closed = lab.is_deleted || (isLocked && role === 'student');
 
   return (
     <div className="group relative flex items-center">
       <button
-        onClick={!lab.is_deleted ? onSelect : undefined}
-        disabled={lab.is_deleted}
-        title={!lab.is_active ? 'Closed lab — history only' : undefined}
+        onClick={!closed ? onSelect : undefined}
+        disabled={closed}
+        title={isLocked && !closed ? 'Locked: students cannot write in this lab' : undefined}
         className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer text-left
           ${isSelected
             ? 'bg-cyan-muted text-cyan font-medium'
-            : isLocked
-              ? 'text-cream-muted hover:bg-ink-hover disabled:opacity-50 disabled:cursor-not-allowed'
-              : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
+            : closed
+              ? 'text-cream-muted opacity-50 cursor-not-allowed'
+              : isLocked
+                ? 'text-cream-muted hover:text-cream hover:bg-ink-hover'
+                : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
           }`}
       >
         {/* Status dot */}
@@ -262,9 +292,10 @@ function LabNode({ lab, classId, role, isSelected, onSelect, onLabAction }) {
         <div className="relative shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-            className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-cream-muted hover:text-cream rounded cursor-pointer transition-all"
+            aria-label={`Actions for ${lab.name}`} title="Lab actions"
+            className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded cursor-pointer transition-all"
           >
-            <EllipsisIcon className="w-3 h-3" />
+            <EllipsisIcon className="w-3.5 h-3.5" />
           </button>
           {showMenu && (
             <LabMenu
@@ -283,15 +314,15 @@ function LabNode({ lab, classId, role, isSelected, onSelect, onLabAction }) {
    CONTEXT MENUS
    ═══════════════════════════════════════════ */
 
-function ClassMenu({ role, cls, onAction, onClose }) {
+function ClassMenu({ role, onAction, onClose }) {
   return (
     <DropdownMenu onClose={onClose}>
-      <MenuItem label="✏️ Rename" onClick={() => onAction('rename')} />
-      <MenuItem label="🔑 Reset Code" onClick={() => onAction('reset-code')} />
+      <MenuItem icon="pencil" label="Rename" onClick={() => onAction('rename')} />
+      <MenuItem icon="key" label="Reset Code" onClick={() => onAction('reset-code')} />
       {role === 'admin' && (
-        <MenuItem label="🔁 Transfer" onClick={() => onAction('transfer')} />
+        <MenuItem icon="transfer" label="Transfer" onClick={() => onAction('transfer')} />
       )}
-      <MenuItem label="🗑️ Archive" danger onClick={() => onAction('delete')} />
+      <MenuItem icon="archive" label="Archive" danger onClick={() => onAction('delete')} />
     </DropdownMenu>
   );
 }
@@ -299,12 +330,13 @@ function ClassMenu({ role, cls, onAction, onClose }) {
 function LabMenu({ lab, onAction, onClose }) {
   return (
     <DropdownMenu onClose={onClose}>
-      <MenuItem label="✏️ Rename" onClick={() => onAction('rename')} />
+      <MenuItem icon="pencil" label="Rename" onClick={() => onAction('rename')} />
       <MenuItem
-        label={lab.is_active ? '🔒 Lock' : '🔓 Unlock'}
+        icon={lab.is_active ? 'lock' : 'unlock'}
+        label={lab.is_active ? 'Lock' : 'Unlock'}
         onClick={() => onAction('toggle')}
       />
-      <MenuItem label="🗑️ Archive" danger onClick={() => onAction('delete')} />
+      <MenuItem icon="archive" label="Archive" danger onClick={() => onAction('delete')} />
     </DropdownMenu>
   );
 }
@@ -320,14 +352,15 @@ function DropdownMenu({ children, onClose }) {
   );
 }
 
-function MenuItem({ label, onClick, danger }) {
+function MenuItem({ icon, label, onClick, danger }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
+      className={`w-full flex items-center gap-2 text-left px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
         danger ? 'text-danger hover:bg-danger-muted' : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
       }`}
     >
+      {icon && <Icon name={icon} className="w-3.5 h-3.5 shrink-0" />}
       {label}
     </button>
   );
@@ -373,6 +406,15 @@ function LogOutIcon({ className }) {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
