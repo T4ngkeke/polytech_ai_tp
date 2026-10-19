@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edu-LLM v8.0 Agentic Class-Lab Architecture</title>
+    <title>Edu-LLM Architecture</title>
     <link
         href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -23,16 +23,10 @@
             --surface-2: #f7f8fc;
             --border: #e2e6f0;
             --text: #1a1e2e;
-            --text-muted: #6b7494;
-            --new: #16a34a;
-            --new-bg: #f0fdf4;
-            --new-border: #bbf7d0;
-            --changed: #b45309;
-            --changed-bg: #fffbeb;
-            --changed-border: #fde68a;
-            --kept: #4f46e5;
-            --kept-bg: #eef2ff;
-            --kept-border: #c7d2fe;
+            --text-muted: #5b6484;
+            --accent: #0e7490;
+            --accent-bg: #ecfeff;
+            --accent-border: #a5f3fc;
         }
 
         body {
@@ -40,7 +34,8 @@
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-            padding: 2.5rem 1.5rem;
+            padding: 2.5rem 1rem;
+            line-height: 1.6;
         }
 
         .wrapper {
@@ -50,12 +45,12 @@
 
         header {
             text-align: center;
-            margin-bottom: 3rem;
+            margin-bottom: 2.5rem;
         }
 
         .pill {
             display: inline-block;
-            background: #1a1e2e;
+            background: var(--text);
             color: #fff;
             font-size: 0.65rem;
             font-weight: 700;
@@ -67,184 +62,98 @@
         }
 
         h1 {
-            font-size: 2.5rem;
+            font-size: clamp(1.7rem, 4vw, 2.4rem);
             font-weight: 700;
             letter-spacing: -0.03em;
-            margin-bottom: 0.6rem;
+            line-height: 1.2;
+            margin-bottom: 0.8rem;
         }
 
         .subtitle {
             font-size: 1rem;
             color: var(--text-muted);
-            max-width: 600px;
+            max-width: 680px;
             margin: 0 auto;
-            line-height: 1.6;
         }
 
-        /* Legend */
-        .legend {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-bottom: 2rem;
+        .note {
+            max-width: 680px;
+            margin: 1.2rem auto 0;
+            font-size: 0.82rem;
+            color: var(--text-muted);
         }
 
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            font-size: 0.78rem;
-            font-weight: 500;
-            padding: 0.3rem 0.75rem;
-            border-radius: 6px;
-            border: 1px solid;
+        h2 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin: 2.5rem 0 0.4rem;
         }
 
-        .legend-item.new {
-            background: var(--new-bg);
-            color: var(--new);
-            border-color: var(--new-border);
+        .lead {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            max-width: 780px;
         }
 
-        .legend-item.changed {
-            background: var(--changed-bg);
-            color: var(--changed);
-            border-color: var(--changed-border);
-        }
-
-        .legend-item.kept {
-            background: var(--kept-bg);
-            color: var(--kept);
-            border-color: var(--kept-border);
-        }
-
-        .legend-item .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .dot.new {
-            background: var(--new);
-        }
-
-        .dot.changed {
-            background: var(--changed);
-        }
-
-        .dot.kept {
-            background: var(--kept);
-        }
-
-        /* Diagram Card */
         .diagram-card {
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 16px;
-            padding: 2rem;
+            padding: 1.5rem;
             box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-            margin-bottom: 2.5rem;
             overflow-x: auto;
         }
 
         .diagram-card .mermaid {
-            display: flex;
-            justify-content: center;
+            width: max-content;
+            margin: 0 auto;
         }
 
-        /* Grid cards */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.25rem;
-            margin-bottom: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
         }
 
         .card {
             background: var(--surface);
             border-radius: 12px;
-            padding: 1.4rem;
+            padding: 1.2rem 1.3rem;
             border: 1px solid var(--border);
-            transition: box-shadow 0.2s;
-        }
-
-        .card:hover {
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-        }
-
-        .card.new {
-            border-color: var(--new-border);
-            background: var(--new-bg);
-        }
-
-        .card.changed {
-            border-color: var(--changed-border);
-            background: var(--changed-bg);
-        }
-
-        .card .tag {
-            font-size: 0.6rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            padding: 0.2rem 0.55rem;
-            border-radius: 4px;
-            margin-bottom: 0.8rem;
-            display: inline-block;
-        }
-
-        .card.new .tag {
-            background: var(--new-border);
-            color: var(--new);
-        }
-
-        .card.changed .tag {
-            background: var(--changed-border);
-            color: var(--changed);
         }
 
         .card h3 {
             font-size: 0.95rem;
             font-weight: 700;
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.35rem;
         }
 
         .card p {
-            font-size: 0.82rem;
+            font-size: 0.84rem;
             color: var(--text-muted);
-            line-height: 1.6;
         }
 
-        .card code {
+        code {
             font-family: 'DM Mono', monospace;
             background: rgba(0, 0, 0, 0.05);
-            padding: 0.1rem 0.35rem;
+            padding: 0.05rem 0.3rem;
             border-radius: 4px;
-            font-size: 0.78rem;
+            font-size: 0.8em;
         }
 
-        /* Schema diff table */
-        .schema-section {
+        .table-card {
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 2rem;
-        }
-
-        .schema-section h2 {
-            font-size: 0.9rem;
-            font-weight: 600;
-            padding: 1rem 1.4rem;
-            border-bottom: 1px solid var(--border);
-            background: var(--surface-2);
+            overflow-x: auto;
         }
 
         table {
             width: 100%;
+            min-width: 560px;
             border-collapse: collapse;
-            font-size: 0.82rem;
+            font-size: 0.84rem;
         }
 
         th {
@@ -269,38 +178,20 @@
             border-bottom: none;
         }
 
-        .badge {
-            font-size: 0.65rem;
-            font-weight: 700;
-            padding: 0.15rem 0.5rem;
-            border-radius: 4px;
-            display: inline-block;
+        td:first-child {
+            font-weight: 600;
+            white-space: nowrap;
         }
 
-        .badge.new {
-            background: var(--new-bg);
-            color: var(--new);
-            border: 1px solid var(--new-border);
+        a {
+            color: var(--accent);
         }
 
-        .badge.changed {
-            background: var(--changed-bg);
-            color: var(--changed);
-            border: 1px solid var(--changed-border);
-        }
-
-        .badge.kept {
-            background: var(--kept-bg);
-            color: var(--kept);
-            border: 1px solid var(--kept-border);
-        }
-
-        td code {
-            font-family: 'DM Mono', monospace;
-            background: rgba(0, 0, 0, 0.04);
-            padding: 0.1rem 0.3rem;
-            border-radius: 3px;
-            font-size: 0.78rem;
+        footer {
+            margin-top: 2.5rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
         }
     </style>
 </head>
@@ -309,365 +200,295 @@
     <div class="wrapper">
 
         <header>
-            <div class="pill">Architecture v8.0 — Agentic Class-Lab Architecture</div>
-            <h1>Edu-LLM: Agentic RAG, Hybrid Retrieval & Off-Peak Ingestion</h1>
-            <p class="subtitle">The v6 foundation (3-tier RBAC, invite codes, hierarchical rule injection) plus a
-                LangGraph agent and the v7.1 retrieval core (PDF-only structured ingestion with Contextual
-                Retrieval, hybrid vector + BM25 retrieval with reranking, a bounded LLM self-eval loop). <b>v7.2</b> adds a full config-driven model-routing table
-                (split a cheap off-peak ingestion / live router model from the expensive chat model),
-                cost-aware weighted-token quota, an LLM-assisted exercise-number fallback with canonical
-                normalization, per-teacher skill presets, section-scoped (length-safe) Contextual Retrieval,
-                and a markdown / code-highlight / KaTeX student chat UI — plus self-service password change.
-                <b>v7.3</b> hardened the data pipeline (single-source deterministic exercise
-                segmentation, strict CM/TD-TP split, language-aware OR-semantics BM25).
-                <b>v8.0</b> replaces the kNN router with a <b>one-call LLM router carrying dialogue
-                state</b> (a sticky exercise fills a blank number but never picks the route;
-                unresolvable numbers ask a clarifying question), adds a <b>teacher-driven hint
-                lifecycle</b> (ingestion never generates hints; a teacher triggers generation, reviews
-                per-exercise, and only <b>approved</b> hints reach students), stores uploaded answers in
-                a main-DB <code>Answers</code> table for <b>offline</b> hint generation (the student path
-                never imports the <code>Answer</code> model), and adds the human loop — teacher
-                test-drive, student feedback, an admin health panel, and a teaching-hotspot panel.</p>
-            <p style="max-width:760px;margin:1.4rem auto 0;padding:0.9rem 1.2rem;background:#fffbeb;
-                border:1px solid #fde68a;border-radius:10px;color:#78350f;font-size:0.85rem;line-height:1.6;">
-                <b>📌 Status:</b> the <b>v8.0 backend is shipped</b> (branch <code>v7.2-upgrade</code>); the
-                v8.0 frontend and the retrieval golden-set eval are still in progress. Authoritative design
-                log: <code>V8.0_PLAN.md</code> + <code>v8_workflow.html</code>.</p>
+            <div class="pill">System architecture</div>
+            <h1>Edu-LLM: a course tutor that answers from the teacher's PDFs</h1>
+            <p class="subtitle">Teachers upload course PDFs to a class or a lab. Students ask questions in a chat.
+                The model answers from those PDFs and cites the pages it used.</p>
+            <p class="note">This page draws what runs today. The details are in
+                <a href="documentation/ARCHITECTURE.md">ARCHITECTURE.md</a>, the endpoints in
+                <a href="documentation/API.md">API.md</a> and the tables in
+                <a href="documentation/DATABASE.md">DATABASE.md</a>.</p>
         </header>
 
-        <div class="legend">
-            <div class="legend-item new">
-                <div class="dot new"></div> New feature
-            </div>
-            <div class="legend-item changed">
-                <div class="dot changed"></div> Modified component
-            </div>
-            <div class="legend-item kept">
-                <div class="dot kept"></div> Unchanged
-            </div>
-        </div>
-
+        <!-- 1. What runs -->
+        <h2>1. What runs</h2>
+        <p class="lead">Five kinds of containers. The browser only talks to nginx. The backend and the worker share
+            one database and the same model servers. The database table <code>ingestion_jobs</code> is the job
+            queue; there is no other queue.</p>
         <div class="diagram-card">
             <div class="mermaid">
-                %%{init: {'theme': 'base', 'themeVariables':
-                {'primaryColor':'#f8fafc','primaryEdgeColor':'#475569','lineColor':'#94a3b8','fontFamily':'DM Sans,
-                sans-serif','fontSize':'13px'}}}%%
-                graph TD
-                classDef default fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#1e293b;
-                classDef newNode fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d,font-weight:bold;
-                classDef changedNode fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#78350f,font-weight:bold;
-                classDef auth fill:#fef9c3,stroke:#eab308,stroke-width:2px,color:#713f12,font-weight:bold;
-                classDef streaming fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e40af,font-weight:bold;
-                classDef route fill:#f3e8ff,stroke:#c084fc,stroke-width:1.5px,color:#581c87;
-                classDef danger fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
+                %%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'DM Sans, sans-serif', 'fontSize': '13px',
+                'lineColor': '#94a3b8'}}}%%
+                flowchart TB
+                classDef people fill:#f1f5f9,stroke:#94a3b8,color:#1e293b;
+                classDef web fill:#ecfeff,stroke:#0e7490,stroke-width:1.5px,color:#164e63;
+                classDef app fill:#eef2ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81;
+                classDef db fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+                classDef model fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#78350f;
+                classDef mon fill:#fdf4ff,stroke:#a21caf,stroke-width:1.5px,color:#701a75;
 
-                subgraph FE ["① Frontend Layer"]
-                UI_S["Student UI"]
-                UI_T["Teacher UI"]
-                UI_A["Admin UI"]
+                P["Students · Teachers · Admins<br/>in a web browser"]
+                NG["Frontend container · nginx<br/>serves the React app<br/>/api/ → backend · /grafana/ → Grafana (admins only)"]
+
+                subgraph BACK["Backend container · FastAPI"]
+                direction LR
+                CHAT["Chat<br/>research agent<br/>Direct · Search · Research"]
+                ROUTES["Pages of teachers and admins<br/>classes, labs, rules, documents,<br/>analytics, reports, model settings"]
                 end
 
-                subgraph BE ["② Backend Layer (FastAPI)"]
-                Auth["JWT Gateway"]
-                R_Admin["Admin Routes\n(CSV Import, LLM Config)"]
-                R_Teacher["Teacher Routes\n(Classes, Labs, Rules, Documents)"]
-                R_Student["Student & Chat Routes\n(Join Codes, Sessions)"]
-                RateLimit["Rate Limiter\n(DB Quota Check)"]
-                Router["LangGraph Router (v8.0)\none LLM call: route + number + dialogue state\nexercise | rag | direct | clarify"]
-                Retrieval["Retrieval Service\nhybrid vector+BM25 (OR, fr/en) → RRF →\nrerank on augmented text → threshold gate (v7.3, ships off)"]
-                SelfEval["Self-Eval Loop\ngate → good/partial/bad → bounded retry"]
-                Synth["Synthesize Node\nskill.md + 3-tier rules + context"]
-                SSE["astream_events → SSE\nadapter"]
-                AsyncDB["Background Task\nweighted billed-token write (α·prompt+β·completion)"]
+                WORK["Worker container · same image<br/>reads PDFs, one job at a time,<br/>waits while students chat"]
+
+                subgraph PG["PostgreSQL + pgvector"]
+                direction LR
+                DATA["Users, classes, rules,<br/>chats, quota"]
+                DOCS["Documents and<br/>searchable passages"]
+                QUEUE["ingestion_jobs<br/>the job queue"]
+                CFG["system_configs<br/>model settings"]
                 end
 
-                subgraph DB ["③ Database Layer (PostgreSQL + pgvector)"]
-                DB_SysConf["SystemConfigs\nmodel-routing table: LLM / Embedding / Rerank / Ingest / Router\n+ TOKEN_ALPHA/BETA (0-Downtime)"]
-                DB_Classes["Classes & Labs\ninvite_code, teacher_id"]
-                DB_Users["Users\nid · role · daily_token_quota"]
-                DB_Rules["Hierarchical Rules\nlevel(class/lab/student) + skill.md"]
-                DB_Sessions["Sessions\nid · user_id · lab_id · current_exercise_id · is_test (v8.0)"]
-                DB_Messages["Messages & Usage Stats\n+ feedback up/down (v8.0)"]
-                DB_Chunks["DocChunks\nembedding vector(N) · tsv (BM25) · context · lab_id · audience"]
-                DB_Exercises["Exercises\nnumber · statement · hints(JSON) · hint_status (v8.0, no solution)"]
-                DB_Answers["Answers (v8.0)\nexercise_id · answer_text · form — teacher/worker only"]
-                DB_Jobs["IngestionJobs\nDB-as-queue · SKIP LOCKED · job_type (v8.0)"]
-                DB_RouterLog["RouterQueryLog v2 + AgentTraceLog\nevery route decision · degradation flags"]
+                subgraph MODELS["Model servers · Docker network edullm-models"]
+                direction LR
+                LLM["Qwen3.8 Flash-Next<br/>served as 'ornith'"]
+                RR["Qwen3-Reranker-0.6B"]
+                EMB["bge-m3<br/>embeddings"]
+                MU["MinerU<br/>reads PDF pages"]
                 end
 
-                subgraph WK ["④ Ingestion Worker (docker-compose)"]
-                Poll["Poll Loop\nconcurrency=1"]
-                GpuGate["GPU Gate\npynvml off-peak"]
-                Extract["Clean (headers/TOC) → deterministic segmentation →\nCM: size-controlled chunks + Contextual Retrieval + embed + tsv\nTD/TP: deterministic exercises (LLM only on numbering anomaly)"]
-                end
+                MON["Monitoring<br/>Grafana + Prometheus"]
 
-                subgraph COMPUTE ["⑤ Compute Layer (one shared engine)"]
-                LLM["Existing Inference Engine (vLLM/Ollama)\nmodel from SystemConfigs — not hardcoded"]
-                end
+                P --> NG
+                NG --> BACK
+                NG -.->|"admin check"| MON
+                BACK -->|"reads and writes"| PG
+                BACK -->|"answers, scores, embeddings"| MODELS
+                WORK -->|"takes jobs, writes revisions"| PG
+                WORK -->|"MinerU, embeddings"| MODELS
+                MON -.->|"metrics"| MODELS
+                MON -.->|"read-only"| PG
 
-                UI_S & UI_T & UI_A == "JWT Token" ==> Auth
-
-                Auth -.->|"validate role"| DB_Users
-                Auth ==>|"admin"| R_Admin
-                Auth ==>|"teacher"| R_Teacher
-                Auth ==>|"student"| R_Student
-
-                R_Admin -.->|"CSV Upsert"| DB_Users
-                R_Admin -.->|"write LLM config"| DB_SysConf
-                R_Teacher -.->|"write Class/Lab"| DB_Classes
-                R_Teacher -.->|"write 3-tier rules + skill.md"| DB_Rules
-                R_Teacher -.->|"upload doc → enqueue"| DB_Jobs
-
-                R_Student -.->|"join via invite code"| DB_Classes
-                R_Student ==>|"chat in lab"| RateLimit
-                RateLimit -.->|"read quota"| DB_Users
-                RateLimit ==>|"quota OK"| Router
-                RateLimit -->|"429 — over limit"| UI_S
-
-                Router ==>|"exercise | rag"| Retrieval
-                Router ==>|"direct | clarify"| Synth
-                Router -.->|"every decision → log"| DB_RouterLog
-                Retrieval -.->|"vector + BM25 (lab + audience)"| DB_Chunks
-                Retrieval -.->|"exercise search (statements + approved hints)"| DB_Exercises
-                Retrieval ==>|"hybrid + rerank"| SelfEval
-                SelfEval -.->|"bad → rewrite & re-retrieve (≤ max)"| Retrieval
-                SelfEval ==>|"context + citations"| Synth
-                Synth -.->|"fetch rules + skill.md"| DB_Rules
-                Synth -.->|"fetch session ctx"| DB_Sessions
-                Synth -.->|"read dynamic URL/Key/Model"| DB_SysConf
-                Synth ==>|"prompt"| LLM
-                LLM ==>|"stream tokens"| SSE
-                SSE ==>|"SSE to browser"| UI_S
-                SSE -.->|"stream ended — trigger"| AsyncDB
-                AsyncDB -.->|"save msg + tokens"| DB_Messages
-
-                Poll -.->|"claim job (SKIP LOCKED)"| DB_Jobs
-                GpuGate -.->|"util < threshold?"| Poll
-                Poll ==>|"run"| Extract
-                Extract -.->|"low-priority batch"| LLM
-                Extract -.->|"write chunks (CM only, v7.3)"| DB_Chunks
-                Extract -.->|"write exercises (TD/TP only, v7.3)"| DB_Exercises
-                Extract -.->|"write answers (corrigé → offline, v8.0)"| DB_Answers
-
-                class DB_SysConf,DB_Classes,DB_Rules,DB_Chunks,DB_Exercises,DB_Answers,DB_Jobs,DB_RouterLog newNode;
-                class Auth auth;
-                class Router,Retrieval,SelfEval,Synth danger;
-                class SSE,LLM streaming;
-                class R_Admin,R_Teacher,R_Student route;
-                class DB_Users,DB_Sessions changedNode;
-                class Poll,GpuGate,Extract newNode;
+                class P people;
+                class NG web;
+                class CHAT,ROUTES,WORK app;
+                class DATA,DOCS,QUEUE,CFG db;
+                class LLM,RR,EMB,MU model;
+                class MON mon;
             </div>
         </div>
 
+        <!-- 2. A chat question -->
+        <h2>2. How a question is answered</h2>
+        <p class="lead">There is one chat path, the research agent in <code>backend/app/agent/</code>. The student
+            picks a mode. A class in exam mode always gets Direct. Search and Research only cite what was read
+            in this run.</p>
+        <div class="diagram-card">
+            <div class="mermaid">
+                %%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'DM Sans, sans-serif', 'fontSize': '13px',
+                'lineColor': '#94a3b8'}}}%%
+                flowchart TD
+                classDef step fill:#eef2ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81;
+                classDef mode fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#78350f;
+                classDef stop fill:#fef2f2,stroke:#dc2626,stroke-width:1.5px,color:#7f1d1d;
+                classDef out fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+
+                Q["Student question in a lab"] --> C["Checks<br/>own session · member of the class<br/>lab open · quota left"]
+                C -->|"no"| X["Refused<br/>for example 429 when the quota is used up"]
+                C -->|"yes"| R["Add the teacher rules<br/>class · lab · student"]
+                R --> M{"Mode"}
+                M -->|"direct, or class in exam mode"| D["Direct<br/>one short answer<br/>without the course files"]
+                M -->|"search"| SE["Search<br/>one search with the question<br/>→ read the best pages and their neighbours<br/>→ one answer"]
+                M -->|"research"| RE["Research<br/>the model calls tools as often as it needs, within limits:<br/>search · open · read · grep · view_image<br/>it may ask the student a question back"]
+                SE --> EV["Check the citations<br/>only passages read in this run (E1, E2 …)<br/>unknown IDs are removed"]
+                RE --> EV
+                D --> SAVE["Save the answer, its citations and its mode<br/>bill the tokens on the daily quota"]
+                EV --> SAVE
+                SAVE --> OUT["Stream to the browser (server-sent events)<br/>the chat shows each cited page, passage highlighted"]
+
+                class C,R,EV,SAVE step;
+                class D,SE,RE mode;
+                class X stop;
+                class OUT out;
+            </div>
+        </div>
+
+        <!-- 3. A PDF -->
+        <h2>3. How a PDF becomes searchable</h2>
+        <p class="lead">An upload never changes what students see until a revision is published. A teacher edit
+            makes a new draft; it never changes a published revision.</p>
+        <div class="diagram-card">
+            <div class="mermaid">
+                %%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'DM Sans, sans-serif', 'fontSize': '13px',
+                'lineColor': '#94a3b8'}}}%%
+                flowchart TD
+                classDef step fill:#eef2ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81;
+                classDef out fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+                classDef wait fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#78350f;
+
+                U["Teacher uploads a PDF<br/>to a lab or a whole class<br/>at most 200 MB, 150 pages"] --> J["Job in ingestion_jobs<br/>the teacher sees jobs ahead,<br/>pages read, time left"]
+                J --> P["Read job<br/>MinerU reads each page<br/>→ pages, blocks, pictures<br/>stored as a draft"]
+                P --> I["Index job<br/>cut blocks into passages<br/>bge-m3 embeddings<br/>full-text vector (fr or en)"]
+                I --> F(["Every page read?"])
+                F -->|"yes"| PUB["Published<br/>students and the agent can use it"]
+                F -->|"no"| DR["Stays a draft<br/>the teacher checks it and publishes"]
+                DR --> PUB
+
+                class U,J,P,I step;
+                class PUB out;
+                class DR wait;
+            </div>
+        </div>
+
+        <!-- 4. Design rules -->
+        <h2>4. Design rules</h2>
+        <p class="lead">The choices that the rest of the code relies on.</p>
         <div class="grid">
-            <div class="card new">
-                <span class="tag">Agent, not Proxy</span>
-                <h3>LangGraph Agentic RAG</h3>
-                <p>The chat endpoint is a graph: <code>router → [exercise → tutor | rag | direct | clarify] → self-eval loop → Synthesize → SSE</code>. <b>[v8.0]</b> the router is <b>one LLM call</b> per message that classifies the route AND carries dialogue state: a sticky exercise (from <code>session.current_exercise_id</code>) fills a blank number but never picks the route, and an unresolvable number produces a clarifying question rather than a wrong-exercise guess. Timeout/failure degrades to a safe <code>rag</code> and is flagged. This replaced the v7.1 regex + <code>bge-m3</code> kNN exemplar router.</p>
+            <div class="card">
+                <h3>Access is checked in SQL</h3>
+                <p>Every course search filters on <code>class_id</code>, <code>lab_id</code> and the revisions fixed
+                    at the start of the run. A prompt cannot widen it. The model never sends a file address.</p>
             </div>
-
-            <div class="card new">
-                <span class="tag">Single DB</span>
-                <h3>Hybrid Retrieval on pgvector</h3>
-                <p>Concept questions hit <b>hybrid RAG</b> — vector ANN <i>and</i> BM25 (<code>tsvector</code>) recall → RRF fusion → <code>bge-reranker-v2-m3</code>; exact missions hit <b>structured search</b> over <code>exercises</code>. All retrieval is filtered by <code>lab_id</code>/<code>class_id</code> (and <code>audience</code> for students) <b>in SQL</b>. No <code>solution</code> is stored anywhere — nothing to leak.</p>
+            <div class="card">
+                <h3>Citations only from what was read</h3>
+                <p>Only what the model read (<code>read</code>) or looked at (<code>view_image</code>) gets an evidence
+                    ID. Search results are leads, not proof. An answer may cite only those IDs.</p>
             </div>
-
-            <div class="card new">
-                <span class="tag">Off-Peak · GPU-Aware</span>
-                <h3>Ingestion Worker (No Airflow / k8s)</h3>
-                <p>A docker-compose <code>worker</code> polls <code>ingestion_jobs</code> (<code>SKIP LOCKED</code>) and runs <b>guided-JSON</b> extraction at low priority on the same engine. A <code>pynvml</code> gate only pulls work when the GPU is idle; chat always preempts.</p>
+            <div class="card">
+                <h3>Search in one table</h3>
+                <p>A vector search (<code>pgvector</code>) and a full-text search (<code>tsvector</code>) run on the
+                    same passages. The two lists are merged, then the reranker orders them. If the embedding server
+                    fails, the full-text list is used alone.</p>
             </div>
-
-            <div class="card changed">
-                <span class="tag">One Shared Engine</span>
-                <h3>Config-Driven Model, Never Hardcoded</h3>
-                <p>Chat <b>and</b> ingestion call the same existing engine (vLLM/Ollama) and the one model set in <code>SystemConfigs</code> — no second model, nothing hardcoded. Swap to any model that fits the box (e.g. smaller for test, larger for prod) with zero downtime and no code change.</p>
+            <div class="card">
+                <h3>One model, set in the database</h3>
+                <p>Qwen3.8 Flash-Next answers, looks at pictures and writes figure descriptions. Model addresses
+                    are rows in <code>system_configs</code>; the admin changes them without a restart.</p>
             </div>
-
-            <div class="card changed">
-                <span class="tag">Granular Control</span>
-                <h3>Three-Tier Rules + skill.md</h3>
-                <p><code>skill.md</code> (instructor persona) reuses the Rules table as a <code>level=class</code> rule placed <b>first</b> (sets tone); restrictive <b>Class → Lab → Student</b> rules come <b>after</b> so constraints win, resisting prompt-injection bypass.</p>
+            <div class="card">
+                <h3>The database is the queue</h3>
+                <p>The worker takes jobs with <code>FOR UPDATE SKIP LOCKED</code> and a lease. It waits while
+                    students chat, so reading PDFs never slows down answers.</p>
             </div>
-
-            <div class="card changed">
-                <span class="tag">Zero-Friction · Context Safe</span>
-                <h3>Invite Codes &amp; Lab-Scoped Sessions</h3>
-                <p>Retained from v6: 6-character invite codes for instant class joining, and isolated chat sessions scoped to a single Lab — clearing history safely and preventing context-window overflow on smaller local models.</p>
+            <div class="card">
+                <h3>Tokens are reserved, then billed</h3>
+                <p>Each model call is reserved on the daily quota before it runs and billed after, as
+                    <code>prompt × 0.2 + completion × 1.0</code> by default. A teacher can refill a student's quota
+                    for the day; usage figures are never rewritten.</p>
             </div>
-
-            <div class="card new">
-                <span class="tag">Teach Prompt Literacy</span>
-                <h3>Effort Coaching, not Mastery Grading</h3>
-                <p>Two cheap rules-first signals (no LLM): a <b>windowed effort/clarity</b> score gently coaches <i>how to ask</i> (never gates a "stupid" question), and a per-message <b>lazy / answer-seeking</b> detector forces a Socratic reply — it answers, but <b>never hands over the answer</b>. Structured scores only, teacher-overridable.</p>
+            <div class="card">
+                <h3>Teacher rules shape the tutor</h3>
+                <p>Class, lab and student rules go into every answer mode. They set the teaching style. They are
+                    not a security boundary; access is checked in SQL.</p>
             </div>
-
-            <div class="card new">
-                <span class="tag">v7.1 · Context-Poor Slides</span>
-                <h3>Contextual Retrieval at Ingest</h3>
-                <p>The off-peak worker LLM-generates each chunk's in-document context and prepends it; the <b>augmented</b> text (<code>context + content</code>) is embedded and BM25-indexed, while the original <code>content</code> is kept for citation. This is what makes context-poor CM slides retrievable. Same engine as chat, config-driven, no torch.</p>
+            <div class="card">
+                <h3>Nothing a student deletes is lost</h3>
+                <p>A deleted session is hidden from the student but kept. Teachers and admins still see it. Only an
+                    admin can delete it for good.</p>
             </div>
-
-            <div class="card new">
-                <span class="tag">v7.1 · Bounded &amp; Cheap</span>
-                <h3>LLM Self-Eval Loop</h3>
-                <p>A deterministic gate (cosine / empty recall) blocks the obviously-bad before any LLM; a guided 1-token verdict grades <code>good / partial / bad</code>; a <code>bad</code> verdict rewrites the query and re-retrieves, capped at <code>RAG_MAX_RETRIES</code> (admin-config, default 1). Still thin after the budget → answer with a "not enough material" disclaimer.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.2 · Split the Engine</span>
-                <h3>Full Model-Routing Table</h3>
-                <p>Generation, <b>embedding</b>, <b>rerank</b>, <b>ingestion</b>, and <b>router</b> each get an optional endpoint/key/model in <code>SystemConfigs</code>. Ingest/router default <b>empty → fall back to the main LLM</b>, so the cheap-model split is opt-in: a 120B serves chat while a 30B does off-peak Contextual Retrieval and live router intent — without sharing one RPM pool.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.2 · Cost-Aware</span>
-                <h3>Weighted-Token Quota</h3>
-                <p>Prefill is cheaper than decode, so quota is now charged on <code>billed = prompt·α + completion·β</code> (admin-set <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>, default <code>0.2</code>/<code>1.0</code>). Raw prompt/completion counts are still stored per message; the <code>429</code> check and <code>/usage</code> compare billed tokens to the daily quota.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.2 · Stable Matching</span>
-                <h3>LLM-Assisted Exercise Routing</h3>
-                <p>The deterministic exercise-number regex stays the zero-latency fast-path; only when it misses but the query looks exercise-shaped does a cheap <code>ROUTER_MODEL</code> disambiguate. A canonical <code>number_normalized</code> integer (Roman / Arabic / <code>3.1</code> all map to one number) lets ingest extraction and query matching share one normalization function.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.2 · Instructor Style</span>
-                <h3>Per-Teacher Skill Presets</h3>
-                <p>Teachers keep a private library of reusable <code>skill</code> presets and <b>snapshot-copy</b> one into a class's <code>level=class</code> rule. The prompt-injection path is unchanged (still reads <code>Rules</code>); editing a preset never retro-changes classes that already selected it.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.2 · Context-Poor, Length-Safe</span>
-                <h3>Section-Scoped Contextual Retrieval</h3>
-                <p>Per-chunk context is generated from the chunk's <b>own scope</b> — its section (TD/TP) or page/slide (CM) — instead of <code>full_text[:8000]</code>, so a long document never gets a context hallucinated from its opening pages, and the call fits any small model. No hard length gate; long docs simply degrade to per-slide context, all on the off-peak <code>INGEST_MODEL</code>.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.2 · Student UX</span>
-                <h3>Markdown + Code + KaTeX Chat</h3>
-                <p>The student chat renders markdown, syntax-highlighted code blocks (with copy), and KaTeX math, using stream-safe incremental rendering so a half-streamed fenced block never collapses into plain text. Plus self-service password change for every role.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.3 · Deterministic Ingestion</span>
-                <h3>Single-Source Segmentation + Strict Split</h3>
-                <p>Headers/footers stripped and TOC removed <b>once</b> for the whole pipeline. TD/TP exercises are built <b>deterministically</b> from expanded boundary patterns (Arabic / Roman / <code>Question n</code> / bare-numbered headings): number = the captured label, statement = the segment body — the whole-document LLM extractor (root cause of wrong numbers) is <b>deleted</b>. An LLM re-judges boundaries only on numbering anomalies (<code>1,1,2,3</code> = sub-questions mistaken for exercises); its failure keeps the regex result. <b>Strict split</b>: TD/TP never produce RAG chunks; DocChunks come from CM only. Teacher edits survive re-ingestion; a per-document <code>ingest_report</code> gives the teacher a warning list.</p>
-            </div>
-
-            <div class="card new">
-                <span class="tag">v7.3 · Retrieval Fixes</span>
-                <h3>BM25 Revived + Honest Reranking</h3>
-                <p>The BM25 leg was silently dead: <code>simple</code> config + AND semantics meant one extra word in a natural French question zeroed the recall. Now <b>OR semantics</b> over content words with per-document <b>language configs</b> (fr/en, stemming: "fonction" matches "fonctions"), same config at ingest and query time. The reranker scores the <b>augmented</b> text (context + content) instead of vetoing the context-poor slide chunks Contextual Retrieval was built to save. A <code>RERANK_SCORE_THRESHOLD</code> injection gate is wired in the retrieval layer and <b>ships disabled</b> until calibrated — its zero-context disclaimer branch lands in v8.0. CM chunks get size control (120–1600 chars) with code-aware splitting.</p>
+            <div class="card">
+                <h3>Grafana for admins only</h3>
+                <p>For every <code>/grafana/</code> request, nginx asks the backend to check the admin's signed
+                    cookie. Students on the network cannot read other students' questions.</p>
             </div>
         </div>
 
-        <div class="schema-section">
-            <h2>Database Schema (PostgreSQL)</h2>
+        <!-- 5. Data -->
+        <h2>5. Where the data lives</h2>
+        <p class="lead">The tables in groups. Every table and column is in
+            <a href="documentation/DATABASE.md">DATABASE.md</a>.</p>
+        <div class="table-card">
             <table>
                 <thead>
                     <tr>
-                        <th>Table</th>
-                        <th>Status</th>
-                        <th>Core Fields</th>
-                        <th>Purpose</th>
+                        <th>Group</th>
+                        <th>Tables</th>
+                        <th>What they hold</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
+                        <td>Settings</td>
                         <td><code>system_configs</code></td>
-                        <td><span class="badge changed">v7.2</span></td>
-                        <td><code>id, key, value</code></td>
-                        <td>Database-driven configuration for LLM connections, allowing live model hot-swapping. <b>v7.2</b> adds the full model-routing table (<code>EMBEDDING_URL/KEY</code>, <code>RERANK_API_KEY</code>, <code>INGEST_MODEL/URL/KEY</code>, <code>ROUTER_MODEL/URL/KEY</code> — empty falls back to the main LLM) plus cost weights <code>TOKEN_ALPHA</code>/<code>TOKEN_BETA</code>. <b>v7.3</b> adds <code>HINT_MODEL/URL/KEY</code> (<b>v8.0</b>: the big off-peak model the hint workflow runs on), <code>RERANK_SCORE_THRESHOLD</code> (ships empty = off) and worker budgets <code>HINT_MAX_SAMPLES</code>/<code>INGEST_TOKEN_BUDGET</code>. <b>v8.0</b> removes <code>ROUTER_KNN_THRESHOLD</code> with the kNN router.</td>
+                        <td>Model addresses and names, token weights, research limits.</td>
                     </tr>
                     <tr>
-                        <td><code>classes & labs</code></td>
-                        <td><span class="badge new">New</span></td>
-                        <td><code>invite_code, teacher_id, class_id</code></td>
-                        <td>Hierarchical structure for organizing students. Uses <code>invite_code</code> for instant join.</td>
+                        <td>People and classes</td>
+                        <td><code>users</code>, <code>classes</code>, <code>labs</code>, <code>class_students</code></td>
+                        <td>Roles, daily quota, invite codes, exam mode, who is in which class.</td>
                     </tr>
                     <tr>
-                        <td><code>rules</code></td>
-                        <td><span class="badge changed">Modified</span></td>
-                        <td><code>level, target_id, rules_text</code></td>
-                        <td>Replaces old <code>teacher_rules</code>. Uses polymorphism to store Class, Lab, and Student-specific AI rules.</td>
+                        <td>Rules</td>
+                        <td><code>rules</code>, <code>skill_presets</code></td>
+                        <td>Teacher rules at class, lab and student level; reusable teaching styles.</td>
                     </tr>
                     <tr>
-                        <td><code>sessions</code></td>
-                        <td><span class="badge changed">Modified</span></td>
-                        <td><code>id, user_id, lab_id, is_deleted</code></td>
-                        <td>Tightly scoped to a <code>lab_id</code>. A student "delete" is a <b>soft delete</b> (<code>is_deleted=True</code>): hidden from the student but retained and visible to teacher/admin audit. Only admin hard-deletes.</td>
+                        <td>Chat</td>
+                        <td><code>sessions</code>, <code>messages</code>, <code>message_citations</code>,
+                            <code>agent_runs</code></td>
+                        <td>Conversations, answers with their mode and feedback, cited passages, one row per
+                            research run.</td>
                     </tr>
                     <tr>
-                        <td><code>users</code></td>
-                        <td><span class="badge kept">Unchanged</span></td>
-                        <td><code>id, role, daily_token_quota</code></td>
-                        <td>Supports bulk creation via Admin CSV dry-run import.</td>
+                        <td>Usage</td>
+                        <td><code>usage_stats</code>, <code>quota_grants</code>, <code>usage_reservations</code>,
+                            <code>model_call_usage</code></td>
+                        <td>Tokens per user and day, teacher refills, reserved and billed model calls.</td>
                     </tr>
                     <tr>
-                        <td><code>documents</code></td>
-                        <td><span class="badge new">New v7 · v7.1</span></td>
-                        <td><code>class_id, lab_id, storage_path, content_hash, doc_type, audience, status, language, ingest_report</code></td>
-                        <td>PDF-only registry with a state machine (<code>pending→processing→indexed→failed</code>, <b>v7.1</b> adds <code>needs_review</code> for the char-yield gate). <b>v7.1</b> <code>doc_type</code> (CM/TD/TP) + <code>audience</code> (student/teacher) are the deterministic routing + filter signals. <b>v7.3</b> adds <code>language</code> and <code>ingest_report</code>. <b>v8.0</b> adds <code>doc_type=corrigé</code> (a standalone answer file → produces only <code>Answers</code>), <code>has_answers</code>, and <code>answers_for_document_id</code> (a corrigé's target TD, for pairing). Files persist in the <code>documents_data</code> volume; <code>content_hash</code> drives dedup &amp; re-index.</td>
+                        <td>Reports</td>
+                        <td><code>audit_reports</code></td>
+                        <td>AI reports on a lab or one student, written from counted numbers.</td>
                     </tr>
                     <tr>
+                        <td>Documents</td>
+                        <td><code>documents</code>, <code>document_revisions</code>, <code>document_pages</code>,
+                            <code>document_blocks</code>, <code>document_assets</code>, <code>document_reviews</code>,
+                            …</td>
+                        <td>Each upload, each reading of it, its pages, blocks and pictures, and the items a teacher
+                            confirms.</td>
+                    </tr>
+                    <tr>
+                        <td>Search</td>
                         <td><code>doc_chunks</code></td>
-                        <td><span class="badge new">New v7 · v7.1</span></td>
-                        <td><code>document_id, lab_id, audience, content, context, embedding vector(N), tsv, page_no</code></td>
-                        <td>Hybrid RAG store. HNSW + <code>vector_cosine_ops</code> for ANN <i>and</i> (<b>v7.1</b>) a GIN <code>tsv</code> for BM25, both built over the <b>augmented</b> text (<code>context + content</code>). Denormalized <code>lab_id</code>/<code>audience</code> for filter-without-JOIN tenant scoping; <code>page_no</code> powers citations.</td>
+                        <td>The passages, with their embedding and full-text vector.</td>
                     </tr>
                     <tr>
-                        <td><code>exercises</code></td>
-                        <td><span class="badge new">New v7 · v7.1 · v7.2</span></td>
-                        <td><code>number, number_normalized, audience, statement, hints(JSON), hint_status, hint_source, edited_by_teacher</code></td>
-                        <td>Target of agentic structured search. <b>🔴 red line:</b> no <code>solution</code> column; answers live in the teacher/worker-only <code>Answers</code> table. <b>v8.0</b>: <code>hints</code> is a tiered JSON array with a review lifecycle (<code>hint_status</code>: none→generating→pending_review→approved/failed) — only <b>approved</b> hints are surfaced to students (retrieval gate); a teacher hand-edit is approved directly.</td>
-                    </tr>
-                    <tr>
+                        <td>Queue</td>
                         <td><code>ingestion_jobs</code></td>
-                        <td><span class="badge new">New v7</span></td>
-                        <td><code>document_id, status, priority, attempts, locked_at, job_type, payload</code></td>
-                        <td>DB-as-queue for the worker. Atomic pickup via <code>FOR UPDATE SKIP LOCKED</code>; stale <code>processing</code> jobs are reclaimed. <b>v8.0</b>: <code>job_type</code> (ingest | hint_generate) is dispatched on; an urgent hint job uses <code>priority=0</code>.</td>
-                    </tr>
-                    <tr>
-                        <td><code>learner_profiles</code></td>
-                        <td><span class="badge new">New v7</span></td>
-                        <td><code>user_id, lab_id, effort_ema, coaching_level, teacher_override</code></td>
-                        <td>Prompt-literacy coaching: smoothed sliding-window effort score per (student, lab). Structured values only — no free-text judgments; teacher-overridable.</td>
-                    </tr>
-                    <tr>
-                        <td><code>router_query_log</code></td>
-                        <td><span class="badge new">v7.1 · redefined v8.0</span></td>
-                        <td><code>message, route, exercise_number, number_source, degraded, is_test, model_name, prompt_version, latency_ms, lab_id</code></td>
-                        <td>Write-only: <b>every</b> LLM-router decision (v8.0), so a distilled router has a labelled source and the hotspot panel can rank the most-asked exercises. <code>degraded</code>/<code>is_test</code> rows are excludable when distilling. Nothing in the live path reads it.</td>
-                    </tr>
-                    <tr>
-                        <td><code>answers</code></td>
-                        <td><span class="badge new">New v8.0</span></td>
-                        <td><code>exercise_id, document_id, number_raw/normalized, answer_form, answer_text, derivation_text, verified</code></td>
-                        <td><b>🔴</b> Uploaded answers for <b>offline</b> hint generation + the teacher answer-view. The student path (chat/agent/prompt/retrieval) never imports the <code>Answer</code> model — enforced by <code>test_answers_isolation</code>. No physical vault; the boundary is the import discipline.</td>
-                    </tr>
-                    <tr>
-                        <td><code>agent_trace_log</code></td>
-                        <td><span class="badge new">New v8.0</span></td>
-                        <td><code>message_id, route, node_latencies, degraded_flags, verdict, retry_flipped, red_flag</code></td>
-                        <td>Per-message observability: which fallbacks fired, per-node latencies, self-eval verdict. Feeds the admin health panel (degradation counts) and the two-week self-eval keep/drop decision.</td>
-                    </tr>
-                    <tr>
-                        <td><code>skill_presets</code></td>
-                        <td><span class="badge new">New v7.2</span></td>
-                        <td><code>owner_teacher_id, name, content</code></td>
-                        <td>Per-teacher private library of reusable instructor-style (<code>skill.md</code>) presets. Applying one to a class <b>snapshot-copies</b> its <code>content</code> into the class's <code>level=class</code> rule — the prompt-injection path is unchanged and still reads <code>rules</code>. Editing a preset does not retro-change classes that already selected it.</td>
+                        <td>Read and index jobs, with lock, lease and progress.</td>
                     </tr>
                 </tbody>
             </table>
         </div>
 
+        <!-- 6. Stacks -->
+        <h2>6. Two stacks, one code base</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Teachers' stack</h3>
+                <p><code>docker-compose.release.yml</code>: its own database, files and daily backup, served over
+                    HTTPS on the school network. It is updated only by rebuilding it. See
+                    <a href="documentation/RELEASE_TEACHERS.md">RELEASE_TEACHERS.md</a>.</p>
+            </div>
+            <div class="card">
+                <h3>Dev stack</h3>
+                <p><code>docker-compose.yml</code> with <code>docker-compose.override.yml</code>: feature flags on,
+                    site on port 8080, and the monitoring containers. Grafana serves both stacks.</p>
+            </div>
+            <div class="card">
+                <h3>Shared model servers</h3>
+                <p>Both stacks call the same model servers on the Docker network <code>edullm-models</code>.</p>
+            </div>
+        </div>
+
+        <footer>Checked against the code on 2026-10-19.</footer>
     </div>
 
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.6/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
+        // Draw after the fonts load, so the labels are measured with the right font.
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', flowchart: { htmlLabels: false, useMaxWidth: false } });
+        await Promise.all(['400', '700'].map((w) => document.fonts.load(`${w} 13px "DM Sans"`))).catch(() => {});
+        await document.fonts.ready;
+        await mermaid.run();
     </script>
 </body>
 
