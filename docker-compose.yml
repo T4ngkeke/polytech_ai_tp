@@ -1,6 +1,6 @@
 services:
   postgres:
-    # [v7] pgvector image — provides the `vector` type for DocChunk embeddings.
+    # pgvector image: provides the `vector` type for DocChunk embeddings.
     image: pgvector/pgvector:pg16
     container_name: edullm-db
     environment:
@@ -22,7 +22,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/edudb
-      - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - LLM_BASE_URL=http://host.docker.internal:8001/v1
       - DOCUMENTS_STORAGE_ROOT=/data/documents
     volumes:
       - documents_data:/data/documents
@@ -32,7 +32,7 @@ services:
       - postgres
     restart: unless-stopped
 
-  # [v7] Off-peak ingestion worker — same image/code as backend, different
+  # Off-peak ingestion worker. Same image and code as the backend, different
   # entrypoint (a polling loop instead of uvicorn). Shares the documents volume.
   worker:
     build:
@@ -42,7 +42,7 @@ services:
     command: ["python", "-m", "backend.worker.main"]
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/edudb
-      - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - LLM_BASE_URL=http://host.docker.internal:8001/v1
       - DOCUMENTS_STORAGE_ROOT=/data/documents
     volumes:
       - documents_data:/data/documents
@@ -50,24 +50,6 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
-    restart: unless-stopped
-
-  # Optional local embedding service (bge-m3) on the GPU: about 0.03 s per
-  # query instead of 0.25 s on CPU, with CPU spikes of 8-11 s (2026-10-12),
-  # same vectors. The model stays loaded (about 0.7 GB of GPU memory).
-  # Enable with --profile local-embeddings and pull bge-m3 once.
-  embeddings:
-    image: ollama/ollama:latest
-    container_name: edullm-embeddings
-    profiles: ["local-embeddings"]
-    gpus: all
-    environment:
-      - OLLAMA_HOST=0.0.0.0:11434
-      - OLLAMA_KEEP_ALIVE=-1
-    volumes:
-      - embedding_models:/root/.ollama
-    cpus: 4
-    mem_limit: 4g
     restart: unless-stopped
 
   frontend:
@@ -84,4 +66,3 @@ services:
 volumes:
   postgres_data:
   documents_data:
-  embedding_models:

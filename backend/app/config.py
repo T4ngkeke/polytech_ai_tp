@@ -32,11 +32,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 8 hours
 
     # LLM proxy
-    LLM_BASE_URL: str = "http://localhost:11434/v1"  # Ollama default
-    LLM_API_KEY: str = "ollama"                       # Placeholder
-    LLM_MODEL: str = "qwen3.5:0.8b"                        # Default model
+    # Used only while system_configs has no value. A local port for a
+    # vLLM server. The real values are set in the admin page.
+    LLM_BASE_URL: str = "http://localhost:8001/v1"
+    LLM_API_KEY: str = "EMPTY"
+    LLM_MODEL: str = "ornith"
 
-    # [v7] Where uploaded course documents are stored (mounted Docker volume)
+    # Where uploaded course documents are stored (mounted Docker volume)
     DOCUMENTS_STORAGE_ROOT: str = "/data/documents"
 
 

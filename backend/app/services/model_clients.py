@@ -19,10 +19,9 @@ async def get_llm_config(db: AsyncSession) -> dict:
     """
     Read LLM connection parameters from the SystemConfig table.
 
-    [v7.2] The model-routing table (embedding / rerank / ingest / router split,
-    token weights) is resolved via ``resolve_model_routing``, which applies the
-    opt-in fallback to the main LLM. The flat keys (``base_url`` etc.) are kept
-    for backward compatibility with existing call sites.
+    The model-routing table (main LLM, embedding, rerank, agent, vision slots,
+    token weights) is resolved via ``resolve_model_routing``. The flat keys
+    (``base_url`` etc.) are kept for existing call sites.
     """
     result = await db.execute(select(SystemConfig))
     configs = {row.key: row.value for row in result.scalars().all()}
@@ -32,14 +31,14 @@ async def get_llm_config(db: AsyncSession) -> dict:
         "base_url": routing.llm.base_url,
         "api_key": routing.llm.api_key,
         "model": routing.llm.model,
-        # [v7.2] embedding endpoint is now independently configurable.
+        # The embedding endpoint is configured on its own.
         "embedding_base_url": routing.embedding.base_url,
         "embedding_api_key": routing.embedding.api_key,
         "embedding_model": routing.embedding.model,
         "rerank_url": routing.rerank.base_url,
         "rerank_api_key": routing.rerank.api_key,
         "rerank_model": routing.rerank.model,
-        # [v8.1] estimated-token budget for chat history (OOM protection).
+        # estimated-token budget for chat history (OOM protection).
         "context_max_tokens": configs.get("CONTEXT_MAX_TOKENS", "8000"),
         "token_alpha": str(routing.token_alpha),
         "token_beta": str(routing.token_beta),

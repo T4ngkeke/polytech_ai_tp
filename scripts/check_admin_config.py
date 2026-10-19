@@ -17,7 +17,7 @@ def main():
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         try:
-            page.goto(os.getenv("ADMIN_TEST_URL", "http://127.0.0.1") + "/login")
+            page.goto(os.getenv("ADMIN_TEST_URL", "http://127.0.0.1:8080") + "/login")
             page.get_by_label("Username", exact=True).fill(os.getenv("ADMIN_TEST_USERNAME", "admin"))
             page.get_by_label("Password", exact=True).fill(os.getenv("ADMIN_TEST_PASSWORD", "admin123"))
             page.get_by_role("button", name="Sign In", exact=True).click()
@@ -28,7 +28,7 @@ def main():
                 page.get_by_role("button", name=re.compile("^" + re.escape(icon + " " + name))).click()
                 expect(page.get_by_role("heading", name=icon + " " + name, exact=True)).to_be_visible()
             # Exercise serialization and the save UI without mutating live settings.
-            current = page.request.get(os.getenv("ADMIN_TEST_URL", "http://127.0.0.1") + "/api/admin/llm/config", headers={
+            current = page.request.get(os.getenv("ADMIN_TEST_URL", "http://127.0.0.1:8080") + "/api/admin/llm/config", headers={
                 "Authorization": "Bearer " + page.evaluate("localStorage.getItem('edu_llm_token')")
             }).json()
             attempts = {"get": 0, "put": 0}

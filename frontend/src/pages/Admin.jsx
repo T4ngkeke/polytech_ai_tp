@@ -759,18 +759,18 @@ const MAP_NODES = [
       + 'both must use the same model.',
     status: (c) => (c.embedding_url ? 'set' : 'inherits'),
     fields: [
-      { key: 'embedding_model', label: 'Model Name', placeholder: 'bge-m3' },
+      { key: 'embedding_model', label: 'Model Name', placeholder: 'BAAI/bge-m3' },
       { key: 'embedding_url', label: 'Base URL', placeholder: 'inherits the default model' },
       { key: 'embedding_api_key', label: 'API Key', placeholder: 'inherits the default model', secret: true },
     ],
   },
   {
     id: 'rerank', x: 58, y: 14, icon: 'sort', name: 'Reranker', sources: ['agent'],
-    tag: 'Reorders the research search results (bge-reranker behind a /rerank endpoint, not the chat '
+    tag: 'Reorders the research search results (a reranker such as Qwen3-Reranker behind a /rerank endpoint, not the chat '
       + 'base URL). Empty URL = off: fusion order only.',
     status: (c) => (c.rerank_url ? 'set' : 'off'),
     fields: [
-      { key: 'rerank_model', label: 'Model Name', placeholder: 'BAAI/bge-reranker-v2-m3' },
+      { key: 'rerank_model', label: 'Model Name', placeholder: 'Qwen/Qwen3-Reranker-0.6B' },
       { key: 'rerank_url', label: 'Rerank URL', placeholder: 'http://reranker:8000/rerank (empty = off)' },
       { key: 'rerank_api_key', label: 'API Key', placeholder: '', secret: true },
     ],

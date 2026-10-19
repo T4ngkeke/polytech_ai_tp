@@ -1,5 +1,5 @@
 """
-history.py — [v8.1] per-turn context cap on chat history (OOM protection).
+history.py — per-turn context cap on chat history (OOM protection).
 
 The local inference engine is the one hard dependency that can fall over: an
 unbounded prompt grows the KV cache until the box OOMs. The 20-message history

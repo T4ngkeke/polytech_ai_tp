@@ -1,5 +1,5 @@
 """
-model_routing.py — [v7.2] resolve the dynamic ``system_configs`` key/value map into
+model_routing.py — resolve the dynamic ``system_configs`` key/value map into
 a structured model-routing config.
 
 The single LLM is split into a routing table: the default model, embedding,
@@ -20,7 +20,7 @@ from backend.app.config import settings
 
 # Defaults that mirror seed.py, used only when a key is entirely absent.
 _DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
-_DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
+_DEFAULT_RERANK_MODEL = "Qwen/Qwen3-Reranker-0.6B"
 _DEFAULT_TOKEN_ALPHA = 0.2
 _DEFAULT_TOKEN_BETA = 1.0
 
@@ -39,8 +39,8 @@ class ModelRouting:
     llm: Endpoint
     embedding: Endpoint
     rerank: Endpoint
-    # The agent's reasoning model — the retrieval loop's planner. Point it at
-    # the BIG model: quality over latency.
+    # The agent's reasoning model, used by the research agent. Point it at
+    # the big model: quality over latency.
     agent: Endpoint
     # Vision slot — images the research agent views and figure descriptions
     # teachers ask for. model == "" means the feature is OFF; it never falls back.
@@ -90,7 +90,7 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
         model=_get(configs, "AGENT_MODEL", main_model),
     )
 
-    # [v8.1] Vision slot for garbled-formula transcription. Opt-in: an empty
+    # Vision slot for garbled-formula transcription. Opt-in: an empty
     # model means OFF and never falls back to the main chat model (sending
     # images to a text model would fail or hallucinate). URL/key do inherit,
     # for the common case where the main engine itself is multimodal.

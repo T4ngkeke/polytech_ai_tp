@@ -9,7 +9,7 @@ All schemas use UUIDs for IDs and datetime with timezone info (UTC).
 
 import uuid
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 

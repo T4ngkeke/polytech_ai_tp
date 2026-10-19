@@ -7,7 +7,9 @@
   evidence.py      evidence IDs (E1, E2, ...) and their citations
   model.py         the model client
   result.py        the run result and its stop exceptions
+  search.py        Search mode: one search, then one answer
+  direct.py        Direct mode: an answer without the course material
+  history.py       the size cap on the chat history
 
-Persistence and billing are in services/research_*.py. The previous LangGraph
-chat agent is in ``legacy``.
+Persistence and billing are in services/research_*.py.
 """

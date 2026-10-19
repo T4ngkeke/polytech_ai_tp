@@ -119,8 +119,8 @@ async def chat_stream(
     lab_id = session.lab_id
 
     if lab_id:
-        # [v7.2] The lab must exist, be active, and not be soft-deleted — a locked
-        # or deleted lab is read-only and must reject chat (README §6 step 1).
+        # The lab must exist, be active, and not be soft-deleted. A locked
+        # or deleted lab is read-only and must reject chat.
         lab_result = await db.execute(
             select(Lab).where(
                 Lab.id == lab_id,
@@ -136,7 +136,7 @@ async def chat_stream(
             )
         class_id = lab.class_id
 
-        # [v8.0 §11A] The owning teacher's test-drive session bypasses the student
+        # The owning teacher's test-drive session bypasses the student
         # membership check (they aren't enrolled in their own class).
         is_owner_test_drive = False
         if session.is_test:

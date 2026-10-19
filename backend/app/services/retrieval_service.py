@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # A reranker: scores each candidate document for the query (higher = better).
 RerankFn = Callable[[str, list[str]], Awaitable[list[float]]]
 
-# [v7.3] Language → Postgres text-search config. Ingest (tsvector) and query
+# Language → Postgres text-search config. Ingest (tsvector) and query
 # (tsquery) sides MUST use the same config or matching silently dies.
 _TS_CONFIGS = {"fr": "french", "en": "english"}
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
@@ -67,7 +67,7 @@ class ChunkHit:
     page_no: int | None
     document_id: uuid.UUID
     id: uuid.UUID | None = None
-    # [v7.3] The Contextual-Retrieval context — recall matched on the augmented
+    # The Contextual-Retrieval context — recall matched on the augmented
     # text, so the reranker must score it too (citations still show content).
     context: str | None = None
     revision_id: uuid.UUID | None = None
@@ -105,21 +105,16 @@ async def apply_rerank(
     hits: list[ChunkHit],
     rerank_fn: RerankFn,
     top_k: int,
-    score_threshold: float | None = None,
 ) -> tuple[list[ChunkHit], bool]:
-    """Reorder hits by reranker score, gate on an absolute threshold, take top-k.
+    """Reorder hits by reranker score and take the top-k.
 
-    Returns ``(hits, all_filtered)``. [v7.3] `score_threshold` turns the
-    reranker's relative ordering into an injection gate: nearest-k is not
-    relevant-k, and a below-threshold chunk must not reach the prompt (false
-    grounding). ``all_filtered=True`` signals the zero-context disclaimer
-    branch. Ships with the threshold unset (off) until calibrated.
+    Returns ``(hits, all_filtered)``. ``all_filtered`` is always False now,
+    because there is no score gate. The flag stays so callers keep one shape.
 
-    [v7.2] Reranking is a best-effort enhancement, never a hard dependency: any
-    failure logs a warning and degrades to fusion-only ordering (no gate — no
-    scores means we never filter blind).
-    [v7.3] Scoring reads the augmented text (context + content) — the same text
-    recall matched on, so context-poor slide chunks aren't vetoed at the last step.
+    Reranking is a best-effort enhancement, never a hard dependency: any
+    failure logs a warning and degrades to fusion-only ordering.
+    Scoring reads the augmented text (context + content), the same text
+    that recall matched on.
     """
     if not hits:
         return [], False
@@ -132,11 +127,6 @@ async def apply_rerank(
         return hits[:top_k], False
     order = sorted(range(len(hits)), key=lambda i: scores[i], reverse=True)
     scored = [replace(h, score=float(s)) for h, s in zip(hits, scores)]
-    if score_threshold is not None:
-        kept = [i for i in order if scores[i] >= score_threshold]
-        if not kept:
-            return [], True
-        return [scored[i] for i in kept[:top_k]], False
     return [scored[i] for i in order[:top_k]], False
 
 
@@ -243,7 +233,7 @@ async def bm25_search(
 ) -> list[ChunkHit]:
     """BM25-style full-text recall over the `tsv` column (Postgres only).
 
-    [v7.3] OR semantics: `plainto_tsquery` ANDs every word, so one extra word
+    OR semantics: `plainto_tsquery` ANDs every word, so one extra word
     in a natural-language question zeroed the recall — the BM25 leg was
     silently dead. Content words are ORed; ts_rank rewards multi-matches.
     The language config enables stemming ('fonctions' matches 'fonction').
@@ -280,21 +270,20 @@ async def hybrid_search(
     rerank_fn: RerankFn | None = None,
     recall_k: int = 20,
     top_k: int = 5,
-    score_threshold: float | None = None,
     language: str = "fr",
     class_id: uuid.UUID | None = None,
     snapshot_revisions: Mapping[uuid.UUID, uuid.UUID] | None = None,
     document_id: uuid.UUID | None = None,
     kind: str | None = None,
 ) -> tuple[list[ChunkHit], bool]:
-    """Vector + BM25 recall → RRF fusion → optional rerank + threshold → top-k.
+    """Vector + BM25 recall → RRF fusion → optional rerank → top-k.
 
-    Returns ``(hits, all_filtered)`` — the flag signals that the [v7.3] score
-    threshold rejected everything (→ zero-context disclaimer branch).
+    Returns ``(hits, all_filtered)`` — the flag is always False (there is no
+    score gate any more).
     Tenant isolation is enforced in the SQL WHERE of each recall, so it
     holds regardless of fusion/rerank order — never a prompt rule.
     """
-    # [v8.0] query_embedding None = embedding endpoint degraded → BM25-only recall.
+    # query_embedding None = embedding endpoint degraded → BM25-only recall.
     vector_hits = (
         await vector_search(db, query_embedding, lab_id,
                             k=recall_k, class_id=class_id,
@@ -336,7 +325,7 @@ async def hybrid_search(
 
     if rerank_fn is not None:
         return await apply_rerank(
-            query_text, fused_hits, rerank_fn, top_k, score_threshold=score_threshold,
+            query_text, fused_hits, rerank_fn, top_k,
         )
     return fused_hits[:top_k], False
 

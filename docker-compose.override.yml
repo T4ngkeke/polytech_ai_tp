@@ -1,5 +1,6 @@
 # Keep the v9 test stack available locally and through Tailscale only.
-# The v6 stable stack uses port 80, so v9 keeps port 8080.
+# The teachers' release stack holds ports 80 and 443 on the LAN, so this
+# test stack keeps port 8080.
 #
 # The research agent and structured documents are on in this test stack. The
 # model server joins the external network edullm-models, and the admin
@@ -7,7 +8,7 @@
 # "ornith", at http://m4-flashnext-v030:8000/v1 for the LLM, agent and VLM):
 #   docker network create edullm-models
 #   docker network connect edullm-models m4-flashnext-v030
-# The reranker (edullm-reranker, vLLM, BAAI/bge-reranker-v2-m3) and the MinerU
+# The reranker (edullm-reranker, vLLM, Qwen/Qwen3-Reranker-0.6B) and the MinerU
 # server (edullm-mineru-vlm, vLLM) run on the same network.
 services:
   postgres:
