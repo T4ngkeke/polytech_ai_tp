@@ -23,10 +23,11 @@ def main():
             page.get_by_role("button", name="Sign In", exact=True).click()
             page.get_by_role("button", name="LLM Config", exact=True).click()
             expect(page.get_by_role("heading", name="Model Routing Map", exact=True)).to_be_visible()
-            for icon, name in [("💬", "Chat LLM"), ("🧭", "Auxiliary"), ("🧲", "Embedding"),
-                               ("⚖️", "Reranker"), ("📥", "Ingest model"), ("🧠", "Agent"), ("👁️", "VLM")]:
-                page.get_by_role("button", name=re.compile("^" + re.escape(icon + " " + name))).click()
-                expect(page.get_by_role("heading", name=icon + " " + name, exact=True)).to_be_visible()
+            # Each model on the map opens its own settings panel; Vision stays open.
+            for name in ["Research agent", "Default model", "Embedding", "Reranker", "MinerU (PDF)",
+                         "Vision (VLM)"]:
+                page.get_by_role("button", name=re.compile("^" + re.escape(name))).click()
+                expect(page.get_by_role("heading", name=name, exact=True)).to_be_visible()
             # Exercise serialization and the save UI without mutating live settings.
             current = page.request.get(os.getenv("ADMIN_TEST_URL", "http://127.0.0.1:8080") + "/api/admin/llm/config", headers={
                 "Authorization": "Bearer " + page.evaluate("localStorage.getItem('edu_llm_token')")
@@ -46,8 +47,8 @@ def main():
                         route.continue_()
 
             page.route("**/api/admin/llm/config", config_response)
-            page.get_by_role("button", name="Save VLM", exact=True).click()
-            expect(page.get_by_text("VLM saved", exact=True)).to_be_visible()
+            page.get_by_role("button", name="Save Vision (VLM)", exact=True).click()
+            expect(page.get_by_text("Vision (VLM) saved", exact=True)).to_be_visible()
             page.get_by_role("button", name="Users", exact=True).click()
             page.get_by_role("button", name="LLM Config", exact=True).click()
             expect(page.get_by_role("alert")).to_contain_text("Temporary config test failure")
