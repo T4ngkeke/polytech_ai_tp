@@ -1,5 +1,5 @@
 """
-test_admin.py — Tests for admin endpoints (v7).
+test_admin.py — Tests for admin endpoints.
 """
 
 import uuid
@@ -328,7 +328,7 @@ class TestLLMConfig:
         assert not [k for k in got if k.startswith("hint_")]
 
     async def test_v81_vlm_slot_roundtrip(self, admin_client):
-        """[v8.1] The VLM slot (garbled-formula transcription, off-peak worker;
+        """The VLM slot (garbled-formula transcription, off-peak worker;
         empty = feature off) is admin-configurable and survives a GET after PUT."""
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",
@@ -342,7 +342,7 @@ class TestLLMConfig:
         assert got["vlm_base_url"] == "http://vision/v1"
 
     async def test_v81_context_max_tokens_roundtrip(self, admin_client):
-        """[v8.1] The per-turn history token budget (OOM protection) is
+        """The per-turn history token budget (OOM protection) is
         admin-configurable and survives a GET after PUT."""
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",
@@ -389,7 +389,7 @@ class TestLLMConfig:
         })
         assert resp.status_code == 200 and resp.json()["agent_max_tool_calls"] == ""
 
-    # --- [v7.2] full model-routing table ---------------------------------
+    # --- full model-routing table ---------------------------------
 
     async def test_admin_sets_and_reads_routing_fields(self, admin_client):
         resp = await admin_client.put("/api/admin/llm/config", json={
@@ -455,7 +455,7 @@ class TestCSVImport:
         assert resp.status_code == 400
 
     async def test_short_row_is_conflict_not_500(self, admin_client):
-        # [v7.2 fix] A row with fewer columns gives DictReader None values; the old
+        # A row with fewer columns gives DictReader None values; the old
         # code did None.strip() → 500. It must be reported as a per-row conflict.
         csv = self._csv(["username,password,role", "onlyname"])
         resp = await admin_client.post("/api/admin/users/import?force=false",
@@ -464,7 +464,7 @@ class TestCSVImport:
         assert resp.json()["conflicts"]  # the short row is flagged, not a crash
 
     async def test_in_file_duplicate_username_force_no_500(self, admin_client):
-        # [v7.2 fix] The same new username twice in one file must not double-INSERT
+        # The same new username twice in one file must not double-INSERT
         # and IntegrityError → 500.
         csv = self._csv(["username,password,role",
                          "dupuser,pass1234,student", "dupuser,pass1234,student"])
@@ -706,7 +706,7 @@ class TestAdminDeleteLab:
 
 
 class TestAdminUpdateLab:
-    """[v7.2 bugfix #1] Admin can lock/unlock any lab, bypassing ownership — the
+    """Admin can lock/unlock any lab, bypassing ownership — the
     lab in seed_full is owned by `teacher`, never by the admin."""
 
     async def test_admin_locks_lab_it_does_not_own(self, admin_full_client, seed_full, db_session):
@@ -799,7 +799,7 @@ class TestAdminClassAnalyticsDetails:
 
 
 # ===================================================================
-# PUT /api/admin/users/{id}/password  ([v7.2] admin reset)
+# PUT /api/admin/users/{id}/password  (admin reset)
 # ===================================================================
 
 class TestAdminResetPassword:

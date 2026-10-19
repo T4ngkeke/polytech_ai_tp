@@ -1,5 +1,5 @@
 """
-test_retrieval_hybrid.py — [v7.1] hybrid-retrieval pure logic.
+test_retrieval_hybrid.py — hybrid-retrieval pure logic.
 
 Reciprocal-rank fusion (vector + BM25) and reranker application are pure functions
 (no DB), so they are unit-tested directly. The SQL recall paths (vector ANN, BM25
@@ -55,7 +55,7 @@ async def test_apply_rerank_orders_by_score_and_truncates():
 
 @pytest.mark.asyncio
 async def test_apply_rerank_degrades_to_fusion_order_when_reranker_fails():
-    """[v7.2] A failing reranker (bad/unreachable endpoint, malformed body) must
+    """A failing reranker (bad/unreachable endpoint, malformed body) must
     never break retrieval: it degrades to the incoming fusion order, truncated to
     top_k — the same path as 'rerank unset'."""
     hits = [_hit("aaa"), _hit("bbb"), _hit("ccc")]
@@ -71,7 +71,7 @@ async def test_apply_rerank_degrades_to_fusion_order_when_reranker_fails():
     assert all_filtered is False
 
 
-# --- [v7.3] rerank reads the augmented text -----------------------------------
+# --- rerank reads the augmented text -----------------------------------
 # Recall matched on context+content; scoring the bare content would veto exactly
 # the context-poor slide chunks that Contextual Retrieval was built to save.
 

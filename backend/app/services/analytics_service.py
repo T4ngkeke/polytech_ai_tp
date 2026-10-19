@@ -80,7 +80,7 @@ async def get_class_analytics(db: AsyncSession, class_id: uuid.UUID, class_name:
                 func.count(Message.id).filter(Message.sender == SenderType.llm),
             )
             .join(Message, Message.session_id == Session.id)
-            # [v8.0 §11A] Teacher test-drives never count toward class usage.
+            # Teacher test-drives never count toward class usage.
             .where(Session.lab_id == lab.id, Session.is_test.is_(False))
             .group_by(Session.user_id)
         )

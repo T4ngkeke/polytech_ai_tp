@@ -1,12 +1,12 @@
 /**
- * MessageContent.jsx — [v7.2] markdown rendering for assistant messages.
+ * MessageContent.jsx — markdown rendering for assistant messages.
  *
  * Renders GitHub-flavored markdown, syntax-highlighted fenced code blocks (with a
  * copy button), and KaTeX math. react-markdown re-parses the full accumulated text
  * on each render, so streaming is inherently safe for *text*: a half-streamed ```
  * fence just renders as partial text until it closes — no manual HTML stitching.
  *
- * Streaming + syntax highlighting (v7.2 crash fix):
+ * Streaming + syntax highlighting (crash fix):
  *  - While a message is still streaming we do NOT run Prism. An unclosed ``` fence
  *    makes the entire growing tail one code block, and re-highlighting that from
  *    scratch on every token builds huge React trees → the tab runs out of memory

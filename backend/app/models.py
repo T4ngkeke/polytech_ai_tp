@@ -1,5 +1,5 @@
 """
-models.py — SQLAlchemy ORM models for Edu-LLM v7 Agentic Class-Lab Architecture.
+models.py — SQLAlchemy ORM models for Edu-LLM.
 
 Tables
 ------
@@ -114,7 +114,7 @@ class EmbeddingVector(TypeDecorator):
 
 
 class TSVector(TypeDecorator):
-    """[v7.1] BM25 full-text column: native `tsvector` on PostgreSQL, Text on SQLite.
+    """BM25 full-text column: native `tsvector` on PostgreSQL, Text on SQLite.
 
     Populated at ingest time via a Postgres `to_tsvector(...)` expression; on SQLite
     it degrades to plain text so the model/table still builds under the unit suite.
@@ -158,7 +158,7 @@ class DocumentStatus(str, enum.Enum):
     indexed = "indexed"
     partially_indexed = "partially_indexed"
     failed = "failed"
-    # [v7.1] PDF rejected by the character-yield gate — returned to the teacher,
+    # PDF rejected by the character-yield gate — returned to the teacher,
     # never silently ingested. Not an error; a request to re-export a clean PDF.
     needs_review = "needs_review"
 
@@ -178,7 +178,7 @@ class JobType(str, enum.Enum):
 
 
 class MessageFeedback(str, enum.Enum):
-    """[v8.0] Student thumbs on an assistant message — free golden-set labels."""
+    """Student thumbs on an assistant message — free golden-set labels."""
     up = "up"
     down = "down"
 
@@ -376,7 +376,7 @@ class Rule(Base):
 
 
 class SkillPreset(Base):
-    """[v7.2] A teacher's private, reusable instructor-style (`skill.md`) preset.
+    """A teacher's private, reusable instructor-style (`skill.md`) preset.
 
     Applying one to a class snapshot-copies its `content` into that class's
     `level=class` rule — the prompt-injection path is unchanged (it still reads
@@ -552,11 +552,11 @@ class Message(Base):
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # [v7.2] Weighted billed tokens (prompt·α + completion·β) stored at write time
+    # Weighted billed tokens (prompt·α + completion·β) stored at write time
     # so per-lab/class analytics reconcile with the quota's billed accounting
     # (recomputing later would be wrong once admin changes α/β).
     billed_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # [v8.0] Student thumbs up/down on an assistant message (nullable = no feedback).
+    # Student thumbs up/down on an assistant message (nullable = no feedback).
     feedback: Mapped[MessageFeedback | None] = mapped_column(
         Enum(MessageFeedback, name="messagefeedback"), nullable=True
     )
@@ -618,12 +618,12 @@ class Document(Base):
         nullable=False,
         default=DocumentStatus.pending,
     )
-    # [v7.1] Populated on `failed` and carries the `needs_review` rejection reason.
+    # Populated on `failed` and carries the `needs_review` rejection reason.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # [v7.3] Document language (fr/en) — selects the BM25 tsvector config.
+    # Document language (fr/en) — selects the BM25 tsvector config.
     # Default fr: the upload form pre-fills it, teachers usually never touch it.
     language: Mapped[str] = mapped_column(String(8), nullable=False, default="fr")
-    # [v7.1] Parsed page count — Phase 6 summary. Nullable until processed.
+    # Parsed page count. Nullable until processed.
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Summary of the ingest run (chunk count, estimated token spend, any VLM
     # repairs) — the teacher audits this instead of re-reading the document.
@@ -737,16 +737,16 @@ class DocChunk(Base):
     source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_ref: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # [v7.1] LLM-generated Contextual-Retrieval context, prepended before embedding.
+    # LLM-generated Contextual-Retrieval context, prepended before embedding.
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # [v7.1] Heading/section path the chunk came from.
+    # Heading/section path the chunk came from.
     section: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Embedded over the augmented text (context + content). bge-m3 = 1024 dim.
     embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(EMBEDDING_DIM), nullable=False)
-    # [v7.1] BM25 full-text index, built over the augmented text at ingest time.
+    # BM25 full-text index, built over the augmented text at ingest time.
     tsv: Mapped[str | None] = mapped_column(TSVector(), nullable=True)
     page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # [v7.3] Teacher-corrected rows survive idempotent re-ingestion.
+    # Teacher-corrected rows survive idempotent re-ingestion.
     edited_by_teacher: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow

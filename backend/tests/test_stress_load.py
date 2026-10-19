@@ -1,5 +1,5 @@
 """
-test_stress_load.py — [v7.1] Phase 5.1 concurrency / latency stress test.
+test_stress_load.py — concurrency / latency stress test.
 
 ⚠️  THIS TALKS TO A REAL INFERENCE ENGINE — it is NOT part of the normal suite.
 
@@ -9,7 +9,7 @@ It auto-skips unless you opt in:
     LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3 \
     .venv/bin/python -m pytest backend/tests/test_stress_load.py -s
 
-Rationale (V7.1_PLAN §5.1): 60 tps is the single-request number; self-eval multiplies
+Rationale: 60 tps is the single-request number; several tool calls per answer multiply
 total token volume, so the real question is whether 20 concurrent requests stay within
 the KV / latency budget. The thresholds below are deliberately loose — tune them to your
 hardware; a failure here is a signal to investigate, not a unit-test regression.

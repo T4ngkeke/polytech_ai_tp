@@ -1,9 +1,9 @@
 """
-gpu_gate.py — [v7.1] off-peak gating for the ingestion worker.
+gpu_gate.py — off-peak gating for the ingestion worker.
 
 Two gates decide whether the worker may pull ingestion work right now:
 
-  * `ChatLoadGate` (v7.1, primary, engine-agnostic): pause ingestion while
+  * `ChatLoadGate` (primary, engine-agnostic): pause ingestion while
     students are actively chatting. The signal is recent chat activity (a count
     sampled from the DB by the caller and passed to `observe`), so it works the
     same whether the engine is a local GPU or a remote API.
@@ -56,7 +56,7 @@ class GpuGate:
 
 
 class ChatLoadGate:
-    """[v7.1] Primary, engine-agnostic gate: pause ingestion while chat is busy.
+    """Primary, engine-agnostic gate: pause ingestion while chat is busy.
 
     The caller samples recent chat activity (e.g. a count of recent `Messages`
     from the DB) and passes it to `observe`. The gate is OPEN (ingestion allowed)

@@ -1,5 +1,5 @@
 /**
- * main.jsx — React entry point for Edu-LLM v5.
+ * main.jsx — React entry point for Edu-LLM.
  *
  * Boots up:
  *   1. Auth store hydration (restores JWT from localStorage)

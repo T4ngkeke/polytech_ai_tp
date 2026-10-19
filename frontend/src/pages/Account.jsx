@@ -1,5 +1,5 @@
 /**
- * Account.jsx — [v7.2] User center.
+ * Account.jsx — User center.
  *
  * Self-service password change for every role (student / teacher / admin).
  * The old password is verified server-side; on success the user stays logged in.

@@ -1,9 +1,9 @@
 """
-test_teacher_test_drive.py — [v8.0 §11A] teacher test-drive session.
+test_teacher_test_drive.py — teacher test-drive session.
 
 POST /labs/{lab_id}/test-session creates an is_test session the teacher owns, so
 they can chat as a preview (membership bypassed, writes
-excluded from analytics/LearnerProfile). Ownership-checked.
+excluded from analytics). Ownership-checked.
 """
 
 import uuid

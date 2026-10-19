@@ -1,5 +1,5 @@
 /**
- * SkillPresetManager.jsx — [v7.2] teacher skill-preset library.
+ * SkillPresetManager.jsx — teacher skill-preset library.
  *
  * A teacher keeps a private library of reusable instructor-style ("skill")
  * presets. "Use" loads a preset into the class rule editor (snapshot at save

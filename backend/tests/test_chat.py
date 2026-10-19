@@ -1,5 +1,5 @@
 """
-test_chat.py — Tests for POST /api/chat/stream (v7).
+test_chat.py — Tests for POST /api/chat/stream.
 
 Coverage
 --------
@@ -178,7 +178,7 @@ class TestGateChecks:
         assert resp.status_code == 403
 
     async def test_owner_test_session_bypasses_membership(self, db_session, seed_chat):
-        """[v8.0 §11A] The owning teacher's is_test session bypasses the student
+        """The owning teacher's is_test session bypasses the student
         membership check — they aren't enrolled in their own class, but a
         test-drive is theirs to open."""
         teacher = seed_chat["teacher"]
@@ -248,7 +248,7 @@ class TestGateChecks:
         assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
 
     async def test_locked_lab_rejected_403(self, client1, seed_chat, db_session):
-        # [v7.2 fix] README §6: a locked (is_active=False) lab must reject chat.
+        # A locked (is_active=False) lab must reject chat.
         lab = seed_chat["lab"]
         lab.is_active = False
         db_session.add(lab)

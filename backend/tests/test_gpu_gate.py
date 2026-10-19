@@ -1,5 +1,5 @@
 """
-test_gpu_gate.py — v7 GPU-aware off-peak gate for the ingestion worker.
+test_gpu_gate.py — GPU-aware off-peak gate for the ingestion worker.
 
 Pure logic: the GPU-utilization reader and the off-peak check are injected, so
 no real GPU (pynvml) or wall clock is needed.
@@ -37,7 +37,7 @@ def test_open_gate_stays_open_until_high_watermark():
     assert gate.should_run() is False  # 70 > 60 → closes
 
 
-# ── ChatLoadGate (v7.1 primary, engine-agnostic) ──
+# ── ChatLoadGate (primary, engine-agnostic) ──
 # Defaults: open (allow ingest) when load < 2, close (pause) when load > 6.
 
 def test_chat_gate_open_when_chat_quiet():

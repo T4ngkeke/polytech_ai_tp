@@ -1,5 +1,5 @@
 """
-test_history_trim.py — [v8.1] per-turn context cap (OOM protection).
+test_history_trim.py — per-turn context cap (OOM protection).
 
 The local inference engine can OOM on unbounded prompts; the 20-message
 history cap bounds count but not size. `trim_history` bounds the ESTIMATED

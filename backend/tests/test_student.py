@@ -1,5 +1,5 @@
 """
-test_student.py — Tests for student endpoints (v7).
+test_student.py — Tests for student endpoints.
 """
 
 import uuid

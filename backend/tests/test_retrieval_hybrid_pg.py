@@ -1,5 +1,5 @@
 """
-test_retrieval_hybrid_pg.py — [v7.1] hybrid retrieval against live pgvector.
+test_retrieval_hybrid_pg.py — hybrid retrieval against live pgvector.
 
 Exercises the real SQL: vector ANN + BM25 (tsvector) recall, RRF fusion, and the
 tenant filter enforced in the WHERE clause. Skips unless a pgvector
@@ -105,7 +105,7 @@ async def test_hybrid_search_does_not_leak_across_labs(pg_session):
     assert [h.content for h in hits] == ["lab A threads"]
 
 
-# --- [v7.3] BM25 OR semantics + language config --------------------------------
+# --- BM25 OR semantics + language config --------------------------------
 # plainto_tsquery is AND: one query word missing from the chunk → zero recall.
 # Natural-language French questions always carry extra words, so the old
 # ('simple' + AND) BM25 leg was silently dead. OR semantics + French stemming.

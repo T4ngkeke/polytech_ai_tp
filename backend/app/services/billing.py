@@ -1,5 +1,5 @@
 """
-billing.py — [v7.2] weighted-token quota accounting.
+billing.py — weighted-token quota accounting.
 
 Prefill (prompt) tokens are cheaper to serve than decode (completion) tokens, so
 the daily quota is charged on a weighted sum rather than the raw total:

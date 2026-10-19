@@ -24,7 +24,7 @@ async def create_session(
 ) -> Session:
     """Create a new chat session scoped to a specific lab.
 
-    [v8.0 §11] `is_test` marks a teacher test-drive session — excluded from
+    `is_test` marks a teacher test-drive session — excluded from
     analytics and the citation report."""
     session = Session(user_id=user_id, lab_id=lab_id, title=title, is_test=is_test)
     db.add(session)

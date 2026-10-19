@@ -1,5 +1,5 @@
 """
-test_chat_llm_config.py — [v7.2] chat's live config resolution exposes the
+test_chat_llm_config.py — chat's live config resolution exposes the
 independently-configurable embedding endpoint (and falls back to the main LLM).
 """
 

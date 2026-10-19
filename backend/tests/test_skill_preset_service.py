@@ -1,5 +1,5 @@
 """
-test_skill_preset_service.py — [v7.2] teacher skill-preset library + apply-to-class.
+test_skill_preset_service.py — teacher skill-preset library + apply-to-class.
 
 A teacher keeps a private library of reusable instructor-style presets. Applying
 one to a class *snapshot-copies* its content into the class's level=class rule —

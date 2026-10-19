@@ -1,5 +1,5 @@
 """
-test_documents.py — v7 ingestion data model tests.
+test_documents.py — ingestion data model tests.
 
 Covers the Document state-machine table (pending → processing → indexed → failed).
 """
@@ -138,7 +138,7 @@ async def test_docchunk_stores_embedding_and_lab_scope(db_session):
 
 
 # ---------------------------------------------------------------------------
-# [v8.1] Markdown ingestion: _default_parse splits an .md file into heading
+# Markdown ingestion: _default_parse splits an .md file into heading
 # pseudo-pages and still runs the character-yield gate (a renamed junk file
 # must not slip through). Other non-PDF suffixes keep the single-page test
 # fallback untouched.

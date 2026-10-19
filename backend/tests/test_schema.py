@@ -1,7 +1,7 @@
 """
 test_schema.py — the shape of the data model after the CM-only rewrite.
 
-Replaces the three release-shaped schema files (v7.1 / v8.0 / PR-2b deltas). The
+Replaces the three release-shaped schema files. The
 model no longer has a document *type*: every upload is course material, so the
 exercise / answer / hint half of the schema is gone and with it the routing
 metadata that only existed to steer documents into it.

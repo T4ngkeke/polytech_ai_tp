@@ -1,5 +1,5 @@
 """
-routers/admin.py — Admin-only endpoints for Edu-LLM v7.
+routers/admin.py — Admin-only endpoints for Edu-LLM.
 
 All DB/business logic is delegated to the services/ layer.
 Admin bypasses ownership checks — no class/lab ownership is verified here.
@@ -179,7 +179,7 @@ async def update_role(
 
 
 # ===================================================================
-# PUT /api/admin/users/{user_id}/password  ([v7.2] admin reset)
+# PUT /api/admin/users/{user_id}/password  (admin reset)
 # ===================================================================
 
 
@@ -234,7 +234,7 @@ async def _upsert_config(db: AsyncSession, key: str, value: str) -> None:
         db.add(config)
 
 
-# [v7.2] Map LLMConfig request/response field names → SystemConfig keys.
+# Map LLMConfig request/response field names → SystemConfig keys.
 # String fields (endpoints/models/knobs); token weights are handled separately.
 _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "base_url": "LLM_BASE_URL",
@@ -250,9 +250,9 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "agent_base_url": "AGENT_BASE_URL",
     "agent_api_key": "AGENT_API_KEY",
     "agent_model": "AGENT_MODEL",
-    # [v8.1] estimated-token budget for chat history (OOM protection).
+    # estimated-token budget for chat history (OOM protection).
     "context_max_tokens": "CONTEXT_MAX_TOKENS",
-    # [v8.1] VLM slot (garbled-formula transcription; empty model = off).
+    # VLM slot (garbled-formula transcription; empty model = off).
     "vlm_base_url": "VLM_BASE_URL",
     "vlm_api_key": "VLM_API_KEY",
     "vlm_model": "VLM_MODEL",
@@ -581,7 +581,7 @@ async def force_update_lab(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> LabResponse:
-    """[v7.2] God-mode lab update: lock/unlock (``is_active``) or rename any lab
+    """Admin lab update: lock/unlock (``is_active``) or rename any lab
     system-wide, bypassing ownership. Mirrors the ``DELETE /api/admin/labs``
     pattern — the teacher route still enforces ownership."""
     lab = await lab_service.get_lab_by_id(db, lab_id)

@@ -1,5 +1,5 @@
 """
-test_analytics.py — [v8.0 §11A] class analytics excludes teacher test-drives.
+test_analytics.py — class analytics excludes teacher test-drives.
 
 Test-drive sessions (is_test) are the teacher previewing their own lab; their
 tokens/requests must not inflate the class usage report.

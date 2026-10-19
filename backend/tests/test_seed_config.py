@@ -1,5 +1,5 @@
 """
-test_seed_config.py — v7.1 SystemConfig default keys.
+test_seed_config.py — SystemConfig default keys.
 
 The seed must provision the config-driven knobs so a fresh install has working
 defaults: a reranker endpoint/model and the model slots. All model wiring reads
@@ -11,9 +11,9 @@ from backend.seed import DEFAULT_SYSTEM_CONFIGS
 
 def test_seed_includes_v71_config_keys():
     keys = {c["key"] for c in DEFAULT_SYSTEM_CONFIGS}
-    # v7 keys still present
+    # Base model keys
     assert {"LLM_BASE_URL", "LLM_MODEL", "EMBEDDING_MODEL"} <= keys
-    # v7.1 additions
+    # Reranker keys
     assert {"RERANK_URL", "RERANK_MODEL"} <= keys
 
 

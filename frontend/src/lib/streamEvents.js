@@ -1,4 +1,4 @@
-// streamEvents.js — [v8.0] shared interpreter for the chat SSE stream.
+// streamEvents.js — shared interpreter for the chat SSE stream.
 //
 // The server (backend/app/routers/chat.py) opens the stream with a named
 // `status` event, then streams JSON-encoded content tokens as anonymous

@@ -222,7 +222,7 @@ export default function Chat() {
     // millisecond, so streamed tokens reach the correct bubble on HTTP too.
     const userMsgId = createMessageId();
     const assistantMsgId = createMessageId();
-    // [v8.0] Client temp ids aren't the server Message ids, so this bubble can't
+    // Client temp ids aren't the server Message ids, so this bubble can't
     // be rated until the session reloads (feedback endpoint needs the real id).
     streamedIdsRef.current.add(assistantMsgId);
     const userMsg = { id: userMsgId, sender: 'user', content: text, created_at: new Date().toISOString() };
@@ -627,7 +627,7 @@ export default function Chat() {
               {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
             </button>
           </div>
-          {/* [v8.0] Transparency: students are told their teacher can see the chat. */}
+          {/* Transparency: students are told their teacher can see the chat. */}
           <p className="mt-2 text-center text-[11px] text-cream-muted">
             Your teacher can see this conversation.
           </p>

@@ -1,8 +1,8 @@
 """
-test_model_routing.py — [v7.2] the pure SystemConfigs → model-routing resolver.
+test_model_routing.py — the pure SystemConfigs → model-routing resolver.
 
 The resolver turns the raw key/value map from `system_configs` into a structured
-routing config, applying the v7.2 fallback rule: embedding / agent
+routing config, applying the fallback rule: embedding / agent
 endpoints fall back to the main LLM when their own values are empty, so the
 cheap-model split is opt-in and the default behaviour is unchanged.
 """
@@ -96,7 +96,7 @@ def test_agent_uses_its_own_endpoint_when_set():
     assert routing.agent.model == "qwen3-235b"
 
 
-# --- [v7.3] worker budgets ----------------------------------------------------
+# --- worker budgets ----------------------------------------------------
 
 
 def test_hint_sampling_budget_is_gone():
@@ -104,7 +104,7 @@ def test_hint_sampling_budget_is_gone():
     assert not hasattr(routing, "hint_max_samples")
 
 
-# --- [v8.1] VLM slot (garbled-formula transcription; opt-in, never falls back) ---
+# --- VLM slot (garbled-formula transcription; opt-in, never falls back) ---
 
 
 def test_vlm_model_empty_means_off_not_fallback():

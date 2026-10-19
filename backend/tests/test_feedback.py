@@ -1,5 +1,5 @@
 """
-test_feedback.py — [v8.0 §11B] student thumbs up/down on an assistant message.
+test_feedback.py — student thumbs up/down on an assistant message.
 
 POST /api/chat/messages/{id}/feedback sets Message.feedback (a free golden-set
 label; a 👎 links back to the message's AgentTraceLog for review). A student may

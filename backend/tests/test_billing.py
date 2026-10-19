@@ -1,5 +1,5 @@
 """
-test_billing.py — [v7.2] weighted-token quota accounting.
+test_billing.py — weighted-token quota accounting.
 
 Quota is charged on billed tokens = prompt*alpha + completion*beta, so prefill
 (prompt) tokens — which are cheaper than decode (completion) — no longer count

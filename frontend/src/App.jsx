@@ -1,5 +1,5 @@
 /**
- * App.jsx — React Router v6 route definitions for Edu-LLM v7.2.
+ * App.jsx — React Router v6 route definitions for Edu-LLM.
  *
  * Route Structure:
  *   /login           → Login page (public)

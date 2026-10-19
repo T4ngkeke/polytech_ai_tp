@@ -1,5 +1,5 @@
 /**
- * Teacher.jsx — Teacher workspace v7.2.
+ * Teacher.jsx — Teacher workspace.
  * Layout: Left HierarchicalSidebar + Right context-sensitive panel.
  * Selected node determines right panel: Class (students/rules) | Lab (rules/analytics/audit).
  */
@@ -578,9 +578,8 @@ function LabSettingsPanel({ lab, onToggle }) {
 }
 
 // Teacher test-drive — opens an is_test session on the lab and chats through
-// the real agent as a preview. The server excludes these writes from analytics
-// and LearnerProfile, and the token cost is charged to the teacher, not a
-// student.
+// the real agent as a preview. The server excludes these writes from analytics,
+// and the token cost is charged to the teacher, not a student.
 function ClassSettingsPanel({ cls, onChange }) {
   const [saving, setSaving] = useState(false);
   const toggle = async () => {

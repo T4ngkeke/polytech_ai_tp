@@ -1,5 +1,5 @@
 """
-services/skill_preset_service.py — [v7.2] teacher skill-preset library.
+services/skill_preset_service.py — teacher skill-preset library.
 
 A teacher maintains a private library of reusable instructor-style (`skill.md`)
 presets. Applying one to a class **snapshot-copies** its content into the class's

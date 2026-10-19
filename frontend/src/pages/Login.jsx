@@ -1,5 +1,5 @@
 /**
- * Login.jsx — Full-screen login page for Edu-LLM v7.2.
+ * Login.jsx — Full-screen login page for Edu-LLM.
  * Editorial layout with a cyan call to action.
  */
 

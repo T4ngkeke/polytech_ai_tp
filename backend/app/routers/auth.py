@@ -132,7 +132,7 @@ async def get_me(
 
 
 # ===================================================================
-# POST /api/auth/change-password  ([v7.2] self-service)
+# POST /api/auth/change-password  (self-service)
 # ===================================================================
 
 

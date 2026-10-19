@@ -1,5 +1,5 @@
 """
-schemas.py — Pydantic v2 request/response schemas for Edu-LLM v7 Agentic Class-Lab Architecture.
+schemas.py — Pydantic v2 request/response schemas for Edu-LLM.
 
 Each router domain has its own section.  Models marked *Request* are used for
 incoming payloads; models marked *Response* are returned to the client.
@@ -37,7 +37,7 @@ class MessageFeedbackValue(str, Enum):
 
 
 class MessageFeedbackRequest(BaseModel):
-    """[v8.0 §11B] A student's thumbs on an assistant message."""
+    """A student's thumbs on an assistant message."""
     feedback: MessageFeedbackValue
 
 
@@ -68,13 +68,13 @@ class TokenResponse(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    """[v7.2] Self-service password change — old password is verified."""
+    """Self-service password change — old password is verified."""
     old_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=6)
 
 
 class AdminResetPasswordRequest(BaseModel):
-    """[v7.2] Admin reset of any user's password — no old password required."""
+    """Admin reset of any user's password — no old password required."""
     new_password: str = Field(..., min_length=6)
 
 
@@ -122,7 +122,7 @@ class LLMConfigRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
 
-    # [v7.2] model-routing table. All optional: only provided (non-None) fields
+    # model-routing table. All optional: only provided (non-None) fields
     # are upserted, so a legacy 3-field PUT never wipes the routing config.
     # Empty string = "inherit the main LLM" (see model_routing.resolve).
     embedding_url: str | None = None
@@ -135,7 +135,7 @@ class LLMConfigRequest(BaseModel):
     agent_base_url: str | None = None
     agent_api_key: str | None = None
     agent_model: str | None = None
-    # [v8.1] estimated-token budget for chat history (OOM protection).
+    # estimated-token budget for chat history (OOM protection).
     context_max_tokens: str | None = None
     # VLM slot — images the research agent views and figure descriptions.
     # Empty model = feature off (never falls back — vision is opt-in).
@@ -159,7 +159,7 @@ class LLMConfigResponse(BaseModel):
     base_url: str
     api_key: str
     model: str
-    # [v7.2] raw stored values — empty means "inherits the main LLM".
+    # raw stored values — empty means "inherits the main LLM".
     embedding_url: str = ""
     embedding_api_key: str = ""
     embedding_model: str = ""
@@ -170,7 +170,7 @@ class LLMConfigResponse(BaseModel):
     agent_base_url: str = ""
     agent_api_key: str = ""
     agent_model: str = ""
-    # [v8.1] estimated-token budget for chat history (OOM protection).
+    # estimated-token budget for chat history (OOM protection).
     context_max_tokens: str = ""
     # VLM slot — empty model = vision off.
     vlm_base_url: str = ""
@@ -295,7 +295,7 @@ class DocumentSummaryResponse(BaseModel):
 
 
 class ChunkResponse(BaseModel):
-    """[v7.1] One indexed chunk — the 'is it well processed?' inspector surface."""
+    """One indexed chunk — the 'is it well processed?' inspector surface."""
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -307,12 +307,12 @@ class ChunkResponse(BaseModel):
 
 
 class ChunkUpdateRequest(BaseModel):
-    """[v7.2] Teacher correction of a chunk's text (triggers re-embed + re-index)."""
+    """Teacher correction of a chunk's text (triggers re-embed + re-index)."""
     content: str = Field(..., min_length=1)
 
 
 class TestSessionResponse(BaseModel):
-    """[v8.0 §11A] The id of a freshly created teacher test-drive session."""
+    """The id of a freshly created teacher test-drive session."""
     session_id: uuid.UUID
 
 
@@ -359,7 +359,7 @@ class RuleResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# [v7.2] Skill presets (instructor-style library)
+# Skill presets (instructor-style library)
 # ---------------------------------------------------------------------------
 
 
@@ -539,7 +539,7 @@ class AdminAnalyticsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Analytics — Hierarchical (v7)
+# Analytics — Hierarchical
 # ---------------------------------------------------------------------------
 
 

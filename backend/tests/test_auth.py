@@ -1,5 +1,5 @@
 """
-test_auth.py — Tests for auth endpoints and dependencies (v7).
+test_auth.py — Tests for auth endpoints and dependencies.
 
 Coverage
 --------
@@ -286,7 +286,7 @@ class TestMe:
 
 
 # ===================================================================
-# 7. POST /api/auth/change-password  ([v7.2] self-service)
+# 7. POST /api/auth/change-password  (self-service)
 # ===================================================================
 
 

@@ -1,5 +1,5 @@
 /**
- * authStore.js — Zustand global auth state for Edu-LLM v5.
+ * authStore.js — Zustand global auth state for Edu-LLM.
  *
  * Stores: token, userId, username, userRole
  * Persists JWT to localStorage; hydrates on app boot.

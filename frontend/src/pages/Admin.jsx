@@ -1,5 +1,5 @@
 /**
- * Admin.jsx — God-mode dashboard v7.2.
+ * Admin.jsx — Admin dashboard.
  * Left nav rail: Users | Classes | Monitoring | LLM Config | Maintenance.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -690,7 +690,7 @@ function TeacherName({ cls }) {
   );
 }
 
-/* ═══════════════════ LLM CONFIG TAB — system map [v8.1] ══════════════════ */
+/* ═══════════════════ LLM CONFIG TAB — system map ══════════════════ */
 // The model-routing table drawn as the system it configures: grey source
 // nodes (students / worker) call the model slots; an empty slot either
 // inherits the main LLM (dashed gold return edge) or is simply off. Click a

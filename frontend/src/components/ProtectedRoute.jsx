@@ -1,5 +1,5 @@
 /**
- * ProtectedRoute.jsx — Role-gated route wrapper for Edu-LLM v5.
+ * ProtectedRoute.jsx — Role-gated route wrapper for Edu-LLM.
  */
 
 import { Navigate, Outlet } from 'react-router-dom';

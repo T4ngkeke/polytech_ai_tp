@@ -1,5 +1,5 @@
 """
-routers/teacher.py — Teacher endpoints for Edu-LLM v7.
+routers/teacher.py — Teacher endpoints for Edu-LLM.
 
 All DB/business logic is delegated to the services/ layer.
 This router only: (1) authenticates, (2) verifies ownership, (3) calls service, (4) returns response.
@@ -103,7 +103,7 @@ async def _verify_class_ownership(db: AsyncSession, class_id: uuid.UUID, teacher
 async def _verify_rule_target_ownership(
     db: AsyncSession, level: RuleLevel, target_id: uuid.UUID, teacher: User
 ) -> None:
-    """[v7.2] A teacher may only read/write rules for a target inside one of their
+    """A teacher may only read/write rules for a target inside one of their
     own classes — these rules are injected into the chat prompt, so cross-tenant
     writes would let one teacher hijack another's tutor behavior."""
     if level == RuleLevel.class_:
@@ -428,7 +428,7 @@ async def create_test_session(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TestSessionResponse:
-    """[v8.0 §11A] Open a test-drive session on a lab the teacher owns — chat as a
+    """Open a test-drive session on a lab the teacher owns — chat as a
     preview (membership bypassed, writes excluded from
     analytics and the citation report)."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
@@ -471,7 +471,7 @@ async def list_rules(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[RuleResponse]:
     """List rules with optional level and target_id filters."""
-    # [v7.2] When asking for a specific target's rule, verify the teacher owns it.
+    # When asking for a specific target's rule, verify the teacher owns it.
     if target_id is not None and level is not None:
         await _verify_rule_target_ownership(db, RuleLevel(level), target_id, teacher)
     rules = await rule_service.list_rules(db, level=level, target_id=target_id)
@@ -479,7 +479,7 @@ async def list_rules(
 
 
 # ===================================================================
-# [v7.2] Skill presets — instructor-style library + apply-to-class
+# Skill presets — instructor-style library + apply-to-class
 # ===================================================================
 
 
@@ -585,7 +585,7 @@ async def get_chat_history(
     and the `is_deleted` flag on each row lets the UI mark the hidden ones. Only an
     admin hard-delete actually removes a session.
     """
-    # [v7.2] Ownership scope (applied unconditionally so a supplied session_id /
+    # Ownership scope (applied unconditionally so a supplied session_id /
     # student_id can't escape it): a teacher only audits sessions in labs of the
     # classes they own.
     owned_lab_ids = (await db.execute(

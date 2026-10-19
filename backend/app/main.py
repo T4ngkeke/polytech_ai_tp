@@ -1,5 +1,5 @@
 """
-main.py — FastAPI application entry point for Edu-LLM v7 Agentic Class-Lab Architecture.
+main.py — FastAPI application entry point for Edu-LLM.
 
 Startup sequence
 ----------------
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
         # Import models so Base.metadata is populated before create_all
         import backend.app.models  # noqa: F401
 
-        # [v7] pgvector must exist before create_all builds vector() columns.
+        # pgvector must exist before create_all builds vector() columns.
         if conn.dialect.name == "postgresql":
             from sqlalchemy import text
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -87,10 +87,10 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="Edu-LLM v7 Agentic Class-Lab Architecture",
+    title="Edu-LLM",
     description=(
-        "Educational LLM platform with 3-tier RBAC, hierarchical Class-Lab structure, "
-        "three-tier rule injection, dynamic LLM config, and invite-code join flow."
+        "A course tutor: students ask questions in a lab, and the model answers "
+        "from the teacher's PDFs and cites the pages it used."
     ),
     version="7.0.0",
     lifespan=lifespan,

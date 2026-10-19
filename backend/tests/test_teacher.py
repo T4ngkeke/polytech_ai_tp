@@ -1,5 +1,5 @@
 """
-test_teacher.py — Tests for teacher endpoints (v7).
+test_teacher.py — Tests for teacher endpoints.
 """
 
 import uuid
@@ -222,7 +222,7 @@ class TestUpsertRule:
         assert resp.status_code == 422
 
     async def test_cannot_upsert_rule_on_foreign_class_403(self, teacher_client, db_session):
-        # [v7.2 fix] A teacher must not write rules (injected into the prompt) on
+        # A teacher must not write rules (injected into the prompt) on
         # another teacher's class.
         other = make_user(role=UserRole.teacher, username="other_t3")
         db_session.add(other)
@@ -452,7 +452,7 @@ class TestUpdateLab:
         assert resp.status_code == 403
 
     async def test_teacher_cannot_update_foreign_lab_403(self, teacher_client, db_session):
-        """[v7.2 bugfix #1] The teacher route still enforces ownership — only the
+        """The teacher route still enforces ownership — only the
         new admin route bypasses it."""
         other = make_user(role=UserRole.teacher, username="other_t_lab")
         db_session.add(other)
@@ -497,14 +497,14 @@ class TestTeacherClassAnalytics:
         assert resp.status_code == 200
         body = resp.json()
         assert body["class_id"] == str(seed_data["class"].id)
-        # [v7.2] analytics tokens are billed tokens (reconcile with quota), so the
+        # analytics tokens are billed tokens (reconcile with quota), so the
         # llm message's billed_tokens=9, not the raw 25.
         assert body["total_tokens"] == 9
         assert len(body["labs"]) >= 1
         assert len(body["labs"][0]["students"]) >= 1
 
     async def test_request_count_is_per_exchange_not_per_message(self, teacher_client, seed_data):
-        # [v7.2 fix] seed_data has 1 user + 1 llm message = ONE exchange. Counting
+        # seed_data has 1 user + 1 llm message = ONE exchange. Counting
         # all Message rows would report 2; an exchange is one llm reply.
         resp = await teacher_client.get(
             f"/api/teacher/analytics/classes/{seed_data['class'].id}")
@@ -524,7 +524,7 @@ class TestTeacherClassAnalytics:
 
 
 # ===================================================================
-# [v7.2] Skill presets (library + apply-to-class)
+# Skill presets (library + apply-to-class)
 # ===================================================================
 
 class TestSkillPresets:
@@ -585,7 +585,7 @@ class TestSkillPresets:
         assert any(r["rules_text"] == "Be formal." for r in rules.json())
 
     async def test_chat_history_scoped_to_own_classes(self, teacher_client, seed_data, db_session):
-        # [v7.2 fix] A foreign teacher's class/lab/session must be invisible even
+        # A foreign teacher's class/lab/session must be invisible even
         # when its session_id is supplied directly (IDOR).
         other = make_user(role=UserRole.teacher, username="other_t2")
         stu = make_user(role=UserRole.student, username="foreign_stu")
