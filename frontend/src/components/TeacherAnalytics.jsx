@@ -7,6 +7,9 @@
  * Teacher test sessions are not counted. Days and hours are Paris time; the
  * charts cover the last 30 days. "Today" token figures are the student's
  * quota, which all their classes share.
+ *
+ * The admin Classes tab shows the same view with `refill={false}` (the admin
+ * sets quotas in Users) and without the links to conversations.
  */
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
@@ -21,7 +24,9 @@ import {
 const MODE_LABEL = { direct: 'Direct', search: 'Search', research: 'Research' };
 const HEAT = ['bg-ink-surface', 'bg-cyan/20', 'bg-cyan/40', 'bg-cyan/65', 'bg-cyan/90'];
 
-export default function TeacherAnalytics({ data, classId, onReload, onOpenConversation, onOpenStudent }) {
+export default function TeacherAnalytics({
+  data, classId, onReload, onOpenConversation, onOpenStudent, refill = true,
+}) {
   if (!data) {
     return (
       <div className="flex items-center gap-2 text-cream-muted text-sm">
@@ -42,7 +47,8 @@ export default function TeacherAnalytics({ data, classId, onReload, onOpenConver
         <Stat label="Thumbs down" value={o.thumbs_down}
           hint={rated ? `${Math.round((100 * o.thumbs_down) / rated)}% of ${rated} rated answers` : 'No answer rated yet'} />
         <Stat label="At limit today" value={o.at_limit_today} warn={o.at_limit_today > 0}
-          hint={o.at_limit_today ? 'Refill their quota in the table below' : 'Nobody is blocked'} />
+          hint={!o.at_limit_today ? 'Nobody is blocked'
+            : refill ? 'Refill their quota in the table below' : 'Raise their quota in Users'} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -56,7 +62,7 @@ export default function TeacherAnalytics({ data, classId, onReload, onOpenConver
 
       <Card title="Students" note={<Modes modes={data.modes} />}>
         <StudentTable students={data.students} classId={classId} onReload={onReload}
-          onOpenStudent={onOpenStudent} />
+          onOpenStudent={onOpenStudent} refill={refill} />
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -130,7 +136,7 @@ function Tip({ tip }) {
   );
 }
 
-function DailyBars({ days }) {
+export function DailyBars({ days }) {
   const max = Math.max(1, ...days.map((d) => d.questions));
   const { ref, tip, on, hide } = useTip();
   return (
@@ -206,7 +212,7 @@ const COLUMNS = [
   ['thumbs_down', <Icon key="icon" name="thumbsDown" className="inline h-3.5 w-3.5 align-[-2px]" title="Thumbs down" />],
 ];
 
-function StudentTable({ students, classId, onReload, onOpenStudent }) {
+function StudentTable({ students, classId, onReload, onOpenStudent, refill }) {
   const [sort, setSort] = useState({ key: 'questions', dir: 'desc' });
   const [busy, setBusy] = useState(null);
   const rows = sortStudents(students, sort.key, sort.dir);
@@ -214,7 +220,7 @@ function StudentTable({ students, classId, onReload, onOpenStudent }) {
     ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
     : { key, dir: key === 'username' ? 'asc' : 'desc' }));
 
-  const refill = async (s) => {
+  const refillQuota = async (s) => {
     setBusy(s.user_id);
     try {
       const out = await api.post(`/api/teacher/classes/${classId}/students/${s.user_id}/quota-refill`);
@@ -240,7 +246,7 @@ function StudentTable({ students, classId, onReload, onOpenStudent }) {
                 </button>
               </th>
             ))}
-            <th className="px-2 py-2 text-right font-medium">Quota</th>
+            {refill && <th className="px-2 py-2 text-right font-medium">Quota</th>}
           </tr>
         </thead>
         <tbody>
@@ -274,9 +280,9 @@ function StudentTable({ students, classId, onReload, onOpenStudent }) {
                 ) : '—'}
               </td>
               <td className="px-2 py-2 font-mono text-cream-secondary">{s.thumbs_down || ''}</td>
-              <td className="px-2 py-1 text-right">
+              {refill && <td className="px-2 py-1 text-right">
                 {canRefill(s) && (
-                  <button type="button" disabled={busy === s.user_id} onClick={() => refill(s)}
+                  <button type="button" disabled={busy === s.user_id} onClick={() => refillQuota(s)}
                     title="Give a full daily quota again for today; usage is kept"
                     className={`rounded-lg border px-2.5 py-1 text-xs transition-colors disabled:opacity-50 ${
                       s.at_limit ? 'border-cyan/40 bg-cyan-muted text-cream hover:bg-cyan/20'
@@ -284,7 +290,7 @@ function StudentTable({ students, classId, onReload, onOpenStudent }) {
                     Refill
                   </button>
                 )}
-              </td>
+              </td>}
             </tr>
           ))}
         </tbody>

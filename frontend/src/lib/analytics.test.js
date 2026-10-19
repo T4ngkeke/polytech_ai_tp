@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  busiestHour, canRefill, heatLevel, lastActive, questionCount, quotaShare, shortDay, sortStudents, tipShift,
+  busiestHour, canRefill, classesByTeacher, heatLevel, lastActive, lastDays, lastWeek, questionCount, quotaShare,
+  shortDay, sortClasses, sortStudents, tipShift,
 } from './analytics.js';
 
 test('question counts read as words', () => {
@@ -60,4 +61,37 @@ test('students sort by a column, then by name', () => {
 
 test('a day keeps its date in every time zone', () => {
   assert.equal(shortDay('2026-10-13'), '13 Oct');
+});
+
+test('the platform chart has every one of the last days, empty ones at zero', () => {
+  const days = lastDays([{ date: '2026-10-18', requests: 4 }, { date: '2026-09-01', requests: 9 }],
+    3, new Date(2026, 9, 19));
+  assert.deepEqual(days, [
+    { date: '2026-10-17', questions: 0 },
+    { date: '2026-10-18', questions: 4 },
+    { date: '2026-10-19', questions: 0 },
+  ]);
+});
+
+test('the last week adds up the last seven days only', () => {
+  const days = Array.from({ length: 10 }, (_, i) => ({ date: `d${i}`, questions: 1 }));
+  assert.equal(lastWeek(days), 7);
+});
+
+test('classes are grouped by the teacher who owns them', () => {
+  const owned = classesByTeacher([
+    { teacher_id: 't1', name: 'A' }, { teacher_id: 't2', name: 'B' }, { teacher_id: 't1', name: 'C' },
+  ]);
+  assert.deepEqual(owned, { t1: ['A', 'C'], t2: ['B'] });
+});
+
+test('classes sort by teacher, then by name', () => {
+  const rows = [
+    { name: 'Z', teacher_username: 'bob', student_count: 1, questions_7d: 0, last_active: null },
+    { name: 'A', teacher_username: 'bob', student_count: 5, questions_7d: 3, last_active: '2026-10-18T10:00:00Z' },
+    { name: 'M', teacher_username: 'alice', student_count: 2, questions_7d: 9, last_active: null },
+  ];
+  assert.deepEqual(sortClasses(rows, 'teacher').map((c) => c.name), ['M', 'A', 'Z']);
+  assert.deepEqual(sortClasses(rows, 'questions_7d', 'desc').map((c) => c.name), ['M', 'A', 'Z']);
+  assert.deepEqual(sortClasses(rows, 'last_active', 'desc').map((c) => c.name), ['A', 'M', 'Z']);
 });

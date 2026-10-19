@@ -8,6 +8,9 @@ account, the token quota is pushed off screen, or the admin model map is missing
 In a teacher lab, the class name in the breadcrumb must open the class, and the
 Analytics tab must show its charts and refill a student's quota; Audit shows
 the latest AI report on the lab.
+The admin Classes tab lists each class with its teacher (red when the class
+has no teacher left), opens a class on its Usage without refill buttons, and
+the Users tab warns before deleting a teacher who still owns classes.
 The admin Monitoring tab shows the real Grafana dashboards (not mocked), in the
 app's theme; it needs the monitoring containers running, and MONITORING_COOKIE
 (an admin's monitoring token), since Grafana is open to app admins only.
@@ -91,6 +94,29 @@ MOCKS = {
                    '1. **SQL** (~35 questions) : « c\'est quoi la différence entre WHERE et HAVING »\n\n'
                    '## How to prepare the next session\n1. Revoir `CoursInfoDeBase-2022_SQL.pdf` p.28.'}},
 }
+
+MOCKS['/api/admin/analytics/classes/class/details'] = MOCKS['/api/teacher/analytics/classes/class/details']
+MOCKS.update({
+    '/api/admin/users': [
+        {'id': 'admin', 'username': 'admin', 'role': 'admin', 'daily_token_quota': 50000},
+        {'id': 't1', 'username': 'alice.martin', 'role': 'teacher', 'daily_token_quota': 50000},
+        {'id': 's1', 'username': 'bob', 'role': 'student', 'daily_token_quota': 50000},
+    ],
+    '/api/admin/classes': [
+        {'id': 'class', 'name': 'Informatique', 'teacher_id': 't1', 'teacher_username': 'alice.martin',
+         'teacher_ok': True, 'exam_mode': True, 'lab_count': 1, 'student_count': 3, 'questions_7d': 12,
+         'last_active': '2026-10-15T09:00:00Z', 'invite_code': 'ABC123', 'is_deleted': False,
+         'created_at': '2026-09-01T09:00:00Z'},
+        {'id': 'other', 'name': 'Automatique', 'teacher_id': 'gone', 'teacher_username': 'old.teacher',
+         'teacher_ok': False, 'exam_mode': False, 'lab_count': 2, 'student_count': 14, 'questions_7d': 0,
+         'last_active': None, 'invite_code': 'DEF456', 'is_deleted': False, 'created_at': '2026-09-01T09:00:00Z'},
+    ],
+    '/api/admin/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True, 'is_deleted': False}],
+    '/api/admin/classes/class/students': [{'id': 's1', 'username': 'bob', 'role': 'student'}],
+    '/api/admin/analytics': {'total_tokens': 1234567, 'total_requests': 812, 'active_users_7d': 9,
+                             'daily_breakdown': [{'date': f'2026-10-{d:02d}', 'tokens': 1000 * d, 'requests': d}
+                                                 for d in range(1, 19)]},
+})
 
 # role, path, text that shows the page is ready, steps after loading, drawer label
 PAGES = [
@@ -474,6 +500,53 @@ def check_analytics(browser, target, shots):
                 context.close()
 
 
+def check_admin_classes(browser, target, shots):
+    # Classes: every class with its teacher; a class opens on Usage, Labs, Students.
+    for theme in ('light', 'dark'):
+        for size in (DESKTOP, PHONE):
+            name = f'admin-classes-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'admin', '/admin', theme, size)
+            try:
+                if size == PHONE:
+                    page.get_by_role('button', name='Menu').click()
+                page.get_by_role('button', name='Classes', exact=True).click()
+                expect(page.get_by_text('alice.martin', exact=True)).to_be_visible()
+                expect(page.get_by_text('old.teacher · no teacher', exact=True)).to_be_visible()
+                expect(page.get_by_text('Questions per day · whole platform', exact=False)).to_be_visible()
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+
+                page.get_by_text('Informatique', exact=True).click()
+                expect(page.get_by_text('When students ask', exact=True)).to_be_visible()
+                expect(page.get_by_text('Teacher:', exact=False)).to_be_visible()
+                expect(page.get_by_role('button', name='Refill')).to_have_count(0)
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: class page scrolls sideways by {overflow}px'
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}-class.png'), full_page=True)
+                page.get_by_role('button', name='Labs', exact=True).click()
+                expect(page.get_by_text('TP agent', exact=True)).to_be_visible()
+                page.get_by_role('button', name='Students', exact=True).click()
+                expect(page.get_by_text('bob', exact=True)).to_be_visible()
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+
+    # Users: a teacher's classes, and a warning before deleting them.
+    context, page, errors = open_page(browser, target, 'admin', '/admin', 'light', DESKTOP)
+    try:
+        expect(page.get_by_text('1 class: Informatique', exact=True)).to_be_visible()
+        page.get_by_role('row', name='alice.martin').get_by_title('Delete user').click()
+        expect(page.get_by_text('still owns 1 class: Informatique', exact=False)).to_be_visible()
+        assert not errors, errors
+        print('PASS: the Users tab shows the classes of a teacher before deleting them')
+    finally:
+        context.close()
+
+
 def check_report(browser, target, shots):
     # Audit > AI report: the latest report, with what it is based on, at every width.
     for theme in ('light', 'dark'):
@@ -566,6 +639,7 @@ def main():
             check_document_pictures(browser, target, shots)
             check_analytics(browser, target, shots)
             check_report(browser, target, shots)
+            check_admin_classes(browser, target, shots)
             check_monitoring(browser, target, shots)
             check_long_answer_stays_at_its_start(browser, target)
         finally:

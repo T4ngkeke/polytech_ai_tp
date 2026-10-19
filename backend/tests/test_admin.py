@@ -495,6 +495,31 @@ class TestAdminListClasses:
         assert "Admin Test Class" in names
         assert "Deleted Class" not in names
 
+    async def test_teacher_and_counts(self, admin_full_client, seed_full):
+        resp = await admin_full_client.get("/api/admin/classes")
+        row = next(c for c in resp.json() if c["name"] == "Admin Test Class")
+        assert row["teacher_username"] == "teacher1"
+        assert row["teacher_ok"] is True
+        assert row["lab_count"] == 1                  # the deleted lab is not counted
+        assert row["student_count"] == 2
+        assert row["questions_7d"] == 2          # "Hello" and "Old message"
+        assert row["last_active"] is not None
+
+    async def test_deleted_teacher_is_flagged(self, admin_full_client, seed_full, db_session):
+        seed_full["teacher"].is_deleted = True
+        await db_session.commit()
+        resp = await admin_full_client.get("/api/admin/classes")
+        row = next(c for c in resp.json() if c["name"] == "Admin Test Class")
+        assert row["teacher_username"] == "teacher1"
+        assert row["teacher_ok"] is False
+
+    async def test_owner_no_longer_teacher_is_flagged(self, admin_full_client, seed_full, db_session):
+        seed_full["teacher"].role = UserRole.student
+        await db_session.commit()
+        resp = await admin_full_client.get("/api/admin/classes")
+        row = next(c for c in resp.json() if c["name"] == "Admin Test Class")
+        assert row["teacher_ok"] is False
+
     async def test_pagination(self, admin_full_client, seed_full):
         resp = await admin_full_client.get("/api/admin/classes?skip=0&limit=1")
         assert resp.status_code == 200
@@ -567,6 +592,7 @@ class TestAdminAnalytics:
         body = resp.json()
         assert body["total_tokens"] >= 1234
         assert body["total_requests"] >= 5
+        assert body["active_users_7d"] == 1
         assert len(body["daily_breakdown"]) >= 1
 
     async def test_empty_state(self, admin_client):
@@ -728,6 +754,47 @@ class TestAdminClassAnalytics:
     async def test_student_rejected_403(self, student_full_client, seed_full):
         resp = await student_full_client.get(
             f"/api/admin/analytics/classes/{seed_full['class'].id}")
+        assert resp.status_code == 403
+
+
+class TestAdminClassAnalyticsDetails:
+    """The teacher Analytics view, for any class, without owning it."""
+
+    async def test_class_details(self, admin_full_client, seed_full):
+        resp = await admin_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["overview"]["members"] == 2
+        assert body["overview"]["questions"] == 2
+        assert {s["username"] for s in body["students"]} == {"student_a", "student_b"}
+
+    async def test_one_lab(self, admin_full_client, seed_full):
+        resp = await admin_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details",
+            params={"lab_id": str(seed_full["lab"].id)})
+        assert resp.status_code == 200
+        assert resp.json()["lab_id"] == str(seed_full["lab"].id)
+
+    async def test_lab_of_another_class_404(self, admin_full_client, seed_full, db_session):
+        other = Class(name="Other", teacher_id=seed_full["teacher2"].id, invite_code="OTH001")
+        db_session.add(other)
+        await db_session.flush()
+        other_lab = Lab(class_id=other.id, name="Other Lab")
+        db_session.add(other_lab)
+        await db_session.commit()
+        resp = await admin_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details",
+            params={"lab_id": str(other_lab.id)})
+        assert resp.status_code == 404
+
+    async def test_unknown_class_404(self, admin_full_client):
+        resp = await admin_full_client.get(f"/api/admin/analytics/classes/{uuid.uuid4()}/details")
+        assert resp.status_code == 404
+
+    async def test_student_rejected_403(self, student_full_client, seed_full):
+        resp = await student_full_client.get(
+            f"/api/admin/analytics/classes/{seed_full['class'].id}/details")
         assert resp.status_code == 403
 
 

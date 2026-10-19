@@ -85,3 +85,57 @@ export function shortDay(day) {
   const [y, m, d] = day.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
+
+// ── Admin Classes tab (pages/Admin.jsx) ─────────────────────────────────────
+
+/** YYYY-MM-DD of a date on the viewer's calendar. */
+function isoDay(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * The last `n` days, oldest first, as {date, questions}: the platform usage
+ * rows (GET /api/admin/analytics daily_breakdown) only list days with use.
+ */
+export function lastDays(rows, n = 30, today = new Date()) {
+  const byDay = Object.fromEntries(rows.map((r) => [r.date, r.requests]));
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (n - 1 - i));
+    const date = isoDay(d);
+    return { date, questions: byDay[date] || 0 };
+  });
+}
+
+/** Questions of the platform in the last 7 days of `lastDays`. */
+export function lastWeek(days) {
+  return days.slice(-7).reduce((sum, d) => sum + d.questions, 0);
+}
+
+/** Class names per teacher id, for the Users tab. */
+export function classesByTeacher(classes) {
+  const out = {};
+  for (const c of classes) (out[c.teacher_id] ||= []).push(c.name);
+  return out;
+}
+
+const CLASS_SORTS = {
+  name: (c) => c.name.toLowerCase(),
+  teacher: (c) => (c.teacher_username || '').toLowerCase(),
+  students: (c) => c.student_count,
+  questions_7d: (c) => c.questions_7d,
+  last_active: (c) => (c.last_active ? new Date(c.last_active).getTime() : 0),
+};
+
+/** Classes sorted on one column; ties by class name. */
+export function sortClasses(classes, key, dir = 'asc') {
+  const value = CLASS_SORTS[key] || CLASS_SORTS.name;
+  const sign = dir === 'asc' ? 1 : -1;
+  return [...classes].sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    if (x < y) return -sign;
+    if (x > y) return sign;
+    return a.name.localeCompare(b.name);
+  });
+}

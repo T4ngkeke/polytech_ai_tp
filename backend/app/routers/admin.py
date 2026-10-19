@@ -25,6 +25,7 @@ PUT    /api/admin/labs/{lab_id}
 DELETE /api/admin/labs/{lab_id}
 GET    /api/admin/analytics
 GET    /api/admin/analytics/classes/{class_id}
+GET    /api/admin/analytics/classes/{class_id}/details?lab_id=
 DELETE /api/admin/sessions/{session_id}
 POST   /api/admin/maintenance/prune
 """
@@ -51,6 +52,7 @@ from backend.app.models import (
 )
 from backend.app.schemas import (
     AdminAnalyticsResponse,
+    AdminClassResponse,
     AdminResetPasswordRequest,
     ClassAnalyticsResponse,
     ClassResponse,
@@ -439,16 +441,29 @@ async def import_users_csv(
 # ===================================================================
 
 
-@router.get("/classes", response_model=list[ClassResponse])
+@router.get("/classes", response_model=list[AdminClassResponse])
 async def list_all_classes(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db, scope="function"),
-) -> list[ClassResponse]:
-    """List all non-deleted classes system-wide."""
+) -> list[AdminClassResponse]:
+    """List all non-deleted classes system-wide, with the teacher who owns
+    each one and a few counts."""
     classes = await class_service.list_all_classes(db, skip=skip, limit=limit)
-    return [ClassResponse.model_validate(c) for c in classes]
+    owners = {u.id: u for u in (await db.scalars(
+        select(User).where(User.id.in_({c.teacher_id for c in classes})))).all()} if classes else {}
+    counts = await analytics_service.get_class_overview(db, [c.id for c in classes])
+    out = []
+    for c in classes:
+        owner = owners.get(c.teacher_id)
+        out.append(AdminClassResponse.model_validate(c).model_copy(update={
+            "teacher_username": owner.username if owner else None,
+            "teacher_ok": owner is not None and not owner.is_deleted
+                          and owner.role in (UserRole.teacher, UserRole.admin),
+            **counts[c.id],
+        }))
+    return out
 
 
 # ===================================================================
@@ -589,6 +604,7 @@ async def get_global_analytics(
     return AdminAnalyticsResponse(
         total_tokens=result.total_tokens,
         total_requests=result.total_requests,
+        active_users_7d=result.active_users_7d,
         daily_breakdown=[
             DailyUsage(date=d["date"], tokens=d["tokens"], requests=d["requests"])
             for d in result.daily_breakdown
@@ -611,6 +627,22 @@ async def get_class_analytics(
     cls = await class_service.get_class_by_id(db, class_id)
     result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
     return ClassAnalyticsResponse.from_analytics(result)
+
+
+@router.get("/analytics/classes/{class_id}/details")
+async def get_class_analytics_details(
+    class_id: uuid.UUID,
+    lab_id: uuid.UUID | None = Query(None),
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """What the teacher Analytics tab shows, for any class or one of its labs."""
+    await class_service.get_class_by_id(db, class_id)  # 404 if not found
+    if lab_id is not None:
+        lab = await lab_service.get_lab_by_id(db, lab_id)
+        if lab.class_id != class_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+    return await analytics_service.get_teaching_analytics(db, class_id, lab_id)
 
 
 # ===================================================================

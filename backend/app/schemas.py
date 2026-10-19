@@ -215,6 +215,20 @@ class ClassResponse(BaseModel):
     exam_mode: bool = False
 
 
+class AdminClassResponse(ClassResponse):
+    """A class in the admin Classes list: its teacher and a few counts.
+
+    ``teacher_ok`` is false when the owner was deleted or is no longer a
+    teacher or admin: nobody can manage the class until it is transferred.
+    """
+    teacher_username: str | None = None
+    teacher_ok: bool = True
+    lab_count: int = 0
+    student_count: int = 0
+    questions_7d: int = 0
+    last_active: datetime | None = None
+
+
 class ClassUpdateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
 
@@ -520,6 +534,7 @@ class DailyUsage(BaseModel):
 class AdminAnalyticsResponse(BaseModel):
     total_tokens: int
     total_requests: int
+    active_users_7d: int = 0
     daily_breakdown: list[DailyUsage] = []
 
 

@@ -1,6 +1,6 @@
 /**
  * Admin.jsx — God-mode dashboard v7.2.
- * Left nav rail: Users | Oversight | Analytics | Monitoring | LLM Config | Maintenance.
+ * Left nav rail: Users | Classes | Monitoring | LLM Config | Maintenance.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
@@ -11,11 +11,12 @@ import useAuthStore from '../store/authStore';
 import ThemeToggle from '../components/ThemeToggle';
 import Icon from '../components/Icon';
 import MonitoringPanel from '../components/MonitoringPanel';
+import TeacherAnalytics, { DailyBars } from '../components/TeacherAnalytics';
+import { classesByTeacher, lastActive, lastDays, lastWeek, sortClasses } from '../lib/analytics';
 
 const NAV = [
   { key: 'users', label: 'Users', icon: UsersIcon },
-  { key: 'oversight', label: 'Oversight', icon: GridIcon },
-  { key: 'analytics', label: 'Analytics', icon: ChartIcon },
+  { key: 'classes', label: 'Classes', icon: GridIcon },
   { key: 'monitoring', label: 'Monitoring', icon: PulseIcon },
   { key: 'llm', label: 'LLM Config', icon: ChipIcon },
   { key: 'maintenance', label: 'Maintenance', icon: DatabaseIcon },
@@ -84,8 +85,7 @@ export default function Admin() {
       {/* Content */}
       <main className="flex-1 min-h-0 overflow-hidden">
         {active === 'users' && <UsersTab />}
-        {active === 'oversight' && <OversightTab />}
-        {active === 'analytics' && <AnalyticsTab />}
+        {active === 'classes' && <ClassesTab />}
         {active === 'monitoring' && <MonitoringPanel />}
         {active === 'llm' && <LLMConfigTab />}
         {active === 'maintenance' && <MaintenanceTab />}
@@ -99,6 +99,7 @@ const ROLE_FILTERS = ['all', 'student', 'teacher', 'admin'];
 
 function UsersTab() {
   const [users, setUsers] = useState([]);
+  const [owned, setOwned] = useState({});      // teacher id -> names of their classes
   const [loading, setLoading] = useState(true);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [csvFile, setCsvFile] = useState(null);
@@ -121,6 +122,9 @@ function UsersTab() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    api.get('/api/admin/classes').then((cs) => setOwned(classesByTeacher(cs))).catch(() => {});
+  }, []);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -245,7 +249,14 @@ function UsersTab() {
             <tbody>
               {visible.map((u) => (
                 <tr key={u.id} className="border-b border-border-subtle last:border-0 hover:bg-ink-hover/40 transition-colors">
-                  <td className="px-4 py-2.5 font-medium text-cream truncate max-w-[240px]">{u.username}</td>
+                  <td className="px-4 py-2.5 max-w-[240px]">
+                    <p className="font-medium text-cream truncate">{u.username}</p>
+                    {owned[u.id] && (
+                      <p className="text-[11px] text-cream-muted truncate" title={owned[u.id].join(', ')}>
+                        {plural(owned[u.id].length, 'class', 'classes')}: {owned[u.id].join(', ')}
+                      </p>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5">
                     <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)}
                       disabled={u.role === 'admin'}
@@ -303,7 +314,15 @@ function UsersTab() {
       {deleteUser && (
         <ConfirmModal
           title="Delete user"
-          message={<>Delete user <span className="text-cream font-medium">{deleteUser.username}</span>? This is a soft delete and can be reviewed by an admin.</>}
+          message={<>
+            Delete user <span className="text-cream font-medium">{deleteUser.username}</span>? This is a soft delete and can be reviewed by an admin.
+            {owned[deleteUser.id] && (
+              <span className="block mt-3 text-danger">
+                {deleteUser.username} still owns {plural(owned[deleteUser.id].length, 'class', 'classes')}: {owned[deleteUser.id].join(', ')}.
+                Nobody will be able to manage {owned[deleteUser.id].length === 1 ? 'it' : 'them'}: transfer {owned[deleteUser.id].length === 1 ? 'it' : 'them'} first in Classes.
+              </span>
+            )}
+          </>}
           confirmLabel="Delete"
           danger busy={deleting}
           onConfirm={handleDelete}
@@ -344,16 +363,26 @@ function UsersTab() {
   );
 }
 
-/* ═══════════════════════════ OVERSIGHT TAB ═══════════════════════════════ */
-// Breadcrumb drill-down: Classes list → class detail (Labs + Students).
-// Single content panel, no nested sidebar.
-function OversightTab() {
+/* ═══════════════════════════ CLASSES TAB ═════════════════════════════════ */
+// Platform numbers and every class with its teacher; a class opens on its
+// Usage (the teacher Analytics view, without refill or conversations), Labs
+// and Students. Replaces the old Oversight and Analytics tabs.
+const CLASS_SECTIONS = [['usage', 'Usage'], ['labs', 'Labs'], ['students', 'Students']];
+const NO_TEACHER = 'The teacher was deleted or is no longer a teacher: nobody can manage this class. Transfer it.';
+
+function ClassesTab() {
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [platform, setPlatform] = useState(null);
   const [teachers, setTeachers] = useState([]);
+  const [sort, setSort] = useState({ key: 'teacher', dir: 'asc' });
   const [selectedClassId, setSelectedClassId] = useState(null);
+  const [section, setSection] = useState('usage');
+  const [labs, setLabs] = useState([]);
   const [students, setStudents] = useState([]);
-  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [usageLab, setUsageLab] = useState('');
+  const [usage, setUsage] = useState(null);
   // modal targets
   const [deleteClass, setDeleteClass] = useState(null);
   const [deleteLab, setDeleteLab] = useState(null);
@@ -361,35 +390,52 @@ function OversightTab() {
   const [transferTo, setTransferTo] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // derive the open class from `classes` so lab edits reflect live
   const selectedClass = classes.find((c) => c.id === selectedClassId) || null;
+  const days = useMemo(() => lastDays(platform?.daily_breakdown || []), [platform]);
+  const rows = useMemo(() => sortClasses(classes, sort.key, sort.dir), [classes, sort]);
 
   const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      const cls = await api.get('/api/admin/classes');
-      const withLabs = await Promise.all(cls.map(async (c) => {
-        const l = await api.get(`/api/admin/classes/${c.id}/labs`).catch(() => []);
-        return { ...c, labs: l };
-      }));
-      setClasses(withLabs);
-    } catch { toast.error('Failed to load classes'); } finally { setLoading(false); }
+    try { setClasses(await api.get('/api/admin/classes')); }
+    catch { toast.error('Failed to load classes'); } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    // teacher list for the transfer dropdown
+    load();
+    api.get('/api/admin/analytics').then(setPlatform).catch(() => {});
+    // teacher list for the transfer dropdown and the teacher count
     api.get('/api/admin/users')
       .then((us) => setTeachers(us.filter((u) => u.role === 'teacher' || u.role === 'admin')))
       .catch(() => {});
+  }, [load]);
+
+  const loadUsage = useCallback(async (classId, labId) => {
+    setUsage(null);
+    try {
+      const q = labId ? `?lab_id=${labId}` : '';
+      setUsage(await api.get(`/api/admin/analytics/classes/${classId}/details${q}`));
+    } catch (err) { toast.error(err.message); }
   }, []);
 
   const openClass = (cls) => {
     setSelectedClassId(cls.id);
-    setStudents([]); setStudentsLoading(true);
-    api.get(`/api/admin/classes/${cls.id}/students`)
-      .then(setStudents).catch(() => {}).finally(() => setStudentsLoading(false));
+    setSection('usage');
+    setUsageLab('');
+    setLabs([]); setStudents([]); setDetailLoading(true);
+    Promise.all([
+      api.get(`/api/admin/classes/${cls.id}/labs`).then(setLabs),
+      api.get(`/api/admin/classes/${cls.id}/students`).then(setStudents),
+    ]).catch(() => toast.error('Failed to load the class')).finally(() => setDetailLoading(false));
+    loadUsage(cls.id, '');
   };
+
+  const pickUsageLab = (labId) => {
+    setUsageLab(labId);
+    loadUsage(selectedClassId, labId);
+  };
+
+  const toggleSort = (key) => setSort((s) => (s.key === key
+    ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+    : { key, dir: key === 'name' || key === 'teacher' ? 'asc' : 'desc' }));
 
   const doDeleteClass = async () => {
     setBusy(true);
@@ -406,8 +452,8 @@ function OversightTab() {
     if (!transferTo) return;
     setBusy(true);
     try {
-      const updated = await api.put(`/api/admin/classes/${transferClass.id}/transfer`, { teacher_id: transferTo });
-      setClasses((p) => p.map((c) => c.id === transferClass.id ? { ...c, teacher_id: updated.teacher_id } : c));
+      await api.put(`/api/admin/classes/${transferClass.id}/transfer`, { teacher_id: transferTo });
+      await load();               // the new teacher's name and status
       toast.success('Class transferred');
       setTransferClass(null);
     } catch (err) { toast.error(err.message); } finally { setBusy(false); }
@@ -417,7 +463,8 @@ function OversightTab() {
     setBusy(true);
     try {
       await api.delete(`/api/admin/labs/${deleteLab.id}`);
-      setClasses((p) => p.map((c) => ({ ...c, labs: c.labs?.filter((l) => l.id !== deleteLab.id) })));
+      setLabs((p) => p.filter((l) => l.id !== deleteLab.id));
+      setClasses((p) => p.map((c) => (c.id === selectedClassId ? { ...c, lab_count: c.lab_count - 1 } : c)));
       toast.success('Lab deleted');
       setDeleteLab(null);
     } catch (err) { toast.error(err.message); } finally { setBusy(false); }
@@ -426,66 +473,147 @@ function OversightTab() {
   const doToggleLab = async (lab) => {
     try {
       const updated = await api.put(`/api/admin/labs/${lab.id}`, { is_active: !lab.is_active });
-      setClasses((p) => p.map((c) => ({ ...c, labs: c.labs?.map((l) => l.id === lab.id ? updated : l) })));
+      setLabs((p) => p.map((l) => (l.id === lab.id ? updated : l)));
       toast.success(updated.is_active ? 'Lab unlocked' : 'Lab locked');
     } catch (err) { toast.error(err.message); }
   };
 
+  const transferButton = (cls) => (
+    <IconButton title="Transfer to another teacher" onClick={() => { setTransferClass(cls); setTransferTo(''); }}>
+      <TransferIcon className="w-4 h-4" />
+    </IconButton>
+  );
+
   return (
     <div className="p-4 md:p-8 overflow-y-auto h-full">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         {!selectedClass ? (
-          /* ── Level 0: class list ── */
+          /* ── Level 0: platform numbers + class table ── */
           <>
-            <PageHeader title="Oversight" subtitle={`${plural(classes.length, 'class', 'classes')} across the platform`} />
+            <PageHeader title="Classes"
+              subtitle={`${plural(classes.length, 'class', 'classes')} · ${plural(teachers.length, 'teacher')}`} />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <StatCard label="Active users, 7 days" value={platform?.active_users_7d} />
+              <StatCard label="Questions, 7 days" value={platform ? lastWeek(days) : null} />
+              <StatCard label="Questions, all time" value={platform?.total_requests?.toLocaleString()} />
+              <StatCard label="Tokens, all time" value={platform?.total_tokens?.toLocaleString()} />
+            </div>
+            {platform && (
+              <section className="rounded-xl border border-border-subtle bg-ink-raised p-4 mb-8">
+                <h4 className="text-sm font-semibold text-cream mb-3">Questions per day · whole platform, last 30 days</h4>
+                <DailyBars days={days} />
+              </section>
+            )}
+
             {loading ? <Spinner /> : classes.length === 0 ? (
               <EmptyState icon={<GridIcon className="w-7 h-7" />} message="No classes on the platform yet." />
             ) : (
-              <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-hidden divide-y divide-border-subtle">
-                {classes.map((cls) => (
-                  <div key={cls.id} onClick={() => openClass(cls)}
-                    className="group flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-ink-hover/50 transition-colors">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-cream truncate">{cls.name}</p>
-                      <p className="text-[11px] text-cream-muted mt-0.5">{plural(cls.labs?.length || 0, 'lab')}</p>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => e.stopPropagation()}>
-                      <IconButton title="Transfer ownership" onClick={() => { setTransferClass(cls); setTransferTo(''); }}>
-                        <TransferIcon className="w-4 h-4" />
-                      </IconButton>
-                      <IconButton title="Force-delete class" danger onClick={() => setDeleteClass(cls)}>
-                        <TrashIcon className="w-4 h-4" />
-                      </IconButton>
-                    </div>
-                    <ChevronIcon className="w-4 h-4 text-cream-muted shrink-0" />
-                  </div>
-                ))}
+              <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-x-auto">
+                <table className="w-full min-w-[680px] text-sm">
+                  <thead>
+                    <tr className="bg-ink-surface/40 border-b border-border-subtle text-[10px] uppercase tracking-widest text-cream-muted">
+                      <SortableTh label="Class" active={sort.key === 'name'} dir={sort.dir} onClick={() => toggleSort('name')} />
+                      <SortableTh label="Teacher" active={sort.key === 'teacher'} dir={sort.dir} onClick={() => toggleSort('teacher')} />
+                      <th className="text-left font-medium px-4 py-3">Labs</th>
+                      <SortableTh label="Students" active={sort.key === 'students'} dir={sort.dir} onClick={() => toggleSort('students')} />
+                      <SortableTh label="Questions, 7 d" active={sort.key === 'questions_7d'} dir={sort.dir} onClick={() => toggleSort('questions_7d')} />
+                      <SortableTh label="Last question" active={sort.key === 'last_active'} dir={sort.dir} onClick={() => toggleSort('last_active')} />
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((cls) => (
+                      <tr key={cls.id} onClick={() => openClass(cls)}
+                        className="group border-b border-border-subtle last:border-0 cursor-pointer hover:bg-ink-hover/40 transition-colors">
+                        <td className="px-4 py-2.5 max-w-[240px]">
+                          <span className="font-medium text-cream truncate">{cls.name}</span>
+                          {cls.exam_mode && (
+                            <span className="ml-2 rounded bg-gold-muted px-1.5 py-0.5 text-[10px] text-gold" title="Exam mode: answers stay in Direct mode">
+                              Exam
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <TeacherName cls={cls} />
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-cream-secondary">{cls.lab_count}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-cream-secondary">{cls.student_count}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-cream-secondary">{cls.questions_7d || <span className="text-cream-muted">0</span>}</td>
+                        <td className="px-4 py-2.5 text-xs text-cream-secondary">{lastActive(cls.last_active)}</td>
+                        <td className="px-2 py-1">
+                          <div className="flex items-center justify-end gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => e.stopPropagation()}>
+                            {transferButton(cls)}
+                            <IconButton title="Force-delete class" danger onClick={() => setDeleteClass(cls)}>
+                              <TrashIcon className="w-4 h-4" />
+                            </IconButton>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </>
         ) : (
-          /* ── Level 1: class detail (Labs + Students) ── */
+          /* ── Level 1: one class (Usage, Labs, Students) ── */
           <>
             <button onClick={() => setSelectedClassId(null)}
               className="inline-flex items-center gap-1 text-xs text-cream-muted hover:text-cyan transition-colors cursor-pointer mb-4">
               <ChevronIcon className="w-3.5 h-3.5 rotate-180" /> Classes
             </button>
             <PageHeader title={selectedClass.name}
-              subtitle={`${plural(selectedClass.labs?.length || 0, 'lab')} · ${plural(students.length, 'student')}`} />
+              subtitle={<>
+                Teacher: <TeacherName cls={selectedClass} /> · {plural(selectedClass.lab_count, 'lab')}
+                {' · '}{plural(selectedClass.student_count, 'student')}
+                {' · '}Exam mode {selectedClass.exam_mode ? 'on' : 'off'}
+              </>}>
+              <button onClick={() => { setTransferClass(selectedClass); setTransferTo(''); }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-default text-cream-secondary text-xs font-medium hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer">
+                <TransferIcon className="w-4 h-4" /> Transfer
+              </button>
+            </PageHeader>
+            {!selectedClass.teacher_ok && (
+              <div className="mb-6 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-muted px-3 py-2 text-xs text-danger">
+                <AlertIcon className="w-4 h-4 shrink-0" /> {NO_TEACHER}
+              </div>
+            )}
 
-            {/* Labs */}
-            <SectionLabel>Labs ({selectedClass.labs?.length || 0})</SectionLabel>
-            {selectedClass.labs?.length ? (
-              <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-hidden divide-y divide-border-subtle mb-8">
-                {selectedClass.labs.map((lab) => {
+            <div className="flex items-center gap-1 p-1 mb-6 w-fit rounded-lg bg-ink-raised border border-border-subtle">
+              {CLASS_SECTIONS.map(([key, label]) => (
+                <button key={key} onClick={() => setSection(key)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    section === key ? 'bg-cyan-muted text-cyan' : 'text-cream-secondary hover:text-cream'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {section === 'usage' && (
+              <>
+                {labs.length > 1 && (
+                  <select value={usageLab} onChange={(e) => pickUsageLab(e.target.value)}
+                    className="mb-4 bg-ink-surface border border-border-default text-cream-secondary text-xs px-2 py-1.5 rounded-lg cursor-pointer focus:outline-none focus:border-cyan/40">
+                    <option value="">All labs</option>
+                    {labs.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                )}
+                <TeacherAnalytics data={usage} classId={selectedClass.id} refill={false} />
+              </>
+            )}
+
+            {section === 'labs' && (detailLoading ? <p className="text-cream-muted text-sm">Loading…</p> : labs.length ? (
+              <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-hidden divide-y divide-border-subtle">
+                {labs.map((lab) => {
                   const locked = lab.is_deleted || !lab.is_active;
                   return (
                     <div key={lab.id} className="group flex items-center gap-3 px-4 py-2.5">
                       <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${locked ? 'bg-cream-muted' : 'bg-success'}`} />
                       <span className="flex-1 min-w-0 text-sm text-cream truncate">{lab.name}</span>
                       <span className="text-[10px] uppercase tracking-wider text-cream-muted">{locked ? 'Locked' : 'Active'}</span>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <IconButton title={lab.is_active ? 'Lock lab' : 'Unlock lab'} onClick={() => doToggleLab(lab)}>
                           {lab.is_active ? <LockIcon className="w-4 h-4" /> : <UnlockIcon className="w-4 h-4" />}
                         </IconButton>
@@ -498,14 +626,10 @@ function OversightTab() {
                 })}
               </div>
             ) : (
-              <p className="text-cream-muted text-sm mb-8">No labs in this class.</p>
-            )}
+              <p className="text-cream-muted text-sm">No labs in this class.</p>
+            ))}
 
-            {/* Students */}
-            <SectionLabel>Students ({students.length})</SectionLabel>
-            {studentsLoading ? (
-              <p className="text-cream-muted text-sm">Loading…</p>
-            ) : students.length ? (
+            {section === 'students' && (detailLoading ? <p className="text-cream-muted text-sm">Loading…</p> : students.length ? (
               <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-hidden divide-y divide-border-subtle">
                 {students.map((s) => (
                   <div key={s.id} className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-ink-hover/40 transition-colors">
@@ -516,7 +640,7 @@ function OversightTab() {
               </div>
             ) : (
               <p className="text-cream-muted text-sm">No students in this class yet.</p>
-            )}
+            ))}
           </>
         )}
       </div>
@@ -534,15 +658,19 @@ function OversightTab() {
       {transferClass && (
         <Modal title={`Transfer "${transferClass.name}"`} onClose={() => setTransferClass(null)}>
           <div className="space-y-4">
-            <p className="text-xs text-cream-muted">Choose the teacher who will own this class.</p>
+            <p className="text-xs text-cream-muted">
+              Now owned by <span className="text-cream">{transferClass.teacher_username || 'nobody'}</span>.
+              Choose the teacher who will own this class.
+            </p>
             <select value={transferTo} onChange={(e) => setTransferTo(e.target.value)}
               className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm cursor-pointer focus:outline-none focus:border-cyan/40">
               <option value="">Select a teacher…</option>
-              {teachers.map((t) => <option key={t.id} value={t.id}>{t.username} ({t.role})</option>)}
+              {teachers.filter((t) => t.id !== transferClass.teacher_id)
+                .map((t) => <option key={t.id} value={t.id}>{t.username} ({t.role})</option>)}
             </select>
             <button onClick={doTransferClass} disabled={!transferTo || busy}
               className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-              {busy ? 'Transferring…' : 'Transfer ownership'}
+              {busy ? 'Transferring…' : 'Transfer'}
             </button>
           </div>
         </Modal>
@@ -551,82 +679,14 @@ function OversightTab() {
   );
 }
 
-/* ═══════════════════════════ ANALYTICS TAB ═══════════════════════════════ */
-function AnalyticsTab() {
-  const [global, setGlobal] = useState(null);
-  const [classes, setClasses] = useState([]);
-  const [classAnalytics, setClassAnalytics] = useState({});
-  const [expanded, setExpanded] = useState({});
-
-  useEffect(() => {
-    api.get('/api/admin/analytics').then(setGlobal).catch(() => {});
-    api.get('/api/admin/classes').then(setClasses).catch(() => {});
-  }, []);
-
-  const loadClassAnalytics = async (classId) => {
-    if (classAnalytics[classId]) {
-      setExpanded((p) => ({ ...p, [classId]: !p[classId] }));
-      return;
-    }
-    try {
-      const data = await api.get(`/api/admin/analytics/classes/${classId}`);
-      setClassAnalytics((p) => ({ ...p, [classId]: data }));
-      setExpanded((p) => ({ ...p, [classId]: true }));
-    } catch (err) { toast.error(err.message); }
-  };
-
+/** The teacher who owns a class; red when nobody can manage it. */
+function TeacherName({ cls }) {
+  if (cls.teacher_ok) return <span className="text-cream-secondary">{cls.teacher_username}</span>;
   return (
-    <div className="p-4 md:p-8 overflow-y-auto h-full">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <PageHeader title="Analytics" subtitle="Platform-wide token usage" />
-        {global && (
-          <div className="grid grid-cols-3 gap-4">
-            <StatCard label="Platform Tokens" value={global.total_tokens?.toLocaleString()} />
-            <StatCard label="Platform Requests" value={global.total_requests?.toLocaleString()} />
-            <StatCard label="Classes" value={classes.length} />
-          </div>
-        )}
-        <div>
-          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-3">Class Breakdown</h3>
-          <div className="space-y-2">
-            {classes.map((cls) => {
-              const data = classAnalytics[cls.id];
-              const open = expanded[cls.id];
-              return (
-                <div key={cls.id} className="bg-ink-raised rounded-xl border border-border-subtle overflow-hidden">
-                  <button onClick={() => loadClassAnalytics(cls.id)}
-                    className="w-full flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-ink-hover transition-colors">
-                    <div className="flex items-center gap-2">
-                      <ChevronIcon className={`w-4 h-4 text-cream-muted transition-transform ${open ? 'rotate-90' : ''}`} />
-                      <span className="text-sm font-medium text-cream">{cls.name}</span>
-                    </div>
-                    {data && <span className="text-xs font-mono text-cyan">{data.total_tokens?.toLocaleString()} tok</span>}
-                  </button>
-                  {open && data && (
-                    <div className="px-4 pb-4 border-t border-border-subtle pt-3 space-y-3">
-                      {data.labs?.map((lab) => (
-                        <div key={lab.lab_id} className="pl-3 border-l border-border-subtle">
-                          <div className="flex justify-between text-xs mb-1">
-                            <span className="text-cream-secondary font-medium">{lab.lab_name}</span>
-                            <span className="text-cream-muted font-mono">{lab.tokens?.toLocaleString()} tok</span>
-                          </div>
-                          {lab.students?.map((s) => (
-                            <div key={s.user_id} className="flex justify-between text-[11px] pl-3 py-0.5">
-                              <span className="text-cream-muted">{s.username}</span>
-                              <span className="text-cream-muted font-mono">{s.tokens_used?.toLocaleString()} tok · {s.request_count} req</span>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-1 text-danger" title={NO_TEACHER}>
+      <AlertIcon className="w-3.5 h-3.5" />
+      {cls.teacher_username || 'unknown'} · no teacher
+    </span>
   );
 }
 
@@ -1122,10 +1182,6 @@ function IconButton({ onClick, title, danger, children }) {
   );
 }
 
-function SectionLabel({ children }) {
-  return <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">{children}</p>;
-}
-
 function EmptyState({ icon, message }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center gap-3 text-cream-muted">
@@ -1225,7 +1281,6 @@ function Svg({ children, className = 'w-4 h-4' }) {
 }
 function UsersIcon(p) { return <Svg {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Svg>; }
 function GridIcon(p) { return <Svg {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></Svg>; }
-function ChartIcon(p) { return <Svg {...p}><path d="M3 3v18h18" /><rect x="7" y="11" width="3" height="6" /><rect x="12" y="7" width="3" height="10" /><rect x="17" y="13" width="3" height="4" /></Svg>; }
 function PulseIcon(p) { return <Svg {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></Svg>; }
 function ChipIcon(p) { return <Svg {...p}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" /></Svg>; }
 function DatabaseIcon(p) { return <Svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></Svg>; }

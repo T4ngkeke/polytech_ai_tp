@@ -50,6 +50,7 @@ class GlobalAnalytics:
     total_tokens: int
     total_requests: int
     daily_breakdown: list[dict] = field(default_factory=list)
+    active_users_7d: int = 0
 
 
 async def get_class_analytics(db: AsyncSession, class_id: uuid.UUID, class_name: str) -> ClassAnalytics:
@@ -145,12 +146,51 @@ async def get_global_analytics(db: AsyncSession) -> GlobalAnalytics:
         {"date": str(r[0]), "tokens": r[1], "requests": r[2]}
         for r in daily_result.all()
     ]
+    active_users_7d = await db.scalar(
+        select(func.count(func.distinct(UsageStat.user_id))).where(
+            UsageStat.date > date.today() - timedelta(days=7), UsageStat.request_count > 0))
 
     return GlobalAnalytics(
         total_tokens=total_tokens,
         total_requests=total_requests,
         daily_breakdown=daily_breakdown,
+        active_users_7d=active_users_7d or 0,
     )
+
+
+async def get_class_overview(db: AsyncSession, class_ids: list[uuid.UUID], *,
+                             now: datetime | None = None) -> dict[uuid.UUID, dict]:
+    """Counts for the admin Classes list: labs, students, questions in the
+    last 7 days and the last question, per class. Teacher test sessions
+    are left out."""
+    now = now or datetime.now(timezone.utc)
+    out = {cid: {"lab_count": 0, "student_count": 0, "questions_7d": 0, "last_active": None} for cid in class_ids}
+    if not class_ids:
+        return out
+    for cid, n in (await db.execute(
+            select(Lab.class_id, func.count(Lab.id))
+            .where(Lab.class_id.in_(class_ids), Lab.is_deleted.is_(False))
+            .group_by(Lab.class_id))).all():
+        out[cid]["lab_count"] = n
+    for cid, n in (await db.execute(
+            select(ClassStudent.class_id, func.count(ClassStudent.student_id))
+            .join(User, User.id == ClassStudent.student_id)
+            .where(ClassStudent.class_id.in_(class_ids), User.is_deleted.is_(False))
+            .group_by(ClassStudent.class_id))).all():
+        out[cid]["student_count"] = n
+    recent = now - timedelta(days=7)
+    for cid, n, last in (await db.execute(
+            select(Lab.class_id,
+                   func.count(Message.id).filter(Message.created_at >= recent),
+                   func.max(Message.created_at))
+            .join(Session, Session.lab_id == Lab.id)
+            .join(Message, Message.session_id == Session.id)
+            .where(Lab.class_id.in_(class_ids), Session.is_test.is_(False),
+                   Message.sender == SenderType.user)
+            .group_by(Lab.class_id))).all():
+        out[cid]["questions_7d"] = n
+        out[cid]["last_active"] = last
+    return out
 
 
 # ---------------------------------------------------------------------------
