@@ -18,7 +18,7 @@ function HighlightedPage({ source, page }) {
   const { imageUrl, error } = usePageImage(source.documentId, source.revisionId, page, source.sessionId);
   const [shown, setShown] = useState(true);
   const scrollRef = useRef(null);
-  const boxes = pageHighlights(source.citations, page, source.focusLabel);
+  const boxes = pageHighlights(source.citations, page, source.focusLabels);
   useEffect(() => setShown(true), [page, source]);
   if (error) return <p role="alert" className="p-6 text-cream">{error}</p>;
   if (!imageUrl) return <p className="p-6 text-cream-secondary">Opening the page…</p>;
@@ -61,7 +61,7 @@ function HighlightedPage({ source, page }) {
 /**
  * A window over the chat showing a cited page. source: { documentId,
  * revisionId, filename, sessionId, page, pages: [{ pageNo, labels }],
- * citations (this file's, with their regions), focusLabel (one [E#] only) }.
+ * citations (this file's, with their regions), focusLabels (only these [E#] of one page) }.
  * It opens on the page image with the cited passages highlighted; "Full PDF"
  * switches to the browser's PDF viewer.
  */
@@ -84,8 +84,7 @@ export function PdfPreviewModal({ source, onClose }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
   const pages = (source.pages || []).filter((p) => p.available !== false);
-  const labels = source.focusLabel ? [source.focusLabel]
-    : pages.find((p) => p.pageNo === page)?.labels || [];
+  const labels = source.focusLabels || pages.find((p) => p.pageNo === page)?.labels || [];
   const tab = (active) => `rounded px-2 py-0.5 text-xs ${active
     ? 'bg-cyan text-on-accent' : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'}`;
   return (
@@ -97,7 +96,7 @@ export function PdfPreviewModal({ source, onClose }) {
           <span className="max-w-[40%] truncate font-medium" title={source.filename}>{source.filename}</span>
           <span className="text-cream-secondary">· PDF page {page}</span>
           {labels.length > 0 && <span className="text-xs text-cream-muted">[{labels.join(', ')}]</span>}
-          {pages.length > 1 && !source.focusLabel && (
+          {pages.length > 1 && !source.focusLabels && (
             <span className="ml-2 flex flex-wrap gap-1">
               {pages.map((p) => (
                 <button key={p.pageNo} type="button" onClick={() => setPage(p.pageNo)}

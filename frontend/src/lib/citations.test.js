@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { distinctImages, groupCitations, linkCitations, pageHighlights } from './citations.js';
+import { distinctImages, groupCitations, labelRange, linkCitations, pageHighlights } from './citations.js';
 
 const cite = (label, page, extra = {}) => ({
   citation_id: `c-${label}`, label, document_id: 'doc-a', revision_id: 'rev-1',
@@ -61,6 +61,26 @@ test('citation markers become links, groups too, code is left alone', () => {
     '`a[E5]` puis\n```\nx = [E5]\n```\n\\[[E5](#cite-E5)\\]');
 });
 
+test('groups side by side become one; labels of one page become one link', () => {
+  const labels = new Set(['E3', 'E5', 'E21', 'E22']);
+  const pageOf = new Map([['E3', 'd:r:4'], ['E5', 'd:r:7'], ['E21', 'd:r:19'], ['E22', 'd:r:19']]);
+  assert.equal(linkCitations('Voir [E3][E5].', labels), 'Voir \\[[E3](#cite-E3), [E5](#cite-E5)\\].');
+  assert.equal(linkCitations('root [E21][E22], fils [E3] [E21, E22]', labels, pageOf),
+    'root \\[[E21–22](#cite-E21,E22)\\], fils \\[[E3](#cite-E3), [E21–22](#cite-E21,E22)\\]');
+  // A group with an unknown label stays as written; its neighbour is still linked.
+  assert.equal(linkCitations('[E3][E9]', labels, pageOf), '\\[[E3](#cite-E3)\\][E9]');
+  // Groups on two lines are not joined.
+  assert.equal(linkCitations('a [E21]\n[E22] b', labels, pageOf),
+    'a \\[[E21](#cite-E21)\\]\n\\[[E22](#cite-E22)\\] b');
+});
+
+test('one page\'s labels are named by their ranges', () => {
+  assert.equal(labelRange(['E21', 'E22']), 'E21–22');
+  assert.equal(labelRange(['E18', 'E11']), 'E11·18');
+  assert.equal(labelRange(['E13', 'E15', 'E14', 'E17', 'E19', 'E20']), 'E13–15·17·19–20');
+  assert.equal(labelRange(['E5']), 'E5');
+});
+
 test('a page shows its cited regions; two labels on one region share a box', () => {
   const cites = [
     { label: 'E2', pdf_page_no: 22, box: [0.1, 0.2, 0.9, 0.5] },
@@ -72,5 +92,8 @@ test('a page shows its cited regions; two labels on one region share a box', () 
   assert.deepEqual(pageHighlights(cites, 22), [
     { box: [0.1, 0.2, 0.9, 0.5], labels: ['E2', 'E4'] },
     { box: [0.1, 0.6, 0.4, 0.8], labels: ['E7'] }]);
-  assert.deepEqual(pageHighlights(cites, 22, 'E7'), [{ box: [0.1, 0.6, 0.4, 0.8], labels: ['E7'] }]);
+  assert.deepEqual(pageHighlights(cites, 22, ['E7']), [{ box: [0.1, 0.6, 0.4, 0.8], labels: ['E7'] }]);
+  assert.deepEqual(pageHighlights(cites, 22, ['E4', 'E7']), [
+    { box: [0.1, 0.2, 0.9, 0.5], labels: ['E4'] },
+    { box: [0.1, 0.6, 0.4, 0.8], labels: ['E7'] }]);
 });

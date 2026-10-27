@@ -56,25 +56,30 @@ const PHASE_LABELS = { thinking: 'Thinking…', finding: 'Searching course mater
   checking_sources: 'Checking citations…' };
 
 /** What the preview window needs to show citation c's page (and its file's other cited pages). */
-function sourceOf(citations, c, sessionId, focusLabel = null) {
+function sourceOf(citations, c, sessionId, focusLabels = null) {
   const sameFile = citations.filter((x) => x.document_id === c.document_id
     && (x.revision_id || null) === (c.revision_id || null));
   return { documentId: c.document_id, revisionId: c.revision_id || null,
     filename: c.filename || 'Source', sessionId, page: c.pdf_page_no ?? c.page_no,
-    pages: groupCitations(sameFile)[0]?.pages || [], citations: sameFile, focusLabel };
+    pages: groupCitations(sameFile)[0]?.pages || [], citations: sameFile, focusLabels };
 }
 
 export const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource, onPick, onResearch }) {
   const isUser = message.sender === 'user';
   const citations = message.citations;
-  // [E#] in the text: open that passage alone, highlighted on its page.
-  const onCite = useCallback((label) => {
-    const c = citations?.find((x) => x.label === label);
-    if (c && c.available && sessionId) onOpenSource(sourceOf(citations, c, sessionId, label));
+  // [E#] in the text (one page's labels, "E21,E22"): open those passages, highlighted on their page.
+  const onCite = useCallback((ids) => {
+    const labels = ids.split(',');
+    const c = citations?.find((x) => x.label === labels[0]);
+    if (c && c.available && sessionId) onOpenSource(sourceOf(citations, c, sessionId, labels));
   }, [citations, sessionId, onOpenSource]);
-  const content = useMemo(() => (isUser || !citations?.length ? message.content
-    : linkCitations(message.content, new Set(citations.filter((c) => c.available && c.label).map((c) => c.label)))),
-  [isUser, message.content, citations]);
+  const content = useMemo(() => {
+    if (isUser || !citations?.length) return message.content;
+    const usable = citations.filter((c) => c.available && c.label);
+    const pageOf = new Map(usable.map((c) => [c.label,
+      `${c.document_id}:${c.revision_id || ''}:${c.pdf_page_no ?? c.page_no}`]));
+    return linkCitations(message.content, new Set(pageOf.keys()), pageOf);
+  }, [isUser, message.content, citations]);
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-2 md:gap-3 animate-fade-in`}>
       {!isUser && (
