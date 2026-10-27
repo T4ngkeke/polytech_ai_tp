@@ -20,6 +20,7 @@ Environment:
   M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
   M4_SAMPLING      qwen (Qwen's non-thinking advice, default, as the product) | greedy (temperature 0),
                    for research and view_image
+  M4_TEMPERATURE   overrides the temperature of M4_SAMPLING (top_p and top_k stay)
   M4_BUDGET        standard | relaxed | relaxed_slow | product (see BUDGETS)
   M4_TOOL_CALLS    overrides the budget's tool call limit
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
@@ -282,6 +283,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     model_name = os.getenv('M4_MODEL_NAME', 'ornith')
     sampling_name = os.getenv('M4_SAMPLING', 'qwen')
     sampling = {'greedy': GREEDY, 'qwen': QWEN_NON_THINKING}[sampling_name]
+    if os.getenv('M4_TEMPERATURE'):
+        sampling = {**sampling, 'temperature': float(os.environ['M4_TEMPERATURE'])}
     model = ResearchModel(Endpoint(upstream, 'local', model_name), sampling=sampling)
     # One model for research and vision unless M4_VISION_URL names another.
     vision_url = os.getenv('M4_VISION_URL', upstream)
