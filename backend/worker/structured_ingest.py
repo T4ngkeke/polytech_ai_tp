@@ -50,6 +50,7 @@ from backend.app.services import document_storage as storage
 from backend.app.services import document_versions as versions
 from backend.app.services.document_cleanup import aware, sweep_staged_objects
 from backend.app.services.document_edits import CAPTION_UNCHECKED, carry_forward
+from backend.worker import picture_captions
 from backend.worker.document_ir import ParsedDocument, ParseIssue
 from backend.worker.pdf_reader import PDFReadError, read_pdf
 from backend.worker.pdf_mineru import MinerUUnavailable, subprocess_extractor
@@ -113,6 +114,9 @@ class StructuredSettings:
     # Stop writing files this long before the lease ends, so the sweep never
     # removes a file that is still being written.
     write_margin_seconds: int = 120
+    # Picture captions after reading (None: off). Set by the worker from the
+    # admin's model settings, so they can change without a restart.
+    captions: picture_captions.CaptionSettings | None = None
 
     @classmethod
     def from_env(cls, storage_root, environ=None) -> 'StructuredSettings':
@@ -360,6 +364,57 @@ class PageProgress:
                 'started_at': self.started_at.isoformat()}
 
 
+async def _keep_lease(db, claim: StructuredClaim, stop: asyncio.Event, *, lease_seconds: int,
+                      now_fn=_utcnow, every: float = 60) -> None:
+    """Extend the lease until `stop` is set, while the job waits for the model.
+    Has the session to itself: the caption step uses it only before and after."""
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=every)
+            return
+        except asyncio.TimeoutError:
+            pass
+        try:
+            await db.execute(update(IngestionJob).where(
+                IngestionJob.id == claim.job_id, IngestionJob.lock_token == claim.lock_token,
+                IngestionJob.status == JobStatus.processing).values(
+                    lease_expires_at=now_fn() + timedelta(seconds=lease_seconds)))
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.warning('structured job %s: lease not extended', claim.job_id, exc_info=True)
+
+
+async def _caption(db, claim: StructuredClaim, outcome: ParseOutcome, pdf: Path,
+                   settings: StructuredSettings, now_fn) -> dict:
+    """Captions for the read pictures (documentation/PICTURE_CAPTIONS.md).
+    Never fails the job: an error leaves the pictures without captions, as
+    before captions existed, and is recorded in the report."""
+    captions = settings.captions
+    model = captions.endpoint.model
+    try:
+        pictures = await asyncio.to_thread(picture_captions.find_pictures, outcome.document, pdf)
+        cached = await picture_captions.cached_captions(
+            db, model, (p.image_sha256 for p in pictures if not p.skip))
+        await db.rollback()  # no transaction is held while the model answers
+        stop = asyncio.Event()
+        keeper = asyncio.create_task(_keep_lease(db, claim, stop, lease_seconds=settings.lease_seconds,
+                                                 now_fn=now_fn))
+        try:
+            report, written = await picture_captions.write_captions(
+                pictures, model=model, describe=picture_captions.make_describe(captions),
+                cached=cached, budget_seconds=captions.budget_seconds)
+        finally:
+            stop.set()
+            await keeper
+        await picture_captions.store_captions(db, model, written)
+        return report
+    except Exception as exc:
+        await db.rollback()
+        logger.warning('structured job %s: captions not written', claim.job_id, exc_info=True)
+        return {'error': type(exc).__name__}
+
+
 async def _write_progress(db, claim: StructuredClaim, progress: PageProgress, stop: asyncio.Event,
                           every: float | None = None, *, lease_seconds: int = DEFAULT_LEASE_SECONDS,
                           now_fn=_utcnow) -> None:
@@ -559,6 +614,8 @@ async def process_structured_job(db, *, settings: StructuredSettings, extractor=
             stop.set()
             await writer
         outcome.document.source_filename = source.original_filename
+        if settings.captions is not None:
+            outcome.render['captions'] = await _caption(db, claim, outcome, copy, settings, now_fn)
         planned = plan_assets(outcome, claim)
         await _stage(db, claim, planned, settings, now_fn)
         await _commit_parsed(db, claim, outcome, planned, now_fn)
