@@ -198,3 +198,32 @@ async def test_a_model_error_never_fails_the_parse_job(db_session, tmp_path, mon
         assert rev.report['render']['captions'] == {'error': 'RuntimeError'}
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_the_backfill_asks_one_reading_per_document_without_captions(db_session, tmp_path, monkeypatch):
+    from backend.app.models import Document, IngestionJob, SystemConfig
+    from backend.tests.test_structured_index_m3b import _parsed_pdf
+    from scripts import caption_backfill
+    db = db_session
+    try:
+        doc, rev, teacher, job = await _parsed_pdf(db, tmp_path, monkeypatch)
+
+        async def embed(texts):
+            return [[0.0] * 1023 + [1.0] for _ in texts]
+        assert await process_index_job(db, embed_fn=embed)       # published, no captions
+        doc_id = doc.id
+        assert not await caption_backfill.captions_on(db)
+        db.add(SystemConfig(key='PICTURE_CAPTIONS', value='on'))
+        await db.commit()
+        assert await caption_backfill.captions_on(db)
+        todo = await caption_backfill.plan(db)
+        assert [d.id for d, _, _ in todo] == [doc_id]
+        await caption_backfill.ask_reading(db, *todo[0])
+        jobs = (await db.scalars(select(IngestionJob).where(IngestionJob.document_id == doc_id,
+                                                            IngestionJob.task_kind == 'pdf_parse'))).all()
+        assert sum(j.status.value == 'queued' for j in jobs) == 1
+        assert await caption_backfill.plan(db) == []             # a reading is already waiting
+        assert (await db.get(Document, doc_id)).lifecycle == 'active'
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
