@@ -262,7 +262,7 @@
       "type": "stat",
       "id": 4,
       "title": "Model servers",
-      "description": "A container is up when it reported in the last minute.",
+      "description": "A server is up when Prometheus could read its metrics at the last scrape. Found by its name on the model network, so it stays right when the container behind it changes.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -279,7 +279,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(max(container_last_seen{name=\"m4-flashnext-v030\"}) > bool (time() - 60)) or vector(0)",
+          "expr": "max(up{job=\"models\",server=\"LLM (Flash-Next)\"}) or vector(0)",
           "legendFormat": "LLM",
           "range": false,
           "instant": true,
@@ -290,7 +290,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(max(container_last_seen{name=\"edullm-reranker\"}) > bool (time() - 60)) or vector(0)",
+          "expr": "max(up{job=\"models\",server=\"Reranker\"}) or vector(0)",
           "legendFormat": "Reranker",
           "range": false,
           "instant": true,
@@ -301,7 +301,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(max(container_last_seen{name=\"edullm-mineru-vlm\"}) > bool (time() - 60)) or vector(0)",
+          "expr": "max(up{job=\"models\",server=\"MinerU\"}) or vector(0)",
           "legendFormat": "MinerU",
           "range": false,
           "instant": true,
@@ -312,7 +312,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(max(container_last_seen{name=\"edullm-embeddings\"}) > bool (time() - 60)) or vector(0)",
+          "expr": "max(up{job=\"models\",server=\"Embeddings\"}) or vector(0)",
           "legendFormat": "Embeddings",
           "range": false,
           "instant": true,
