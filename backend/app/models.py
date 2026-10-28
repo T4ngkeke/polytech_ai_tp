@@ -1003,6 +1003,22 @@ class DocumentStagedObject(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class PictureCaption(Base):
+    """A caption of a picture written by a model at ingest (M4-G).
+
+    Keyed by the hash of the picture's pixels, the model and the prompt
+    version: a new version of a course reuses the captions of its unchanged
+    pictures, and a new model or prompt writes new ones. Shared by all
+    documents, as a caption describes pixels, not a course.
+    """
+    __tablename__ = "picture_captions"
+    image_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model: Mapped[str] = mapped_column(String(128), primary_key=True)
+    prompt_version: Mapped[str] = mapped_column(String(32), primary_key=True)
+    caption: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 # Register ORM immutability checks after all model names exist.
 from backend.app.services import document_snapshot_guards as _snapshot_guards  # noqa: E402,F401
 
