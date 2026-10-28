@@ -137,6 +137,15 @@ def _page_furniture(item) -> bool:
     return item.get('type') == 'navigation' and (len(text) <= 3 or text.isdigit())
 
 
+def _snippet_text(snippet) -> str:
+    """A search snippet; one found in a picture description says whose it is."""
+    text = snippet.get('content', '')
+    if snippet.get('description_by'):
+        note = 'unchecked ' if snippet.get('description_checked') is False else ''
+        text = f'({note}picture description by {snippet["description_by"]}) {text}'
+    return text
+
+
 def error_text(result: dict) -> str:
     """A failed tool call as the model sees it: 'error: code (message)' and a hint."""
     error = result.get('error') or {}
@@ -363,7 +372,10 @@ class ToolView:
         content = item.get('content') or ''
         line += ': ' + (content if content.strip() else '(no text)')
         if item.get('content_description'):
-            line += f'\n    description by {item.get("description_origin") or "unknown"}: {item["content_description"]}'
+            line += f'\n    description by {item.get("description_origin") or "unknown"}'
+            if item.get('description_checked') is False:
+                line += ' (unchecked; view the image before relying on it)'
+            line += f': {item["content_description"]}'
         if item.get('source_completeness') not in (None, 'complete'):
             line += (f'\n    source {item["source_completeness"]}: the text may miss content; '
                      f'check the page image{" " + page_image if page_image else ""} with view_image')
@@ -389,7 +401,7 @@ class ToolView:
         lines = [f'{len(items)} locations (leads, not evidence; read a page or block before citing)',
                  self._legend([i['document_id'] for i in items])]
         for item in items:
-            text = ' … '.join(s.get('content', '') for s in item.get('snippets') or [])
+            text = ' … '.join(_snippet_text(s) for s in item.get('snippets') or [])
             line = (f'{self.block(item["document_id"], item["block_id"], item["page_id"])} '
                     f'{item.get("type") or "block"}: {text}')
             if item.get('source_completeness') not in (None, 'complete'):

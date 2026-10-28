@@ -148,7 +148,8 @@ def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
                     source_completeness='unknown' if kind in ('figure','formula','table','code') or not content else 'complete',
                     preview_required=kind=='figure',preview_scope='page',
                     source_text=content if kind in ('figure','heading','text','navigation') and isinstance(content,str) else None,
-                    model_candidate=item.get('content') if kind=='figure' and isinstance(item.get('content'),str) else None)
+                    model_candidate=item.get('content') if kind=='figure' and isinstance(item.get('content'),str) else None,
+                    figure_type=str(item.get('sub_type'))[:40] if kind=='figure' and item.get('sub_type') else None)
                 if kind=='figure':
                     block.asset_ids=(preview_id,)
                     if not content:

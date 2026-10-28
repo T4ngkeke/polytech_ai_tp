@@ -24,6 +24,7 @@ from sqlalchemy import select
 
 from backend.app.config import settings
 from backend.app.models import DocumentAsset, DocumentBlock, DocumentBlockAsset, DocumentPage, DocumentReview
+from backend.app.services.document_edits import description_checked
 
 OPEN_BATCH = 20
 GREP_BATCH = 20
@@ -126,7 +127,8 @@ def block_view(block, page, *, teacher: bool, assets=()):
         'block_id': str(block.block_id), 'page': _page_ref(page), 'order_index': block.order_index,
         'type': block.kind, 'content': block.content, 'content_format': block.content_format,
         'content_description': block.content_description, 'context_description': block.context_description,
-        'description_origin': block.description_origin, 'section_path': list(block.section_path or []),
+        'description_origin': block.description_origin, 'description_checked': description_checked(block),
+        'section_path': list(block.section_path or []),
         'source_completeness': block.source_completeness, 'index_state': block.index_state,
         'edited_by_teacher': block.edited_by_teacher, 'issues': list(block.issues or []),
         'source': {'format': ref.get('format'), 'source_slide_no': ref.get('source_slide_no'),

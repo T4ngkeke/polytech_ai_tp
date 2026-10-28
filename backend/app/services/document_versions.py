@@ -21,6 +21,22 @@ class VersionConflict(ValueError):
     pass
 
 
+# A chunk whose source_ref names this field points into the block's
+# description, not into its text: search finds a picture without text by it.
+DESCRIPTION_FIELD = 'content_description'
+
+
+def chunk_of_description(source_ref) -> bool:
+    return (source_ref or {}).get('indexed_field') == DESCRIPTION_FIELD
+
+
+def indexed_text(block, of_description: bool) -> str | None:
+    """The text a chunk must be an exact slice of; None when search may not use it."""
+    if of_description:
+        return block.content_description if block.index_state != 'excluded' else None
+    return block.content if block.index_state == 'searchable' else None
+
+
 def storage_key(value):
     path = PurePosixPath(value)
     if not value or path.is_absolute() or '..' in path.parts or '\\' in value or str(path) != value:
@@ -183,14 +199,19 @@ async def validate_publishable(db, rev, *, acknowledge_issues):
     doc = await db.get(Document, rev.document_id)
     for chunk in chunks:
         block = by_id.get(chunk.block_id)
-        if (block is None or block.index_state != 'searchable' or chunk.document_id != doc.id
+        of_description = chunk_of_description(chunk.source_ref)
+        text = indexed_text(block, of_description) if block is not None else None
+        if (not text or chunk.document_id != doc.id
                 or chunk.class_id != doc.class_id or chunk.lab_id != doc.lab_id
                 or chunk.content_start is None or chunk.content_end is None
-                or not 0 <= chunk.content_start < chunk.content_end <= len(block.content)
-                or chunk.content != block.content[chunk.content_start:chunk.content_end]
+                or not 0 <= chunk.content_start < chunk.content_end <= len(text)
+                or chunk.content != text[chunk.content_start:chunk.content_end]
                 or chunk.tsv is None):
             raise VersionConflict('invalid_index')
-        grouped.setdefault(block.block_id, []).append(chunk)
+        if not of_description:
+            # Only the text must be indexed whole; a description helps search
+            # but an older index without it is still complete.
+            grouped.setdefault(block.block_id, []).append(chunk)
     for block in blocks:
         if block.index_state != 'searchable' or not block.content:
             continue

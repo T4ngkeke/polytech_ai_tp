@@ -388,3 +388,25 @@ async def test_grep_in_one_document_keeps_its_cursor():
     assert text.splitlines()[-1] == 'more matches: grep(cursor="c1")'
     text, ok = await course.call('grep', {'document': 'd1'})
     assert not ok and 'give a pattern' in text
+
+
+
+def test_an_unchecked_picture_description_says_so_in_search_and_read():
+    from backend.app.agent.course_tools import ToolView
+    doc, page, block = str(uuid4()), str(uuid4()), str(uuid4())
+    view = ToolView({doc: {'filename': 'Heritage.pdf', 'pages': [{'page_id': page, 'pdf_page_no': 10}]}})
+    search = {'ok': True, 'items': [{
+        'document_id': doc, 'page_id': page, 'block_id': block, 'type': 'figure', 'snippets': [
+            {'content': 'graph TD A --> B', 'description_by': 'model', 'description_checked': False}]}]}
+    assert '(unchecked picture description by model) graph TD A --> B' in view.render(
+        'search', {'query': 'héritage'}, search)
+    ref = {'page_id': page, 'preview_page_no': 10, 'preview_asset_id': None}
+    item = {'block_id': block, 'page': ref, 'type': 'figure', 'content': '',
+            'content_description': 'graph TD A --> B', 'description_origin': 'model',
+            'description_checked': False}
+    read = {'ok': True, 'page': ref, 'items': [item], 'item_evidence_ids': ['E1']}
+    assert ('description by model (unchecked; view the image before relying on it): graph TD A --> B'
+            in view.render('read', {'document_id': doc, 'page_id': page}, read))
+    item.update(description_origin='teacher', description_checked=True)
+    assert 'description by teacher: graph TD A --> B' in view.render(
+        'read', {'document_id': doc, 'page_id': page}, read)

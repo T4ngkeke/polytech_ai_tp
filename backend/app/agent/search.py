@@ -298,7 +298,8 @@ class SearchRunner:
                 continue
             content = (item.get('content') or '').strip()
             if item.get('content_description'):
-                content += f' (description of the {item.get("type") or "block"}: {item["content_description"]})'
+                note = 'unchecked model ' if item.get('description_checked') is False else ''
+                content += f' ({note}description of the {item.get("type") or "block"}: {item["content_description"]})'
             if content:
                 evidence_id = ids[number] if number < len(ids) else None
                 lines.append(f'[{evidence_id}] {content}' if evidence_id else content)

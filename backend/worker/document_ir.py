@@ -203,6 +203,13 @@ class ParsedBlock:
     # ``content`` is only a readable rendering of it.
     table_data: dict | None = None
     model_candidate: str | None = None
+    # The reader's class of a picture (MinerU sub_type: flowchart, text_image,
+    # natural_image, a chart type), when it gives one.
+    figure_type: str | None = None
+    # A caption of the picture written by a model after reading
+    # (picture_captions.py), and where it came from (model, prompt, image hash).
+    caption: str | None = None
+    caption_source: dict | None = None
     issues: list[ParseIssue] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -240,6 +247,9 @@ class ParsedBlock:
             'preview_scope': self.preview_scope,
             'table_data': self.table_data,
             'model_candidate': self.model_candidate,
+            'figure_type': self.figure_type,
+            'caption': self.caption,
+            'caption_source': self.caption_source,
             'issues': [issue.to_dict() for issue in self.issues],
         }
 

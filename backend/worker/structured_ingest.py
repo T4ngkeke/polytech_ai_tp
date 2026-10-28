@@ -49,7 +49,7 @@ from backend.app.models import (
 from backend.app.services import document_storage as storage
 from backend.app.services import document_versions as versions
 from backend.app.services.document_cleanup import aware, sweep_staged_objects
-from backend.app.services.document_edits import carry_forward
+from backend.app.services.document_edits import CAPTION_UNCHECKED, carry_forward
 from backend.worker.document_ir import ParsedDocument, ParseIssue
 from backend.worker.pdf_reader import PDFReadError, read_pdf
 from backend.worker.pdf_mineru import MinerUUnavailable, subprocess_extractor
@@ -286,18 +286,26 @@ def rows_for(outcome: ParseOutcome, claim: StructuredClaim, assets: list[Planned
             issues=_page_issues(page, outcome.mapping), width=page.width_cm, height=page.height_cm,
             preview_asset_id=preview.db_id if preview else None))
         for block in page.blocks:
+            # A picture's caption is its unchecked model description. MinerU's
+            # own picture text stays raw data (model_candidate), never searched.
+            description = (block.caption or '').strip() if block.kind == 'figure' else ''
+            structure = {'table_data': block.table_data, 'model_candidate': block.model_candidate,
+                         'figure_type': block.figure_type, 'group_path': list(block.group_path),
+                         'preview_required': block.preview_required,
+                         'preview_object_id': block.preview_object_id,
+                         'preview_scope': block.preview_scope}
+            if description:
+                structure[CAPTION_UNCHECKED] = True
+                structure['caption'] = block.caption_source
             blocks.append(DocumentBlock(
                 revision_id=rev, source_version_id=src, block_id=db_id(block.block_id),
                 page_id=db_id(page.page_id), order_index=block.order_index, kind=block.kind,
                 content=block.content, content_format=block.content_format, source_text=block.source_text,
                 source_ref=block.source_ref.to_dict(), section_path=list(block.section_path),
-                description_origin='none', source_completeness=block.source_completeness,
+                content_description=description or None, description_origin='model' if description else 'none',
+                source_completeness=block.source_completeness,
                 index_state=_index_state(block), issues=[issue.to_dict() for issue in block.issues],
-                edited_by_teacher=False,
-                structure={'table_data': block.table_data, 'model_candidate': block.model_candidate, 'group_path': list(block.group_path),
-                           'preview_required': block.preview_required,
-                           'preview_object_id': block.preview_object_id,
-                           'preview_scope': block.preview_scope}))
+                edited_by_teacher=False, structure=structure))
             for ir_asset_id in dict.fromkeys(block.asset_ids):
                 links.append(DocumentBlockAsset(
                     revision_id=rev, source_version_id=src, block_id=db_id(block.block_id),

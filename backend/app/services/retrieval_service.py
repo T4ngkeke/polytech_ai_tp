@@ -23,6 +23,7 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import DocChunk, Document, DocumentBlock, DocumentRevision, DocumentSource
+from backend.app.services.document_versions import chunk_of_description
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,8 @@ class ChunkHit:
     content_end: int | None = None
     # The reranker's score for the query, when a reranker ordered the hits.
     score: float | None = None
+    # The range points into the block's description, not into its text.
+    of_description: bool = False
 
 
 def _augmented_text(hit: ChunkHit) -> str:
@@ -206,7 +209,7 @@ async def vector_search(
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context, DocChunk.revision_id,
-               DocChunk.block_id, DocChunk.content_start, DocChunk.content_end),
+               DocChunk.block_id, DocChunk.content_start, DocChunk.content_end, DocChunk.source_ref),
         lab_id, class_id, snapshot_revisions=snapshot_revisions,
         document_id=document_id, kind=kind,
     ).order_by(distance).limit(k)
@@ -214,7 +217,8 @@ async def vector_search(
     return [
         ChunkHit(id=r.id, content=r.content, page_no=r.page_no,
                  document_id=r.document_id, context=r.context, revision_id=r.revision_id,
-                 block_id=r.block_id, content_start=r.content_start, content_end=r.content_end)
+                 block_id=r.block_id, content_start=r.content_start, content_end=r.content_end,
+                 of_description=chunk_of_description(r.source_ref))
         for r in rows
     ]
 
@@ -248,7 +252,7 @@ async def bm25_search(
     stmt = _scope(
         select(DocChunk.id, DocChunk.content, DocChunk.page_no,
                DocChunk.document_id, DocChunk.context, DocChunk.revision_id,
-               DocChunk.block_id, DocChunk.content_start, DocChunk.content_end),
+               DocChunk.block_id, DocChunk.content_start, DocChunk.content_end, DocChunk.source_ref),
         lab_id, class_id, snapshot_revisions=snapshot_revisions,
         document_id=document_id, kind=kind,
     ).where(DocChunk.tsv.op("@@")(tsquery)).order_by(rank.desc()).limit(k)
@@ -256,7 +260,8 @@ async def bm25_search(
     return [
         ChunkHit(id=r.id, content=r.content, page_no=r.page_no,
                  document_id=r.document_id, context=r.context, revision_id=r.revision_id,
-                 block_id=r.block_id, content_start=r.content_start, content_end=r.content_end)
+                 block_id=r.block_id, content_start=r.content_start, content_end=r.content_end,
+                 of_description=chunk_of_description(r.source_ref))
         for r in rows
     ]
 

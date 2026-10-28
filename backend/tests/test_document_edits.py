@@ -414,3 +414,24 @@ async def test_the_model_sees_the_picture_not_the_whole_page(db_session, storage
         assert mime == 'image/png' and crop_w < page_w and crop_h < page_h / 2
     finally:
         app.dependency_overrides.pop(get_describe_fn, None)
+
+
+def test_a_teacher_change_ends_an_unchecked_caption():
+    from types import SimpleNamespace
+    from backend.app.services.document_edits import CAPTION_UNCHECKED, apply_block_change, description_checked
+
+    def figure():
+        return SimpleNamespace(
+            content='A  B', source_text=None, edited_by_teacher=False, source_ref={}, kind='figure',
+            content_format='plain', index_state='searchable', content_description='graph TD A --> B',
+            context_description=None, description_origin='model',
+            structure={'model_candidate': 'graph TD A --> B', CAPTION_UNCHECKED: True})
+    block = figure()
+    assert not description_checked(block)
+    apply_block_change(block, teacher_id=uuid.uuid4(), content_description='B hérite de A')
+    assert block.description_origin == 'teacher' and description_checked(block)
+    assert CAPTION_UNCHECKED not in block.structure and block.structure['model_candidate']
+    block = figure()
+    apply_block_change(block, teacher_id=uuid.uuid4(), content='A  B  C')
+    assert block.content_description is None and block.description_origin == 'none'
+    assert CAPTION_UNCHECKED not in block.structure

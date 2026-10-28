@@ -520,3 +520,4 @@ def test_the_api_and_the_migration_runner_name_the_same_versions():
     from backend.app.schema_versions import REQUIRED_SCHEMA_VERSIONS
     from scripts.migrate_document_snapshots import MIGRATIONS
     assert REQUIRED_SCHEMA_VERSIONS == tuple(version for version, _ in MIGRATIONS)
+

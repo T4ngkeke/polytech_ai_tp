@@ -134,7 +134,7 @@ async def _snapshot(db, claim):
         raise IndexConflict('no_searchable_blocks')
     snapshot = [(b.block_id, b.content, b.source_text, copy.deepcopy(b.source_ref or {}),
                  list(b.section_path or []), b.index_state, b.edited_by_teacher,
-                 p.preview_page_no) for b, p in rows]
+                 p.preview_page_no, b.content_description, b.description_origin) for b, p in rows]
     meta = (doc.id, doc.class_id, doc.lab_id, doc.language, rev.id)
     await db.rollback()  # no read transaction is held while the embedder runs
     return meta, snapshot
@@ -142,15 +142,24 @@ async def _snapshot(db, claim):
 
 def _prepare(snapshot):
     prepared = []
-    for block_id, content, source_text, source_ref, section_path, index_state, edited, page_no in snapshot:
-        if index_state != 'searchable' or not content:
-            continue
-        parts = split_block(content)
+    for (block_id, content, source_text, source_ref, section_path, index_state, edited, page_no,
+         description, description_origin) in snapshot:
         section = ' / '.join(str(s) for s in section_path)[:512] or None
-        fingerprint = hashlib.sha256((source_text if source_text is not None else content).encode()).hexdigest()
-        for i, part in enumerate(parts):
-            prepared.append((block_id, i, len(parts), part, source_text, source_ref,
-                             fingerprint, section, edited, page_no))
+        if index_state == 'searchable' and content:
+            parts = split_block(content)
+            fingerprint = hashlib.sha256((source_text if source_text is not None else content).encode()).hexdigest()
+            for i, part in enumerate(parts):
+                prepared.append((block_id, i, len(parts), part, source_text, source_ref,
+                                 fingerprint, section, edited, page_no))
+        if index_state != 'excluded' and description:
+            # Own chunks, pointing into the description: a picture without
+            # text (a block still waiting for review) is found by it too.
+            parts = split_block(description)
+            ref = {**source_ref, 'indexed_field': versions.DESCRIPTION_FIELD}
+            fingerprint = hashlib.sha256(description.encode()).hexdigest()
+            for i, part in enumerate(parts):
+                prepared.append((block_id, i, len(parts), part, None, ref,
+                                 fingerprint, section, description_origin == 'teacher', page_no))
     return prepared
 
 
@@ -166,7 +175,8 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
     if meta[:3] != (doc.id, doc.class_id, doc.lab_id) or meta[4] != rev.id:
         raise IndexConflict('tenant_or_revision_changed')
     # The teacher no longer picks the language: BM25 stems with the one the text is in.
-    language = detect_language(item[3].content for item in prepared)
+    language = detect_language(item[3].content for item in prepared
+                               if not versions.chunk_of_description(item[5]))
     # Embeddings are complete and validated before any existing draft rows go.
     await db.execute(delete(DocChunk).where(DocChunk.revision_id == rev.id))
     for idx, (item, embedding) in enumerate(zip(prepared, embeddings, strict=True)):
@@ -184,6 +194,7 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
     await db.flush()
     report = copy.deepcopy(rev.report or {})
     report['index'] = {'chunk_count': len(prepared), 'searchable_block_count': len({i[0] for i in prepared}),
+                       'description_chunk_count': sum(versions.chunk_of_description(i[5]) for i in prepared),
                        'chunker_version': CHUNKER_VERSION, 'budget_unit': 'utf8_bytes_upper_bound',
                        'target': TARGET_BYTES, 'hard_limit': HARD_BYTES, 'overlap': 0,
                        'embedding_inputs': len(prepared), 'embedding_elapsed_seconds': round(elapsed_seconds, 3),

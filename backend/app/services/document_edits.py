@@ -39,6 +39,20 @@ MAX_CONTENT = 100_000
 MAX_DESCRIPTION = 400
 REVIEW_KINDS = ('teacher_edit_unmatched', 'vision_description')
 UNSET = object()
+# Block structure flag: the description is a picture caption written by a
+# model at ingest, which nobody has checked. Search finds the picture by it;
+# the picture stays the reference. Any teacher change drops it.
+CAPTION_UNCHECKED = 'caption_unchecked'
+
+
+def description_checked(block) -> bool:
+    return not (block.description_origin == 'model' and (block.structure or {}).get(CAPTION_UNCHECKED))
+
+
+def _drop_caption_flag(block):
+    if (block.structure or {}).get(CAPTION_UNCHECKED):
+        # JSON columns are not change-tracked in place: assign a new value.
+        block.structure = {k: v for k, v in block.structure.items() if k != CAPTION_UNCHECKED}
 
 
 class EditRejected(ValueError):
@@ -129,6 +143,7 @@ def apply_block_change(block, *, teacher_id, content=UNSET, kind=UNSET, content_
                 # A model description of the old text must not describe the new one.
                 block.content_description = block.context_description = None
                 block.description_origin = 'none'
+                _drop_caption_flag(block)
     if kind is not UNSET:
         if kind not in BLOCK_KINDS:
             raise EditRejected('invalid_kind')
@@ -151,6 +166,7 @@ def apply_block_change(block, *, teacher_id, content=UNSET, kind=UNSET, content_
         if value != block.content_description or (value and block.description_origin != 'teacher'):
             block.content_description = value
             block.description_origin = 'teacher' if value else 'none'
+            _drop_caption_flag(block)
             changed.append('content_description')
     if changed:
         # Completeness of the source is not changed by an edit: a teacher text
@@ -276,6 +292,8 @@ async def carry_forward(db, *, parent_revision_id, revision) -> dict:
                 new.source_text = native_text(new)
             for field in TEACHER_FIELDS:
                 setattr(new, field, copy.deepcopy(getattr(old, field)))
+            if not (old.structure or {}).get(CAPTION_UNCHECKED):
+                _drop_caption_flag(new)   # the description moved with it was checked
             new.index_state = old.index_state
             new.source_ref = {**(new.source_ref or {}), **{k: v for k, v in (old.source_ref or {}).items()
                                                             if k in ('content_origin', 'edited_by')}}

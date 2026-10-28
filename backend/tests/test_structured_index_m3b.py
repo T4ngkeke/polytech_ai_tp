@@ -44,6 +44,9 @@ async def _parsed_pdf(db,tmp_path,monkeypatch):
         doc,metrics=read_pdf(source,digest,work_dir,items)
         # Long block also checks split ranges in the database.
         doc.pages[0].blocks[0].content = 'Définition θ₁ et texte visible\n' * 35
+        # The caption step's result; MinerU's own picture text stays unsearched.
+        doc.pages[0].blocks[1].caption = 'Schéma avec deux boîtes reliées par une flèche'
+        doc.pages[0].blocks[1].caption_source = {'model': 'test', 'prompt_version': 'v1'}
         return si.ParseOutcome(doc,{'status':'source_pdf','extractor':metrics},
                                {'kind':'same_pdf_physical_page','pages':1},True)
     monkeypatch.setattr(si,'run_pdf_pipeline',fake_pipeline)
@@ -83,8 +86,17 @@ async def test_index_draft_and_teacher_edit_rebuild(db_session,tmp_path,monkeypa
         assert job.status==JobStatus.done
         chunks=(await db.scalars(select(DocChunk).where(DocChunk.revision_id==rev.id).order_by(DocChunk.chunk_index))).all()
         assert len(chunks)==len(calls) and len(chunks)>5
+        # Its text stays out; its caption is searched apart from the text, as an
+        # unchecked model description. MinerU's picture text is never searched.
+        described=[c for c in chunks if document_versions.chunk_of_description(c.source_ref)]
+        assert [(c.block_id,c.content) for c in described]==[(figure_id,'Schéma avec deux boîtes reliées par une flèche')]
+        chunks=[c for c in chunks if c not in described]
         assert all(c.block_id!=figure_id and 'invented arrow' not in c.content for c in chunks)
         blocks={b.block_id:b for b in (await db.scalars(select(DocumentBlock).where(DocumentBlock.revision_id==rev.id))).all()}
+        assert blocks[figure_id].description_origin=='model'
+        assert not document_edits.description_checked(blocks[figure_id])
+        assert blocks[figure_id].structure['caption']=={'model': 'test', 'prompt_version': 'v1'}
+        assert blocks[figure_id].structure['model_candidate']=='invented arrow'
         for block_id in {c.block_id for c in chunks}:
             block=blocks[block_id]
             parts=[c for c in chunks if c.block_id==block_id]

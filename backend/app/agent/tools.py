@@ -21,6 +21,8 @@ from backend.app.models import (
 )
 from backend.app.services import document_reader as reader
 from backend.app.services.document_access import DocumentNotFound, readable_asset, readable_revision
+from backend.app.services.document_edits import description_checked
+from backend.app.services.document_versions import indexed_text
 from backend.app.services.retrieval_service import RerankFn, hybrid_search
 
 EmbedFn = Callable[[str], Awaitable[list[float]]]
@@ -281,9 +283,10 @@ class ResearchTools:
         for hit in hits:
             block = by_block.get((hit.revision_id, hit.block_id))
             page = by_page.get((hit.revision_id, block.page_id)) if block else None
-            if (not block or not page or block.index_state != 'searchable' or
+            text = indexed_text(block, hit.of_description) if block else None
+            if (not block or not page or not text or
                     hit.content_start is None or hit.content_end is None or
-                    block.content[hit.content_start:hit.content_end] != hit.content or
+                    text[hit.content_start:hit.content_end] != hit.content or
                     page.preview_page_no != hit.page_no):
                 issues.append('source_identity_conflict')
                 continue
@@ -302,11 +305,15 @@ class ResearchTools:
                 # Best reranker score of the block's snippets (search mode
                 # uses it to tell a missing topic from a weak match).
                 item['score'] = max(item.get('score', hit.score), hit.score)
-            item['snippets'].append({
+            snippet = {
                 'chunk_id': str(hit.id),
                 'range': {'start': hit.content_start, 'end': hit.content_end},
                 'content': hit.content,
-            })
+            }
+            if hit.of_description:
+                snippet['description_by'] = block.description_origin
+                snippet['description_checked'] = description_checked(block)
+            item['snippets'].append(snippet)
             if len(json.dumps(list(items_by_block.values()), ensure_ascii=False)) > MAX_SEARCH_OUTPUT_CHARS:
                 item['snippets'].pop()
                 if not item['snippets']:
