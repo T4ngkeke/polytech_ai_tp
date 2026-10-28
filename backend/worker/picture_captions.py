@@ -43,6 +43,23 @@ MAX_TOKENS = 300
 
 DescribeFn = Callable[[bytes, str], Awaitable[str]]
 
+# Admin settings (system_configs). Captions use the VLM slot, the model that
+# also serves view_image.
+ENABLED_KEY = 'PICTURE_CAPTIONS'                     # 'on' turns captions on
+PRIORITY_KEY = 'PICTURE_CAPTION_PRIORITY'            # empty: no priority sent
+BUDGET_KEY = 'PICTURE_CAPTION_BUDGET_SECONDS'        # empty: DEFAULT_BUDGET_SECONDS
+DEFAULT_BUDGET_SECONDS = 900
+PRIORITY_RANGE = (-1000, 1000)
+BUDGET_RANGE = (60, 7200)
+
+
+def whole_number(value, low: int, high: int) -> int | None:
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if low <= number <= high else None
+
 
 @dataclass(frozen=True)
 class CaptionSettings:
@@ -51,6 +68,17 @@ class CaptionSettings:
     # send no priority, for a server without --scheduling-policy priority.
     priority: int | None = None
     budget_seconds: float = 900.0
+
+
+def settings_from_config(configs, vlm: Endpoint) -> 'CaptionSettings | None':
+    """The caption settings of one config snapshot; None when captions are off
+    or no vision model is set. An invalid number falls back to the default."""
+    if (configs.get(ENABLED_KEY) or '').strip().lower() != 'on' or not vlm.model or not vlm.base_url:
+        return None
+    return CaptionSettings(
+        endpoint=vlm,
+        priority=whole_number(configs.get(PRIORITY_KEY), *PRIORITY_RANGE),
+        budget_seconds=whole_number(configs.get(BUDGET_KEY), *BUDGET_RANGE) or DEFAULT_BUDGET_SECONDS)
 
 
 @dataclass

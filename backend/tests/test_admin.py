@@ -362,6 +362,20 @@ class TestLLMConfig:
             "mineru_server_url": "http://other-mineru:8000/v1"})
         assert resp.status_code == 200 and resp.json()["mineru_server_url"] == "http://other-mineru:8000/v1"
 
+    async def test_picture_caption_settings_roundtrip_and_check(self, admin_client):
+        base = {"base_url": "http://main/v1", "api_key": "k", "model": "m"}
+        resp = await admin_client.put("/api/admin/llm/config", json={
+            **base, "picture_captions": "on", "picture_caption_priority": "10",
+            "picture_caption_budget_seconds": "600"})
+        assert resp.status_code == 200
+        got = resp.json()
+        assert (got["picture_captions"], got["picture_caption_priority"],
+                got["picture_caption_budget_seconds"]) == ("on", "10", "600")
+        for field, value in (("picture_captions", "yes"), ("picture_caption_priority", "high"),
+                             ("picture_caption_budget_seconds", "5")):
+            resp = await admin_client.put("/api/admin/llm/config", json={**base, field: value})
+            assert resp.status_code == 422, field
+
     async def test_research_limits_roundtrip_and_range_check(self, admin_client):
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",

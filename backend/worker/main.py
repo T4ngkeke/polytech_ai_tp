@@ -89,6 +89,8 @@ class WorkerFns:
     embed_fn: EmbedFn
     # MinerU server set in the admin map; empty = PDF_MINERU_SERVER_URL.
     mineru_server_url: str = ""
+    # Picture captions after reading (picture_captions.py); None = off.
+    captions: object = None
 
 
 def with_mineru_server(structured, url: str):
@@ -98,6 +100,14 @@ def with_mineru_server(structured, url: str):
         return structured
     from dataclasses import replace
     return replace(structured, pdf_server_url=url)
+
+
+def with_captions(structured, captions):
+    """The structured settings of this tick with the admin's caption settings."""
+    if structured is None:
+        return structured
+    from dataclasses import replace
+    return replace(structured, captions=captions)
 
 
 def make_fn_builder(load_config=None, build_fns=None):
@@ -141,7 +151,7 @@ async def run_forever(
         await run_tick(
             db, gate, embed_fn=fns.embed_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
-            structured=with_mineru_server(structured, fns.mineru_server_url),
+            structured=with_captions(with_mineru_server(structured, fns.mineru_server_url), fns.captions),
         )
 
 
@@ -196,8 +206,8 @@ def _pynvml_util() -> float:  # pragma: no cover
 
 
 async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
-    """The worker's settings from SystemConfigs: the embedding endpoint (indexing)
-    and the MinerU server set in the admin map."""
+    """The worker's settings from SystemConfigs: the embedding endpoint (indexing),
+    the MinerU server set in the admin map and the picture caption settings."""
     from sqlalchemy import select
 
     from backend.app.models import SystemConfig
@@ -210,6 +220,8 @@ async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
         "embedding_api_key": routing.embedding.api_key,
         "embedding_model": routing.embedding.model,
         "mineru_server_url": next((r.value.strip() for r in rows if r.key == "PDF_MINERU_SERVER_URL"), ""),
+        "vlm": (routing.vlm.base_url, routing.vlm.api_key, routing.vlm.model),
+        "captions": {r.key: r.value for r in rows if r.key.startswith("PICTURE_CAPTION")},
     }
 
 
@@ -221,9 +233,13 @@ def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
     embed_client = AsyncOpenAI(
         api_key=cfg["embedding_api_key"], base_url=cfg["embedding_base_url"]
     )
+    from backend.app.services.model_routing import Endpoint
+    from backend.worker.picture_captions import settings_from_config
+
     return WorkerFns(
         embed_fn=_make_real_embed_fn(embed_client, cfg["embedding_model"]),
         mineru_server_url=cfg.get("mineru_server_url") or "",
+        captions=settings_from_config(cfg.get("captions") or {}, Endpoint(*(cfg.get("vlm") or ("", "", "")))),
     )
 
 

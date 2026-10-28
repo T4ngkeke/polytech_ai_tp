@@ -258,6 +258,10 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "vlm_model": "VLM_MODEL",
     # MinerU server of the PDF worker; empty = the worker's PDF_MINERU_SERVER_URL.
     "mineru_server_url": "PDF_MINERU_SERVER_URL",
+    # Picture captions at ingest, by the VLM slot (documentation/PICTURE_CAPTIONS.md).
+    "picture_captions": "PICTURE_CAPTIONS",
+    "picture_caption_priority": "PICTURE_CAPTION_PRIORITY",
+    "picture_caption_budget_seconds": "PICTURE_CAPTION_BUDGET_SECONDS",
     # Research agent limits (see research_service.ResearchLimits).
     "agent_max_tool_calls": "AGENT_MAX_TOOL_CALLS",
     "agent_max_visual_calls": "AGENT_MAX_VISUAL_CALLS",
@@ -324,6 +328,18 @@ async def get_model_servers(
 # ===================================================================
 
 
+def _check_caption_fields(body) -> None:
+    from backend.worker import picture_captions as pc
+    if (body.picture_captions or '') not in ('', 'on', 'off'):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "picture_captions must be on or off")
+    for field, (low, high) in (('picture_caption_priority', pc.PRIORITY_RANGE),
+                               ('picture_caption_budget_seconds', pc.BUDGET_RANGE)):
+        value = getattr(body, field)
+        if value and pc.whole_number(value, low, high) is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                f"{field} must be a whole number from {low} to {high}")
+
+
 @router.put("/llm/config", response_model=LLMConfigResponse)
 async def update_llm_config(
     body: LLMConfigRequest,
@@ -343,6 +359,7 @@ async def update_llm_config(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"{field} must be a whole number from {low} to {high}",
             )
+    _check_caption_fields(body)
     for field, key in _LLM_CONFIG_STR_FIELDS.items():
         value = getattr(body, field)
         if value is not None:

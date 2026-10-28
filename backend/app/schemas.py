@@ -144,6 +144,10 @@ class LLMConfigRequest(BaseModel):
     vlm_model: str | None = None
     # MinerU server of the PDF worker (hot-switched; empty = deployment setting).
     mineru_server_url: str | None = None
+    # Picture captions at ingest: 'on'/'off', vLLM priority, seconds per document.
+    picture_captions: str | None = None
+    picture_caption_priority: str | None = None
+    picture_caption_budget_seconds: str | None = None
     # Research agent limits (whole numbers; empty = default, see ResearchLimits).
     agent_max_tool_calls: str | None = None
     agent_max_visual_calls: str | None = None
@@ -177,6 +181,9 @@ class LLMConfigResponse(BaseModel):
     vlm_api_key: str = ""
     vlm_model: str = ""
     mineru_server_url: str = ""
+    picture_captions: str = ""
+    picture_caption_priority: str = ""
+    picture_caption_budget_seconds: str = ""
     # Feature flags of the deployment and the worker's own MinerU server (read-only).
     features: dict[str, bool] = Field(default_factory=dict)
     mineru_default_url: str = ""
