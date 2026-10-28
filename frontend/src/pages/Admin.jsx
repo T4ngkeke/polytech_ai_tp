@@ -728,15 +728,21 @@ const MAP_NODES = [
     ],
   },
   {
-    id: 'vlm', x: 34, y: 48, icon: 'eye', name: 'Vision (VLM)', sources: ['agent', 'teachers'],
+    id: 'vlm', x: 34, y: 48, icon: 'eye', name: 'Vision (VLM)', sources: ['agent', 'teachers', 'worker'],
     tag: 'Looks at images: page images and figures the research agent views, figure descriptions '
-      + 'teachers ask for. Empty model = off; it never '
-      + 'falls back to a text-only model.',
+      + 'teachers ask for, and the picture captions the worker writes after reading a PDF (when on). '
+      + 'Empty model = off; it never falls back to a text-only model.',
     status: (c) => (c.vlm_model ? 'set' : 'off'),
     fields: [
       { key: 'vlm_model', label: 'Model Name', placeholder: 'empty = off' },
       { key: 'vlm_base_url', label: 'Base URL', placeholder: 'inherits the default model URL' },
       { key: 'vlm_api_key', label: 'API Key', placeholder: 'inherits the default model key', secret: true },
+      { key: 'picture_captions', label: 'Picture captions at upload', placeholder: 'on / off (empty = off)',
+        hint: () => 'A short French caption for each picture of a new PDF, used by search only.' },
+      { key: 'picture_caption_priority', label: 'Caption priority', placeholder: 'empty = none sent',
+        hint: () => 'vLLM priority of caption requests; students (0) go first when it is higher. '
+          + 'Needs --scheduling-policy priority on the model server; leave empty otherwise.' },
+      { key: 'picture_caption_budget_seconds', label: 'Caption time per document (s)', placeholder: '900' },
     ],
   },
   {

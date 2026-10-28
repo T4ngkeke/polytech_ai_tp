@@ -216,7 +216,8 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
       {documents.some((d) => IN_PROGRESS.has(displayStatus(d))) && (
         <p className="text-xs text-cream-muted">
           A PDF takes about 15 seconds per page to read. You can leave this page: reading goes on
-          without it.
+          without it. Pictures then get a short caption for search; while this runs, answers to students
+          can be a little slower.
         </p>
       )}
       {loading ? (
