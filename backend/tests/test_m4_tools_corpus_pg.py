@@ -42,7 +42,8 @@ def _vectors():
 
 
 async def publish_frozen_pdf(db, teacher, lab_id, storage, tmp_path, monkeypatch, pdf: Path,
-                             expected_sha256: str, page_count: int, content_lists: Path, embed):
+                             expected_sha256: str, page_count: int, content_lists: Path, embed,
+                             captions=None):
     """Upload, parse from frozen MinerU pages, index and publish one PDF through
     the product APIs and workers. No MinerU or model call is made here."""
     digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
@@ -67,7 +68,7 @@ async def publish_frozen_pdf(db, teacher, lab_id, storage, tmp_path, monkeypatch
             {'kind': 'same_pdf_physical_page', 'pages': page_count}, True)
 
     monkeypatch.setattr(si, 'run_pdf_pipeline', cached_pipeline)
-    worker = si.StructuredSettings(storage_root=storage, task_root=tmp_path / 'tasks')
+    worker = si.StructuredSettings(storage_root=storage, task_root=tmp_path / 'tasks', captions=captions)
     assert await si.process_structured_job(db, settings=worker)
     assert await process_index_job(db, embed_fn=embed)
     doc = await db.get(Document, uuid.UUID(upload['id']), populate_existing=True)
@@ -162,8 +163,10 @@ async def test_four_pdfs_rebuild_and_tool_sources(pg_session, tmp_path, monkeypa
 CORPUS_V3 = ROOT / 'documentation/ingestion-agent-acceptance/m3-pdf/2026-10-05-corpus-v3'
 
 
-async def build_corpus_v3(db, tmp_path, monkeypatch, *, embed_url: str | None = None) -> dict:
+async def build_corpus_v3(db, tmp_path, monkeypatch, *, embed_url: str | None = None,
+                          captions=None) -> dict:
     """The 14-PDF corpus: the four M3-C PDFs plus ten more, all mineru-text.
+    captions: CaptionSettings to write picture captions with a live model.
 
     Chunk vectors come from the frozen M3-C cache and the corpus-v3 cache. A
     missing vector is computed once with the same BGE-M3 service and appended
@@ -211,14 +214,20 @@ async def build_corpus_v3(db, tmp_path, monkeypatch, *, embed_url: str | None = 
         for entry in corpus['documents']:
             await publish_frozen_pdf(db, teacher, lab_id, storage, tmp_path, monkeypatch,
                 ROOT / entry['pdf'], entry['sha256'], entry['page_count'],
-                ROOT / entry['content_lists'], embed)
+                ROOT / entry['content_lists'], embed, captions=captions)
         student = make_user()
         db.add(student)
         await db.flush()
         db.add(ClassStudent(class_id=class_id, student_id=student.id))
         db.add(Session(id=uuid.uuid4(), lab_id=lab_id, user_id=student.id))
         await db.commit()
+        from backend.app.models import DocumentRevision
+        caption_reports = [r.get('render', {}).get('captions') for r in (await db.scalars(
+            select(DocumentRevision.report))).all() if r]
         return {'documents': len(corpus['documents']),
+                'captions': {key: sum((c or {}).get(key, 0) for c in caption_reports)
+                             for key in ('written', 'cached', 'skipped_repeated', 'skipped_small',
+                                         'failed', 'not_reached')} if captions else None,
                 'chunks': await db.scalar(select(func.count(DocChunk.id))),
                 'new_vectors': added}
     finally:
