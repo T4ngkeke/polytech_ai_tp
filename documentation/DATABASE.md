@@ -32,7 +32,7 @@ The keys below are the ones the code reads. An empty value means "use the defaul
 
 | Key | Fallback when empty | Meaning |
 | --- | --- | --- |
-| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | the environment values of the same name | The main model. In the current deployment this is Qwen3.8 Flash-Next, served under the name `ornith`. |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | the environment values of the same name | The main model. In the current deployment this is Qwen3.8 Flash-Next, served under the name `flash-next`. |
 | `AGENT_BASE_URL`, `AGENT_API_KEY`, `AGENT_MODEL` | the main model | The model of the research agent. |
 | `VLM_BASE_URL`, `VLM_API_KEY` | the main model's URL and key | The vision model that reads images (`view_image`, "Write with AI"). |
 | `VLM_MODEL` | none: empty means vision is off | The name of the vision model. It never falls back to a text model. |

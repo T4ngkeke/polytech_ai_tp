@@ -35,7 +35,7 @@ def test_caption_settings_follow_the_admin_map(tmp_path):
     from backend.worker.main import with_captions
     from backend.worker.picture_captions import CaptionSettings, settings_from_config
     from backend.worker.structured_ingest import StructuredSettings
-    vlm = Endpoint('http://model:8000/v1', 'k', 'ornith')
+    vlm = Endpoint('http://model:8000/v1', 'k', 'flash-next')
     assert settings_from_config({}, vlm) is None                                   # off by default
     assert settings_from_config({'PICTURE_CAPTIONS': 'on'}, Endpoint('http://model', 'k', '')) is None
     on = settings_from_config({'PICTURE_CAPTIONS': 'on', 'PICTURE_CAPTION_PRIORITY': '10',

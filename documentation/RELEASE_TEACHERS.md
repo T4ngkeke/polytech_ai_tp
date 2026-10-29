@@ -21,7 +21,7 @@ The stack is the Compose project `edullm-release`. The private settings are in `
 | `edullm-release-db` | PostgreSQL with `pgvector`, in the volume `edullm-release_release_postgres_data`. |
 | `edullm-release-backup` | A checked `pg_dump` every 24 hours in the volume `edullm-release_release_backups`. Dumps are kept for 14 days. |
 
-The backend and the worker use the model servers on the network `edullm-models`: Qwen3.8 Flash-Next (served as `ornith`), the reranker, the embeddings and MinerU. How to start those servers is in [MODEL_SERVERS.md](MODEL_SERVERS.md), [PDF_INGESTION.md](PDF_INGESTION.md) and the README. The model settings are in the release database (`system_configs`) and are changed in the admin page.
+The backend and the worker use the model servers on the network `edullm-models`: Qwen3.8 Flash-Next (served as `flash-next`), the reranker, the embeddings and MinerU. How to start those servers is in [MODEL_SERVERS.md](MODEL_SERVERS.md), [PDF_INGESTION.md](PDF_INGESTION.md) and the README. The model settings are in the release database (`system_configs`) and are changed in the admin page.
 
 Every service has its own name (`release-*`, `edullm-release-*`). The frontend and the database also join the dev network `polytech_ai_tp_default`, where Grafana runs. A generic name such as `backend` or `postgres` would answer there twice, with the dev container and the release container. This is what went wrong in the v6 deployment: two backends answered to one name, and requests went to both in turn.
 

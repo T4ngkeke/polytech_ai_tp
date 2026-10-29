@@ -25,7 +25,7 @@ class Script:
         text = self.answers.pop(0)
         if on_text:
             on_text(text)
-        return ModelReply(text, [], 'ornith', 100, 10)
+        return ModelReply(text, [], 'flash-next', 100, 10)
 
 
 class Scored(ViewFixture):

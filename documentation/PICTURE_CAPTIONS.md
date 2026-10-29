@@ -95,7 +95,7 @@ MinerU reads every page → captions for the pictures → index → publish
 
 ### Model and scheduling
 
-- The main model (Flash-Next, served as `ornith`), the same one that answers
+- The main model (Flash-Next, served as `flash-next`), the same one that answers
   the students and runs view_image. No second model: memory on the Spark is
   short, and a small vision model would need its own tests and upkeep.
 - The worker sends all caption requests of a document at once and lets the
@@ -105,9 +105,16 @@ MinerU reads every page → captions for the pictures → index → publish
 - This needs vLLM's priority scheduling (`--scheduling-policy priority`) on
   the model server, which means a restart. vLLM serves a lower `priority`
   value first; caption requests send a higher number than chat requests (the
-  default, 0). To check on our vLLM build before relying on it: that the
-  setting starts with MTP and the prefix cache options we use, and whether a
-  student request preempts running caption requests or waits for one to end.
+  default, 0). Captions use priority 10 (admin key
+  `PICTURE_CAPTION_PRIORITY`).
+- Measured on 2026-10-29 (vLLM build of the salient recipe, with MTP and our
+  prefix cache options): the server starts and runs at the same speed as
+  without the setting. 108 captions sent at once, a student request of about
+  6,000 tokens: without priority the student waits 120 s for the first token;
+  with priority 10, 4.1 s (median, 2.8 s with no load) and the answer takes
+  18 s instead of 8.5 s. A student request does not stop running captions:
+  it takes the next free place, then shares the GPU with them. The 108
+  captions took 185 s instead of 137 s.
 - Time budget: one limit for the whole document (15 minutes to start with),
   not per picture. A caption request may wait behind students in the queue;
   a per-picture limit would skip it for no reason.
@@ -172,4 +179,3 @@ data). The flag name can become `caption_unchecked`.
 
 - Size limit for "very small" pictures.
 - Backfill: all documents at night, or on demand.
-- Priority value for captions, and whether preemption is needed.

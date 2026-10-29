@@ -117,7 +117,7 @@ async def parse_job_with_captions(db, tmp_path, monkeypatch):
         return 'Un carré bleu sur fond blanc.'
     monkeypatch.setattr(pc, 'make_describe', lambda _settings: describe)
     worker = si.StructuredSettings(storage_root=storage, task_root=tmp_path / 'tasks',
-                                   captions=pc.CaptionSettings(Endpoint('http://model', 'k', 'ornith')))
+                                   captions=pc.CaptionSettings(Endpoint('http://model', 'k', 'flash-next')))
     try:
         teacher, _, lab, _ = await seed(db)
         lab_id = lab.id
@@ -179,7 +179,7 @@ async def test_a_model_error_never_fails_the_parse_job(db_session, tmp_path, mon
         raise RuntimeError('render failed')
     monkeypatch.setattr(pc, 'find_pictures', broken)
     worker = si.StructuredSettings(storage_root=storage, task_root=tmp_path / 'tasks',
-                                   captions=pc.CaptionSettings(Endpoint('http://model', 'k', 'ornith')))
+                                   captions=pc.CaptionSettings(Endpoint('http://model', 'k', 'flash-next')))
     try:
         teacher, _, lab, _ = await seed(db)
         client = await make_client(db, teacher)

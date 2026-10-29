@@ -5,7 +5,7 @@
 # The research agent and structured documents are on in this test stack. The
 # model server joins the external network edullm-models, and the admin
 # settings use its container name (2026-10-13: Qwen3.8-Flash-Next, served as
-# "ornith", at http://m4-flashnext-v030:8000/v1 for the LLM, agent and VLM):
+# "flash-next", at http://m4-flashnext-v030:8000/v1 for the LLM, agent and VLM):
 #   docker network create edullm-models
 #   docker network connect edullm-models m4-flashnext-v030
 # The reranker (edullm-reranker, vLLM, Qwen/Qwen3-Reranker-0.6B) and the MinerU

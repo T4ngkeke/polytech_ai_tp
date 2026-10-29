@@ -20,7 +20,7 @@ This file says what the project is, what it does today and how to run it. The de
 
 - **Stack.** FastAPI, PostgreSQL with `pgvector`, React and Docker Compose. There is no message queue: the `ingestion_jobs` table is the queue.
 - **Search.** Vector search (`pgvector`) and full-text search (`tsvector`) run on one table. The results are merged and then reranked by a model.
-- **Models.** Every model is reached through an OpenAI-compatible HTTP endpoint. The addresses and names are stored in the database (`system_configs`) and the admin changes them at run time. The current deployment runs one model for the whole system (Qwen3.8 Flash-Next, served under the name `ornith`) for answers, vision and figure descriptions, with `Qwen3-Reranker` as reranker and `bge-m3` for embeddings (both on vLLM). The image has no torch.
+- **Models.** Every model is reached through an OpenAI-compatible HTTP endpoint. The addresses and names are stored in the database (`system_configs`) and the admin changes them at run time. The current deployment runs one model for the whole system (Qwen3.8 Flash-Next, served under the name `flash-next`) for answers, vision and figure descriptions, with `Qwen3-Reranker` as reranker and `bge-m3` for embeddings (both on vLLM). The image has no torch.
 - **Worker.** A second container runs `backend/worker`. It reads PDFs while students are not chatting, and chat always goes first.
 - **Access rules in SQL.** Every course search filters on `class_id` and `lab_id` in the SQL query, not in the prompt. A prompt cannot widen it.
 - **Pedagogy in the prompt.** The teacher rules shape how the tutor answers. They are not a security boundary.

@@ -14,7 +14,7 @@ def test_the_models_address_of_any_endpoint_url():
 @pytest.mark.asyncio
 async def test_a_wrong_model_name_and_a_silent_server_are_shown():
     routing = resolve_model_routing({
-        'LLM_BASE_URL': 'http://llm:8000/v1', 'LLM_MODEL': 'ornith',
+        'LLM_BASE_URL': 'http://llm:8000/v1', 'LLM_MODEL': 'flash-next',
         'AGENT_MODEL': 'qwen3.8-flash-next',           # not served: every call would 404
         'EMBEDDING_URL': 'http://emb:8000/v1', 'EMBEDDING_MODEL': 'BAAI/bge-m3',
         'RERANK_URL': 'http://down:8000/rerank', 'VLM_MODEL': ''})
@@ -25,12 +25,12 @@ async def test_a_wrong_model_name_and_a_silent_server_are_shown():
         if url.startswith('http://down'):
             raise ms.httpx.ConnectError('refused')
         if url.startswith('http://llm'):
-            return {'data': [{'id': 'ornith', 'max_model_len': 65536}]}
+            return {'data': [{'id': 'flash-next', 'max_model_len': 65536}]}
         return {'data': [{'id': 'BAAI/bge-m3', 'max_model_len': 8192}]}
 
     rows = {r['slot']: r for r in await ms.server_status(routing, fetch=fetch)}
     assert (rows['llm']['status'], rows['llm']['max_model_len'], rows['llm']['server']) == ('ok', 65536, 'llm:8000')
-    assert rows['agent']['status'] == 'model_missing' and rows['agent']['served'] == ['ornith']
+    assert rows['agent']['status'] == 'model_missing' and rows['agent']['served'] == ['flash-next']
     assert rows['vlm']['status'] == 'off'
     assert rows['embedding']['status'] == 'ok' and rows['rerank']['status'] == 'unreachable'
     # Each server is asked once, whatever the number of slots on it.
@@ -44,7 +44,7 @@ async def test_only_an_admin_reads_the_servers(db_session, monkeypatch):
     from backend.tests.conftest import make_client, make_user
 
     async def fetch(url, key):
-        return {'data': [{'id': 'ornith', 'max_model_len': 65536}]}
+        return {'data': [{'id': 'flash-next', 'max_model_len': 65536}]}
 
     monkeypatch.setattr(ms, '_fetch', fetch)
     admin, teacher = make_user(role=UserRole.admin), make_user(role=UserRole.teacher)

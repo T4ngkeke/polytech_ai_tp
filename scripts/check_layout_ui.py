@@ -53,12 +53,12 @@ MOCKS = {
     '/api/student/usage': {'used': 1200, 'limit': 50000},
     '/api/teacher/classes': [{'id': 'class', 'name': 'Informatique'}],
     '/api/teacher/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True}],
-    '/api/admin/llm/config': {'llm_model': 'ornith', 'features': {'research_agent': True, 'pdf_documents': True}},
+    '/api/admin/llm/config': {'llm_model': 'flash-next', 'features': {'research_agent': True, 'pdf_documents': True}},
     '/api/admin/llm/servers': {'servers': [
-        {'slot': 'llm', 'label': 'Main model', 'model': 'ornith', 'server': 'm4-flashnext-v030:8000', 'status': 'ok',
-         'served': ['ornith'], 'max_model_len': 65536},
+        {'slot': 'llm', 'label': 'Main model', 'model': 'flash-next', 'server': 'm4-flashnext-v030:8000', 'status': 'ok',
+         'served': ['flash-next'], 'max_model_len': 65536},
         {'slot': 'agent', 'label': 'Research agent', 'model': 'qwen3.8-flash-next', 'server': 'm4-flashnext-v030:8000',
-         'status': 'model_missing', 'served': ['ornith'], 'max_model_len': None}]},
+         'status': 'model_missing', 'served': ['flash-next'], 'max_model_len': None}]},
     '/api/teacher/analytics/classes/class/details': {
         'class_id': 'class', 'lab_id': 'lab', 'period_days': 30,
         'overview': {'members': 3, 'active_7d': 2, 'active_ever': 2, 'questions': 41, 'questions_7d': 12,
@@ -86,7 +86,7 @@ MOCKS = {
     },
     '/api/teacher/classes/class/students/s1/quota-refill': {'used': 50000, 'limit': 100000, 'granted': 50000},
     '/api/teacher/labs/lab/reports': {'report': {
-        'id': 'r1', 'lab_id': 'lab', 'student_id': None, 'status': 'done', 'error': None, 'model': 'ornith',
+        'id': 'r1', 'lab_id': 'lab', 'student_id': None, 'status': 'done', 'error': None, 'model': 'flash-next',
         'created_at': '2026-10-15T12:00:00Z', 'finished_at': '2026-10-15T12:00:30Z',
         'facts': {'questions': 108, 'questions_given_to_model': 108, 'pages_matched_by_search': 24,
                   'period': {'first_question': '2026-10-14T08:00:00Z', 'last_question': '2026-10-15T12:00:00Z'}},

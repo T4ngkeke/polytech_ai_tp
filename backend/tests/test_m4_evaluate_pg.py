@@ -25,7 +25,7 @@ async def test_benchmark_run(pg_session, tmp_path, monkeypatch):
             from backend.app.services.model_routing import Endpoint
             from backend.worker.picture_captions import CaptionSettings
             captions = CaptionSettings(Endpoint(os.getenv('M4_UPSTREAM', 'http://127.0.0.1:18301/v1'), 'local',
-                                                os.getenv('M4_MODEL_NAME', 'ornith')))
+                                                os.getenv('M4_MODEL_NAME', 'flash-next')))
         corpus = await build_corpus_v3(pg_session, tmp_path, monkeypatch,
                                        embed_url=os.environ['M4_EMBED_URL'], captions=captions)
         print('corpus-v3', corpus, flush=True)

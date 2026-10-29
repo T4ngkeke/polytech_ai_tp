@@ -15,7 +15,7 @@ Variants:
 
 Environment:
   M4_UPSTREAM      model server (OpenAI-compatible, native tool calls), default Flash-Next
-  M4_MODEL_NAME    served model name (default: ornith)
+  M4_MODEL_NAME    served model name (default: flash-next)
   M4_MODEL_LABEL   model name written to the manifest (default Flash-Next)
   M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
   M4_SAMPLING      qwen (Qwen's non-thinking advice, default, as the product) | greedy (temperature 0),
@@ -194,7 +194,7 @@ def make_tool_dependencies(config):
 
     async def observe(image, mime, question, *dimensions):
         started = time.monotonic()
-        row = {'model': 'ornith', 'status': 'started'}
+        row = {'model': config['model_name'], 'status': 'started'}
         visual_usage.append(row)
         try:
             reply = await vision(image, mime, question)
@@ -280,7 +280,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     factory = async_sessionmaker(db.bind, expire_on_commit=False)
     call_seconds = limits['call_seconds']
     upstream = os.getenv('M4_UPSTREAM', 'http://127.0.0.1:18301/v1')
-    model_name = os.getenv('M4_MODEL_NAME', 'ornith')
+    model_name = os.getenv('M4_MODEL_NAME', 'flash-next')
     sampling_name = os.getenv('M4_SAMPLING', 'qwen')
     sampling = {'greedy': GREEDY, 'qwen': QWEN_NON_THINKING}[sampling_name]
     if os.getenv('M4_TEMPERATURE'):

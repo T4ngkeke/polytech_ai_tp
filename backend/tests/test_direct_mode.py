@@ -16,7 +16,7 @@ class Model:
             raise self.error
         if on_text:
             on_text(self.text)
-        return ModelReply(self.text, [], 'ornith', 30, 8)
+        return ModelReply(self.text, [], 'flash-next', 30, 8)
 
 
 @pytest.mark.asyncio

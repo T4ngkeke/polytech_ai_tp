@@ -206,9 +206,9 @@ async def test_real_model_to_firefox_page_and_refresh(pg_session, tmp_path, monk
             question, expected_page = ('Où est expliquée la définition θ₁ dans ce cours ?', 1)
         # The research model (AGENT_*) must be served with native tool calls.
         db.add_all([SystemConfig(key='AGENT_BASE_URL', value='http://127.0.0.1:18001/v1'),
-                    SystemConfig(key='AGENT_MODEL', value='ornith'),
+                    SystemConfig(key='AGENT_MODEL', value='flash-next'),
                     SystemConfig(key='VLM_BASE_URL', value='http://127.0.0.1:18001/v1'),
-                    SystemConfig(key='VLM_MODEL', value='ornith')])
+                    SystemConfig(key='VLM_MODEL', value='flash-next')])
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         client = await make_client(db, student)

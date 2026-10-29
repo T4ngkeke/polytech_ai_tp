@@ -22,7 +22,7 @@ There is no message queue. The `ingestion_jobs` table is the queue. The backend 
 
 This section says which models the system uses and where their settings live. See [DATABASE.md](DATABASE.md) for the setting keys.
 
-- **One model for the whole system.** Qwen3.8 Flash-Next, served under the name `ornith`, writes the answers, looks at pictures (the `view_image` tool) and writes figure descriptions ("Write with AI"). Slots for the agent and for vision exist in the admin page. An empty agent slot uses the main model. The vision slot has no fallback: empty means that vision is off.
+- **One model for the whole system.** Qwen3.8 Flash-Next, served under the name `flash-next`, writes the answers, looks at pictures (the `view_image` tool) and writes figure descriptions ("Write with AI"). Slots for the agent and for vision exist in the admin page. An empty agent slot uses the main model. The vision slot has no fallback: empty means that vision is off.
 - **Reranker.** `Qwen/Qwen3-Reranker-0.6B`, served by vLLM (container `edullm-reranker`). A reranker reads the question and each candidate passage and gives each one a score.
 - **Embeddings.** `BAAI/bge-m3`, served by vLLM (container `edullm-embeddings`). An embedding is a list of numbers that stands for the meaning of a text. Both the question and the passages are turned into embeddings for the vector search.
 - **PDF reading.** MinerU is a PDF reading tool. It has a model server (`edullm-mineru-vlm`) and a client in the worker image. See [PDF_INGESTION.md](PDF_INGESTION.md).

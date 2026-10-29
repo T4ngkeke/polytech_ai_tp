@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # vLLM server. The real values are set in the admin page.
     LLM_BASE_URL: str = "http://localhost:8001/v1"
     LLM_API_KEY: str = "EMPTY"
-    LLM_MODEL: str = "ornith"
+    LLM_MODEL: str = "flash-next"
 
     # Where uploaded course documents are stored (mounted Docker volume)
     DOCUMENTS_STORAGE_ROOT: str = "/data/documents"

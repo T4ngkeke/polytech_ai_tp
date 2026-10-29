@@ -19,16 +19,16 @@ from backend.tests.test_m4_tools_pg import _indexed_pdf
 
 def models(base_url, vision_url=None):
     """The research model (AGENT_*) and the vision model (VLM_*), by default on one endpoint."""
-    return [SystemConfig(key='AGENT_BASE_URL', value=base_url), SystemConfig(key='AGENT_MODEL', value='ornith'),
+    return [SystemConfig(key='AGENT_BASE_URL', value=base_url), SystemConfig(key='AGENT_MODEL', value='flash-next'),
             SystemConfig(key='VLM_BASE_URL', value=vision_url or base_url),
-            SystemConfig(key='VLM_MODEL', value='ornith')]
+            SystemConfig(key='VLM_MODEL', value='flash-next')]
 
 
 def local_models():
-    """The opt-in real-model tests: M4D_AGENT_URL (default local Ornith), and
+    """The opt-in real-model tests: M4D_AGENT_URL (default the local Flash-Next server), and
     M4D_VLM_URL, by default the same model."""
     import os
-    agent = os.environ.get('M4D_AGENT_URL', 'http://127.0.0.1:18001/v1')
+    agent = os.environ.get('M4D_AGENT_URL', 'http://127.0.0.1:18301/v1')
     return models(agent, os.environ.get('M4D_VLM_URL', agent))
 
 
@@ -217,7 +217,7 @@ async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch
                 endpoints.append(endpoint.model)
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
                 # A reply without research gets one check; DONE keeps it.
-                return ModelReply('DONE' if purpose == 'answer_check' else 'Bonjour !', [], 'ornith', 25, 8)
+                return ModelReply('DONE' if purpose == 'answer_check' else 'Bonjour !', [], 'flash-next', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
         client = await make_client(db, student)
         request_id = str(uuid.uuid4())
@@ -230,14 +230,14 @@ async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch
             assert ('token', 'Bonjour !') in stream
             assert ('citations', []) in stream
             assert any(name == 'done' for name, _ in stream)
-            assert endpoints == ['ornith', 'ornith']   # the answer and the title use the agent model
+            assert endpoints == ['flash-next', 'flash-next']   # the answer and the title use the agent model
             run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id))
             await db.refresh(run)
             assert run.stop_reason == 'finished'
             calls = (await db.scalars(select(ModelCallUsage).where(
                 ModelCallUsage.run_id == run.id))).all()
             assert sorted(c.purpose for c in calls) == ['agent', 'answer_check']
-            assert {c.model for c in calls} == {'ornith'}
+            assert {c.model for c in calls} == {'flash-next'}
             history = await client.get(f'/api/student/sessions/{chat.id}')
             assert history.status_code == 200
             assert any(m['content'] == 'Bonjour !' and not m['citations']
@@ -279,7 +279,7 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
                 model_messages.append(messages)
-                return ModelReply('Bonjour !', [], 'ornith', 25, 8)
+                return ModelReply('Bonjour !', [], 'flash-next', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
         client = await make_client(db, student)
         async with client:
@@ -330,7 +330,7 @@ async def test_silent_research_sends_keep_alive_comments(pg_session, tmp_path, m
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
                 await asyncio.sleep(1.2)
-                return ModelReply('Bonjour !', [], 'ornith', 25, 8)
+                return ModelReply('Bonjour !', [], 'flash-next', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', SlowModel)
         client = await make_client(db, student)
         async with client:
@@ -345,10 +345,10 @@ async def test_silent_research_sends_keep_alive_comments(pg_session, tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_real_ornith_direct_student_http(pg_session, tmp_path, monkeypatch):
+async def test_real_model_direct_student_http(pg_session, tmp_path, monkeypatch):
     import os
     if os.environ.get('RUN_M4D_DIRECT') != '1':
-        pytest.skip('opt-in local Ornith direct-answer probe')
+        pytest.skip('opt-in local Flash-Next direct-answer probe')
     try:
         db = pg_session
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
@@ -374,7 +374,7 @@ async def test_real_ornith_direct_student_http(pg_session, tmp_path, monkeypatch
                 ModelCallUsage.run_id == run.id))).all()
             # The greeting and its check (no research, no citation).
             assert [c.purpose for c in calls][:1] == ['agent'] and len(calls) <= 2
-            assert {c.model for c in calls} == {'ornith'}
+            assert {c.model for c in calls} == {'flash-next'}
             assert all(c.usage_source == 'actual' for c in calls)
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
@@ -460,7 +460,7 @@ async def test_real_local_model_student_research_http(pg_session, tmp_path, monk
 async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monkeypatch):
     import os
     if os.environ.get('RUN_M4D_VISION') != '1':
-        pytest.skip('opt-in local Ornith probe')
+        pytest.skip('opt-in local Flash-Next probe')
     from backend.app.models import SystemConfig, ModelCallUsage
     try:
         db = pg_session
@@ -498,7 +498,7 @@ async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monke
             assert citations[0]['range'] is None and citations[0]['available']
             visual_call = await db.scalar(select(ModelCallUsage).where(
                 ModelCallUsage.purpose == 'vision'))
-            assert visual_call is not None and visual_call.model == 'ornith'
+            assert visual_call is not None and visual_call.model == 'flash-next'
             assert visual_call.usage_source == 'actual' and visual_call.input_tokens > 0
             print(json.dumps({'visual_citation': citations[0],
                               'vision_input_tokens': visual_call.input_tokens,
@@ -571,7 +571,7 @@ async def _mode_chat(db, tmp_path, monkeypatch, replies):
             pass
         async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
             calls.append({'purpose': purpose, 'tools': tools, 'messages': messages})
-            return ModelReply(replies.pop(0), [], 'ornith', 40, 10)
+            return ModelReply(replies.pop(0), [], 'flash-next', 40, 10)
     monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
     return doc, student, chat, calls
 

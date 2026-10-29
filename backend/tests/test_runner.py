@@ -25,9 +25,9 @@ class Script:
         self.purposes.append(purpose)
         step = self.steps.pop(0)
         if isinstance(step, str):
-            return ModelReply(step, [], 'ornith', 100, 10)
+            return ModelReply(step, [], 'flash-next', 100, 10)
         return ModelReply('', [{'id': f'c{len(self.seen)}{n}', 'name': name, 'arguments': json.dumps(args)}
-                                for n, (name, args) in enumerate(step)], 'ornith', 100, 10)
+                                for n, (name, args) in enumerate(step)], 'flash-next', 100, 10)
 
 
 def test_course_tools_have_plain_names_and_no_finish():

@@ -5,8 +5,8 @@ import { contextLength, serverState } from './modelServers.js';
 
 test('a wrong model name says what the server has instead', () => {
   assert.deepEqual(serverState({ status: 'ok' }), { text: 'served', tone: 'ok' });
-  assert.deepEqual(serverState({ status: 'model_missing', served: ['ornith'] }),
-    { text: 'not served — the server has: ornith', tone: 'bad' });
+  assert.deepEqual(serverState({ status: 'model_missing', served: ['flash-next'] }),
+    { text: 'not served — the server has: flash-next', tone: 'bad' });
   assert.equal(serverState({ status: 'unreachable' }).tone, 'warn');
   assert.equal(serverState({ status: 'off' }).text, 'off');
 });
