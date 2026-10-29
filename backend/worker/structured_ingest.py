@@ -397,16 +397,18 @@ async def _caption(db, claim: StructuredClaim, outcome: ParseOutcome, pdf: Path,
         cached = await picture_captions.cached_captions(
             db, model, (p.image_sha256 for p in pictures if not p.skip))
         await db.rollback()  # no transaction is held while the model answers
+        describe = picture_captions.make_describe(captions)
         stop = asyncio.Event()
         keeper = asyncio.create_task(_keep_lease(db, claim, stop, lease_seconds=settings.lease_seconds,
                                                  now_fn=now_fn))
         try:
             report, written = await picture_captions.write_captions(
-                pictures, model=model, describe=picture_captions.make_describe(captions),
+                pictures, model=model, describe=describe,
                 cached=cached, budget_seconds=captions.budget_seconds)
         finally:
             stop.set()
             await keeper
+            await picture_captions.close(describe)
         await picture_captions.store_captions(db, model, written)
         return report
     except Exception as exc:

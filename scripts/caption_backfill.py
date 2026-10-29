@@ -12,6 +12,10 @@ The worker takes the jobs one at a time; run this at night.
 model). A document with a reading already waiting is left alone. Captions must
 be on in the admin model map, else nothing is asked. Without --apply it only
 prints what it would ask.
+
+Run it with the stack's feature flags, as the backend has them:
+STRUCTURED_INGEST_ENABLED=true PDF_STRUCTURED_INGEST_ENABLED=true. A document
+that cannot be asked is reported and skipped.
 """
 import argparse
 import asyncio
@@ -19,6 +23,7 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.app.config import settings
 from backend.app.models import (
     Class, Document, DocumentRevision, DocumentSource, IngestionJob, JobStatus, SystemConfig,
 )
@@ -27,8 +32,11 @@ from backend.worker import picture_captions as pc
 
 
 def has_captions(rev) -> bool:
+    """The caption step ran on this reading and nothing failed or ran out of
+    time. A document without pictures to caption counts as done."""
     report = ((rev.report or {}).get('render') or {}).get('captions') or {}
-    return bool(report.get('written') or report.get('cached'))
+    return 'prompt_version' in report and not (report.get('error') or report.get('failed')
+                                               or report.get('not_reached'))
 
 
 async def captions_on(db) -> bool:
@@ -66,6 +74,9 @@ async def main():
     parser.add_argument('--all', action='store_true')
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()
+    if not (settings.STRUCTURED_INGEST_ENABLED and settings.PDF_STRUCTURED_INGEST_ENABLED):
+        print('STRUCTURED_INGEST_ENABLED and PDF_STRUCTURED_INGEST_ENABLED must be true, as in the stack')
+        return
     engine = create_async_engine(args.database_url)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
@@ -73,11 +84,18 @@ async def main():
                 print(f'captions are off ({pc.ENABLED_KEY} is not "on" in the model map): nothing to do')
                 return
             todo = await plan(db, every=args.all, limit=args.limit)
+            asked = 0
             for doc, rev, teacher_id in todo:
                 print(f'{doc.filename} ({doc.id})')
                 if args.apply:
-                    await ask_reading(db, doc, rev, teacher_id)
-            print(f'{len(todo)} document(s)' + ('' if args.apply else ': dry run, nothing asked (add --apply)'))
+                    try:
+                        await ask_reading(db, doc, rev, teacher_id)
+                        asked += 1
+                    except ValueError as exc:      # VersionConflict, EditRejected
+                        await db.rollback()
+                        print(f'  skipped: {exc}')
+            print(f'{len(todo)} document(s)' + (f', {asked} asked' if args.apply
+                                                else ': dry run, nothing asked (add --apply)'))
     finally:
         await engine.dispose()
 

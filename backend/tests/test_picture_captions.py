@@ -115,6 +115,10 @@ async def parse_job_with_captions(db, tmp_path, monkeypatch):
     async def describe(png, title):
         calls.append(title)
         return 'Un carré bleu sur fond blanc.'
+
+    async def aclose():
+        calls.append('closed')
+    describe.aclose = aclose
     monkeypatch.setattr(pc, 'make_describe', lambda _settings: describe)
     worker = si.StructuredSettings(storage_root=storage, task_root=tmp_path / 'tasks',
                                    captions=pc.CaptionSettings(Endpoint('http://model', 'k', 'flash-next')))
@@ -148,7 +152,7 @@ async def parse_job_with_captions(db, tmp_path, monkeypatch):
         rev = await db.get(DocumentRevision, rev_id, populate_existing=True)
         report = rev.report['render']['captions']
         assert (report['written'], report['cached'], report['failed']) == (1, 0, 0)
-        assert calls == ['Titre de la diapositive']
+        assert calls == ['Titre de la diapositive', 'closed']     # the model client is closed
         assert len((await db.scalars(select(PictureCaption))).all()) == 1
 
         async def embed(texts):
@@ -161,7 +165,7 @@ async def parse_job_with_captions(db, tmp_path, monkeypatch):
         # The same picture in a new upload comes from the cache.
         rev_id = await upload_and_parse()
         rev = await db.get(DocumentRevision, rev_id, populate_existing=True)
-        assert rev.report['render']['captions']['cached'] == 1 and len(calls) == 1
+        assert rev.report['render']['captions']['cached'] == 1 and calls.count('Titre de la diapositive') == 1
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 
@@ -198,6 +202,21 @@ async def test_a_model_error_never_fails_the_parse_job(db_session, tmp_path, mon
         assert rev.report['render']['captions'] == {'error': 'RuntimeError'}
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
+
+
+def test_the_backfill_counts_a_reading_without_pictures_as_done():
+    from types import SimpleNamespace
+    from scripts.caption_backfill import has_captions
+
+    def rev(captions):
+        return SimpleNamespace(report={'render': {'captions': captions}} if captions is not None else {})
+    assert not has_captions(rev(None))                                         # read before captions
+    assert has_captions(rev({'prompt_version': 'p', 'pictures': 0, 'written': 0}))
+    assert has_captions(rev({'prompt_version': 'p', 'written': 0, 'skipped_repeated': 3}))
+    assert has_captions(rev({'prompt_version': 'p', 'written': 2, 'cached': 1}))
+    assert not has_captions(rev({'error': 'RuntimeError'}))
+    assert not has_captions(rev({'prompt_version': 'p', 'written': 2, 'failed': 1, 'error': 'ValueError'}))
+    assert not has_captions(rev({'prompt_version': 'p', 'written': 2, 'not_reached': 1}))
 
 
 @pytest.mark.asyncio

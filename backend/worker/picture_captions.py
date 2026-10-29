@@ -160,7 +160,18 @@ def make_describe(settings: CaptionSettings) -> DescribeFn:
         if not choice or choice.finish_reason != 'stop' or not text:
             raise ValueError('caption_unfinished')
         return text
+    describe.aclose = client.close   # one client per document: close() when done
     return describe
+
+
+async def close(describe: DescribeFn) -> None:
+    """Close the model client of a describe function from make_describe."""
+    aclose = getattr(describe, 'aclose', None)
+    if aclose is not None:
+        try:
+            await aclose()
+        except Exception:  # noqa: BLE001 - the captions are written; a close error changes nothing
+            pass
 
 
 async def cached_captions(db, model: str, hashes) -> dict[str, str]:
