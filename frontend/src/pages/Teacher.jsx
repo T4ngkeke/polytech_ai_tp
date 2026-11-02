@@ -350,7 +350,8 @@ export default function Teacher() {
             <div className="shrink-0 px-4 pt-2 md:px-8 md:pt-6 pb-0 border-b border-border-subtle bg-ink-base/60">
               <Breadcrumb cls={selectedClass} lab={selectedLab} onClass={() => handleSelectClass(selectedClass)}
                 className="hidden md:block mb-1 text-[11px] text-cream-muted uppercase tracking-widest font-mono" />
-              <div className="flex gap-5 md:gap-6 overflow-x-auto no-scrollbar">
+              {/* Phones: the tabs wrap onto a second line, so none is hidden off screen. */}
+              <div className="flex flex-wrap gap-x-5 md:flex-nowrap md:gap-6 md:overflow-x-auto no-scrollbar">
                 {tabs.map((tab, i) => (
                   <button
                     key={tab}
