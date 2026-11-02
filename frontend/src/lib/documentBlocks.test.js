@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { boxStyle, cropStyle, pictureNumbers, searchNote, visibleIssues, withoutText } from './documentBlocks.js';
+import {
+  boxStyle, cropStyle, displayPieces, pictureNumbers, searchNote, visibleIssues, withoutText,
+} from './documentBlocks.js';
 
 const picture = (over = {}) => ({ block_id: 'f', type: 'figure', content: '', index_state: 'needs_review',
   edited_by_teacher: false, issues: [{ code: 'content_review', message: 'Figure has no native PDF labels' }], ...over });
@@ -29,4 +31,18 @@ test('a region is placed over the preview and cropped out of it', () => {
   const crop = cropStyle([500, 500, 1000, 1000], 4 / 3);
   assert.equal(crop.frame.aspectRatio, '666.667 / 500');
   assert.deepEqual(crop.image, { width: '200.00%', left: '-100.00%', top: '-100.00%' });
+});
+
+test('sub- and superscripts become display pieces, code and other tags stay as written', () => {
+  assert.deepEqual(displayPieces('pré(op<sub>B</sub>) et x<sup>2</sup>'), [
+    { text: 'pré(op', script: null }, { text: 'B', script: 'sub' },
+    { text: ') et x', script: null }, { text: '2', script: 'sup' }]);
+  assert.deepEqual(displayPieces('<sup>•</sup> Décrire'), [
+    { text: '•', script: null }, { text: ' Décrire', script: null }]);
+  assert.deepEqual(displayPieces(' point'), [{ text: '• point', script: null }]);
+  assert.deepEqual(displayPieces('#include <stdlib.h> x<sub>1</sub>', 'code'),
+    [{ text: '#include <stdlib.h> x<sub>1</sub>', script: null }]);
+  assert.deepEqual(displayPieces('<td>a</td>'), [{ text: '<td>a</td>', script: null }]);
+  assert.deepEqual(displayPieces(''), [{ text: '', script: null }]);
+  assert.deepEqual(displayPieces(null), [{ text: '', script: null }]);
 });

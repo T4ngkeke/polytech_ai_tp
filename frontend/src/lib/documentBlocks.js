@@ -60,3 +60,29 @@ export function cropStyle(region, pageRatio) {
              top: `${(-100 * y0 / h).toFixed(2)}%` },
   };
 }
+
+// MinerU keeps the PDF's sub- and superscripts as <sub>/<sup> tags and some
+// bullets as private-use characters (Wingdings), shown as squares. For display
+// only: the stored text and the edit box keep them as they are.
+const SCRIPT = /<(sub|sup)>([\s\S]*?)<\/\1>/gi;
+const PRIVATE_USE = /[-]/g;
+const BULLET = /^\s*[•◦▪■●○‣-]\s*$/;
+
+/**
+ * A block text as display pieces, [{ text, script: 'sub' | 'sup' | null }].
+ * Code is left as written; a raised bullet ("<sup>•</sup>") is an ordinary one.
+ */
+export function displayPieces(text, kind = 'text') {
+  if (kind === 'code') return [{ text: text || '', script: null }];
+  const clean = (text || '').replace(PRIVATE_USE, '•');
+  const pieces = [];
+  let last = 0;
+  for (const match of clean.matchAll(SCRIPT)) {
+    if (match.index > last) pieces.push({ text: clean.slice(last, match.index), script: null });
+    const script = BULLET.test(match[2]) ? null : match[1].toLowerCase();
+    pieces.push({ text: match[2], script });
+    last = match.index + match[0].length;
+  }
+  if (last < clean.length || !pieces.length) pieces.push({ text: clean.slice(last), script: null });
+  return pieces;
+}

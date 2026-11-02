@@ -12,7 +12,7 @@ import toast from 'react-hot-toast';
 
 import api, { responseError } from '../lib/api';
 import {
-  KIND_NAME, boxStyle, cropStyle, pictureNumbers, searchNote, visibleIssues, withoutText,
+  KIND_NAME, boxStyle, cropStyle, displayPieces, pictureNumbers, searchNote, visibleIssues, withoutText,
 } from '../lib/documentBlocks';
 import Icon from './Icon';
 
@@ -190,7 +190,7 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
                 className={`block w-full rounded px-2 py-1 text-left text-xs ${p.page_id === pageId ? 'bg-ink-hover text-cream' : 'text-cream-secondary hover:bg-ink-hover'}`}>
                 <span className="font-medium">Page {p.source_slide_no}</span>
                 {p.state !== 'usable' && <span className="ml-1 text-gold"><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /></span>}
-                <span className="block truncate text-cream-muted">{p.title || p.summary || '—'}</span>
+                <span className="block truncate text-cream-muted"><DisplayText text={p.title || p.summary || '—'} /></span>
               </button>
             ))}
             {outlineCursor && (
@@ -202,6 +202,14 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
       )}
     </div>
   );
+}
+
+/** Text read from a PDF, with its sub- and superscripts shown as such (see displayPieces). */
+function DisplayText({ text, kind }) {
+  return displayPieces(text, kind).map((piece, i) => (
+    piece.script === 'sub' ? <sub key={i}>{piece.text}</sub>
+      : piece.script === 'sup' ? <sup key={i}>{piece.text}</sup>
+        : <span key={i}>{piece.text}</span>));
 }
 
 function RevisionSummary({ revision }) {
@@ -395,10 +403,10 @@ function BlockCard({ block, number, busy, change, docId, preview, pageRatio, act
             </div>
           ) : (
             block.content
-              ? <pre className="whitespace-pre-wrap break-words font-mono text-sm text-cream-secondary">{block.content}</pre>
+              ? <pre className="whitespace-pre-wrap break-words font-mono text-sm text-cream-secondary"><DisplayText text={block.content} kind={block.type} /></pre>
               : !bare && <p className="text-sm text-cream-muted">—</p>
           )}
-          {block.content_description && !editing && <p className="mt-1 text-xs italic text-cyan">{block.content_description}</p>}
+          {block.content_description && !editing && <p className="mt-1 text-xs italic text-cyan"><DisplayText text={block.content_description} /></p>}
           {block.edited_by_teacher && block.source_text != null && block.source_text !== block.content && (
             <details className="mt-1 text-xs text-cream-muted"><summary>Text read from the PDF</summary>
               <pre className="whitespace-pre-wrap font-mono">{block.source_text}</pre></details>
