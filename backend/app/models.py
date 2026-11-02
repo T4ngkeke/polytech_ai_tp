@@ -663,6 +663,9 @@ class IngestionJob(Base):
     lock_token: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     claimed_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A queued job is not claimed before this time (m4h): teacher edits wait
+    # until the teacher stops editing, then one index job covers them all.
+    not_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(
         GUID(), primary_key=True, default=uuid.uuid4

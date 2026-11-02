@@ -2,13 +2,13 @@
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.main import app
 from backend.app.models import (
     ClassStudent, DocChunk, Document, DocumentAsset, DocumentBlock, DocumentPage,
-    DocumentRevision, EMBEDDING_DIM, Session,
+    DocumentRevision, EMBEDDING_DIM, IngestionJob, Session,
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.app.agent.tools import ResearchTools, create_scope
@@ -150,6 +150,10 @@ async def test_snapshot_survives_republication_but_membership_revokes_it(pg_sess
         await db.refresh(doc)
         prepublication = await create_scope(db, user_id=student.id, session_id=chat.id)
         assert prepublication.snapshot_revisions[doc.id] == old.id
+        # The teacher has stopped editing: the index job is due.
+        await db.execute(update(IngestionJob).where(IngestionJob.revision_id == edited.id)
+                         .values(not_before=None))
+        await db.commit()
         assert await process_index_job(db, embed_fn=embed)
         # The teacher's edit is published as soon as it is indexed.
         doc = await db.get(Document, doc.id, populate_existing=True)

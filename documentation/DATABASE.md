@@ -469,6 +469,7 @@ The queue of the worker. A job is claimed with `FOR UPDATE SKIP LOCKED`. There i
 | lock_token | UUID | Nullable. Who holds the claim. |
 | claimed_generation | Integer | Nullable. The document generation the claim saw. |
 | lease_expires_at | Timestamp | Nullable. Until when the claim may write. A result is stored only while the token, the generation and the lease still match. |
+| not_before | Timestamp | Nullable. A queued job is not claimed before this time. A teacher's edit draft waits until 60 seconds after the last edit; until then, more edits change the same draft. Added by migration `m4h_job_not_before_v1`. |
 | locked_at | Timestamp | Nullable. |
 | error_message | Text | Nullable. |
 | created_at | Timestamp | |

@@ -171,6 +171,14 @@ async def clone_revision(db, *, document_id, teacher_id, expected_generation,
     return rev
 
 
+async def check_edit_view(db, *, document_id, teacher_id, expected_generation):
+    """The checks of clone_revision, for an edit that goes into an existing draft."""
+    _enabled()
+    doc = await owned_document(db, document_id, teacher_id)
+    await _cas(db, doc, expected_generation)
+    return doc
+
+
 async def validate_publishable(db, rev, *, acknowledge_issues):
     if rev.processing_state not in ('ready', 'partial') or not rev.index_ready:
         raise VersionConflict('revision_not_ready')

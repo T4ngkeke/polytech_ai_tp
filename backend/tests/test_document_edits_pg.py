@@ -130,6 +130,38 @@ async def test_pg_two_edits_from_the_same_view_have_one_winner(m1_pg, storage, t
 
 
 @pytest.mark.asyncio
+async def test_pg_edits_into_a_waiting_draft_have_one_winner_and_no_copy(m1_pg, storage, tmp_path):
+    factory = async_sessionmaker(m1_pg, expire_on_commit=False)
+    _, ids = await parsed_pg(factory, storage, tmp_path)
+    async with factory() as db:
+        draft = await edits.edit_block(db, document_id=ids['doc_id'], teacher_id=ids['teacher_id'],
+                                       block_id=ids['block_id'], expected_revision_id=ids['rev_id'],
+                                       expected_generation=ids['generation'], content='SELECT 1;')
+        await db.commit()
+        draft_id = draft.id
+        generation = await db.scalar(select(Document.generation).where(Document.id == ids['doc_id']))
+
+    async def edit(text_value):
+        async with factory() as db:
+            try:
+                rev = await edits.edit_block(db, document_id=ids['doc_id'], teacher_id=ids['teacher_id'],
+                                             block_id=ids['block_id'], expected_revision_id=draft_id,
+                                             expected_generation=generation, content=text_value)
+                await db.commit()
+                return rev.id
+            except VersionConflict:
+                await db.rollback()
+                return 'conflict'
+
+    outcomes = await asyncio.wait_for(asyncio.gather(edit('SELECT 2;'), edit('SELECT 3;')), 15)
+    assert sorted(map(str, outcomes)) == sorted([str(draft_id), 'conflict'])
+    async with factory() as db:
+        assert await db.scalar(text("SELECT count(*) FROM document_revisions WHERE reason='teacher_edit'")) == 1
+        assert await db.scalar(text("SELECT count(*) FROM ingestion_jobs WHERE revision_id=:r AND status='queued' "
+                                    "AND not_before > now()"), {'r': draft_id}) == 1
+
+
+@pytest.mark.asyncio
 async def test_pg_m2c_migration_replaces_the_old_review_constraint(m1_pg):
     from scripts.migrate_document_snapshots import apply_migration
     async with m1_pg.begin() as conn:

@@ -217,7 +217,9 @@ function RevisionSummary({ revision }) {
     <p className="text-xs text-cream-muted">
       {STATE_LABEL[revision.processing_state] || revision.processing_state} · {revision.publication_state}
       {notes.length > 0 && ` · ${notes.join(' · ')}`}
-      {revision.processing_state === 'parsed' && ' · cannot be published before indexing'}
+      {revision.processing_state === 'parsed' && (revision.reason === 'teacher_edit'
+        ? ' · your changes go live about a minute after your last change'
+        : ' · cannot be published before indexing')}
     </p>
   );
 }

@@ -1,8 +1,9 @@
 """M3-B PDF indexing: exact ranges, publication when every page was read, failed embedding."""
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.app.config import settings
 from backend.app.main import app
@@ -105,21 +106,43 @@ async def test_index_draft_and_teacher_edit_rebuild(db_session,tmp_path,monkeypa
             assert all(c.page_no==1 and c.source_ref.get('format')=='pdf' for c in parts)
         assert (await db.scalars(_scope(select(DocChunk),doc.lab_id,doc.class_id))).all()
         text_block=next(b for b in blocks.values() if b.kind=='text')
-        text_block_id=text_block.block_id
+        text_block_id,teacher_id=text_block.block_id,teacher.id
         new=await document_edits.edit_block(db,document_id=doc.id,teacher_id=teacher.id,
             block_id=text_block_id,expected_revision_id=rev.id,
             expected_generation=doc.generation,content='Texte corrigé par enseignant')
         await db.commit()
         new_job=await db.scalar(select(IngestionJob).where(IngestionJob.revision_id==new.id))
         assert new_job.task_kind=='pdf_index' and new_job.status==JobStatus.queued
+        # The index waits until the teacher stops editing; the next edit goes
+        # into the same draft instead of a new copy.
+        assert not await process_index_job(db,embed_fn=embed)
+        await db.refresh(doc);await db.refresh(new)
+        again=await document_edits.edit_block(db,document_id=doc.id,teacher_id=teacher_id,
+            block_id=text_block_id,expected_revision_id=new.id,
+            expected_generation=doc.generation,content='Texte corrigé deux fois')
+        await db.commit()
+        assert again.id==new.id
+        assert [e['block_id'] for e in again.report['edits']]==[str(text_block_id)]*2
+        assert await db.scalar(select(func.count()).select_from(IngestionJob)
+                               .where(IngestionJob.task_kind=='pdf_index',IngestionJob.status==JobStatus.queued))==1
+        await db.refresh(new_job)
+        new_job.not_before=datetime.now(timezone.utc)-timedelta(seconds=1)
+        await db.commit()
         assert await process_index_job(db,embed_fn=embed)
         await db.refresh(new);await db.refresh(doc);await db.refresh(rev)
         assert new.index_ready and new.processing_state=='ready'
         assert doc.current_revision_id==new.id
         new_chunks=(await db.scalars(select(DocChunk).where(DocChunk.revision_id==new.id,
                        DocChunk.block_id==text_block_id))).all()
-        assert ''.join(c.content for c in new_chunks)=='Texte corrigé par enseignant'
+        assert ''.join(c.content for c in new_chunks)=='Texte corrigé deux fois'
         assert all(c.edited_by_teacher for c in new_chunks)
+        # A published version is never edited in place: the next edit copies it.
+        await db.refresh(doc)
+        later=await document_edits.edit_block(db,document_id=doc.id,teacher_id=teacher_id,
+            block_id=text_block_id,expected_revision_id=new.id,
+            expected_generation=doc.generation,content='Texte corrigé trois fois')
+        await db.commit()
+        assert later.id!=new.id and later.parent_revision_id==new.id
         # The teacher's edit is what students search now.
         visible=(await db.scalars(_scope(select(DocChunk),doc.lab_id,doc.class_id))).all()
         assert visible and all(c.revision_id==new.id for c in visible)

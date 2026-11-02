@@ -14,6 +14,7 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm4e_clarification_v1',
     'm4f_answer_modes_v1',
     'm4g_picture_captions_v1',
+    'm4h_job_not_before_v1',
 )
 
 # Structured ingestion alone needs the versions before the research ones.

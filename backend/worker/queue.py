@@ -47,7 +47,7 @@ async def claim_structured_job(
     db: AsyncSession, *, lease_seconds: int = DEFAULT_LEASE_SECONDS, now: datetime | None = None,
     task_kinds: tuple[str, ...] = STRUCTURED_TASK_KINDS,
 ) -> StructuredClaim | None:
-    """Claim one queued structured job, or one whose lease has run out.
+    """Claim one queued structured job whose not_before has passed, or one whose lease has run out.
 
     Only the job row is locked (SKIP LOCKED), and the document is only read, so
     this never waits on a teacher action holding the document lock. The token
@@ -61,7 +61,8 @@ async def claim_structured_job(
             IngestionJob.task_kind.in_(task_kinds),
             Document.structured.is_(True),
             Document.lifecycle == "active",
-            or_(IngestionJob.status == JobStatus.queued,
+            or_(and_(IngestionJob.status == JobStatus.queued,
+                     or_(IngestionJob.not_before.is_(None), IngestionJob.not_before <= now)),
                 and_(IngestionJob.status == JobStatus.processing,
                      IngestionJob.lease_expires_at < now)),
         )

@@ -1,10 +1,12 @@
 """M2-C: teacher changes to structured documents. Caller owns the transaction.
 
-Every change makes a new draft revision from the one the teacher looked at
-(expected_revision_id + expected_generation). The old snapshot is never
-changed. The new draft is "parsed": its content is stored, it has no index,
-and it cannot publish until M3 builds one. Nothing from an old index is
-inherited as ready.
+A change goes into a draft revision made from the one the teacher looked at
+(expected_revision_id + expected_generation). A published, indexed or other
+snapshot is never changed. The draft is "parsed": its content is stored, it
+has no index, and it cannot publish until M3 builds one. Nothing from an old
+index is inherited as ready. While the teacher's own edit draft waits for its
+index (EDIT_SETTLE_SECONDS after the last edit), further edits change that
+draft instead of making one more copy.
 
 Rules kept here, not in the router:
 
@@ -21,8 +23,9 @@ Rules kept here, not in the router:
 import copy
 import hashlib
 import uuid
+from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from backend.app.models import (
     DocumentBlock, DocumentPage, DocumentReview, DocumentRevision, DocumentSource, IngestionJob,
@@ -43,6 +46,10 @@ UNSET = object()
 # model at ingest, which nobody has checked. Search finds the picture by it;
 # the picture stays the reference. Any teacher change drops it.
 CAPTION_UNCHECKED = 'caption_unchecked'
+# A teacher's edit draft is indexed (and published) once no edit has come for
+# this long. Until then the next edit changes the same draft, so a series of
+# edits makes one new version instead of one per edit.
+EDIT_SETTLE_SECONDS = 60
 
 
 def description_checked(block) -> bool:
@@ -85,8 +92,37 @@ async def _copy_pending_reviews(db, old_rev, new_rev, *, skip=()):
     await db.flush()
 
 
+async def _postpone_index(db, doc, parent, teacher_id, until) -> bool:
+    """True when ``parent`` is the teacher's edit draft whose index has not started.
+
+    Its queued job then waits until ``until``. The update keeps the job row
+    locked to the end of the transaction, so the worker (SKIP LOCKED) cannot
+    claim it before the edit is stored.
+    """
+    if (parent is None or parent.document_id != doc.id or parent.id == doc.current_revision_id
+            or parent.publication_state != 'draft' or parent.reason != 'teacher_edit'
+            or parent.processing_state != 'parsed' or parent.created_by != teacher_id):
+        return False
+    held = await db.execute(update(IngestionJob).where(
+        IngestionJob.revision_id == parent.id, IngestionJob.status == JobStatus.queued)
+        .values(not_before=until).execution_options(synchronize_session=False))
+    return held.rowcount == 1
+
+
 async def _new_edit_revision(db, doc, *, teacher_id, expected_revision_id, expected_generation, note):
+    """The draft an edit goes into, and the revision the teacher looked at.
+
+    The teacher's own edit draft that is not indexed yet takes the edit itself
+    (the two are then the same object); any other revision is copied.
+    """
     parent = await db.get(DocumentRevision, expected_revision_id)
+    settle = _utcnow() + timedelta(seconds=EDIT_SETTLE_SECONDS)
+    if await _postpone_index(db, doc, parent, teacher_id, settle):
+        await versions.check_edit_view(db, document_id=doc.id, teacher_id=teacher_id,
+                                       expected_generation=expected_generation)
+        parent.report = {**parent.report, 'edits': [*parent.report.get('edits', []), note]}
+        await db.flush()
+        return parent, parent
     rev = await versions.clone_revision(db, document_id=doc.id, teacher_id=teacher_id,
         expected_generation=expected_generation, expected_revision_id=expected_revision_id,
         reason='teacher_edit')
@@ -101,7 +137,7 @@ async def _new_edit_revision(db, doc, *, teacher_id, expected_revision_id, expec
     # revision-bound job is new; the old published version remains searchable.
     if (rev.reader_version or '').startswith('mineru-text-'):
         db.add(IngestionJob(id=uuid.uuid4(), document_id=doc.id,
-            status=JobStatus.queued, task_kind='pdf_index',
+            status=JobStatus.queued, task_kind='pdf_index', not_before=settle,
             source_version_id=rev.source_version_id, revision_id=rev.id))
     await db.flush()
     return parent, rev
@@ -191,7 +227,8 @@ async def edit_block(db, *, document_id, teacher_id, block_id, expected_revision
     edits_list = [dict(e) for e in rev.report['edits']]
     edits_list[-1]['fields'] = changed
     rev.report = {**rev.report, 'edits': edits_list}
-    await _copy_pending_reviews(db, parent, rev, skip={resolve_review} if resolve_review else ())
+    if rev is not parent:
+        await _copy_pending_reviews(db, parent, rev, skip={resolve_review} if resolve_review else ())
     await db.flush()
     return rev
 
@@ -218,7 +255,8 @@ async def set_excluded(db, *, document_id, teacher_id, block_id, expected_revisi
         structure.pop('exclusion', None)
         block.index_state = 'searchable' if (block.content or '').strip() else 'needs_review'
     block.structure = structure
-    await _copy_pending_reviews(db, parent, rev)
+    if rev is not parent:
+        await _copy_pending_reviews(db, parent, rev)
     await db.flush()
     return rev
 
