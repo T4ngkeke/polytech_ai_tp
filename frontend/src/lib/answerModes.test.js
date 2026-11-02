@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_MODE, modeLabel, offersResearch, saveMode, storedMode } from './answerModes.js';
+import { DEFAULT_MODE, modeLabel, offersResearch, saveMode, sessionMode, storedMode } from './answerModes.js';
 
 function memory() {
   const items = {};
@@ -38,4 +38,16 @@ test('only an uncited search answer offers research', () => {
   assert.equal(offersResearch({ ...answer, answer_mode: 'research' }), false);
   assert.equal(offersResearch({ ...answer, content: '' }), false);
   assert.equal(offersResearch({ ...answer, sender: 'user' }), false);
+});
+
+test('a session opens with its chosen mode, else the mode of its last answer', () => {
+  const storage = memory();
+  const messages = [
+    { sender: 'user', content: 'q1' }, { sender: 'llm', answer_mode: 'search', content: 'a1' },
+    { sender: 'user', content: 'q2' }, { sender: 'llm', answer_mode: null, content: 'old' }];
+  assert.equal(sessionMode('s1', messages, storage), 'search');
+  saveMode('s1', 'direct', storage);
+  assert.equal(sessionMode('s1', messages, storage), 'direct');
+  assert.equal(sessionMode('s2', [], storage), DEFAULT_MODE);
+  assert.equal(sessionMode('s3', messages, () => { throw new Error('SecurityError'); }), 'search');
 });

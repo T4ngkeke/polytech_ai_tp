@@ -24,7 +24,7 @@ import { PdfPreviewModal } from '../components/PdfPreview';
 import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
 import ModeSwitch from '../components/ModeSwitch';
 import useMediaQuery from '../lib/useMediaQuery';
-import { DEFAULT_MODE, offersResearch, saveMode, storedMode } from '../lib/answerModes';
+import { DEFAULT_MODE, offersResearch, saveMode, sessionMode, storedMode } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
@@ -142,6 +142,7 @@ export default function Chat() {
         // Load messages
         const sessionData = await api.get(`/api/student/sessions/${latest.id}`);
         setMessages(sessionData.messages || []);
+        setMode(sessionMode(latest.id, sessionData.messages));
       } else {
         setSessions([]);
       }
@@ -183,6 +184,7 @@ export default function Chat() {
     try {
       const data = await api.get(`/api/student/sessions/${sessionId}`);
       setMessages(data.messages || []);
+      setMode(sessionMode(sessionId, data.messages));
     } catch {
       toast.error('Failed to load messages');
     } finally {

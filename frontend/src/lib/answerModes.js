@@ -14,14 +14,32 @@ export const DEFAULT_MODE = 'research';
 
 const key = (sessionId) => `edullm-mode-${sessionId}`;
 
+const known = (mode) => MODES.some((m) => m.key === mode);
+
 export function storedMode(sessionId, getStorage = () => localStorage) {
   if (!sessionId) return DEFAULT_MODE;
   try {
     const value = getStorage().getItem(key(sessionId));
-    return MODES.some((m) => m.key === value) ? value : DEFAULT_MODE;
+    return known(value) ? value : DEFAULT_MODE;
   } catch {
     return DEFAULT_MODE;
   }
+}
+
+/**
+ * The mode a session opens with: the one chosen for it in this browser, else
+ * the mode of its last answer (another browser, cleared storage), else the default.
+ */
+export function sessionMode(sessionId, messages, getStorage = () => localStorage) {
+  let value = null;
+  try {
+    value = sessionId ? getStorage().getItem(key(sessionId)) : null;
+  } catch {
+    // Blocked storage: the answers still tell.
+  }
+  if (known(value)) return value;
+  const last = [...(messages || [])].reverse().find((m) => m.sender === 'llm' && known(m.answer_mode));
+  return last ? last.answer_mode : DEFAULT_MODE;
 }
 
 export function saveMode(sessionId, mode, getStorage = () => localStorage) {
