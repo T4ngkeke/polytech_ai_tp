@@ -82,7 +82,7 @@ from backend.app.services import (
     analytics_service,
     quota_service,
 )
-from backend.app.services.citation_report import lab_citation_report
+from backend.app.services.citation_report import class_citation_report, lab_citation_report
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 
@@ -642,11 +642,29 @@ async def get_citation_report(
     Shape: backend/app/services/citation_report.py."""
     lab = await lab_service.get_lab_by_id(db, lab_id)
     await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
+    return await lab_citation_report(db, lab, **_report_period(start, end))
+
+
+@router.get("/classes/{class_id}/citation-report")
+async def get_class_citation_report(
+    class_id: uuid.UUID,
+    start: date | None = Query(None, description="First day included (UTC)."),
+    end: date | None = Query(None, description="Last day included (UTC)."),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """The lab report for all labs of the class together; each question names its lab."""
+    await _verify_class_ownership(db, class_id, teacher)
+    labs = await lab_service.list_labs_for_class(db, class_id)
+    return await class_citation_report(db, class_id, labs, **_report_period(start, end))
+
+
+def _report_period(start: date | None, end: date | None) -> dict:
+    """[start, end] in days (UTC) as the report's [start, end) datetimes."""
     if start and end and end < start:
         raise HTTPException(status_code=422, detail="end is before start")
     day = lambda d: datetime.combine(d, time.min, tzinfo=timezone.utc)
-    return await lab_citation_report(db, lab, start=day(start) if start else None,
-                                     end=day(end) + timedelta(days=1) if end else None)
+    return {'start': day(start) if start else None, 'end': day(end) + timedelta(days=1) if end else None}
 
 
 # ===================================================================

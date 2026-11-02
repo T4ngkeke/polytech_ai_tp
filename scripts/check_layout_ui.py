@@ -96,6 +96,22 @@ MOCKS = {
 }
 
 MOCKS['/api/admin/analytics/classes/class/details'] = MOCKS['/api/teacher/analytics/classes/class/details']
+MOCKS['/api/teacher/classes/class/citation-report'] = {
+    'class_id': 'class', 'labs': [{'id': 'lab', 'name': 'TP agent'}],
+    'period': {'start': None, 'end': None},
+    'totals': {'questions': 2, 'students': 1, 'answers_with_sources': 1, 'unverified': 1,
+               'marked_wrong': 0, 'questions_back': 0},
+    'files': [{'document_id': 'd1', 'filename': 'SQL.pdf', 'in_lab': True, 'answers': 1, 'students': 1,
+               'share': 1.0, 'pages': [{'pdf_page_no': 28, 'answers': 1, 'students': 1,
+                   'passages': [{'block_id': 'b', 'kind': 'text', 'excerpt': 'La clause HAVING filtre les groupes',
+                                 'answers': 1}],
+                   'examples': [{'student': 'alice', 'student_id': 's1', 'question': 'HAVING ou WHERE ?',
+                                 'asked_at': '2026-10-14T09:00:00+00:00', 'session_id': 'x', 'message_id': 'm',
+                                 'lab_id': 'lab'}]}]}],
+    'uncited_files': [], 'marked_wrong': [],
+    'unverified': [{'student': 'alice', 'student_id': 's1', 'question': 'Et le TP 3 ?',
+                    'asked_at': '2026-10-13T08:00:00+00:00', 'session_id': 'y', 'lab_id': 'lab',
+                    'outcome': 'partial_deadline_exceeded'}]}
 MOCKS.update({
     '/api/admin/users': [
         {'id': 'admin', 'username': 'admin', 'role': 'admin', 'daily_token_quota': 50000},
@@ -560,14 +576,81 @@ def check_report(browser, target, shots):
                 expect(page.get_by_role('heading', name='How to prepare the next session')).to_be_visible()
                 expect(page.get_by_text('Based on 108 questions', exact=False)).to_be_visible()
                 expect(page.get_by_role('button', name='Write again')).to_be_enabled()
+                expect(page.get_by_role('button', name='Export Markdown')).to_be_visible()
                 overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
                 assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
                 if shots:
                     page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+                page.evaluate(NO_DIALOG)
+                page.get_by_role('button', name='Print / PDF').click()
+                text = printed_text(page)
+                assert 'How to prepare the next session' in text and 'Based on 108 questions' in text, name
+                assert 'Write again' not in text and 'Export Markdown' not in text, name
                 assert not errors, f'{name}: {errors}'
                 print(f'PASS: {name}')
             finally:
                 context.close()
+
+
+# window.print() is replaced: the copy stays in #print-root, so its content and
+# the print layout can be checked without a dialog.
+NO_DIALOG = 'window.print = () => { window.__printed = (window.__printed || 0) + 1; };'
+
+
+def printed_text(page):
+    expect(page.locator('#print-root')).to_have_count(1)
+    page.emulate_media(media='print')
+    try:
+        return page.locator('#print-root').inner_text()
+    finally:
+        page.emulate_media(media='screen')
+
+
+def check_class_course_use(browser, target, shots):
+    # Class > Course use: all labs together, each question with its lab; printing
+    # shows every file open and none of the controls.
+    for theme in ('light', 'dark'):
+        for size in (DESKTOP, PHONE):
+            name = f'class-course-use-{theme}-{size[0]}'
+            context, page, errors = open_page(browser, target, 'teacher', '/teacher', theme, size)
+            try:
+                page.evaluate(NO_DIALOG)
+                page.get_by_text('Informatique', exact=True).first.click()
+                if size == PHONE:
+                    # Choosing a class keeps the drawer open for its labs: close it.
+                    page.mouse.click(size[0] - 10, size[1] // 2)
+                page.get_by_role('button', name='Course use', exact=True).click()
+                expect(page.get_by_text('SQL.pdf')).to_be_visible()
+                expect(page.get_by_text('(TP agent)').first).to_be_visible()
+                overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
+                assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
+                if shots:
+                    page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
+                page.get_by_role('button', name='Print / PDF').click()
+                text = printed_text(page)
+                for wanted in ('Course use — Informatique', 'Period: all time', 'Page 28', 'HAVING ou WHERE ?'):
+                    assert wanted in text, f'{name}: "{wanted}" not printed'
+                for unwanted in ('Export Markdown', 'open conversation', 'From'):
+                    assert unwanted not in text, f'{name}: "{unwanted}" printed'
+                assert page.evaluate('document.documentElement.dataset.theme') == 'light', name
+                assert not errors, f'{name}: {errors}'
+                print(f'PASS: {name}')
+            finally:
+                context.close()
+
+
+def check_phone_lab_tabs(browser, target):
+    # On a phone every lab tab is on screen (they wrap), none hidden to the right.
+    context, page, errors = open_page(browser, target, 'teacher', '/teacher', 'light', PHONE)
+    try:
+        page.get_by_text('TP agent', exact=True).first.click()
+        for tab in ('Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive'):
+            box = page.get_by_role('button', name=tab, exact=True).bounding_box()
+            assert box and box['x'] >= 0 and box['x'] + box['width'] <= PHONE[0], f'tab {tab} off screen: {box}'
+        assert not errors, errors
+        print('PASS: every lab tab is on screen on a phone')
+    finally:
+        context.close()
 
 
 def check_monitoring(browser, target, shots):
@@ -639,6 +722,8 @@ def main():
             check_document_pictures(browser, target, shots)
             check_analytics(browser, target, shots)
             check_report(browser, target, shots)
+            check_class_course_use(browser, target, shots)
+            check_phone_lab_tabs(browser, target)
             check_admin_classes(browser, target, shots)
             check_monitoring(browser, target, shots)
             check_long_answer_stays_at_its_start(browser, target)

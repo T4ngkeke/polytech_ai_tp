@@ -31,3 +31,21 @@ export function basis(report) {
   if (f.pages_matched_by_search) parts.push(`${f.pages_matched_by_search} tied to pages by a course search`);
   return parts.join(' · ');
 }
+
+/**
+ * A finished report as a file: { name, title, markdown }. The Markdown keeps
+ * the date, the basis and the warning shown on the page above the model's text.
+ */
+export function reportFile(report, { labName = '', studentName = null } = {}) {
+  const subject = [labName, studentName].filter(Boolean).join(' — ');
+  const title = `AI report${subject ? ` — ${subject}` : ''}`;
+  const written = (report.finished_at || report.created_at || '').slice(0, 10);
+  const slug = (subject || 'lab').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '');
+  const markdown = [
+    `# ${title}`, '',
+    `Written ${written}${basis(report) ? ` · ${basis(report)}` : ''}.`,
+    'Written by a model from the questions: check it before you rely on it.', '',
+    (report.content || '').trim(), '',
+  ].join('\n');
+  return { name: `ai-report-${slug}-${written}.md`, title, markdown };
+}

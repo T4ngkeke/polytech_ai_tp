@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { basis, failureText } from './reports.js';
+import { basis, failureText, reportFile } from './reports.js';
 
 test('a failed report says why, a written one does not', () => {
   assert.equal(failureText(null), null);
@@ -20,4 +20,15 @@ test('the basis names the questions, the period and the search matches', () => {
     period: { first_question: '2026-10-14T08:00:00Z', last_question: '2026-10-14T09:00:00Z' } } }),
   'Based on 1 question on 14 Oct');
   assert.match(basis({ facts: { ...facts, questions: 200, questions_given_to_model: 150 } }), /the latest 150 given/);
+});
+
+test('a report file keeps the date, the basis and the warning above the text', () => {
+  const report = { status: 'done', content: '## Topics\n- jointures\n', finished_at: '2026-10-15T09:30:00Z',
+    facts: { questions: 3, questions_given_to_model: 3, period: null, pages_matched_by_search: 0 } };
+  const file = reportFile(report, { labName: 'TP SQL', studentName: 'élève.1' });
+  assert.equal(file.title, 'AI report — TP SQL — élève.1');
+  assert.equal(file.name, 'ai-report-tp-sql-élève-1-2026-10-15.md');
+  assert.match(file.markdown, /^# AI report — TP SQL — élève\.1\n\nWritten 2026-10-15 · Based on 3 questions\.\n/);
+  assert.match(file.markdown, /check it before you rely on it\.\n\n## Topics\n- jointures\n$/);
+  assert.equal(reportFile(report).name, 'ai-report-lab-2026-10-15.md');
 });

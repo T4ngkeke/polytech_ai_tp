@@ -10,7 +10,7 @@ from backend.app.agent.model import ModelReply
 from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import (
-    AgentRun, DocumentBlock, DocumentPage, Message, MessageCitation, ModelCallUsage, SenderType, SystemConfig,
+    AgentRun, DocumentBlock, DocumentPage, Lab, Message, MessageCitation, ModelCallUsage, SenderType, SystemConfig,
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.tests.conftest import make_client
@@ -163,8 +163,11 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
                                       json={'feedback': 'down'})
             assert rated.status_code == 200, rated.text
             assert (await client.get(f'/api/teacher/labs/{chat.lab_id}/citation-report')).status_code == 403
+            class_id = (await db.get(Lab, chat.lab_id)).class_id
+            assert (await client.get(f'/api/teacher/classes/{class_id}/citation-report')).status_code == 403
             teacher_client = await make_client(db, teacher)
             async with teacher_client:
+                whole = (await teacher_client.get(f'/api/teacher/classes/{class_id}/citation-report')).json()
                 report = (await teacher_client.get(
                     f'/api/teacher/labs/{chat.lab_id}/citation-report')).json()
                 empty = (await teacher_client.get(f'/api/teacher/labs/{chat.lab_id}/citation-report',
@@ -186,6 +189,11 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
             assert empty['totals']['questions'] == 0 and empty['files'] == []
             assert empty['uncited_files'][0]['document_id'] == str(doc.id)
             assert backwards.status_code == 422
+            # Only this lab of the class has conversations: the class report counts
+            # the same, lists every lab, and each question names its lab.
+            assert str(chat.lab_id) in {lab['id'] for lab in whole['labs']} and len(whole['labs']) == 2
+            assert (whole['totals'], whole['files']) == (report['totals'], report['files'])
+            assert {e['lab_id'] for e in cited_page['examples']} == {str(chat.lab_id)}
             from backend.app.services.document_cleanup import mark_deleted
             await db.refresh(doc)
             await db.refresh(teacher)

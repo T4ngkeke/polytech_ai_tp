@@ -288,3 +288,13 @@
   0%, 50% { border-color: var(--color-cyan); }
   51%, 100% { border-color: transparent; }
 }
+
+/* lib/exportFile.js printElement: while printing, only the copy in #print-root
+   is shown, at full length (no scroll boxes), without its controls. */
+#print-root { display: none; }
+@media print {
+  body > *:not(#print-root) { display: none !important; }
+  #print-root { display: block; }
+  #print-root * { overflow: visible !important; max-height: none !important; }
+  #print-root .no-print { display: none !important; }
+}

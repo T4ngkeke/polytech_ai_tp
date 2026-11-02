@@ -29,7 +29,7 @@ import Icon from '../components/Icon';
 // it in when a test-drive is actually opened.
 const MessageContent = lazy(() => import('../components/MessageContent'));
 
-const TABS_CLASS = ['Settings', 'Rules', 'Analytics', 'Documents'];
+const TABS_CLASS = ['Settings', 'Rules', 'Analytics', 'Documents', 'Course use'];
 // New tabs appended last so existing tab indices stay stable.
 const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive'];
 
@@ -376,6 +376,11 @@ export default function Teacher() {
               )}
               {level === 'class' && activeTab === 3 && <DocumentManager classId={selectedClass.id}
                 examMode={!!selectedClass.exam_mode} onOpenClassSettings={() => setActiveTab(0)} />}
+              {level === 'class' && activeTab === 4 && (
+                <CitationReport classId={selectedClass.id} name={selectedClass.name}
+                  onOpenConversation={(userId, sessionId, labId) => openConversation(
+                    { lab_id: labId, user_id: userId, session_id: sessionId })} />
+              )}
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
@@ -819,7 +824,7 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
       <div className="max-w-3xl">
         <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
         {views}
-        <TeachingReport labId={lab.id} />
+        <TeachingReport labId={lab.id} labName={lab.name} />
       </div>
     );
   }
@@ -828,7 +833,7 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
       <div>
         <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
         {views}
-        <CitationReport labId={lab.id} labName={lab.name} onOpenConversation={openConversation} />
+        <CitationReport labId={lab.id} name={lab.name} onOpenConversation={openConversation} />
       </div>
     );
   }
@@ -858,7 +863,7 @@ function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStu
               <div className="border-t border-border-subtle bg-ink-base">
                 {studentSessions.length > 0 && (
                   <div className="border-b border-border-subtle p-3">
-                    <TeachingReport labId={lab.id} studentId={student.id} studentName={student.username} />
+                    <TeachingReport labId={lab.id} labName={lab.name} studentId={student.id} studentName={student.username} />
                   </div>
                 )}
                 {studentSessions.length === 0 ? (

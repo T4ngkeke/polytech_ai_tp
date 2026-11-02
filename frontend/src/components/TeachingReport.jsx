@@ -1,18 +1,21 @@
 /**
  * TeachingReport.jsx — a report the model writes for the teacher, on a lab or
  * on one student of it (studentId). Written only when the teacher asks; the
- * latest one is shown with what it is based on.
+ * latest one is shown with what it is based on, and can be exported as
+ * Markdown or printed (PDF).
  */
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 
 import api from '../lib/api';
-import { POLL_MS, basis, failureText } from '../lib/reports';
+import { downloadText, printElement } from '../lib/exportFile';
+import { POLL_MS, basis, failureText, reportFile } from '../lib/reports';
 
 const MessageContent = lazy(() => import('./MessageContent'));
 
-export default function TeachingReport({ labId, studentId = null, studentName = null }) {
+export default function TeachingReport({ labId, labName = '', studentId = null, studentName = null }) {
   const [report, setReport] = useState(undefined);       // undefined: loading; null: none yet
+  const sheet = useRef(null);
   const [starting, setStarting] = useState(false);
   const query = studentId ? `?student_id=${studentId}` : '';
   const url = `/api/teacher/labs/${labId}/reports`;
@@ -41,8 +44,10 @@ export default function TeachingReport({ labId, studentId = null, studentName = 
 
   const subject = studentName ? `on ${studentName}` : 'on this lab';
   const failed = failureText(report);
+  const done = report?.status === 'done';
+  const file = done ? reportFile(report, { labName, studentName }) : null;
   return (
-    <section className="rounded-xl border border-border-subtle bg-ink-raised p-4">
+    <section ref={sheet} className="rounded-xl border border-border-subtle bg-ink-raised p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h4 className="text-sm font-semibold text-cream">AI report {subject}</h4>
@@ -52,10 +57,23 @@ export default function TeachingReport({ labId, studentId = null, studentName = 
               : 'Topics, most asked PDFs and pages, difficulties, how to prepare the next session.'}
           </p>
         </div>
-        <button type="button" disabled={starting || running || report === undefined} onClick={write}
-          className="shrink-0 rounded-lg border border-cyan/40 bg-cyan-muted px-3 py-1.5 text-xs text-cream hover:bg-cyan/20 disabled:opacity-50">
-          {running ? 'Writing…' : report ? 'Write again' : 'Write report'}
-        </button>
+        <div className="no-print flex shrink-0 flex-wrap gap-2">
+          {file && <>
+            <button type="button" onClick={() => downloadText(file.name, file.markdown)}
+              className="rounded-lg border border-border-default px-3 py-1.5 text-xs text-cream-secondary hover:bg-ink-hover">
+              Export Markdown
+            </button>
+            <button type="button" onClick={() => printElement(sheet.current, file.title)}
+              title="Print, or choose “Save as PDF” in the print dialog"
+              className="rounded-lg border border-border-default px-3 py-1.5 text-xs text-cream-secondary hover:bg-ink-hover">
+              Print / PDF
+            </button>
+          </>}
+          <button type="button" disabled={starting || running || report === undefined} onClick={write}
+            className="rounded-lg border border-cyan/40 bg-cyan-muted px-3 py-1.5 text-xs text-cream hover:bg-cyan/20 disabled:opacity-50">
+            {running ? 'Writing…' : report ? 'Write again' : 'Write report'}
+          </button>
+        </div>
       </div>
 
       {running && (
@@ -65,7 +83,7 @@ export default function TeachingReport({ labId, studentId = null, studentName = 
         </p>
       )}
       {failed && <p className="mt-3 text-xs text-gold">{failed}</p>}
-      {report?.status === 'done' && (
+      {done && (
         <div className="mt-3 border-t border-border-subtle pt-3">
           <p className="mb-2 text-[11px] text-cream-muted">
             Written {new Date(report.finished_at || report.created_at).toLocaleString()} · {basis(report)}.

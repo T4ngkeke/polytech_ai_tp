@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { reportMarkdown } from './citationReport.js';
+import { labOf, reportMarkdown } from './citationReport.js';
 
 const report = {
   period: { start: '2026-10-01T00:00:00+00:00', end: '2026-10-15T00:00:00+00:00' },
@@ -37,4 +37,19 @@ test('an empty period reads as all time and has no empty sections', () => {
     uncited_files: [], unverified: [], marked_wrong: [] });
   assert.match(md, /Period: all time\./);
   assert.doesNotMatch(md, /## Files no answer cited|## Questions without|## Answers marked wrong/);
+});
+
+test('a class report names the lab of each question', () => {
+  const lab = (item) => ({ ...item, lab_id: 'l2' });
+  const whole = {
+    ...report, labs: [{ id: 'l1', name: 'TP 1' }, { id: 'l2', name: 'TP 2' }],
+    files: [{ ...report.files[0], pages: [{ ...report.files[0].pages[0],
+      examples: report.files[0].pages[0].examples.map(lab) }] }],
+    unverified: report.unverified.map(lab), marked_wrong: report.marked_wrong.map(lab),
+  };
+  const md = reportMarkdown(whole, 'Informatique');
+  assert.match(md, /^# Course use — Informatique\n/);
+  assert.match(md, /- alice \(TP 2\), 2026-10-14: HAVING \?/);
+  assert.match(md, /- bob \(TP 2\), 2026-10-13: Et le TP 3 \?/);
+  assert.equal(labOf(report, { lab_id: 'l2' }), '');
 });

@@ -1,48 +1,44 @@
 /**
- * CitationReport.jsx — the "Course use" view of a lab's audit: which files,
- * pages and passages the research answers cite, who asked what, the files no
- * answer cited, and the questions without a verified answer. Numbers come from
- * GET /api/teacher/labs/{labId}/citation-report; nothing here is computed by a model.
+ * CitationReport.jsx — the "Course use" view of a lab's audit, or of a whole
+ * class (classId): which files, pages and passages the research answers cite,
+ * who asked what, the files no answer cited, and the questions without a
+ * verified answer. Numbers come from GET /api/teacher/{labs|classes}/{id}/citation-report;
+ * nothing here is computed by a model. Exported as Markdown or printed (PDF).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
-import { reportMarkdown } from '../lib/citationReport';
+import { labOf, periodText, reportMarkdown } from '../lib/citationReport';
+import { downloadText, printElement } from '../lib/exportFile';
 
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString() : '');
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-function download(name, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function Question({ item, onOpen }) {
+function Question({ item, lab, onOpen }) {
   return (
     <li className="text-xs text-cream-secondary">
       <span className="font-medium text-cream">{item.student}</span>
+      {lab && <span className="text-cream-muted">{lab}</span>}
       <span className="text-cream-muted"> · {day(item.asked_at)} · </span>
       {item.question || <span className="italic text-cream-muted">question not stored</span>}
       {item.session_id && (
-        <button type="button" onClick={() => onOpen(item.student_id, item.session_id)}
-          className="ml-2 text-cyan hover:underline cursor-pointer">open conversation</button>
+        <button type="button" onClick={() => onOpen(item.student_id, item.session_id, item.lab_id)}
+          className="no-print ml-2 text-cyan hover:underline cursor-pointer">open conversation</button>
       )}
     </li>
   );
 }
 
-function FileRow({ file, onOpen }) {
-  const [open, setOpen] = useState(false);
+function FileRow({ file, report, scopeWord, printing, onOpen }) {
+  const [opened, setOpen] = useState(false);
+  // A printed report shows every file open.
+  const open = opened || printing;
   return (
     <div className="bg-ink-raised rounded-xl border border-border-subtle overflow-hidden">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left cursor-pointer hover:bg-ink-hover transition-colors">
         <div className="min-w-0">
           <p className="text-sm font-medium text-cream truncate">{file.filename}
-            {!file.in_lab && <span className="ml-2 text-[10px] text-cream-muted">(no longer in the lab)</span>}</p>
+            {!file.in_lab && <span className="ml-2 text-[10px] text-cream-muted">(no longer in the {scopeWord})</span>}</p>
           <p className="text-xs text-cream-muted font-mono">
             {count(file.answers, 'answer')} · {Math.round(file.share * 100)}% · {count(file.students, 'student')} · {count(file.pages.length, 'page')}
           </p>
@@ -67,7 +63,7 @@ function FileRow({ file, onOpen }) {
                 </ul>
               )}
               <ul className="space-y-1">
-                {page.examples.map((e) => <Question key={e.message_id} item={e} onOpen={onOpen} />)}
+                {page.examples.map((e) => <Question key={e.message_id} item={e} lab={labOf(report, e)} onOpen={onOpen} />)}
               </ul>
             </div>
           ))}
@@ -77,11 +73,23 @@ function FileRow({ file, onOpen }) {
   );
 }
 
-export default function CitationReport({ labId, labName, onOpenConversation }) {
+/** labId, or classId for all labs of the class; name is the lab's or the class's. */
+export default function CitationReport({ labId, classId, name, onOpenConversation }) {
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
+  const [printing, setPrinting] = useState(false);
+  const sheet = useRef(null);
+  const url = classId ? `/api/teacher/classes/${classId}/citation-report` : `/api/teacher/labs/${labId}/citation-report`;
+  const scopeWord = classId ? 'class' : 'lab';
+
+  // Printed once every file is rendered open (FileRow), then back to normal.
+  useEffect(() => {
+    if (!printing) return;
+    printElement(sheet.current, `Course use - ${name || ''}`);
+    setPrinting(false);
+  }, [printing, name]);
 
   useEffect(() => {
     let current = true;
@@ -89,16 +97,18 @@ export default function CitationReport({ labId, labName, onOpenConversation }) {
     if (start) params.set('start', start);
     if (end) params.set('end', end);
     setError(null);
-    api.get(`/api/teacher/labs/${labId}/citation-report${params.toString() ? `?${params}` : ''}`)
+    api.get(`${url}${params.toString() ? `?${params}` : ''}`)
       .then((r) => { if (current) setReport(r); })
       .catch((err) => { if (current) { setReport(null); setError(err.message || 'Could not load the report'); } });
     return () => { current = false; };
-  }, [labId, start, end]);
+  }, [url, start, end]);
 
   const t = report?.totals;
   return (
-    <div className="space-y-5 max-w-3xl">
-      <div className="flex flex-wrap items-end gap-3">
+    <div ref={sheet} className="space-y-5 max-w-3xl">
+      <h3 className="hidden print:block text-lg font-semibold">Course use{name ? ` — ${name}` : ''}</h3>
+      {report && <p className="hidden print:block text-xs">Period: {periodText(report.period)}.</p>}
+      <div className="no-print flex flex-wrap items-end gap-3">
         <label className="text-xs text-cream-muted">From
           <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
             className="ml-2 px-2 py-1 rounded-lg bg-ink-deep border border-border-default text-cream text-xs" />
@@ -108,9 +118,14 @@ export default function CitationReport({ labId, labName, onOpenConversation }) {
             className="ml-2 px-2 py-1 rounded-lg bg-ink-deep border border-border-default text-cream text-xs" />
         </label>
         <button type="button" disabled={!report}
-          onClick={() => download(`course-use-${labName || labId}.md`, reportMarkdown(report, labName))}
+          onClick={() => downloadText(`course-use-${name || labId || classId}.md`, reportMarkdown(report, name))}
           className="ml-auto px-3 py-1.5 rounded-lg border border-border-default text-cream-secondary text-xs hover:bg-ink-hover disabled:opacity-40 cursor-pointer">
           Export Markdown
+        </button>
+        <button type="button" disabled={!report} onClick={() => setPrinting(true)}
+          title="Print, or choose “Save as PDF” in the print dialog"
+          className="px-3 py-1.5 rounded-lg border border-border-default text-cream-secondary text-xs hover:bg-ink-hover disabled:opacity-40 cursor-pointer">
+          Print / PDF
         </button>
       </div>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
@@ -126,7 +141,8 @@ export default function CitationReport({ labId, labName, onOpenConversation }) {
             <h4 className="text-xs font-semibold uppercase tracking-widest text-cream-muted">Cited files</h4>
             {report.files.length === 0
               ? <p className="text-sm text-cream-muted italic">No answer cited the course in this period.</p>
-              : report.files.map((f) => <FileRow key={f.document_id} file={f} onOpen={onOpenConversation} />)}
+              : report.files.map((f) => <FileRow key={f.document_id} file={f} report={report} scopeWord={scopeWord}
+                  printing={printing} onOpen={onOpenConversation} />)}
           </section>
           {report.uncited_files.length > 0 && (
             <section className="space-y-2">
@@ -142,7 +158,7 @@ export default function CitationReport({ labId, labName, onOpenConversation }) {
               <h4 className="text-xs font-semibold uppercase tracking-widest text-cream-muted">Questions without a verified answer</h4>
               <ul className="space-y-1">
                 {report.unverified.map((q) => (
-                  <Question key={`${q.session_id}-${q.asked_at}`} item={q} onOpen={onOpenConversation} />
+                  <Question key={`${q.session_id}-${q.asked_at}`} item={q} lab={labOf(report, q)} onOpen={onOpenConversation} />
                 ))}
               </ul>
             </section>
@@ -153,7 +169,8 @@ export default function CitationReport({ labId, labName, onOpenConversation }) {
               <ul className="space-y-1">
                 {report.marked_wrong.map((w) => (
                   <Question key={w.message_id} item={{ ...w, question: `${w.question || ''} — cited ${
-                    w.pages.map((p) => `${p.filename} p. ${p.pdf_page_no}`).join(', ')}` }} onOpen={onOpenConversation} />
+                    w.pages.map((p) => `${p.filename} p. ${p.pdf_page_no}`).join(', ')}` }} lab={labOf(report, w)}
+                    onOpen={onOpenConversation} />
                 ))}
               </ul>
             </section>

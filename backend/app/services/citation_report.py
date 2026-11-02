@@ -1,4 +1,5 @@
-"""Which course files, pages and passages the research answers of a lab cite.
+"""Which course files, pages and passages the research answers of a lab, or of
+all labs of a class, cite.
 
 For the teacher's audit: per file, then page, then passage, with the students
 and their questions; the files no answer cited; the questions that got no
@@ -50,14 +51,16 @@ def _in_period(column, start: datetime | None, end: datetime | None):
     return conditions
 
 
-async def _lab_files(db: AsyncSession, lab: Lab) -> dict[uuid.UUID, str]:
-    """The published PDF files students of the lab can research (as create_scope)."""
+async def _lab_files(db: AsyncSession, labs: list[Lab]) -> dict[uuid.UUID, str]:
+    """The published PDF files students of these labs (one class) can research (as create_scope)."""
+    if not labs:
+        return {}
     rows = (await db.execute(select(Document.id, Document.filename)
         .join(DocumentRevision, (DocumentRevision.document_id == Document.id) &
                                 (DocumentRevision.id == Document.current_revision_id))
         .join(DocumentSource, DocumentSource.id == DocumentRevision.source_version_id)
-        .where(Document.class_id == lab.class_id,
-               (Document.lab_id == lab.id) | Document.lab_id.is_(None),
+        .where(Document.class_id == labs[0].class_id,
+               Document.lab_id.in_([lab.id for lab in labs]) | Document.lab_id.is_(None),
                Document.lifecycle == 'active', Document.structured.is_(True),
                DocumentRevision.publication_state == 'published',
                DocumentSource.format == 'pdf'))).all()
@@ -67,26 +70,41 @@ async def _lab_files(db: AsyncSession, lab: Lab) -> dict[uuid.UUID, str]:
 async def lab_citation_report(db: AsyncSession, lab: Lab, *, start: datetime | None = None,
                               end: datetime | None = None) -> dict:
     """The report of one lab for [start, end) (either bound may be open)."""
-    student_sessions = [Session.lab_id == lab.id, Session.is_test.is_(False)]
+    return {'lab_id': str(lab.id), **await _report(db, [lab], start, end)}
+
+
+async def class_citation_report(db: AsyncSession, class_id: uuid.UUID, labs: list[Lab], *,
+                                start: datetime | None = None, end: datetime | None = None) -> dict:
+    """The report of all labs of a class together: a class-wide file counts once.
+
+    Each question names its lab (lab_id; ``labs`` gives the names).
+    """
+    return {'class_id': str(class_id), 'labs': [{'id': str(lab.id), 'name': lab.name} for lab in labs],
+            **await _report(db, labs, start, end)}
+
+
+async def _report(db: AsyncSession, labs: list[Lab], start: datetime | None,
+                  end: datetime | None) -> dict:
+    student_sessions = [Session.lab_id.in_([lab.id for lab in labs]), Session.is_test.is_(False)]
 
     # Each research question of the period, with its student and outcome.
-    runs = (await db.execute(select(AgentRun, Session.id, User.username)
+    runs = (await db.execute(select(AgentRun, Session.id, User.username, Session.lab_id)
         .join(Session, Session.id == AgentRun.session_id)
         .join(User, User.id == AgentRun.user_id)
         .where(*student_sessions, *_in_period(AgentRun.started_at, start, end))
         .order_by(AgentRun.started_at))).all()
     question_of = {run.assistant_message_id: (run, session_id, username)
-                   for run, session_id, username in runs if run.assistant_message_id}
+                   for run, session_id, username, _ in runs if run.assistant_message_id}
 
     # Each cited passage of an answer of the period.
     cited = (await db.execute(select(MessageCitation, Message.created_at, Message.feedback,
-                                     Session.id, Session.user_id, User.username)
+                                     Session.id, Session.user_id, User.username, Session.lab_id)
         .join(Message, Message.id == MessageCitation.message_id)
         .join(Session, Session.id == Message.session_id)
         .join(User, User.id == Session.user_id)
         .where(*student_sessions, *_in_period(Message.created_at, start, end)))).all()
 
-    files = await _lab_files(db, lab)
+    files = await _lab_files(db, labs)
     cited_ids = {c.document_id for c, *_ in cited}
     names = dict((await db.execute(select(Document.id, Document.filename)
                                    .where(Document.id.in_(cited_ids)))).all()) if cited_ids else {}
@@ -101,25 +119,25 @@ async def lab_citation_report(db: AsyncSession, lab: Lab, *, start: datetime | N
             if (row.revision_id, row.block_id) in blocks:
                 excerpts[(row.revision_id, row.block_id)] = (row.kind, _excerpt(row.content))
 
-    def example(message_id, session_id, user_id, username, created_at):
+    def example(message_id, session_id, user_id, username, created_at, lab_id):
         run, _, _ = question_of.get(message_id, (None, None, None))
         return {'student': username, 'student_id': str(user_id),
                 'question': run.question if run else None,
                 'asked_at': created_at.isoformat(), 'session_id': str(session_id),
-                'message_id': str(message_id)}
+                'message_id': str(message_id), 'lab_id': str(lab_id)}
 
     by_file = defaultdict(lambda: {'answers': set(), 'students': set(), 'pages': defaultdict(
         lambda: {'answers': {}, 'students': set(), 'passages': defaultdict(lambda: {
             'answers': set(), 'revision_id': None})})})
     answers_with_sources, wrong = set(), {}
-    for citation, created_at, feedback, session_id, user_id, username in cited:
+    for citation, created_at, feedback, session_id, user_id, username, lab_id in cited:
         message_id = citation.message_id
         answers_with_sources.add(message_id)
         file = by_file[citation.document_id]
         file['answers'].add(message_id)
         file['students'].add(user_id)
         page = file['pages'][citation.pdf_page_no]
-        page['answers'][message_id] = example(message_id, session_id, user_id, username, created_at)
+        page['answers'][message_id] = example(message_id, session_id, user_id, username, created_at, lab_id)
         page['students'].add(user_id)
         if citation.block_id:
             passage = page['passages'][citation.block_id]
@@ -127,7 +145,7 @@ async def lab_citation_report(db: AsyncSession, lab: Lab, *, start: datetime | N
             passage['revision_id'] = citation.revision_id
         if feedback == MessageFeedback.down:
             entry = wrong.setdefault(message_id, {
-                **example(message_id, session_id, user_id, username, created_at), 'pages': set()})
+                **example(message_id, session_id, user_id, username, created_at, lab_id), 'pages': set()})
             entry['pages'].add((names.get(citation.document_id) or 'deleted file', citation.pdf_page_no))
 
     report_files = []
@@ -156,18 +174,17 @@ async def lab_citation_report(db: AsyncSession, lab: Lab, *, start: datetime | N
 
     unverified = [{'student': username, 'student_id': str(run.user_id), 'question': run.question,
                    'asked_at': run.started_at.isoformat(), 'session_id': str(session_id),
-                   'outcome': run.stop_reason or run.status}
-                  for run, session_id, username in runs
+                   'lab_id': str(lab_id), 'outcome': run.stop_reason or run.status}
+                  for run, session_id, username, lab_id in runs
                   if run.status == 'failed' or (run.stop_reason or '').startswith('partial_')]
     return {
-        'lab_id': str(lab.id),
         'period': {'start': start.isoformat() if start else None,
                    'end': end.isoformat() if end else None},
         'totals': {'questions': len(runs),
-                   'students': len({username for _, _, username in runs}),
+                   'students': len({username for _, _, username, _ in runs}),
                    'answers_with_sources': len(answers_with_sources),
                    'unverified': len(unverified), 'marked_wrong': len(wrong),
-                   'questions_back': sum(run.stop_reason == 'clarification' for run, _, _ in runs)},
+                   'questions_back': sum(run.stop_reason == 'clarification' for run, *_ in runs)},
         'files': report_files,
         'uncited_files': sorted(({'document_id': str(d), 'filename': name}
                                  for d, name in files.items() if d not in by_file),

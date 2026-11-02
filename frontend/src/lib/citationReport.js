@@ -1,9 +1,10 @@
-// citationReport.js — the lab citation report (GET /api/teacher/labs/{id}/citation-report)
-// as Markdown, for the teacher's export. Every number comes from the report.
+// citationReport.js — the citation report of a lab or a class
+// (GET /api/teacher/{labs|classes}/{id}/citation-report) as Markdown, for the
+// teacher's export. Every number comes from the report.
 
 const day = (iso) => (iso ? iso.slice(0, 10) : '');
 
-function periodText(period) {
+export function periodText(period) {
   const start = day(period?.start);
   // The API end is exclusive (the day after the last day chosen).
   const end = period?.end ? day(new Date(new Date(period.end).getTime() - 86400000).toISOString()) : '';
@@ -15,11 +16,20 @@ function periodText(period) {
 
 const cell = (text) => String(text ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 
-/** The report as a Markdown document. */
-export function reportMarkdown(report, labName = '') {
+/**
+ * " (lab name)" after a question of a class report (its `labs` name them);
+ * nothing in a lab report.
+ */
+export function labOf(report, item) {
+  const lab = report.labs?.find((l) => l.id === item.lab_id);
+  return lab ? ` (${lab.name})` : '';
+}
+
+/** The report as a Markdown document; `name` is the lab's or the class's. */
+export function reportMarkdown(report, name = '') {
   const t = report.totals;
   const lines = [
-    `# Course use${labName ? ` — ${labName}` : ''}`,
+    `# Course use${name ? ` — ${name}` : ''}`,
     '',
     `Period: ${periodText(report.period)}. Teacher test drives are not counted.`,
     '',
@@ -46,7 +56,7 @@ export function reportMarkdown(report, labName = '') {
         if (passage.excerpt) lines.push(`  - "${cell(passage.excerpt)}" (${passage.answers})`);
       }
       for (const e of p.examples) {
-        lines.push(`  - ${e.student}, ${day(e.asked_at)}: ${cell(e.question) || '(question not stored)'}`);
+        lines.push(`  - ${e.student}${labOf(report, e)}, ${day(e.asked_at)}: ${cell(e.question) || '(question not stored)'}`);
       }
     }
   }
@@ -56,13 +66,15 @@ export function reportMarkdown(report, labName = '') {
   }
   if (report.unverified.length) {
     lines.push('', '## Questions without a verified answer', '');
-    for (const q of report.unverified) lines.push(`- ${q.student}, ${day(q.asked_at)}: ${cell(q.question)} (${q.outcome})`);
+    for (const q of report.unverified) {
+      lines.push(`- ${q.student}${labOf(report, q)}, ${day(q.asked_at)}: ${cell(q.question)} (${q.outcome})`);
+    }
   }
   if (report.marked_wrong.length) {
     lines.push('', '## Answers marked wrong', '');
     for (const w of report.marked_wrong) {
       const pages = w.pages.map((p) => `${p.filename} p. ${p.pdf_page_no}`).join(', ');
-      lines.push(`- ${w.student}, ${day(w.asked_at)}: ${cell(w.question) || '(question not stored)'} — cited ${pages}`);
+      lines.push(`- ${w.student}${labOf(report, w)}, ${day(w.asked_at)}: ${cell(w.question) || '(question not stored)'} — cited ${pages}`);
     }
   }
   return `${lines.join('\n')}\n`;
