@@ -32,6 +32,8 @@ Environment:
                    for the search variant
   M4_SEARCH_MIN_SCORE  best reranker score below which search answers "not found" (default: unset)
   M4_SEARCH_CONCISE    1: the search answer is asked to be concise (default 0)
+  M4_NO_LEAD_CALLS     searches/greps in a row without a new page before the runner's
+                       "no new page" note (default: the product value; 0: never)
   M4_RERANK_URL    rerank endpoint (vLLM /rerank) for the search tool; unset: no reranker.
                    M4_RERANK_MODEL names its model (default BAAI/bge-reranker-v2-m3)
 """
@@ -256,8 +258,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     from backend.app.agent.course_tools import CourseTools
     from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.agent.result import ResearchResult
-    from backend.app.agent.runner import ResearchRunner
-    from backend.app.agent.search import SearchRunner
+    from backend.app.agent.runner import NO_LEAD_CALLS, ResearchRunner
+    from backend.app.agent.search import SearchRunner, min_score_for
     from backend.app.agent.tools import PerCallTools, create_scope
     from backend.app.models import Document, Session, User, UserRole
     from backend.app.services.model_routing import Endpoint
@@ -298,6 +300,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     search_query = os.getenv('M4_SEARCH_QUERY', 'raw')
     assert search_query in ('raw', 'rewrite'), 'M4_SEARCH_QUERY is raw or rewrite'
     search_min_score = float(os.getenv('M4_SEARCH_MIN_SCORE')) if os.getenv('M4_SEARCH_MIN_SCORE') else None
+    # M4_NO_LEAD_CALLS=0 turns the "no new page" note off (A/B against the product value).
+    no_lead_calls = int(os.getenv('M4_NO_LEAD_CALLS', NO_LEAD_CALLS))
     search_concise = os.getenv('M4_SEARCH_CONCISE', '0') == '1'
     results = []
     dependencies = []
@@ -387,7 +391,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                                              research_timeout=limits['research_seconds'],
                                              total_timeout=limits['total_seconds'], model_timeout=call_seconds,
                                              max_input_tokens=limits['input_tokens'],
-                                             final_reserve=limits['final_reserve'])
+                                             final_reserve=limits['final_reserve'],
+                                             lead_min_score=min_score_for(tool_config['rerank_model']),
+                                             no_lead_calls=no_lead_calls)
             course_tools, research = runner()
             # The clarify questions are asked as in the student chat, without the
             # benchmark note that asks for course support.
@@ -463,6 +469,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'concurrency': concurrency, 'ask_student': allow_ask,
             'search': {'query': search_query, 'min_score': search_min_score, 'concise': search_concise}
                       if 'search' in variants else None,
+            'no_lead_calls': no_lead_calls,
             'reranker': ({'url': tool_config['rerank_url'], 'model': tool_config['rerank_model']}
                          if tool_config['rerank_url'] else None),
             'index': 'frozen M3-C mineru-text/BGE-M3',

@@ -8,7 +8,7 @@ from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchRunStopped
 from backend.app.agent.runner import (
-    COURSE_TOOLS, FINISH_TURN, ResearchRunner, partial_answer, system_prompt,
+    COURSE_TOOLS, FINISH_TURN, NO_LEAD_TURN, ResearchRunner, lead_pages, partial_answer, system_prompt,
 )
 from backend.tests.test_course_tools import ViewFixture
 
@@ -559,3 +559,39 @@ async def test_an_answer_with_handles_in_parentheses_needs_no_correction():
     model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1] (d1.p10), cours d1 – Algebre.pdf.')
     result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
     assert result.answer == 'Vin3 [E1], cours Algebre.pdf.' and model.purposes == ['agent', 'agent']
+
+
+def test_lead_pages_count_strong_search_pages_and_grep_pages_only():
+    search = {'name': 'search', 'result': {'items': [
+        {'document_id': 'a', 'pdf_page_no': 3, 'score': 0.9},
+        {'document_id': 'a', 'pdf_page_no': 4, 'score': 0.2}]}}
+    assert lead_pages(search, 0.5) == {('a', 3)}
+    assert lead_pages(search, None) == {('a', 3), ('a', 4)}
+    grep = {'name': 'grep', 'arguments': {'document_id': 'b'},
+            'result': {'items': [{'page': {'preview_page_no': 7}}]}}
+    assert lead_pages(grep, 0.5) == {('b', 7)}
+    assert lead_pages({'name': 'grep', 'result': {'ok': False}}, 0.5) == set()
+    assert lead_pages({'name': 'read', 'result': {'items': [{'page': {'preview_page_no': 7}}]}}, 0.5) is None
+
+
+@pytest.mark.asyncio
+async def test_searches_without_a_new_page_get_one_note_and_keep_the_tools():
+    # The fixture's search always returns the same page: the first search
+    # brings it, the next three bring nothing new.
+    model = Script(*[[('search', {'query': f'q{n}'})] for n in range(5)], [('read', {'page': 'd1.p10'})],
+                   'Réponse [E1].')
+    result = await ResearchRunner(CourseTools(ViewFixture(), max_tool_calls=10), model,
+                                  max_tool_calls=10).run('Question ?')
+    notes = [m for m in model.seen[-1] if m['role'] == 'user' and m['content'] == NO_LEAD_TURN.format(n=3)]
+    assert len(notes) == 1
+    assert [m['content'] for m in model.seen[4]][-1] == NO_LEAD_TURN.format(n=3)
+    assert all(model.with_tools[:-1]) and result.stop_reason == 'finished'
+    assert [e for e in result.trace if e.get('event') == 'no_new_leads'] == [{'event': 'no_new_leads', 'calls': 3}]
+
+
+@pytest.mark.asyncio
+async def test_no_lead_calls_zero_sends_no_note():
+    model = Script(*[[('search', {'query': f'q{n}'})] for n in range(5)], 'Réponse sans source.', 'DONE')
+    await ResearchRunner(CourseTools(ViewFixture(), max_tool_calls=10), model, max_tool_calls=10,
+                         no_lead_calls=0).run('Question ?')
+    assert not any(m['content'] == NO_LEAD_TURN.format(n=3) for m in model.seen[-1] if m['role'] == 'user')

@@ -202,7 +202,9 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
             runner = ResearchRunner(course_tools, billed,
                 max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
                 total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
-                max_input_tokens=limits.input_tokens, on_phase=on_phase, on_draft=on_draft)
+                max_input_tokens=limits.input_tokens,
+                lead_min_score=search_mode.min_score_for(rerank_model),
+                on_phase=on_phase, on_draft=on_draft)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations,
                                   allow_ask=allow_ask)

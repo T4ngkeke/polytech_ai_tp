@@ -167,6 +167,17 @@ READ_TURN = ('Your answer cites {ids}, which no tool returned in this research. 
              'conversation cite. Do not mention the first version.')
 FINISH_RETRY = ('Tool calls cannot run any more and were ignored. Answer the student now in plain '
                 'text with the evidence already returned, and name what is still missing.')
+# Sent once, tools still open, after NO_LEAD_CALLS searches and greps in a row
+# brought no page the run had not seen (a search page counts only above the
+# reranker's bound). The model decides; nothing is withdrawn. Replaying the
+# 2026-10-27/28 v3 and v4 traces, 3 in a row came in 26 of 192 runs, 21 of
+# which then used all 30 tool calls (V08/V15/V21 ask for content the course
+# lacks); a hard stop would have cut 2 runs before a gold page was found.
+NO_LEAD_CALLS = 3
+NO_LEAD_TURN = ('Your last {n} searches found no course page you had not already seen. If the course '
+                'files do not cover the rest of the question, stop searching: answer now with the '
+                'evidence already returned and say which part the course does not cover. Search '
+                'again only for a part you have not looked for yet.')
 SHORTENED = '(result shortened for length; its evidence IDs stay valid)'
 # Input tokens kept free for the final answer when deciding to withdraw the tools.
 FINAL_RESERVE = 2500
@@ -176,6 +187,27 @@ TOOL_PHASES = {'search': 'finding', 'view_image': 'checking_image'}
 
 def _has_tool_markup(content: str) -> bool:
     return '<tool_call>' in content or '<function=' in content
+
+
+def lead_pages(row: dict, min_score: float | None) -> set | None:
+    """The pages a search or grep call returned, (document, page); None for other tools.
+
+    A search page counts only when its reranker score reaches ``min_score``.
+    """
+    if row.get('name') not in ('search', 'grep'):
+        return None
+    pages = set()
+    for item in (row.get('result') or {}).get('items') or []:
+        if not isinstance(item, dict):
+            continue
+        if row['name'] == 'search':
+            score = item.get('score')
+            if min_score is None or (score is not None and score >= min_score):
+                pages.add((item.get('document_id'), item.get('pdf_page_no')))
+        elif isinstance(item.get('page'), dict):
+            document_id = item.get('document_id') or (row.get('arguments') or {}).get('document_id')
+            pages.add((document_id, item['page'].get('preview_page_no')))
+    return pages
 
 
 def partial_answer(state: dict, stop: str, *, max_pages: int = 6) -> str | None:
@@ -205,6 +237,7 @@ class ResearchRunner:
                  research_timeout: float = 45.0, total_timeout: float = 60.0,
                  model_timeout: float = 20.0, max_input_tokens: int = 12000,
                  final_reserve: int = FINAL_RESERVE,
+                 lead_min_score: float | None = None, no_lead_calls: int = NO_LEAD_CALLS,
                  on_phase: Callable[[str], None] | None = None,
                  on_draft: Callable[[str | None], None] | None = None,
                  clock: Callable[[], float] = time.monotonic):
@@ -214,6 +247,9 @@ class ResearchRunner:
         self.research_timeout, self.total_timeout = research_timeout, total_timeout
         self.model_timeout, self.max_input_tokens = model_timeout, max_input_tokens
         self.final_reserve, self.clock = final_reserve, clock
+        # lead_min_score: the reranker bound of a search page (search.min_score_for);
+        # no_lead_calls 0 never sends NO_LEAD_TURN.
+        self.lead_min_score, self.no_lead_calls = lead_min_score, no_lead_calls
         self.on_phase = on_phase or (lambda _phase: None)
         # on_draft(text) receives the reply text as the model writes it, and
         # on_draft(None) when that draft is withdrawn. A draft is not checked;
@@ -254,6 +290,9 @@ class ResearchRunner:
         drafted = False  # draft text was sent and not withdrawn
         offered = COURSE_TOOLS + [ASK_STUDENT] if allow_ask else COURSE_TOOLS
         clarification = None
+        seen_pages: set = set()  # pages any search or grep of this run returned
+        no_lead = 0  # searches and greps in a row without a new page
+        no_lead_sent = False
 
         def note(event, **details):
             # Runner events go to the trace and to the log, next to the tool
@@ -370,6 +409,7 @@ class ResearchRunner:
                     {'id': c['id'], 'type': 'function',
                      'function': {'name': c['name'], 'arguments': c['arguments'] or '{}'}}
                     for c in reply.tool_calls]})
+                first_row = len(tools.trace)
                 for c in reply.tool_calls:
                     if c in asks:
                         text = ASK_ALONE if len(reply.tool_calls) > 1 else f'error: invalid_arguments ({problem})'
@@ -377,6 +417,15 @@ class ResearchRunner:
                         text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
                 note('turn', tools=[c['name'] for c in reply.tool_calls], text=reply.content[:200])
+                for row in tools.trace[first_row:]:
+                    pages = lead_pages(row, self.lead_min_score)
+                    if pages is not None:
+                        no_lead = 0 if pages - seen_pages else no_lead + 1
+                        seen_pages |= pages
+                if self.no_lead_calls and no_lead >= self.no_lead_calls and not no_lead_sent:
+                    no_lead_sent = True
+                    messages.append({'role': 'user', 'content': NO_LEAD_TURN.format(n=no_lead)})
+                    note('no_new_leads', calls=no_lead)
                 continue
             if not tools_open and (reply.tool_calls or _has_tool_markup(reply.content)) and not retried:
                 retried = True

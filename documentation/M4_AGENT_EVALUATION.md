@@ -458,6 +458,42 @@ correction that drops every citation keeps the original answer. An answer
 citing "[EASI951_CM_2025.pdf, page 42]" had no valid reference and no
 correction; brackets naming a file or a page now count as malformed.
 
+## A note when searches find nothing new (2026-11-02)
+
+When the course does not cover a question, the agent used to search until the
+limit of 30 tool calls (v3 V08, V15, V21). Other agents do not solve this in
+the loop: pi and DSH have no budget or give-up path, only hooks through which
+the host adds a message (pi `getSteeringMessages`/`finishTurn`, DSH
+`agent/turn-stopping`); LangChain's open_deep_research and Anthropic's
+research system put effort rules in the prompt; the papers (Stop-RAG, HALT)
+find the model's own "enough?" judgment unreliable. A hard stop of our own
+(`no_progress`, 2026-10-02) had dropped gold pages that search had found.
+
+So the runner sends one note, as a host message, and keeps the tools: after
+`NO_LEAD_CALLS` = 3 searches and greps in a row that return no page the run
+has not seen (a search page counts only at a reranker score of at least
+`search.min_score_for`), it tells the model to answer with the evidence it has
+and say which part the course does not cover. The value comes from replaying
+the recorded traces of 192 v3/v4 trials: 3 in a row happened in 26 trials, 21
+of which then used all 30 calls, and only 2 before the last gold page was
+found.
+
+Same code, note off and on (`M4_NO_LEAD_CALLS=0` turns it off), back to back:
+
+| Run | Facets | Precision | Tool calls | Runs at 30 calls | Median s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| v4 off | 91/106 | 67% | 441 | 4 | 55 |
+| v4 on | 93/106 | 68% | 404 | 2 | 53 |
+| v3 off | 127/130 | 71% | 753 | 11 | 63 |
+| v3 on | 123/130 | 75% | 632 | 3 | 48 |
+
+Blind content review of v3: off 269/272, on 262/272; per question off better
+on 3, worse on 2, tied on 22. Of the 7 points, 6 come from one question back
+with no research (V24, no note). One loss comes from the note: V12 stopped
+before reading the parser page and said the course does not explain `p`.
+V15 and V21 now end in 60 to 136 s and say what the course lacks; V08 still
+reaches the limit.
+
 ## Running the benchmark
 
 `backend/tests/test_m4_evaluate_pg.py` builds the frozen corpus in a disposable
