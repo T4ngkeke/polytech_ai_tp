@@ -17,7 +17,12 @@ Environment:
   M4_UPSTREAM      model server (OpenAI-compatible, native tool calls), default Flash-Next
   M4_MODEL_NAME    served model name (default: flash-next)
   M4_MODEL_LABEL   model name written to the manifest (default Flash-Next)
+  M4_API_KEY       key for M4_UPSTREAM (default: none, a local server); never written to the output
+  M4_RETRIES       retries of a failed model call, e.g. 429 from a rate-limited API (default 0,
+                   as the product)
   M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
+  M4_VISION_MODEL  served name of the vision model (default: M4_MODEL_NAME); with M4_VISION_URL
+                   set to another server, view_image sends no key (a local server)
   M4_SAMPLING      qwen (Qwen's non-thinking advice, default, as the product) | greedy (temperature 0),
                    for research and view_image
   M4_TEMPERATURE   overrides the temperature of M4_SAMPLING (top_p and top_k stay)
@@ -153,7 +158,7 @@ def make_tool_dependencies(config):
         vectors.update({row['text_sha256']: row['embedding']
                         for row in map(json.loads, shared.read_text().splitlines())})
     embedding_client = httpx.AsyncClient(timeout=20)
-    vision = ResearchVision(Endpoint(config['vision_url'], 'local', config['model_name']),
+    vision = ResearchVision(Endpoint(config['vision_url'], config['vision_key'], config['vision_model']),
                             timeout=config['call_seconds'], sampling=config['sampling'])
     visual_usage = []
 
@@ -196,7 +201,7 @@ def make_tool_dependencies(config):
 
     async def observe(image, mime, question, *dimensions):
         started = time.monotonic()
-        row = {'model': config['model_name'], 'status': 'started'}
+        row = {'model': config['vision_model'], 'status': 'started'}
         visual_usage.append(row)
         try:
             reply = await vision(image, mime, question)
@@ -287,11 +292,18 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     sampling = {'greedy': GREEDY, 'qwen': QWEN_NON_THINKING}[sampling_name]
     if os.getenv('M4_TEMPERATURE'):
         sampling = {**sampling, 'temperature': float(os.environ['M4_TEMPERATURE'])}
-    model = ResearchModel(Endpoint(upstream, 'local', model_name), sampling=sampling)
+    api_key = os.getenv('M4_API_KEY', 'local')
+    retries = int(os.getenv('M4_RETRIES', '0'))
+    model = ResearchModel(Endpoint(upstream, api_key, model_name), sampling=sampling)
+    if retries:
+        model.client = model.client.with_options(max_retries=retries)
     # One model for research and vision unless M4_VISION_URL names another.
     vision_url = os.getenv('M4_VISION_URL', upstream)
+    vision_model = os.getenv('M4_VISION_MODEL', model_name)
     tool_config = {'storage_root': str(storage_root), 'embedding_url': embedding_url,
                    'query_cache': str(query_cache), 'vision_url': vision_url,
+                   'vision_model': vision_model,
+                   'vision_key': api_key if vision_url == upstream else 'local',
                    'model_name': model_name, 'call_seconds': call_seconds, 'sampling': sampling,
                    'rerank_url': os.getenv('M4_RERANK_URL', ''),
                    'rerank_model': os.getenv('M4_RERANK_MODEL', 'BAAI/bge-reranker-v2-m3')}
@@ -463,7 +475,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'corpus': os.getenv('M4_CORPUS', 'm3c-4pdf'), 'variants': variants,
             'model': os.getenv('M4_MODEL_LABEL', 'Flash-Next'), 'upstream': upstream,
             'vision_model': os.getenv('M4_VISION_LABEL', os.getenv('M4_MODEL_LABEL', 'Flash-Next')),
-            'vision_url': vision_url,
+            'vision_url': vision_url, 'vision_model_name': vision_model, 'model_name': model_name,
+            'retries': retries,
             'thinking_enabled': False, 'sampling': {'name': sampling_name, **sampling},
             'budget': budget, 'limits': limits,
             'concurrency': concurrency, 'ask_student': allow_ask,
