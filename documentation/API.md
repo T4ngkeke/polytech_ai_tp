@@ -163,6 +163,7 @@ This area covers users, classes, the model settings, data pruning and global ana
 | GET | `/api/admin/classes/{class_id}/students` | Admin | The students of a class. |
 | PUT | `/api/admin/classes/{class_id}/transfer` | Admin | Gives the class to another teacher (`teacher_id`). |
 | DELETE | `/api/admin/classes/{class_id}` | Admin | Soft-deletes any class. |
+| GET | `/api/admin/documents` | Admin | Every course document of every class, newest upload first: class, lab, uploader, status and the newest revision's state and error code. |
 | GET | `/api/admin/labs` | Admin | All labs. |
 | PUT | `/api/admin/labs/{lab_id}` | Admin | Renames any lab, or opens or locks it with `is_active`. |
 | DELETE | `/api/admin/labs/{lab_id}` | Admin | Soft-deletes any lab. |

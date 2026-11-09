@@ -301,6 +301,28 @@ class DocumentSummaryResponse(BaseModel):
     scope: str = "lab"
 
 
+class AdminDocumentResponse(BaseModel):
+    """A document in the admin Documents tab: where it is and how its upload went.
+
+    The status shown is worked out in the browser as in the teacher list:
+    a structured document not yet published shows its newest revision's state.
+    """
+    id: uuid.UUID
+    filename: str
+    status: str
+    structured: bool = False
+    current_revision_id: uuid.UUID | None = None
+    page_count: int | None = None
+    error_message: str | None = None
+    class_id: uuid.UUID
+    class_name: str
+    lab_id: uuid.UUID | None = None
+    lab_name: str | None = None
+    uploaded_by: str | None = None
+    uploaded_at: datetime | None = None
+    latest_revision: dict | None = None
+
+
 class ChunkResponse(BaseModel):
     """One indexed chunk — the 'is it well processed?' inspector surface."""
     model_config = ConfigDict(from_attributes=True)

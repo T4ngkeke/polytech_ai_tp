@@ -847,3 +847,53 @@ class TestAdminResetPassword:
             json={"new_password": "resetpw123"},
         )
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/documents
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_admin_documents_lists_every_upload_with_its_state(admin_full_client, db_session, seed_full):
+    from backend.app.models import Document, DocumentRevision, DocumentStatus
+
+    teacher, cls, lab = seed_full["teacher"], seed_full["class"], seed_full["lab"]
+
+    def doc(name, **kw):
+        kw.setdefault("class_id", cls.id)
+        return Document(id=uuid.uuid4(), filename=name, storage_path="/x", content_hash=uuid.uuid4().hex,
+                        uploaded_by=teacher.id, **kw)
+
+    ready = doc("ready.pdf", lab_id=lab.id, status=DocumentStatus.indexed, page_count=12)
+    failed = doc("broken.pdf", structured=True)                      # class-wide, never published
+    gone = doc("gone.pdf", lab_id=lab.id, lifecycle="deleted")
+    in_deleted_class = doc("old.pdf", class_id=seed_full["deleted_class"].id)
+    in_deleted_lab = doc("old-lab.pdf", lab_id=seed_full["deleted_lab"].id)
+    db_session.add_all([ready, failed, gone, in_deleted_class, in_deleted_lab])
+    await db_session.flush()
+    now = datetime.now(timezone.utc)
+    db_session.add_all([
+        DocumentRevision(document_id=failed.id, source_version_id=uuid.uuid4(), created_by=teacher.id,
+                         processing_state="queued", created_at=now - timedelta(hours=1)),
+        DocumentRevision(document_id=failed.id, source_version_id=uuid.uuid4(), created_by=teacher.id,
+                         processing_state="failed", report={"error_code": "mineru_timeout"}, created_at=now),
+    ])
+    await db_session.commit()
+
+    resp = await admin_full_client.get("/api/admin/documents")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert [r["filename"] for r in rows] == ["broken.pdf", "ready.pdf"]  # newest upload first
+    broken, ok = rows
+    assert broken["class_name"] == "Admin Test Class" and broken["lab_name"] is None
+    assert broken["uploaded_by"] == "teacher1"
+    assert broken["latest_revision"]["processing_state"] == "failed"   # the newest revision
+    assert broken["latest_revision"]["error_code"] == "mineru_timeout"
+    assert ok["lab_name"] == "Admin Test Lab" and ok["status"] == "indexed" and ok["page_count"] == 12
+    assert ok["latest_revision"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_documents_is_admin_only(student_client):
+    resp = await student_client.get("/api/admin/documents")
+    assert resp.status_code == 403

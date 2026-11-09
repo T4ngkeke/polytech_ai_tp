@@ -20,6 +20,7 @@ GET    /api/admin/classes/{class_id}/labs
 GET    /api/admin/classes/{class_id}/students
 PUT    /api/admin/classes/{class_id}/transfer
 DELETE /api/admin/classes/{class_id}
+GET    /api/admin/documents
 GET    /api/admin/labs
 PUT    /api/admin/labs/{lab_id}
 DELETE /api/admin/labs/{lab_id}
@@ -53,6 +54,7 @@ from backend.app.models import (
 from backend.app.schemas import (
     AdminAnalyticsResponse,
     AdminClassResponse,
+    AdminDocumentResponse,
     AdminResetPasswordRequest,
     ClassAnalyticsResponse,
     ClassResponse,
@@ -70,7 +72,7 @@ from backend.app.schemas import (
     UserCreateRequest,
     UserResponse,
 )
-from backend.app.services import class_service, lab_service, analytics_service, model_servers
+from backend.app.services import class_service, document_service, lab_service, analytics_service, model_servers
 from backend.app.services.model_routing import resolve_model_routing
 from backend.app.services.research_service import DEFAULT_LIMITS, LIMIT_KEYS, limit_value
 
@@ -550,6 +552,21 @@ async def force_delete_class(
     cls = await class_service.get_class_by_id(db, class_id)
     await class_service.soft_delete_class(db, cls)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ===================================================================
+# GET /api/admin/documents
+# ===================================================================
+
+
+@router.get("/documents", response_model=list[AdminDocumentResponse])
+async def list_all_documents(
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[AdminDocumentResponse]:
+    """Every course document of every class, newest upload first, with its
+    class, lab, uploader and processing state: did each upload work?"""
+    return [AdminDocumentResponse(**row) for row in await document_service.list_all_documents(db)]
 
 
 # ===================================================================

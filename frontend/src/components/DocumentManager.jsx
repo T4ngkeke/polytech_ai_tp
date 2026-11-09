@@ -1,7 +1,9 @@
 /**
  * DocumentManager.jsx — the teacher's course documents.
  *
- * A teacher uploads course PDFs, sees each document's processing state and
+ * A teacher uploads course PDFs: files are added to a list (several at once or
+ * one pick after another, each removable), then sent one after the other, each
+ * with its own result. The teacher sees each document's processing state and
  * summary (pages / chunks), and opens a document to review and edit what
  * MinerU read (DocumentBlockEditor). Documents from before the PDF path
  * (Markdown, HTML, older uploads) are listed and can be deleted only.
@@ -27,7 +29,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
-import { readingLine } from '../lib/documentProgress';
+import { displayStatus, readingLine } from '../lib/documentProgress';
 import StructuredDocumentDetail from './DocumentBlockEditor';
 import Icon from './Icon';
 
@@ -57,15 +59,18 @@ const WARNING_HINT = {
 
 const IN_PROGRESS = new Set(['pending', 'processing', 'parsed']);
 
-// A structured document has no published version until indexing
-// exists (M3). Until then its newest draft tells what is going on.
-const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', partial: 'needs_review', failed: 'failed' };
-function displayStatus(doc) {
-  if (doc.structured && !doc.current_revision_id && doc.latest_revision) {
-    return REVISION_STATUS[doc.latest_revision.processing_state] || doc.latest_revision.processing_state;
-  }
-  return doc.status;
-}
+// Upload refusals the server names by a code (routers/teacher.py).
+const UPLOAD_ERROR = {
+  only_pdf: 'Only PDF files can be uploaded.',
+  odp_not_supported: 'Export the slides to PDF first.',
+  file_too_large: 'The file is too large.',
+  structured_ingest_disabled: 'Uploads are turned off on this server.',
+};
+const isPdf = (file) => file.name.toLowerCase().endsWith('.pdf');
+const fileSize = (bytes) => (bytes < 1048576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(1)} MB`);
+const fileKey = (file) => `${file.name}|${file.size}|${file.lastModified}`;
+// A row still to send: newly added, or failed and sent again on the next Upload.
+const toSend = (row) => row.state === 'chosen' || row.state === 'failed';
 
 export default function DocumentManager({ labId, classId, examMode = false, onOpenClassSettings }) {
   const base = classId ? `/api/teacher/classes/${classId}/documents` : labId ? `/api/teacher/labs/${labId}/documents` : null;
@@ -73,10 +78,9 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null); // document summary being inspected
   const [uploading, setUploading] = useState(false);
-  const [sent, setSent] = useState(0); // share of the file sent, while uploading
-
+  // The upload list: { key, file, state: chosen|sending|done|failed, sent, error }.
+  const [files, setFiles] = useState([]);
   const fileRef = useRef(null);
-  const [fileName, setFileName] = useState('');
 
   const loadDocuments = useCallback(async () => {
     if (!base) return [];
@@ -89,6 +93,7 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   useEffect(() => {
     if (!base) return;
     setSelected(null);
+    setFiles([]);
     setLoading(true);
     loadDocuments()
       .catch((e) => toast.error(e.message))
@@ -104,29 +109,50 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
     return () => clearInterval(id);
   }, [documents, loadDocuments]);
 
+  // Add the picked files to the list. Files already sent leave it; the same file twice is kept once.
+  const addFiles = (picked) => {
+    const skipped = picked.filter((file) => !isPdf(file)).map((file) => file.name);
+    if (skipped.length) toast.error(`Not a PDF, not added: ${skipped.join(', ')}`, { duration: 6000 });
+    setFiles((rows) => {
+      const kept = rows.filter((row) => row.state !== 'done');
+      const known = new Set(kept.map((row) => row.key));
+      const added = picked.filter((file) => isPdf(file) && !known.has(fileKey(file)))
+        .map((file) => ({ key: fileKey(file), file, state: 'chosen', sent: 0 }));
+      return [...kept, ...added];
+    });
+    if (fileRef.current) fileRef.current.value = '';   // the same file can be picked again after a removal
+  };
+  const removeFile = (key) => setFiles((rows) => rows.filter((row) => row.key !== key));
+
   const handleUpload = async (e) => {
     e.preventDefault();
-    const file = fileRef.current?.files?.[0];
-    if (!file) {
-      toast.error('Choose a file first.');
+    const queue = files.filter(toSend);
+    if (!queue.length) {
+      toast.error('Add a PDF first.');
       return;
     }
-    const form = new FormData();
-    form.append('file', file);
-
+    const setRow = (key, patch) => setFiles((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
     setUploading(true);
-    setSent(0);
-    try {
-      await api.uploadWithProgress(base, form, setSent);
-      if (fileRef.current) fileRef.current.value = '';
-      setFileName('');
-      toast.success('Uploaded. The pages are being read; you can leave this page meanwhile.', { duration: 6000 });
-      await loadDocuments();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setUploading(false);
+    let done = 0;
+    let failed = 0;
+    // One file at a time: the server reads them in the order they arrive anyway.
+    for (const { key, file } of queue) {
+      setRow(key, { state: 'sending', sent: 0, error: null });
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        await api.uploadWithProgress(base, form, (sent) => setRow(key, { sent }));
+        setRow(key, { state: 'done', sent: 1 });
+        done += 1;
+        await loadDocuments().catch(() => {});
+      } catch (err) {
+        setRow(key, { state: 'failed', error: UPLOAD_ERROR[err.message] || err.message });
+        failed += 1;
+      }
     }
+    setUploading(false);
+    if (failed) toast.error(`${done} uploaded, ${failed} failed. Upload again to retry the failed ones.`, { duration: 8000 });
+    else toast.success(`${done === 1 ? 'Uploaded' : `${done} files uploaded`}. The pages are being read; you can leave this page meanwhile.`, { duration: 6000 });
   };
 
   const deleteDocument = async (doc, e) => {
@@ -191,26 +217,36 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
           ? 'Documents uploaded here are shared by every lab of this class, e.g. the course handout.'
           : "Upload this lab's own material here. Documents marked Class come from the class Documents tab, shared by every lab; manage them there."}
       </p>
-      <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3 rounded-lg border border-border-default bg-ink-deep/30 p-3">
-        <div className="flex min-w-0 flex-col gap-1">
+      <form onSubmit={handleUpload} className="space-y-3 rounded-lg border border-border-default bg-ink-deep/30 p-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-xs font-medium text-cream-muted">{classId ? 'Class material' : 'Lab material'}</span>
-          <label className="flex min-w-0 cursor-pointer items-center gap-2">
-            <input ref={fileRef} type="file" className="sr-only"
-              accept="application/pdf,.pdf"
-              onChange={(e) => setFileName(e.target.files?.[0]?.name || '')} />
-            <span className="shrink-0 rounded border border-border-default bg-ink-surface px-3 py-1 text-sm text-cream-secondary hover:border-cyan/40 hover:text-cream">
-              Choose file
-            </span>
-            <span className="truncate text-sm text-cream-muted">{fileName || 'PDF'}</span>
-          </label>
+          <span className="text-xs text-cream-muted">Add PDFs, one or several at a time, then upload them together.</span>
         </div>
-        <button
-          type="submit"
-          disabled={uploading}
-          className="rounded gradient-cyan px-3 py-1.5 text-sm font-medium text-on-accent hover:brightness-110 disabled:opacity-50"
-        >
-          {uploading ? `Uploading ${Math.round(100 * sent)}%` : 'Upload'}
-        </button>
+        {files.length > 0 && <UploadList rows={files} busy={uploading} onRemove={removeFile} />}
+        <div className="flex flex-wrap items-center gap-3">
+          <label className={`shrink-0 ${uploading ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}>
+            <input ref={fileRef} type="file" className="sr-only" multiple disabled={uploading}
+              accept="application/pdf,.pdf"
+              onChange={(e) => addFiles(Array.from(e.target.files || []))} />
+            <span className="inline-block rounded border border-border-default bg-ink-surface px-3 py-1.5 text-sm text-cream-secondary hover:border-cyan/40 hover:text-cream">
+              {files.some(toSend) ? '+ Add more' : '+ Add PDFs'}
+            </span>
+          </label>
+          <button
+            type="submit"
+            disabled={uploading || !files.some(toSend)}
+            className="rounded gradient-cyan px-3 py-1.5 text-sm font-medium text-on-accent hover:brightness-110 disabled:opacity-50"
+          >
+            {uploading ? 'Uploading…'
+              : `Upload${files.filter(toSend).length > 1 ? ` ${files.filter(toSend).length} files` : ''}`}
+          </button>
+          {!uploading && files.length > 0 && (
+            <button type="button" onClick={() => setFiles([])}
+              className="cursor-pointer text-xs text-cream-muted hover:text-cream">
+              Clear list
+            </button>
+          )}
+        </div>
       </form>
 
       {documents.some((d) => IN_PROGRESS.has(displayStatus(d))) && (
@@ -267,6 +303,36 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
         </ul>
       )}
     </div>
+  );
+}
+
+// The upload list: files waiting to be sent (removable), then how each went.
+function UploadList({ rows, busy, onRemove }) {
+  return (
+    <ul className="divide-y divide-border-subtle rounded border border-border-subtle bg-ink-base/40 text-sm">
+      {rows.map((row) => (
+        <li key={row.key} className="flex min-w-0 items-center gap-2 px-2.5 py-1.5">
+          <span className="w-4 shrink-0">
+            {row.state === 'done' && <Icon name="check" className="h-4 w-4 text-success" />}
+            {row.state === 'failed' && <Icon name="warning" className="h-4 w-4 text-danger" />}
+            {(row.state === 'chosen' || row.state === 'sending') && <Icon name="file" className="h-4 w-4 text-cream-muted" />}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-cream-secondary" title={row.file.name}>{row.file.name}</span>
+          <span className={`shrink-0 text-xs ${row.state === 'failed' ? 'text-danger' : 'text-cream-muted'}`}>
+            {row.state === 'chosen' && fileSize(row.file.size)}
+            {row.state === 'sending' && `sending ${Math.round(100 * row.sent)}%`}
+            {row.state === 'done' && 'sent, being read'}
+            {row.state === 'failed' && row.error}
+          </span>
+          {toSend(row) && !busy ? (
+            <button type="button" onClick={() => onRemove(row.key)} title="Remove from the list"
+              aria-label={`Remove ${row.file.name}`} className="shrink-0 cursor-pointer text-cream-muted hover:text-danger">
+              <Icon name="close" className="h-4 w-4" />
+            </button>
+          ) : <span className="w-4 shrink-0" />}
+        </li>
+      ))}
+    </ul>
   );
 }
 

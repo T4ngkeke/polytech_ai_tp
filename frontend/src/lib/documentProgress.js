@@ -2,7 +2,32 @@
  * What a document being read shows under its name (components/DocumentManager.jsx):
  * the jobs ahead, the pages read and the time left, then indexing.
  * The server sends latest_revision.jobs_ahead (queued) or .progress (reading).
+ * Also the status a document shows, in the teacher list and the admin
+ * Documents tab (pages/Admin.jsx).
  */
+
+// A structured document has no published version until it is indexed.
+// Until then its newest revision tells what is going on.
+const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', partial: 'needs_review', failed: 'failed' };
+
+/** The status to show: pending, processing, parsed, indexed, needs_review, failed… */
+export function displayStatus(doc) {
+  if (doc.structured && !doc.current_revision_id && doc.latest_revision) {
+    const state = doc.latest_revision.processing_state;
+    return REVISION_STATUS[state] || state;
+  }
+  return doc.status;
+}
+
+const WORKING = new Set(['pending', 'processing', 'parsed']);
+const PROBLEM = new Set(['failed', 'needs_review', 'partially_indexed']);
+
+/** 'working' (still being read), 'problem' (failed or pages missing) or 'ready'. */
+export function statusGroup(status) {
+  if (WORKING.has(status)) return 'working';
+  if (PROBLEM.has(status)) return 'problem';
+  return 'ready';
+}
 
 /** "about 8 min left", "less than a minute left"; null when not known yet. */
 export function timeLeft(seconds) {

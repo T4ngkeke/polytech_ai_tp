@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readingLine, timeLeft } from './documentProgress.js';
+import { displayStatus, readingLine, statusGroup, timeLeft } from './documentProgress.js';
 
 test('the time left reads in minutes', () => {
   assert.equal(timeLeft(null), null);
@@ -24,4 +24,23 @@ test('a document being read shows its pages and, once known, the time left', () 
   assert.equal(line.share, 0.475);
   assert.equal(readingLine('parsed', {}).text, 'Indexing…');
   assert.equal(readingLine('indexed', {}), null);
+});
+
+test('an unpublished structured document shows its newest revision', () => {
+  const draft = { status: 'pending', structured: true, current_revision_id: null };
+  assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'failed' } }), 'failed');
+  assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'partial' } }), 'needs_review');
+  assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'queued' } }), 'pending');
+  // Published, or an older upload: the document's own status.
+  assert.equal(displayStatus({ ...draft, current_revision_id: 'r1', status: 'indexed',
+    latest_revision: { processing_state: 'failed' } }), 'indexed');
+  assert.equal(displayStatus({ status: 'failed', structured: false }), 'failed');
+});
+
+test('statuses fall in three groups', () => {
+  assert.equal(statusGroup('processing'), 'working');
+  assert.equal(statusGroup('parsed'), 'working');
+  assert.equal(statusGroup('failed'), 'problem');
+  assert.equal(statusGroup('partially_indexed'), 'problem');
+  assert.equal(statusGroup('indexed'), 'ready');
 });

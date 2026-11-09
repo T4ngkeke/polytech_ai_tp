@@ -10,9 +10,11 @@ from datetime import datetime
 
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from backend.app.models import (
-    Class, DocChunk, Document, DocumentReview, DocumentRevision, IngestionJob, JobStatus, _utcnow,
+    Class, DocChunk, Document, DocumentReview, DocumentRevision, IngestionJob, JobStatus, Lab, User,
+    _utcnow,
 )
 from backend.app.services.document_cleanup import aware
 
@@ -99,6 +101,52 @@ async def _summaries(db: AsyncSession, where) -> list[dict]:
             "scope": "class" if doc.lab_id is None else "lab",
         })
     return summaries
+
+
+async def list_all_documents(db: AsyncSession) -> list[dict]:
+    """Every document in a class or lab that still exists, for the admin
+    Documents tab: where it is, who uploaded it, and how its upload went.
+
+    Two queries, whatever the number of documents: the documents with their
+    class, lab and uploader, then the newest revision of each.
+    """
+    rows = (await db.execute(
+        select(Document, Class.name, Lab.name, User.username)
+        .join(Class, Class.id == Document.class_id)
+        .outerjoin(Lab, Lab.id == Document.lab_id)
+        .outerjoin(User, User.id == Document.uploaded_by)
+        .where(Document.lifecycle != "deleted", Class.is_deleted.is_(False),
+               or_(Document.lab_id.is_(None), Lab.is_deleted.is_(False)))
+    )).all()
+    ranked = select(
+        DocumentRevision,
+        func.row_number().over(partition_by=DocumentRevision.document_id,
+                               order_by=(DocumentRevision.created_at.desc(),
+                                         DocumentRevision.id.desc())).label("n"),
+    ).where(DocumentRevision.document_id.in_([doc.id for doc, *_ in rows])).subquery()
+    newest = aliased(DocumentRevision, ranked)
+    latest = {rev.document_id: rev for rev in (await db.execute(
+        select(newest).where(ranked.c.n == 1))).scalars()} if rows else {}
+
+    out = []
+    for doc, class_name, lab_name, uploader in rows:
+        rev = latest.get(doc.id)
+        out.append({
+            "id": doc.id, "filename": doc.filename, "status": doc.status.value,
+            "structured": doc.structured, "current_revision_id": doc.current_revision_id,
+            "page_count": doc.page_count, "error_message": doc.error_message,
+            "class_id": doc.class_id, "class_name": class_name,
+            "lab_id": doc.lab_id, "lab_name": lab_name, "uploaded_by": uploader,
+            "uploaded_at": rev.created_at if rev else None,
+            "latest_revision": {
+                "processing_state": rev.processing_state,
+                "publication_state": rev.publication_state,
+                "error_code": (rev.report or {}).get("error_code"),
+            } if rev else None,
+        })
+    # Newest upload first; documents without a revision (older uploads) last.
+    out.sort(key=lambda d: (d["uploaded_at"] is not None, aware(d["uploaded_at"])), reverse=True)
+    return out
 
 
 async def _reading_state(db: AsyncSession, rev: DocumentRevision) -> dict:
