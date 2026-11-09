@@ -1,6 +1,8 @@
 /** Loading a cited course PDF, and the link to open it in its own tab. */
 import { useEffect, useState } from 'react';
 import api, { responseError } from './api';
+import { sourceError } from './sourceError';
+
 
 /** Load the PDF of a document revision (authorized by the chat session) as a blob URL. */
 export function useSourcePdf(documentId, sessionId, revisionId) {
@@ -28,9 +30,9 @@ export function useSourcePdf(documentId, sessionId, revisionId) {
         objectUrl = URL.createObjectURL(blob);
         setPdfUrl(objectUrl);
       } catch (err) {
-        if (!controller.signal.aborted) setError(err.status === 404
-          ? 'This document is no longer available to you.'
-          : err.message || 'Could not open the PDF.');
+        if (!controller.signal.aborted) {
+          setError(sourceError(err, 'This document is no longer available to you.', err.message || 'Could not open the PDF.'));
+        }
       }
     })();
     return () => {
@@ -66,8 +68,9 @@ export function usePageImage(documentId, revisionId, page, sessionId) {
       objectUrl = URL.createObjectURL(blob);
       setImageUrl(objectUrl);
     }).catch((err) => {
-      if (!controller.signal.aborted) setError(err.status === 404
-        ? 'This page is no longer available to you.' : 'Could not show the page.');
+      if (!controller.signal.aborted) {
+        setError(sourceError(err, 'This page is no longer available to you.', 'Could not show the page.'));
+      }
     });
     return () => {
       controller.abort();

@@ -155,3 +155,49 @@ async def test_legacy_pdf_opens_only_in_own_session(db_session, tmp_path):
         assert denied.status_code == 404
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_exam_mode_closes_course_documents_to_students(db_session, tmp_path):
+    """In exam mode a student cannot open a course PDF, not even one cited in an
+    earlier answer; it opens again once exam mode is off."""
+    from backend.app.models import Class
+
+    with pymupdf.open() as source:
+        source.new_page().insert_text((40, 40), 'Course page')
+        pdf_bytes = source.tobytes()
+    db = db_session
+    storage = tmp_path / 'storage'
+    storage.mkdir()
+    app.dependency_overrides[get_storage_root] = lambda: str(storage)
+    try:
+        _, _, lab, _ = await seed(db)
+        student = make_user()
+        db.add(student)
+        await db.flush()
+        db.add(ClassStudent(class_id=lab.class_id, student_id=student.id))
+        chat = Session(id=uuid.uuid4(), lab_id=lab.id, user_id=student.id)
+        db.add(chat)
+        digest = hashlib.sha256(pdf_bytes).hexdigest()
+        path = storage / f'{digest}_course.pdf'
+        path.write_bytes(pdf_bytes)
+        doc = Document(class_id=lab.class_id, lab_id=lab.id, filename='course.pdf',
+                       storage_path=str(path), content_hash=digest, uploaded_by=student.id)
+        db.add(doc)
+        cls = await db.get(Class, lab.class_id)
+        cls.exam_mode = True
+        await db.flush()
+        url, params = f'/api/documents/{doc.id}/pdf', {'session_id': str(chat.id)}
+        image = f'/api/documents/{doc.id}/revisions/{uuid.uuid4()}/pages/1/image'
+        client = await make_client(db, student)
+        async with client:
+            closed = await client.get(url, params=params)
+            closed_image = await client.get(image, params=params)
+            cls.exam_mode = False
+            await db.flush()
+            opened = await client.get(url, params=params)
+        assert closed.status_code == 403 and closed.json()['detail'] == 'exam_mode'
+        assert closed_image.status_code == 403   # checked before the revision is looked up
+        assert opened.status_code == 200 and opened.content == pdf_bytes
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)

@@ -51,6 +51,17 @@ async def readable_document(db, *, document_id, user_id, session_id=None, teache
     return doc
 
 
+async def exam_mode_closes(db, *, session_id, user_id) -> bool:
+    """True when this chat session is a student's, in a class in exam mode:
+    the course documents stay closed to the student until exam mode is off.
+    The owning teacher's test session is not closed. Only the routes that show
+    a document to a student ask this; citations stay stored and checked."""
+    row = (await db.execute(select(Class.exam_mode, Session.is_test)
+        .join(Lab, Session.lab_id == Lab.id).join(Class, Lab.class_id == Class.id)
+        .where(Session.id == session_id, Session.user_id == user_id))).first()
+    return bool(row and row.exam_mode and not row.is_test)
+
+
 async def readable_revision(db, *, document_id, user_id, revision_id=None,
                             session_id=None, teacher=False):
     """Explicit historical IDs remain readable until document/scope revocation."""

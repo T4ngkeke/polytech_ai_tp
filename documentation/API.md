@@ -218,6 +218,8 @@ Teacher endpoints work on drafts and published revisions of an own document. Stu
 | GET | `/api/documents/{document_id}/revisions/{revision_id}/preview` | Any user | The PDF used to show the revision. Needs `?session_id=`. |
 | GET | `/api/documents/{document_id}/pdf` | Any user | The complete course PDF, with the session's access checked again. Needs `?session_id=`. Optional `?revision_id=`. |
 
+The five `/api/documents/` routes above answer `403 exam_mode` when the session's class is in exam mode: a student cannot open course documents, even pages cited in earlier answers. The owning teacher's test session still opens them. Stored citations are kept and show again when exam mode is off.
+
 ## Health
 
 This area has one endpoint that tells whether the backend runs.

@@ -21,7 +21,9 @@ from backend.app.models import DocumentAsset, DocumentPage, DocumentRevision, Do
 from backend.app.routers.teacher import get_storage_root
 from backend.app.services import document_reader as reader
 from backend.app.services import document_storage as storage
-from backend.app.services.document_access import DocumentNotFound, readable_asset, readable_document, readable_revision
+from backend.app.services.document_access import (
+    DocumentNotFound, exam_mode_closes, readable_asset, readable_document, readable_revision,
+)
 from backend.app.services.page_render import render_page_png
 
 teacher_router = APIRouter(prefix='/api/teacher/documents', tags=['document-reader'])
@@ -48,6 +50,13 @@ async def _student_rev(db, document_id, revision_id, user, session_id):
                                        revision_id=revision_id, session_id=session_id)
     except DocumentNotFound:
         raise _not_found() from None
+
+
+async def _exam_guard(db, user, session_id):
+    """Exam mode: a student cannot open course documents, even pages cited
+    in earlier answers. 403 exam_mode, so the viewer can say why."""
+    if await exam_mode_closes(db, session_id=session_id, user_id=user.id):
+        raise HTTPException(403, 'exam_mode')
 
 
 def _file(asset: DocumentAsset, root) -> FileResponse:
@@ -175,6 +184,7 @@ async def teacher_source(document_id: uuid.UUID, revision_id: uuid.UUID,
 async def student_page(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: uuid.UUID,
                        session_id: uuid.UUID, user: User = Depends(get_current_user),
                        db: AsyncSession = Depends(get_db, scope="function")):
+    await _exam_guard(db, user, session_id)
     rev = await _student_rev(db, document_id, revision_id, user, session_id)
     try:
         view = await reader.page_view(db, rev, page_id, teacher=False)
@@ -190,6 +200,7 @@ async def student_page(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: 
 async def student_preview(document_id: uuid.UUID, revision_id: uuid.UUID, session_id: uuid.UUID,
                           user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function"),
                           root: str = Depends(get_storage_root)):
+    await _exam_guard(db, user, session_id)
     rev = await _student_rev(db, document_id, revision_id, user, session_id)
     if rev.preview_pdf_asset_id is None:
         raise _not_found()
@@ -205,6 +216,7 @@ async def student_preview(document_id: uuid.UUID, revision_id: uuid.UUID, sessio
 async def student_asset(document_id: uuid.UUID, revision_id: uuid.UUID, asset_id: uuid.UUID,
                         session_id: uuid.UUID, user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db, scope="function"), root: str = Depends(get_storage_root)):
+    await _exam_guard(db, user, session_id)
     try:
         asset = await readable_asset(db, asset_id=asset_id, document_id=document_id, user_id=user.id,
                                      revision_id=revision_id, session_id=session_id)
@@ -220,6 +232,7 @@ async def student_page_image(document_id: uuid.UUID, revision_id: uuid.UUID, pag
                              root: str = Depends(get_storage_root)):
     """One page of a revision's PDF as a PNG, for the citation preview: the
     chat draws the cited blocks' regions over it. Access as for the PDF."""
+    await _exam_guard(db, user, session_id)
     rev = await _student_rev(db, document_id, revision_id, user, session_id)
     if rev.preview_pdf_asset_id is None:
         raise _not_found()
@@ -253,6 +266,7 @@ async def student_original_pdf(document_id: uuid.UUID, session_id: uuid.UUID,
     Structured citations pin a published revision; legacy PDFs use their
     immutable uploaded file. No storage path is exposed to the browser.
     """
+    await _exam_guard(db, user, session_id)
     try:
         doc = await readable_document(db, document_id=document_id, user_id=user.id,
                                       session_id=session_id)

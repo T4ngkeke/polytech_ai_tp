@@ -9,7 +9,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { createMessageId, createRequestId } from '../lib/messageId';
-import { interpretStreamEvent } from '../lib/streamEvents';
+import { interpretStreamEvent, openStream } from '../lib/streamEvents';
 import { applyToMessage } from '../lib/streamMessage';
 import { MessageBubble } from '../components/ChatMessage';
 import { PdfPreviewModal } from '../components/PdfPreview';
@@ -607,8 +607,8 @@ function ClassSettingsPanel({ cls, onChange }) {
           <p className="text-sm font-medium text-cream">Exam mode</p>
           <p className="mt-1 text-xs text-cream-muted">
             {cls.exam_mode
-              ? 'On: in every lab of this class, students get Direct answers only. The course files are not searched.'
-              : 'Off: students choose Direct, Search or Research. Turn it on during an exam to stop course search in every lab.'}
+              ? 'On: in every lab of this class, students get Direct answers only. The course files are not searched, and students cannot open them, not even pages cited in earlier answers.'
+              : 'Off: students choose Direct, Search or Research. Turn it on during an exam to stop course search and close the course files in every lab.'}
           </p>
         </div>
         <button type="button" role="switch" aria-checked={!!cls.exam_mode} aria-label="Exam mode"
@@ -694,6 +694,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
           mode: examMode ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
         signal: ctrl.signal,
         openWhenHidden: true,
+        onopen: openStream,
         onmessage(ev) {
           const action = interpretStreamEvent(ev);
           switch (action.type) {
@@ -718,8 +719,9 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
         },
         onerror(err) { throw err; },
       });
-    } catch {
-      if (!ctrl.signal.aborted) toast.error('Stream interrupted');
+    } catch (err) {
+      if (err?.refusal) toast.error(err.refusal.message, { duration: 8000 });
+      else if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
       // An unchecked draft never stays on screen once the stream ends.
       setMessages((prev) => prev.map((m) => (m.id === assistantMsgId && m.draft ? { ...m, draft: '' } : m)));

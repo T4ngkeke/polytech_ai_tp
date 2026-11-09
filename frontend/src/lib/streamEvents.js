@@ -71,3 +71,35 @@ export function interpretStreamEvent(ev) {
       return { type: 'ignore' };
   }
 }
+
+/**
+ * What to tell the student when the server refuses a question before the
+ * stream starts (routers/chat.py: lab locked, not in the class, quota used,
+ * conversation gone). `reload` names what the page should load again:
+ * 'classes' (the lab or class changed) or 'usage' (the quota bar).
+ * @param {number} status HTTP status
+ * @param {string|null} detail the server's `detail`, when it is a string
+ */
+export function streamRefusal(status, detail) {
+  if (status === 429) return { message: "You have used today's quota. It resets tomorrow.", reload: 'usage' };
+  if (status === 403) return { message: detail || 'You can no longer ask questions in this lab.', reload: 'classes' };
+  if (status === 404) return { message: 'This conversation no longer exists. Open the lab again.', reload: 'classes' };
+  if (status >= 500) return { message: `The server could not take the question (error ${status}). Try again in a moment.`, reload: null };
+  return { message: detail || `The question was refused (error ${status}).`, reload: null };
+}
+
+/**
+ * fetchEventSource `onopen`: let an event stream through; otherwise throw an
+ * error carrying `refusal` (streamRefusal) so the caller can explain it.
+ */
+export async function openStream(res) {
+  if (res.ok && (res.headers.get('content-type') || '').includes('text/event-stream')) return;
+  let detail = null;
+  try {
+    const body = await res.json();
+    if (typeof body?.detail === 'string') detail = body.detail;
+  } catch { /* not JSON */ }
+  const error = new Error('stream_refused');
+  error.refusal = streamRefusal(res.status, detail);
+  throw error;
+}

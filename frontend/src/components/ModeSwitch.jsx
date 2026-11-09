@@ -8,7 +8,7 @@ export default function ModeSwitch({ mode, onChange, examMode = false, disabled 
   if (examMode) {
     return (
       <p className="text-[11px] text-gold" role="status">
-        Exam mode: your teacher has turned course search off. Answers are Direct only.
+        Exam mode: your teacher has turned course search off and closed the course documents. Answers are Direct only.
       </p>
     );
   }

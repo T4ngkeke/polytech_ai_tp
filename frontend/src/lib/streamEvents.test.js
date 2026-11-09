@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { interpretStreamEvent } from './streamEvents.js';
+import { interpretStreamEvent, openStream, streamRefusal } from './streamEvents.js';
 
 // The chat SSE stream opens with `event: status\ndata: {"route": ...}` before any
 // token. It must be recognised as a status event, NEVER appended as a content
@@ -86,4 +86,18 @@ test('a status names the answer mode the server applies', () => {
   const older = interpretStreamEvent({ event: 'status', data: '{"route": "agent"}' });
   assert.equal(older.mode, null);
   assert.equal(older.examMode, false);
+});
+
+test('a question refused before the stream says why and what to reload', async () => {
+  assert.deepEqual(streamRefusal(403, 'This lab is locked or no longer available'),
+    { message: 'This lab is locked or no longer available', reload: 'classes' });
+  assert.equal(streamRefusal(429, 'Daily token quota exceeded').reload, 'usage');
+  assert.equal(streamRefusal(404, 'Session not found').reload, 'classes');
+  assert.equal(streamRefusal(502, null).reload, null);
+
+  await openStream(new Response('', { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+  await assert.rejects(
+    openStream(new Response(JSON.stringify({ detail: 'You are not a member of the class that owns this lab' }),
+      { status: 403, headers: { 'content-type': 'application/json' } })),
+    (err) => err.refusal.message === 'You are not a member of the class that owns this lab' && err.refusal.reload === 'classes');
 });

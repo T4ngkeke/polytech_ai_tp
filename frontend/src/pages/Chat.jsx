@@ -17,7 +17,7 @@ import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import api from '../lib/api';
 import { createMessageId, createRequestId } from '../lib/messageId';
-import { interpretStreamEvent } from '../lib/streamEvents';
+import { interpretStreamEvent, openStream } from '../lib/streamEvents';
 import { applyToMessage } from '../lib/streamMessage';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import { PdfPreviewModal } from '../components/PdfPreview';
@@ -30,6 +30,11 @@ import { useChatScroll } from '../lib/chatScroll';
 // lazily). We warm that chunk on mount (see effect below) so the first
 // assistant message renders as real markdown instead of the raw-text
 // Suspense fallback ("squished markdown") while the large chunk downloads.
+
+// The class list (and with it exam mode and locked labs) is loaded again this
+// often while the page is shown, and when the student comes back to the tab.
+const CLASS_REFRESH_MS = 90_000;
+const MIN_REFRESH_GAP_MS = 10_000;
 
 export default function Chat() {
   const { labId: urlLabId } = useParams();
@@ -86,9 +91,10 @@ export default function Chat() {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
 
   // ── Load classes with labs ──
-  const loadClasses = useCallback(async () => {
+  // quiet: a background refresh, without the loading state or an error toast.
+  const loadClasses = useCallback(async ({ quiet = false } = {}) => {
     try {
-      setClassesLoading(true);
+      if (!quiet) setClassesLoading(true);
       const classData = await api.get('/api/student/classes');
       // For each class, fetch its labs
       const withLabs = await Promise.all(
@@ -99,13 +105,32 @@ export default function Chat() {
       );
       setClasses(withLabs);
     } catch {
-      toast.error('Failed to load classes');
+      if (!quiet) toast.error('Failed to load classes');
     } finally {
-      setClassesLoading(false);
+      if (!quiet) setClassesLoading(false);
     }
   }, []);
 
   useEffect(() => { loadClasses(); }, [loadClasses]);
+
+  // The teacher may turn exam mode on or off, or lock a lab, while this page is
+  // open: load the classes again now and then, and when the student comes back.
+  useEffect(() => {
+    let last = Date.now();
+    const refresh = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < MIN_REFRESH_GAP_MS) return;
+      last = Date.now();
+      loadClasses({ quiet: true });
+    };
+    const id = setInterval(refresh, CLASS_REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [loadClasses]);
 
   // Warm the markdown/highlight/KaTeX chunk immediately so the first message
   // doesn't fall back to raw-text rendering while it downloads.
@@ -244,11 +269,14 @@ export default function Chat() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: currentSessionId, message: text,
           client_request_id: createRequestId(),
-          mode: examMode ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
+          // The server applies exam mode; the page may not know yet that it changed.
+          mode: typeof modeOverride === 'string' ? modeOverride : mode }),
         signal: ctrl.signal,
         // Keep the stream open while the tab is hidden; by default the library
         // closes it and resends the question when the tab is shown again.
         openWhenHidden: true,
+        // A question refused before the stream starts (lab locked, quota used…).
+        onopen: openStream,
         onmessage(ev) {
           // Named events (status/done/error/citations) are matched before the
           // content-token branch, so the opening `status` frame is never appended
@@ -300,15 +328,23 @@ export default function Chat() {
         },
         onerror(err) { throw err; },
       });
-    } catch {
-      if (!ctrl.signal.aborted) toast.error('Stream interrupted');
+    } catch (err) {
+      if (err?.refusal) {
+        // Nothing was asked: take the question back off the screen, into the box.
+        streamedIdsRef.current.delete(assistantMsgId);
+        setMessages((prev) => prev.filter((m) => m.id !== userMsgId && m.id !== assistantMsgId));
+        if (typeof picked !== 'string') setInput((current) => current || text);
+        toast.error(err.refusal.message, { duration: 8000 });
+        if (err.refusal.reload === 'classes') loadClasses({ quiet: true });
+        if (err.refusal.reload === 'usage') loadUsage();
+      } else if (!ctrl.signal.aborted) toast.error('Stream interrupted');
     } finally {
       // An unchecked draft never stays on screen once the stream ends.
       setMessages((prev) => prev.map((m) => m.id === assistantMsgId && m.draft ? { ...m, draft: '' } : m));
       setResearchPhase(null);
       setIsStreaming(false);
     }
-  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage, mode, examMode, activeClass, follow]);
+  }, [input, activeSessionId, activeLabId, isStreaming, token, loadUsage, loadClasses, mode, activeClass, follow]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
