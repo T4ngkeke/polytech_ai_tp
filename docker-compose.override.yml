@@ -101,10 +101,13 @@ services:
   node-exporter:
     image: prom/node-exporter:v1.9.1
     container_name: edullm-node-exporter
-    command: ["--path.rootfs=/host", "--path.procfs=/host/proc", "--path.sysfs=/host/sys"]
+    command: ["--path.rootfs=/host", "--path.procfs=/host/proc", "--path.sysfs=/host/sys",
+              "--collector.textfile.directory=/textfile"]
     pid: host
     volumes:
       - /:/host:ro,rslave
+      # Written by the release backup after each good backup (docker-compose.release.yml).
+      - /var/lib/edullm-metrics:/textfile:ro
     mem_limit: 128m
     restart: unless-stopped
 

@@ -28,7 +28,8 @@ def test_only_named_columns_are_granted_and_nothing_personal():
     stmts = [' '.join(s.split()) for s in grant_statements(GRANTS_PATH.read_text())]
     assert all(s.startswith(('GRANT SELECT (', 'GRANT USAGE ON SCHEMA public')) for s in stmts)
     tables = granted()
-    assert 'users' not in tables
+    # From users only the role and the quotas: no name, no password.
+    assert tables['users'] == {'id', 'role', 'daily_token_quota', 'weekly_token_quota'}
     assert 'content' not in tables['messages']           # the answers
     assert not {'storage_path', 'content_hash'} & tables['documents']
 
@@ -40,5 +41,6 @@ def test_every_table_the_dashboards_read_is_granted():
             for target in panel.get('targets', []):
                 sql = target.get('rawSql')
                 if sql:
-                    used = set(re.findall(r'\b(?:FROM|JOIN)\s+(\w+)', sql)) - {'runs'}
+                    ctes = set(re.findall(r'(\w+)\s+AS\s*\(', sql))   # WITH name AS (...)
+                    used = set(re.findall(r'\b(?:FROM|JOIN)\s+(\w+)', sql)) - ctes
                     assert used <= set(tables), (path.name, panel['title'], used - set(tables))

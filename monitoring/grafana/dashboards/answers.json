@@ -1,7 +1,7 @@
 {
   "uid": "edullm-answers",
   "title": "Answers",
-  "description": "Questions, answer times and modes, model calls and document jobs.",
+  "description": "Questions, answer times and modes, limits and refused questions, model calls, documents.",
   "tags": [
     "edullm"
   ],
@@ -104,7 +104,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) AS \"Questions\" FROM runs",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) AS \"Questions\" FROM runs",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -147,8 +147,8 @@
     {
       "type": "stat",
       "id": 19,
-      "title": "Median time",
-      "description": "",
+      "title": "Median time by mode",
+      "description": "Half of the questions in each mode were answered faster than this.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${db}"
@@ -165,7 +165,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS \"Median\" FROM runs WHERE seconds IS NOT NULL",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) FILTER (WHERE mode = 'direct') AS \"Direct\",\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) FILTER (WHERE mode = 'search') AS \"Search\",\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) FILTER (WHERE mode = 'research') AS \"Research\"\nFROM runs WHERE seconds IS NOT NULL",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -187,7 +187,8 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 0
+          "decimals": 0,
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -201,7 +202,7 @@
         },
         "colorMode": "value",
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
@@ -210,8 +211,8 @@
     {
       "type": "stat",
       "id": 20,
-      "title": "Tool limit reached",
-      "description": "Research runs that stopped because the tool calls ran out, not because the answer was ready.",
+      "title": "Tool limit reached (research)",
+      "description": "Research questions that stopped because the tool calls ran out, not because the answer was ready.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${db}"
@@ -228,7 +229,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT avg((stop_reason = 'budget_exhausted')::int) AS \"Share\" FROM runs",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT avg((stop_reason = 'budget_exhausted')::int) FILTER (WHERE mode = 'research') AS \"Share\" FROM runs",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -258,7 +259,8 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 0
+          "decimals": 0,
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -299,7 +301,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE status = 'failed') AS \"Failed\" FROM runs",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE status = 'failed') AS \"Failed\" FROM runs",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -364,7 +366,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE stop_reason = 'clarification') AS \"Asked\" FROM runs",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE stop_reason = 'clarification') AS \"Asked\" FROM runs",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -425,7 +427,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE feedback = 'down') AS \"Down\" FROM runs",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT count(*) FILTER (WHERE feedback = 'down') AS \"Down\" FROM runs",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -490,7 +492,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT $__timeGroupAlias(started_at, 1h, 0), mode AS metric, count(*) AS value FROM runs GROUP BY 1, 2 ORDER BY 1",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT $__timeGroupAlias(started_at, 1h, 0), mode AS metric, count(*) AS value FROM runs GROUP BY 1, 2 ORDER BY 1",
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
@@ -546,7 +548,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT $__timeGroupAlias(started_at, 1h, NULL), mode AS metric, percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS value FROM runs WHERE seconds IS NOT NULL GROUP BY 1, 2 ORDER BY 1",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT $__timeGroupAlias(started_at, 1h, NULL), mode AS metric, percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS value FROM runs WHERE seconds IS NOT NULL GROUP BY 1, 2 ORDER BY 1",
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
@@ -602,7 +604,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT mode AS \"Mode\", count(*) AS \"Questions\",\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS \"Median\",\n       percentile_cont(0.95) WITHIN GROUP (ORDER BY seconds) AS \"95%\",\n       avg(billed_tokens)::int AS \"Tokens (mean)\",\n       avg((stop_reason = 'budget_exhausted')::int) AS \"Tool limit\",\n       count(*) FILTER (WHERE status = 'failed') AS \"Failed\",\n       count(*) FILTER (WHERE feedback = 'down') AS \"Thumbs down\"\nFROM runs GROUP BY mode ORDER BY 2 DESC",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT mode AS \"Mode\", count(*) AS \"Questions\",\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS \"Median\",\n       percentile_cont(0.95) WITHIN GROUP (ORDER BY seconds) AS \"95%\",\n       avg(billed_tokens)::int AS \"Tokens (mean)\",\n       avg((stop_reason = 'budget_exhausted')::int) AS \"Tool limit\",\n       count(*) FILTER (WHERE status = 'failed') AS \"Failed\",\n       count(*) FILTER (WHERE feedback = 'down') AS \"Thumbs down\"\nFROM runs GROUP BY mode ORDER BY 2 DESC",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -699,7 +701,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT coalesce(stop_reason, status) AS \"Reason\", count(*) AS \"Runs\"\nFROM runs GROUP BY 1 ORDER BY 2 DESC",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT coalesce(stop_reason, status) AS \"Reason\", count(*) AS \"Runs\"\nFROM runs GROUP BY 1 ORDER BY 2 DESC",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -728,12 +730,451 @@
     },
     {
       "type": "row",
+      "id": 33,
+      "title": "Limits and refused questions",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 34,
+      "title": "Refused before starting",
+      "description": "Questions the chat refused before they started: a limit reached, a locked lab, or a student no longer in the class.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT count(*) AS \"Refused\" FROM chat_refusals WHERE $__timeFilter(created_at)",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 35,
+      "title": "Students at a limit now",
+      "description": "Students who cannot start a question now (day or week limit). Days start at midnight Paris time, weeks on Monday.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 21,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH day AS (\n  SELECT (now() AT TIME ZONE 'Europe/Paris')::date AS d,\n         date_trunc('week', now() AT TIME ZONE 'Europe/Paris')::date AS w\n), used AS (\n  SELECT s.user_id, sum(s.tokens_used) FILTER (WHERE s.date = day.d) AS today, sum(s.tokens_used) AS week\n  FROM usage_stats s CROSS JOIN day WHERE s.date >= day.w AND s.date <= day.d GROUP BY s.user_id\n), granted AS (\n  SELECT g.user_id, sum(g.tokens) FILTER (WHERE g.kind = 'day' AND g.date = day.d) AS today,\n         sum(g.tokens) FILTER (WHERE g.kind = 'week') AS week\n  FROM quota_grants g CROSS JOIN day WHERE g.date >= day.w AND g.date <= day.d GROUP BY g.user_id\n), q AS (\n  SELECT u.id AS user_id, coalesce(used.today, 0) AS used_today, coalesce(used.week, 0) AS used_week,\n         u.daily_token_quota + coalesce(granted.today, 0) AS limit_today,\n         u.weekly_token_quota + coalesce(granted.week, 0) AS limit_week\n  FROM users u JOIN used ON used.user_id = u.id LEFT JOIN granted ON granted.user_id = u.id\n  WHERE u.role = 'student'\n)\nSELECT count(*) FILTER (WHERE used_today >= limit_today OR used_week >= limit_week) AS \"Students\" FROM q",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 36,
+      "title": "Reset requests today",
+      "description": "Students at a limit who asked their teacher for a reset today: still open, and all of today.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH day AS (SELECT (now() AT TIME ZONE 'Europe/Paris')::date AS d)\nSELECT count(*) FILTER (WHERE r.resolved_at IS NULL) AS \"Open\", count(*) AS \"Asked\"\nFROM quota_reset_requests r CROSS JOIN day WHERE r.date = day.d",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "stat",
+      "id": 37,
+      "title": "Resets this week",
+      "description": "Times a teacher or an admin gave a student a full day and week again (since Monday). Usage is kept.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 21,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH day AS (SELECT date_trunc('week', now() AT TIME ZONE 'Europe/Paris')::date AS w)\nSELECT count(DISTINCT (g.user_id, g.created_at)) AS \"Resets\" FROM quota_grants g CROSS JOIN day WHERE g.date >= day.w",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "table",
+      "id": 38,
+      "title": "Refused questions by reason",
+      "description": "In the time range. A limit refusal means the student saw the limit message.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 9,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT CASE reason WHEN 'day_quota' THEN 'Day limit' WHEN 'week_quota' THEN 'Week limit'\n                   WHEN 'lab_locked' THEN 'Lab locked' WHEN 'not_member' THEN 'Not in the class'\n                   ELSE reason END AS \"Reason\",\n       count(*) AS \"Questions\", count(DISTINCT user_id) AS \"Students\", max(created_at) AS \"Last\"\nFROM chat_refusals WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 2 DESC",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "table",
+      "id": 39,
+      "title": "Token use by class",
+      "description": "Students who used tokens this week, by class (a student counts in each of their classes). \"Highest\" is the student closest to the limit. No names: see the teacher Analytics tab.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 9,
+        "y": 25,
+        "w": 15,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "WITH day AS (\n  SELECT (now() AT TIME ZONE 'Europe/Paris')::date AS d,\n         date_trunc('week', now() AT TIME ZONE 'Europe/Paris')::date AS w\n), used AS (\n  SELECT s.user_id, sum(s.tokens_used) FILTER (WHERE s.date = day.d) AS today, sum(s.tokens_used) AS week\n  FROM usage_stats s CROSS JOIN day WHERE s.date >= day.w AND s.date <= day.d GROUP BY s.user_id\n), granted AS (\n  SELECT g.user_id, sum(g.tokens) FILTER (WHERE g.kind = 'day' AND g.date = day.d) AS today,\n         sum(g.tokens) FILTER (WHERE g.kind = 'week') AS week\n  FROM quota_grants g CROSS JOIN day WHERE g.date >= day.w AND g.date <= day.d GROUP BY g.user_id\n), q AS (\n  SELECT u.id AS user_id, coalesce(used.today, 0) AS used_today, coalesce(used.week, 0) AS used_week,\n         u.daily_token_quota + coalesce(granted.today, 0) AS limit_today,\n         u.weekly_token_quota + coalesce(granted.week, 0) AS limit_week\n  FROM users u JOIN used ON used.user_id = u.id LEFT JOIN granted ON granted.user_id = u.id\n  WHERE u.role = 'student'\n)\nSELECT c.name AS \"Class\", count(*) AS \"Students\",\n       sum(q.used_today) AS \"Today\", max(q.used_today::float / nullif(q.limit_today, 0)) AS \"Highest today\",\n       sum(q.used_week) AS \"This week\", max(q.used_week::float / nullif(q.limit_week, 0)) AS \"Highest this week\",\n       count(*) FILTER (WHERE q.used_today >= q.limit_today OR q.used_week >= q.limit_week) AS \"At a limit\"\nFROM q JOIN class_students cs ON cs.student_id = q.user_id JOIN classes c ON c.id = cs.class_id\nWHERE NOT c.is_deleted GROUP BY c.name ORDER BY 5 DESC",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Highest today"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Highest this week"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Today"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "This week"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "row",
       "id": 28,
       "title": "Latest questions",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 33,
         "w": 24,
         "h": 1
       },
@@ -750,7 +1191,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 34,
         "w": 24,
         "h": 12
       },
@@ -760,7 +1201,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         CASE WHEN r.assistant_message_id IS NULL THEN 'no answer'\n              ELSE coalesce(m.answer_mode, 'research') END AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT started_at AS \"Time\", class AS \"Class\", lab AS \"Lab\", mode AS \"Mode\",\n       question AS \"Question\", seconds AS \"Seconds\", coalesce(stop_reason, status) AS \"Stopped\",\n       feedback AS \"Feedback\", billed_tokens AS \"Tokens\", CASE WHEN is_test THEN 'teacher' ELSE '' END AS \"Test\"\nFROM runs ORDER BY started_at DESC LIMIT 200",
+          "rawSql": "WITH runs AS (\n  SELECT r.started_at, r.status, r.stop_reason, r.question,\n         EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) AS seconds,\n         coalesce(r.mode, m.answer_mode,\n                  CASE WHEN r.assistant_message_id IS NULL THEN 'unknown' ELSE 'research' END) AS mode,\n         m.feedback::text AS feedback, m.billed_tokens, s.is_test, l.name AS lab, c.name AS class\n  FROM agent_runs r\n  JOIN sessions s ON s.id = r.session_id\n  LEFT JOIN messages m ON m.id = r.assistant_message_id\n  LEFT JOIN labs l ON l.id = s.lab_id\n  LEFT JOIN classes c ON c.id = l.class_id\n  WHERE $__timeFilter(r.started_at) AND (NOT s.is_test OR ${tests})\n)\nSELECT started_at AS \"Time\", class AS \"Class\", lab AS \"Lab\", mode AS \"Mode\",\n       question AS \"Question\", seconds AS \"Seconds\", coalesce(stop_reason, status) AS \"Stopped\",\n       feedback AS \"Feedback\", billed_tokens AS \"Tokens\", CASE WHEN is_test THEN 'teacher' ELSE '' END AS \"Test\"\nFROM runs ORDER BY started_at DESC LIMIT 200",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -931,7 +1372,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 46,
         "w": 24,
         "h": 1
       },
@@ -948,7 +1389,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 34,
+        "y": 47,
         "w": 14,
         "h": 8
       },
@@ -1029,7 +1470,7 @@
       },
       "gridPos": {
         "x": 14,
-        "y": 34,
+        "y": 47,
         "w": 10,
         "h": 8
       },
@@ -1113,6 +1554,261 @@
         "footer": {
           "show": false
         }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 40,
+      "title": "Reading time per page",
+      "description": "MinerU: median seconds per PDF page, in the time range (the whole PDF read, divided by its pages).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (r.parse_finished_at - r.parse_started_at)) / d.page_count) AS \"Per page\"\nFROM document_revisions r JOIN documents d ON d.id = r.document_id\nWHERE r.parse_finished_at IS NOT NULL AND $__timeFilter(r.parse_finished_at) AND d.page_count > 0",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "type": "table",
+      "id": 42,
+      "title": "Reading PDFs",
+      "description": "Each PDF read in the time range: wait before reading, reading time, time per page, and the time from the upload until students can use it (indexing done).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 5,
+        "y": 55,
+        "w": 19,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT r.parse_finished_at AS \"Read at\", d.filename AS \"File\", d.page_count AS \"Pages\",\n       EXTRACT(EPOCH FROM (r.parse_started_at - r.created_at)) AS \"Waited\",\n       EXTRACT(EPOCH FROM (r.parse_finished_at - r.parse_started_at)) AS \"Reading\",\n       EXTRACT(EPOCH FROM (r.parse_finished_at - r.parse_started_at)) / nullif(d.page_count, 0) AS \"Per page\",\n       EXTRACT(EPOCH FROM (j.updated_at - r.created_at)) AS \"Until ready\"\nFROM document_revisions r JOIN documents d ON d.id = r.document_id\nLEFT JOIN ingestion_jobs j ON j.revision_id = r.id AND j.task_kind = 'pdf_index' AND j.status::text = 'done'\nWHERE r.parse_finished_at IS NOT NULL AND $__timeFilter(r.parse_finished_at)\nORDER BY r.parse_finished_at DESC LIMIT 50",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Read at"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              },
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Waited"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Reading"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Per page"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Until ready"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 41,
+      "title": "Wait before reading",
+      "description": "Median time from the upload to the start of the reading. PDFs are read one after another.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 59,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (r.parse_started_at - r.created_at))) AS \"Wait\"\nFROM document_revisions r JOIN documents d ON d.id = r.document_id\nWHERE r.parse_finished_at IS NOT NULL AND $__timeFilter(r.parse_finished_at)",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
       }
     }
   ]

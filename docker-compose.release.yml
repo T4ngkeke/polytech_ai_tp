@@ -115,6 +115,8 @@ services:
       PGPASSWORD: ${RELEASE_DB_PASSWORD}
     volumes:
       - release_backups:/backups
+      # After each good backup, its time for node-exporter (Grafana "Last backup").
+      - /var/lib/edullm-metrics:/metrics
     depends_on:
       release-db:
         condition: service_healthy
@@ -127,6 +129,10 @@ services:
           backup_file="/backups/release-$$(date -u +%Y%m%dT%H%M%SZ).dump"
           pg_dump -h edullm-release-db -U release -d edudb -Fc > "$$backup_file"
           pg_restore -l "$$backup_file" > /dev/null
+          printf 'edullm_backup_last_success_timestamp_seconds %s\nedullm_backup_last_size_bytes %s\n' \
+            "$$(date +%s)" "$$(stat -c %s "$$backup_file")" > /metrics/backup.prom.tmp
+          chmod 644 /metrics/backup.prom.tmp
+          mv /metrics/backup.prom.tmp /metrics/backup.prom
           find /backups -type f -name 'release-*.dump' -mtime +13 -delete
           sleep 86400
         done
