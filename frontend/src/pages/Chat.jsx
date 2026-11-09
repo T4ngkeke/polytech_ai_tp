@@ -26,6 +26,7 @@ import ModeSwitch from '../components/ModeSwitch';
 import useMediaQuery from '../lib/useMediaQuery';
 import { DEFAULT_MODE, offersResearch, saveMode, sessionMode, storedMode } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
+import { blockedMessage, nearLimit, nearLimitMessage, percent } from '../lib/quota';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
 // assistant message renders as real markdown instead of the raw-text
@@ -50,7 +51,9 @@ export default function Chat() {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [usage, setUsage] = useState({ used: 0, limit: 50000 });
+  // Day and week limits (lib/quota.js); a started question always finishes.
+  const [usage, setUsage] = useState({ used: 0, limit: 0, week_used: 0, week_limit: 0, blocked: null });
+  const [askingReset, setAskingReset] = useState(false);
 
   // ── Chat state ──
   const [input, setInput] = useState('');
@@ -141,12 +144,51 @@ export default function Chat() {
     try {
       const data = await api.get('/api/student/usage');
       setUsage(data);
+      // Told once (per day or week) when 80% of a limit is used.
+      const near = nearLimit(data);
+      if (near) {
+        let seen = false;
+        try { seen = localStorage.getItem(near.key) === '1'; localStorage.setItem(near.key, '1'); } catch { /* private window */ }
+        if (!seen) toast(nearLimitMessage(near.kind), { duration: 8000 });
+      }
     } catch {
-      // The quota bar keeps its last value.
+      // The quota bars keep their last value.
     }
   }, []);
 
   useEffect(() => { loadUsage(); }, [loadUsage]);
+
+  // A teacher may reset the limits while this page is open (same rhythm as the classes).
+  useEffect(() => {
+    let last = Date.now();
+    const refresh = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < MIN_REFRESH_GAP_MS) return;
+      last = Date.now();
+      loadUsage();
+    };
+    const id = setInterval(refresh, CLASS_REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [loadUsage]);
+
+  const askForReset = useCallback(async () => {
+    setAskingReset(true);
+    try {
+      const data = await api.post('/api/student/usage/reset-request');
+      setUsage(data);
+      toast.success(data.sent ? 'Request sent to your teacher.' : 'Your teacher already has your request.');
+    } catch (err) {
+      toast.error(err.message);
+      loadUsage();
+    } finally {
+      setAskingReset(false);
+    }
+  }, [loadUsage]);
 
   // ── When a lab is selected ──
   const handleSelectLab = useCallback(async (labId) => {
@@ -407,7 +449,7 @@ export default function Chat() {
   }, [activeSessionId]);
 
   // ── Derived ──
-  const quotaPct = usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
+  const blockedText = blockedMessage(usage);
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   // Desktop: its own column next to the classes. Phones: inside the drawer.
@@ -519,20 +561,11 @@ export default function Chat() {
           )}
         </HierarchicalSidebar>
 
-        {/* Token quota at bottom */}
-        <div className="shrink-0 px-4 py-3 border-t border-border-subtle">
-          <div className="flex justify-between text-[10px] text-cream-muted mb-1.5">
-            <span>Token Quota</span>
-            <span className="font-mono">{usage.used.toLocaleString()} / {usage.limit.toLocaleString()}</span>
-          </div>
-          <div className="h-1 bg-ink-surface rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                quotaPct > 85 ? 'bg-danger' : quotaPct > 65 ? 'bg-gold' : 'bg-cyan'
-              }`}
-              style={{ width: `${quotaPct}%` }}
-            />
-          </div>
+        {/* Token limits at bottom: today and this week */}
+        <div className="shrink-0 px-4 py-3 border-t border-border-subtle space-y-2"
+          title="A question that has started always finishes. Today resets at midnight, the week on Monday.">
+          <QuotaBar label="Today" used={usage.used} limit={usage.limit} />
+          <QuotaBar label="This week" used={usage.week_used} limit={usage.week_limit} />
         </div>
       </div>
 
@@ -632,6 +665,19 @@ export default function Chat() {
 
         {/* Input */}
         <div className="shrink-0 px-3 py-3 md:px-6 md:py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
+          {blockedText && (
+            <div role="status" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-gold/40 bg-gold-muted px-3 py-2 text-xs text-cream">
+              <span className="flex-1 min-w-[12rem]">{blockedText}</span>
+              {usage.reset_requested ? (
+                <span className="text-cream-muted">Request sent to your teacher.</span>
+              ) : (
+                <button type="button" onClick={askForReset} disabled={askingReset}
+                  className="cursor-pointer rounded-md border border-border-default bg-ink-base px-2.5 py-1 text-cream hover:bg-ink-hover disabled:opacity-50">
+                  Ask my teacher for a reset
+                </button>
+              )}
+            </div>
+          )}
           {activeSessionId && (
             <div className="mb-2">
               <ModeSwitch mode={mode} onChange={chooseMode} examMode={examMode} disabled={isStreaming} />
@@ -740,4 +786,23 @@ function CheckIcon({ className }) {
 }
 function XIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>;
+}
+
+
+function QuotaBar({ label, used, limit }) {
+  const pct = percent(used, limit);
+  return (
+    <div>
+      <div className="flex justify-between text-[10px] text-cream-muted mb-1">
+        <span>{label}</span>
+        <span className="font-mono">{pct}%</span>
+      </div>
+      <div className="h-1 bg-ink-surface rounded-full overflow-hidden"
+        role="meter" aria-label={`${label}: ${pct}% of the limit used`} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className={`h-full rounded-full transition-all duration-500 ${
+          pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-gold' : 'bg-cyan'}`}
+          style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }

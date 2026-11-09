@@ -53,7 +53,10 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
         # Columns each explicit migration adds to a table that already exists.
         # The ORM selects them, so a missing one breaks even the legacy path.
         migrated_columns = {"documents": "structured", "ingestion_jobs": "task_kind",
-                            "document_reviews": "revision_id", "document_blocks": "structure"}
+                            "document_reviews": "revision_id", "document_blocks": "structure",
+                            # M4-I
+                            "users": "weekly_token_quota", "quota_grants": "kind",
+                            "agent_runs": "mode", "document_revisions": "parse_started_at"}
         def needs_migration(sync_conn):
             inspector = inspect(sync_conn)
             return any(inspector.has_table(table) and column not in {

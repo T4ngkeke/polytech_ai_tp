@@ -114,6 +114,7 @@ def make_user(
     username: str | None = None,
     is_deleted: bool = False,
     quota: int = 50_000,
+    weekly_quota: int = 25_000_000,
 ) -> User:
     """Helper to create a User ORM instance for tests."""
     return User(
@@ -122,6 +123,7 @@ def make_user(
         hashed_password=hash_password("password1"),
         role=role,
         daily_token_quota=quota,
+        weekly_token_quota=weekly_quota,
         is_deleted=is_deleted,
     )
 

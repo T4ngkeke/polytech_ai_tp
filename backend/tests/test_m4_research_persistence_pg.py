@@ -23,7 +23,7 @@ from backend.app.services.document_cleanup import mark_deleted
 from backend.app.services.research_runs import (
     STALE_RUN_SECONDS, CitationInvalid, ResearchRuns, RunConflict, _label_order,
 )
-from backend.app.services.research_usage import ResearchCallConflict, ResearchQuotaExceeded, ResearchUsage
+from backend.app.services.research_usage import ResearchCallConflict, ResearchUsage
 from backend.tests.conftest import make_user
 from backend.tests.test_m4_tools_pg import _indexed_pdf
 from backend.tests.test_structured_ingest import seed
@@ -261,8 +261,10 @@ async def test_a_failure_before_the_model_call_closes_the_run(pg_session, monkey
 
 
 @pytest.mark.asyncio
-async def test_concurrent_quota_reservation_idempotent_settlement_and_unknown(pg_session):
-    scope, factory = await _setup(pg_session, quota=100)
+async def test_concurrent_reservations_idempotent_settlement_and_unknown(pg_session):
+    # The quota is checked when a question starts (routers/chat.py), never per
+    # call: a started question always finishes, even over a tiny quota.
+    scope, factory = await _setup(pg_session, quota=10)
     run = await ResearchRuns(factory).begin_run(scope=scope,
         question='Quota?', client_request_id='quota')
     usage = ResearchUsage(factory)
@@ -270,10 +272,8 @@ async def test_concurrent_quota_reservation_idempotent_settlement_and_unknown(pg
         return await usage.reserve(run_id=run.run_id, purpose='agent', model='local',
             input_tokens=20, max_output_tokens=50, alpha=1, beta=1)
     outcomes = await asyncio.gather(reserve(), reserve(), return_exceptions=True)
-    succeeded = [x for x in outcomes if isinstance(x, uuid.UUID)]
-    assert len(succeeded) == 1
-    assert sum(isinstance(x, ResearchQuotaExceeded) for x in outcomes) == 1
-    call_id = succeeded[0]
+    assert all(isinstance(x, uuid.UUID) for x in outcomes) and outcomes[0] != outcomes[1]
+    call_id, another = outcomes
     assert await usage.reserve(run_id=run.run_id, purpose='agent', model='local',
         input_tokens=20, max_output_tokens=50, alpha=1, beta=1,
         call_id=call_id) == call_id
@@ -286,15 +286,12 @@ async def test_concurrent_quota_reservation_idempotent_settlement_and_unknown(pg
     second = await usage.settle(call_id=call_id, input_tokens=20,
         output_tokens=10, status='ok', elapsed_seconds=.1, usage_source='actual')
     assert first.call_id == second.call_id and first.billed_tokens == 30
-    another = await reserve()  # 30 billed + 70 held = 100
     async with factory() as db:
         async with db.begin():
             row = await db.get(UsageReservation, another)
             row.expires_at = _utcnow() - timedelta(seconds=1)
     assert await usage.mark_expired_unknown(another)
     assert not await usage.mark_expired_unknown(another)
-    with pytest.raises(ResearchQuotaExceeded):
-        await reserve()  # unknown is still held; it is not silently free
     await usage.settle(call_id=another, input_tokens=20, output_tokens=0,
                        status='reconciled', elapsed_seconds=.2,
                        usage_source='estimated')
@@ -521,24 +518,20 @@ async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_retur
 
 
 @pytest.mark.asyncio
-async def test_quota_denial_propagates_and_does_not_call_model(pg_session):
+async def test_a_started_question_finishes_over_the_quota(pg_session):
     from backend.app.services.research_service import run_persisted_research
     scope, factory = await _setup(pg_session, quota=10)
-    invoked = False
     async def model(messages, max_output, timeout, **kwargs):
-        nonlocal invoked
-        invoked = True
-        return ModelReply('{}')
-    with pytest.raises(ResearchQuotaExceeded):
-        await run_persisted_research(scope=scope, question='No quota?',
-            client_request_id='no-quota', model=model, model_name='local',
-            token_alpha=1, token_beta=1, session_factory=factory)
-    assert not invoked
+        return ModelReply('A full answer.', [], 'fake', 30, 10)
+    result = await run_persisted_research(scope=scope, question='Over the quota?',
+        client_request_id='over', model=model, model_name='local', mode='direct',
+        token_alpha=1, token_beta=1, session_factory=factory)
+    assert result['status'] == 'finished'
     async with factory() as db:
-        run = await db.scalar(select(AgentRun).where(
-            AgentRun.client_request_id == 'no-quota'))
-        assert run.status == 'failed' and run.assistant_message_id is None
-        assert await db.scalar(select(func.count()).select_from(ModelCallUsage)) == 0
+        run = await db.scalar(select(AgentRun).where(AgentRun.client_request_id == 'over'))
+        assert run.status == 'finished' and run.mode == 'direct'
+        stat = await db.scalar(select(UsageStat).where(UsageStat.user_id == scope.user_id))
+        assert stat.tokens_used == 40  # over the quota of 10: the next question is refused
 
 
 @pytest.mark.asyncio

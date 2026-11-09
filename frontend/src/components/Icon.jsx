@@ -4,14 +4,14 @@
  */
 import {
   Archive, ArrowUpDown, Bot, Check, Compass, Copy, Download, Eye, FileText, KeyRound, Layers,
-  Lock, LockOpen, MessageSquare, Network, Pencil, Repeat, ThumbsDown, ThumbsUp, Trash2, TriangleAlert, X,
+  Lock, LockOpen, MessageSquare, Network, Pencil, Repeat, RotateCcw, ThumbsDown, ThumbsUp, Trash2, TriangleAlert, X,
 } from 'lucide-react';
 
 const ICONS = {
   trash: Trash2, file: FileText, layers: Layers, warning: TriangleAlert, lock: Lock, unlock: LockOpen,
   pencil: Pencil, key: KeyRound, transfer: Repeat, archive: Archive, thumbsUp: ThumbsUp,
   thumbsDown: ThumbsDown, bot: Bot, eye: Eye, message: MessageSquare, network: Network,
-  sort: ArrowUpDown, compass: Compass, download: Download, copy: Copy, check: Check, close: X,
+  sort: ArrowUpDown, compass: Compass, download: Download, copy: Copy, check: Check, close: X, reset: RotateCcw,
 };
 
 export default function Icon({ name, className = 'w-4 h-4', title }) {

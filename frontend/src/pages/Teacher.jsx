@@ -17,6 +17,7 @@ import useAuthStore from '../store/authStore';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import DocumentManager from '../components/DocumentManager';
 import TeacherAnalytics from '../components/TeacherAnalytics';
+import QuotaRequests from '../components/QuotaRequests';
 import TeachingReport from '../components/TeachingReport';
 import SkillPresetManager from '../components/SkillPresetManager';
 import CitationReport from '../components/CitationReport';
@@ -342,6 +343,7 @@ export default function Teacher() {
                 className="min-w-0 truncate text-sm font-medium text-cream" />
             : <span className="min-w-0 truncate text-sm font-medium text-cream">Teacher</span>}
         </div>
+        <QuotaRequests onReset={activeTab === tabs.indexOf('Analytics') ? loadAnalytics : undefined} />
         {!selectedClass && !selectedLab ? (
           <EmptyState />
         ) : (

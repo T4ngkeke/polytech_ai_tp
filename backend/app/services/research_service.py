@@ -116,7 +116,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
     runs = ResearchRuns(session_factory)
     usage = ResearchUsage(session_factory)
     started = await runs.begin_run(scope=scope, question=question,
-        client_request_id=client_request_id,
+        client_request_id=client_request_id, mode=mode,
         stale_after=max(STALE_RUN_SECONDS, 2 * limits.total_seconds))
     if not started.created:
         # The same request again (a resend, a reconnect): wait for the run

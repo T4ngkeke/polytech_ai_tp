@@ -8,15 +8,16 @@ class_id with ownership already verified; Admin passes it directly.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import (
-    AgentRun, ClassStudent, Lab, Message, QuotaGrant, SenderType, Session, UsageStat, User,
+    AgentRun, ClassStudent, Lab, Message, SenderType, Session, UsageStat, User,
 )
+from backend.app.services import quota_service
 
 
 @dataclass
@@ -148,7 +149,7 @@ async def get_global_analytics(db: AsyncSession) -> GlobalAnalytics:
     ]
     active_users_7d = await db.scalar(
         select(func.count(func.distinct(UsageStat.user_id))).where(
-            UsageStat.date > date.today() - timedelta(days=7), UsageStat.request_count > 0))
+            UsageStat.date > quota_service.today() - timedelta(days=7), UsageStat.request_count > 0))
 
     return GlobalAnalytics(
         total_tokens=total_tokens,
@@ -296,29 +297,25 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
         names.update({u.id: u.username for u in (await db.scalars(select(User).where(User.id.in_(missing)))).all()})
 
     member_ids = [u.id for u in members]
-    today = date.today()
-    used_today = dict((await db.execute(select(UsageStat.user_id, UsageStat.tokens_used).where(
-        UsageStat.user_id.in_(member_ids), UsageStat.date == today))).all()) if member_ids else {}
-    granted_today: dict[uuid.UUID, int] = {}
-    if member_ids:
-        for user_id, tokens in (await db.execute(
-                select(QuotaGrant.user_id, func.sum(QuotaGrant.tokens)).where(
-                    QuotaGrant.user_id.in_(member_ids), QuotaGrant.date == today)
-                .group_by(QuotaGrant.user_id))).all():
-            granted_today[user_id] = int(tokens)
+    # Limits are per student (all their classes share them); see quota_service.
+    quota = await quota_service.usages(db, list(members))
+    asked = await quota_service.open_requests(db, member_ids)
+    resets = await quota_service.reset_count(db, member_ids)
 
     students = []
     for user_id in member_ids + sorted(missing, key=lambda i: names.get(i, "")):
         s = per_student.get(user_id) or student(user_id)
-        quota = next((u.daily_token_quota for u in members if u.id == user_id), None)
-        limit = quota + granted_today.get(user_id, 0) if quota is not None else None
+        u = quota.get(user_id)
         students.append({
-            "user_id": user_id, "username": names.get(user_id, "?"), "member": user_id in names and quota is not None,
+            "user_id": user_id, "username": names.get(user_id, "?"), "member": u is not None,
             "questions": s["questions"], "sessions": len(s["sessions"]), "last_active": s["last_active"],
             "tokens": s["tokens"], "thumbs_down": s["thumbs_down"], "modes": s["modes"],
-            "used_today": used_today.get(user_id, 0), "limit_today": limit,
-            "granted_today": granted_today.get(user_id, 0),
-            "at_limit": limit is not None and used_today.get(user_id, 0) >= limit,
+            "used_today": u.used if u else 0, "limit_today": u.limit if u else None,
+            "granted_today": u.granted if u else 0,
+            "used_week": u.week_used if u else 0, "limit_week": u.week_limit if u else None,
+            "granted_week": u.week_granted if u else 0,
+            "blocked": u.blocked if u else None, "at_limit": bool(u and u.blocked),
+            "reset_requested": user_id in asked, "resets": resets.get(user_id, 0),
         })
 
     return {

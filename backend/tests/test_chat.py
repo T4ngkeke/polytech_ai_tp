@@ -9,7 +9,6 @@ Coverage
 """
 
 import uuid
-from datetime import date
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -19,6 +18,7 @@ from backend.app.auth import create_access_token
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import (
+    ChatRefusal,
     Class,
     ClassStudent,
     Lab,
@@ -31,6 +31,7 @@ from backend.app.models import (
     UsageStat,
     UserRole,
 )
+from backend.app.services import quota_service
 from tests.conftest import make_client, make_user
 
 
@@ -206,29 +207,56 @@ class TestGateChecks:
             app.dependency_overrides.clear()
 
     async def test_quota_exceeded_returns_429(self, client1, seed_chat, db_session):
-        # Max out the quota
-        usage = UsageStat(user_id=seed_chat["student1"].id, date=date.today(), tokens_used=100)
+        # Max out the quota (the quota day is the date in Paris).
+        usage = UsageStat(user_id=seed_chat["student1"].id, date=quota_service.today(), tokens_used=100)
         db_session.add(usage)
         await db_session.commit()
 
         resp = await client1.post("/api/chat/stream", json={
             "session_id": str(seed_chat["sess1"].id), "message": "hi",
         })
-        assert resp.status_code == 429
+        assert resp.status_code == 429 and resp.json()["detail"] == "day_quota_reached"
+        refusal = await db_session.scalar(select(ChatRefusal))
+        assert refusal.reason == "day_quota" and refusal.user_id == seed_chat["student1"].id
+        assert refusal.lab_id == seed_chat["sess1"].lab_id
+
+    async def test_week_quota_blocks_with_room_left_today(self, client1, seed_chat, db_session):
+        student = seed_chat["student1"]
+        student.weekly_token_quota = 50
+        db_session.add(UsageStat(user_id=student.id, date=quota_service.today(), tokens_used=60))
+        await db_session.commit()
+        body = (await client1.get("/api/student/usage")).json()
+        assert body["blocked"] == "week" and body["used"] == 60 and body["limit"] == 100
+        resp = await client1.post("/api/chat/stream", json={
+            "session_id": str(seed_chat["sess1"].id), "message": "hi",
+        })
+        assert resp.status_code == 429 and resp.json()["detail"] == "week_quota_reached"
 
     async def test_teacher_refill_lets_the_student_ask_again(self, client1, seed_chat, db_session):
         # The student used the whole quota (100); the teacher refills it.
-        db_session.add(UsageStat(user_id=seed_chat["student1"].id, date=date.today(), tokens_used=100))
+        db_session.add(UsageStat(user_id=seed_chat["student1"].id, date=quota_service.today(), tokens_used=100))
         await db_session.commit()
-        assert (await client1.get("/api/student/usage")).json() == {"used": 100, "limit": 100}
+        body = (await client1.get("/api/student/usage")).json()
+        assert (body["used"], body["limit"], body["blocked"], body["reset_requested"]) == (100, 100, "day", False)
         class_id, student1, student2 = seed_chat["class"].id, seed_chat["student1"], seed_chat["student2"]
+        # The student asks for a reset: one open request at a time.
+        asked = await client1.post("/api/student/usage/reset-request")
+        twice = await client1.post("/api/student/usage/reset-request")
+        assert asked.json()["sent"] is True and asked.json()["reset_requested"] is True
+        assert twice.json()["sent"] is False
         teacher = await make_client(db_session, seed_chat["teacher"])
         async with teacher:
+            requests = (await teacher.get("/api/teacher/quota-requests")).json()
             refill = await teacher.post(f"/api/teacher/classes/{class_id}/students/{student1.id}/quota-refill")
             again = await teacher.post(f"/api/teacher/classes/{class_id}/students/{student1.id}/quota-refill")
             outside = await teacher.post(f"/api/teacher/classes/{class_id}/students/{student2.id}/quota-refill")
-        assert refill.json() == {"used": 100, "limit": 200, "granted": 100}
-        assert again.json() == {"used": 100, "limit": 200, "granted": 100}   # still a full quota left
+            after = (await teacher.get("/api/teacher/quota-requests")).json()
+        assert [(r["username"], r["blocked"], r["used"]) for r in requests] == [("student1", "day", 100)]
+        assert requests[0]["classes"] == [{"id": str(class_id), "name": "Chat Class"}]
+        assert after == []                                                  # answered by the refill
+        assert {k: refill.json()[k] for k in ("used", "limit", "granted")} == {"used": 100, "limit": 200, "granted": 100}
+        assert {k: again.json()[k] for k in ("used", "limit", "granted")} == {"used": 100, "limit": 200, "granted": 100}
+        assert refill.json()["week_limit"] == 25_000_000 + 100              # the week is full again too
         assert outside.status_code == 404                                    # not in this class
         stranger = make_user(role=UserRole.teacher)
         db_session.add(stranger)
@@ -236,16 +264,38 @@ class TestGateChecks:
         other = await make_client(db_session, stranger)
         async with other:
             foreign = await other.post(f"/api/teacher/classes/{class_id}/students/{student1.id}/quota-refill")
-        assert foreign.status_code in (403, 404)
+            foreign_all = await other.post(f"/api/teacher/classes/{class_id}/quota-refill-all")
+            assert (await other.get("/api/teacher/quota-requests")).json() == []
+        assert foreign.status_code in (403, 404) and foreign_all.status_code in (403, 404)
         # Usage is not rewritten; the student is past the quota check (the agent is off here).
         usage = await db_session.scalar(select(UsageStat).where(UsageStat.user_id == student1.id))
         assert usage.tokens_used == 100
         client1.headers["Authorization"] = f"Bearer {create_access_token(student1.id)}"
-        assert (await client1.get("/api/student/usage")).json() == {"used": 100, "limit": 200}
+        body = (await client1.get("/api/student/usage")).json()
+        assert (body["used"], body["limit"], body["blocked"]) == (100, 200, None)
+        assert (await client1.post("/api/student/usage/reset-request")).status_code == 409
         resp = await client1.post("/api/chat/stream", json={
             "session_id": str(seed_chat["sess1"].id), "message": "hi",
         })
         assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
+        # At the limit again the same day: a new request is possible after the reset.
+        usage.tokens_used = 200
+        await db_session.commit()
+        assert (await client1.post("/api/student/usage/reset-request")).json()["sent"] is True
+
+    async def test_teacher_refills_the_whole_class(self, client1, seed_chat, db_session):
+        student1, student2 = seed_chat["student1"], seed_chat["student2"]
+        db_session.add(UsageStat(user_id=student1.id, date=quota_service.today(), tokens_used=100))
+        await db_session.commit()
+        teacher = await make_client(db_session, seed_chat["teacher"])
+        async with teacher:
+            out = await teacher.post(f"/api/teacher/classes/{seed_chat['class'].id}/quota-refill-all")
+        assert out.status_code == 200
+        assert out.json()["refilled"] == 1 and out.json()["students"] >= 1
+        u1 = await quota_service.usage(db_session, student1)
+        u2 = await quota_service.usage(db_session, student2)
+        assert u1.blocked is None and u1.limit == 200 and u1.used == 100
+        assert u2.granted == 0                                              # nothing used, nothing granted
 
     async def test_locked_lab_rejected_403(self, client1, seed_chat, db_session):
         # A locked (is_active=False) lab must reject chat.

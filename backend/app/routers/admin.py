@@ -9,6 +9,7 @@ Endpoints
 GET    /api/admin/users
 POST   /api/admin/users
 PUT    /api/admin/users/{user_id}/quota
+POST   /api/admin/users/{user_id}/quota-refill
 PUT    /api/admin/users/{user_id}/role
 DELETE /api/admin/users/{user_id}
 GET    /api/admin/llm/config
@@ -72,7 +73,7 @@ from backend.app.schemas import (
     UserCreateRequest,
     UserResponse,
 )
-from backend.app.services import class_service, document_service, lab_service, analytics_service, model_servers
+from backend.app.services import class_service, document_service, lab_service, analytics_service, model_servers, quota_service
 from backend.app.services.model_routing import resolve_model_routing
 from backend.app.services.research_service import DEFAULT_LIMITS, LIMIT_KEYS, limit_value
 
@@ -131,6 +132,7 @@ async def create_user(
         hashed_password=await hash_password_async(body.password),
         role=body.role,
         daily_token_quota=body.daily_token_quota,
+        weekly_token_quota=body.weekly_token_quota,
     )
     db.add(user)
     await db.flush()
@@ -150,13 +152,34 @@ async def update_quota(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
-    """Update the daily token quota for a user."""
+    """Update the daily (and, when given, weekly) token quota of a user."""
     user = await _get_active_user_or_404(db, user_id)
     user.daily_token_quota = body.daily_token_quota
+    if body.weekly_token_quota is not None:
+        user.weekly_token_quota = body.weekly_token_quota
     db.add(user)
     await db.flush()
     await db.refresh(user)
     return UserResponse.model_validate(user)
+
+
+# ===================================================================
+# POST /api/admin/users/{user_id}/quota-refill
+# ===================================================================
+
+
+@router.post("/users/{user_id}/quota-refill")
+async def refill_quota(
+    user_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Give any user a full day and week again; usage is kept (quota_service)."""
+    user = await _get_active_user_or_404(db, user_id)
+    usage = await quota_service.refill(db, student=user, by=admin.id)
+    await db.commit()
+    return {"used": usage.used, "limit": usage.limit,
+            "week_used": usage.week_used, "week_limit": usage.week_limit}
 
 
 # ===================================================================

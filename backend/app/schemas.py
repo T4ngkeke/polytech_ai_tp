@@ -87,6 +87,7 @@ class UserBase(BaseModel):
     username: str
     role: UserRole
     daily_token_quota: int
+    weekly_token_quota: int
 
 
 class UserResponse(UserBase):
@@ -100,11 +101,14 @@ class UserCreateRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=150)
     password: str = Field(..., min_length=8)
     role: UserRole = UserRole.student
-    daily_token_quota: int = Field(50_000, ge=0)
+    daily_token_quota: int = Field(5_000_000, ge=0, le=2_000_000_000)
+    weekly_token_quota: int = Field(25_000_000, ge=0, le=2_000_000_000)
 
 
 class UpdateQuotaRequest(BaseModel):
-    daily_token_quota: int = Field(..., ge=0)
+    daily_token_quota: int = Field(..., ge=0, le=2_000_000_000)
+    # Left out: the weekly quota stays as it is.
+    weekly_token_quota: int | None = Field(None, ge=0, le=2_000_000_000)
 
 
 class UpdateRoleRequest(BaseModel):

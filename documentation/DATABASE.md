@@ -10,7 +10,7 @@ This file describes every table and column of the PostgreSQL database (with the 
 - **New tables.** The backend creates missing tables at startup with `Base.metadata.create_all`. There is no Alembic.
 - **Changes to existing tables.** `create_all` cannot add columns to a table that exists. These changes are SQL files in `scripts/`, applied in order by `python -m scripts.migrate_document_snapshots --database-url URL [--apply]`. The command is a dry run without `--apply`. The script keeps its record in the table `document_schema_migrations` (`version`, `checksum`, `applied_at`), which is not an ORM model.
 - **Startup checks.** The backend stops with an error if an old table lacks a column that a migration adds. With `STRUCTURED_INGEST_ENABLED` or `AGENTIC_SEARCH_ENABLED` on, it also stops if a required migration is missing. The required list is `backend/app/schema_versions.py`.
-- **Tables that came without a migration file.** `quota_grants` and `audit_reports` are new tables, so `create_all` makes them.
+- **Tables that came without a migration file.** `quota_grants` and `audit_reports` are new tables, so `create_all` makes them. `quota_reset_requests` and `chat_refusals` are made by `create_all` too, and by the M4-I file.
 - **Types in tests.** The tests run on SQLite for most cases. There a UUID is stored as `CHAR(36)`, and the vector and full-text columns are plain text. Tests of search use PostgreSQL.
 
 **Known gap: two indexes do not exist.** Search over `doc_chunks` needs an HNSW index on `embedding` (`USING hnsw (embedding vector_cosine_ops)`) and a GIN index on `tsv` (`USING gin (tsv)`). No code creates them, so both searches read the whole table. The answers are correct, but the search will slow down as the material grows.
@@ -60,7 +60,8 @@ The accounts of all three roles.
 | username | String(150) | Unique. |
 | hashed_password | String(255) | bcrypt hash. |
 | role | Enum | `student`, `teacher` or `admin`. Default `student`. |
-| daily_token_quota | Integer | Daily limit of billed tokens. Default 50000. Set by the admin. |
+| daily_token_quota | Integer | Daily limit of billed tokens (a day starts at midnight Paris time). Default 5 000 000. Set by the admin. |
+| weekly_token_quota | Integer | Weekly limit of billed tokens (a week starts on Monday). Default 25 000 000. Set by the admin. |
 | is_deleted | Boolean | Default false. A deleted user cannot log in. |
 
 ### classes
@@ -176,16 +177,42 @@ The tokens each user used per day. One row per user and day (unique). It is neve
 
 ### quota_grants
 
-Tokens that a teacher adds to a student's limit for one day (the quota refill). The limit of a day is `users.daily_token_quota` plus the grants of that day. Every quota check uses it.
+Tokens that a teacher or an admin adds to a student's limits (a reset). The limit of a day is `users.daily_token_quota` plus the `day` grants of that day; the limit of a week is `users.weekly_token_quota` plus the `week` grants of that week. A reset adds both, with the same `created_at`. The chat checks the limits once, when a question starts (`services/quota_service.py`).
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | id | UUID | Primary key. |
 | user_id | UUID | Foreign key to `users.id`. The student. |
-| date | Date | The day the grant is valid for. |
+| date | Date | The day of the grant (Paris time). |
 | tokens | Integer | More than 0. |
-| granted_by | UUID | Nullable. Foreign key to `users.id`. The teacher. |
+| kind | String(8) | `day` (default) or `week`. |
+| granted_by | UUID | Nullable. Foreign key to `users.id`. The teacher or admin. |
 | created_at | Timestamp | |
+
+### quota_reset_requests
+
+A student at a limit asks for a reset. At most one open request per student; a reset answers it, and the student can ask again later.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| user_id | UUID | Foreign key to `users.id`. The student. |
+| date | Date | The day of the request (Paris time). |
+| created_at | Timestamp | |
+| resolved_at | Timestamp | Nullable. When a reset answered it. |
+| resolved_by | UUID | Nullable. Foreign key to `users.id`. |
+
+### chat_refusals
+
+A question the chat refused before it started, so it has no run. For monitoring.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| user_id | UUID | Foreign key to `users.id`. |
+| lab_id | UUID | Nullable. Foreign key to `labs.id`. |
+| reason | String(32) | `day_quota`, `week_quota`, `lab_locked` or `not_member`. |
+| created_at | Timestamp | Indexed. |
 
 ## Reports
 
@@ -274,6 +301,7 @@ The readings of a source.
 | config_hash | String(64) | |
 | report | JSON | What happened during reading and indexing. |
 | index_ready | Boolean | Default false. True when the chunks are stored. A revision cannot be published before. |
+| parse_started_at, parse_finished_at | Timestamp | Nullable. When the worker started and finished reading the PDF (the last attempt). For monitoring. Added by `m4i_quota_week_v1`. |
 | created_by | UUID | Foreign key to `users.id`. |
 | created_at | Timestamp | |
 | published_at | Timestamp | Nullable. |
@@ -496,6 +524,7 @@ One row per chat request. A session can have only one running run at a time (uni
 | snapshot_map | JSON | Which revision of each document the run used, frozen when it starts. |
 | user_message_id, assistant_message_id | UUID | Nullable. Foreign keys to `messages.id`. |
 | stop_reason | String(64) | Nullable. For example `clarification` for a question back. |
+| mode | String(16) | Nullable (older runs). `direct`, `search` or `research`: the mode the run answered in. Added by `m4i_quota_week_v1`. |
 | settlement_status | String(16) | `open` (default) or `settled`. Whether the quota was settled. |
 | started_at | Timestamp | |
 | finished_at | Timestamp | Nullable. |

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import timedelta
 
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -24,6 +24,7 @@ from backend.app.models import (
 from backend.app.services.document_access import (
     DocumentNotFound, readable_asset, readable_revision,
 )
+from backend.app.services import quota_service
 from backend.app.services.page_render import block_box
 
 
@@ -74,7 +75,7 @@ class ResearchRuns:
         self.session_factory = session_factory
 
     async def begin_run(self, *, scope: ResearchScope, question: str,
-                        client_request_id: str,
+                        client_request_id: str, mode: str | None = None,
                         stale_after: float = STALE_RUN_SECONDS) -> StartOutcome:
         if not question.strip() or not 1 <= len(client_request_id) <= 128:
             raise ValueError('invalid_request')
@@ -103,7 +104,7 @@ class ResearchRuns:
                     await db.flush()
                 values = dict(id=scope.run_id, user_id=scope.user_id,
                     session_id=scope.session_id, client_request_id=client_request_id,
-                    question=question, status='running', settlement_status='open',
+                    question=question, status='running', settlement_status='open', mode=mode,
                     snapshot_map={str(k): str(v) for k, v in scope.snapshot_revisions.items()},
                     started_at=_utcnow())
                 dialect_insert = pg_insert if db.bind.dialect.name == 'postgresql' else sqlite_insert
@@ -124,7 +125,7 @@ class ResearchRuns:
                 await db.flush()
                 run = await db.get(AgentRun, inserted)
                 run.user_message_id = user_message.id
-                today = date.today()
+                today = quota_service.today()
                 daily = await db.scalar(select(UsageStat).where(
                     UsageStat.user_id == user.id, UsageStat.date == today)
                     .with_for_update())

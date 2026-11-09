@@ -26,7 +26,7 @@ This area covers sign-up, login and the user's own profile and password.
 | --- | --- | --- | --- |
 | POST | `/api/auth/signup` | none | Student self-registration. The role is always `student`. Fails if the username exists. Returns a token. |
 | POST | `/api/auth/login` | none | Checks the credentials. Returns a token that holds only `user_id`. A deleted user cannot log in. |
-| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily quota and `is_deleted`. The app calls it after login. |
+| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily and weekly quota and `is_deleted`. The app calls it after login. |
 | POST | `/api/auth/change-password` | Any user | Changes the user's own password. Needs `old_password` (checked) and `new_password`. |
 
 ## Student
@@ -44,7 +44,8 @@ This area covers joining classes, labs and chat sessions, and the daily usage. A
 | GET | `/api/student/sessions/{session_id}` | Any user | The messages of one own session. Each answer has its citations (with `available` and `href` checked again against current access), `clarification` for a question back, and `answer_mode` (`direct`, `search`, `research`; `null` for answers written before the modes). |
 | PUT | `/api/student/sessions/{session_id}` | Any user | Renames an own session. |
 | DELETE | `/api/student/sessions/{session_id}` | Any user | Soft-deletes an own session (see above). |
-| GET | `/api/student/usage` | Any user | Today's usage and today's limit. The limit is the daily quota plus the grants of the day. |
+| GET | `/api/student/usage` | Any user | `{used, limit, week_used, week_limit, blocked, resets_at, week_resets_at, reset_requested}`. A day starts at midnight Paris time, a week on Monday. A limit is the quota plus the grants of that day or week. `blocked` is `day`, `week` or `null`: whether a new question is refused now. |
+| POST | `/api/student/usage/reset-request` | Any user | Asks the teachers of the user's classes for a reset. One open request at a time (`sent` is false while one is open); after a reset the student can ask again. `409 not_at_limit` when no limit is reached. Returns the usage above plus `sent`. |
 
 ## Chat
 
@@ -52,7 +53,7 @@ This area covers the chat itself and the thumbs up or down on an answer.
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
-| POST | `/api/chat/stream` | Any user | Answers one message of an own session, as server-sent events (see below). Needs `AGENTIC_SEARCH_ENABLED` (else `503 chat_not_enabled`) and a session in a lab (else `400 session_without_lab`). A locked or deleted lab, or a lab of a class the user has not joined, gets `403`. A used-up quota gets `429`. |
+| POST | `/api/chat/stream` | Any user | Answers one message of an own session, as server-sent events (see below). Needs `AGENTIC_SEARCH_ENABLED` (else `503 chat_not_enabled`) and a session in a lab (else `400 session_without_lab`). A locked or deleted lab, or a lab of a class the user has not joined, gets `403`. A reached limit gets `429` with `day_quota_reached` or `week_quota_reached`. Each of these refusals is stored in `chat_refusals` (for monitoring). The limits are checked only here: a question that starts always finishes, even over the limit, and the next one is refused. |
 | POST | `/api/chat/messages/{message_id}/feedback` | Any user | Thumbs up or down on an answer. Body `{feedback: "up" \| "down"}`. A student can only rate a message of a session they own. |
 
 ### The chat stream
@@ -79,10 +80,10 @@ The events, in order:
 | `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`, and `box` (the region of the cited block as `[x0, y0, x1, y1]` fractions of the page, or `null`). |
 | `done` | `{"message_id": ...}` |
 | `title` | Only after the first answer of a conversation that has no title: `{"session_id": ..., "title": ...}`. The answer model writes it from the first question and answer (at most 6 words, in the student's language; the first line of the question if the model fails). A title the student wrote is kept. Teacher test sessions get none. It is not charged to the quota. |
-| `error` | `{"detail": ...}`. For example when another research request of the session is still running, or `Daily token quota exceeded` when the quota runs out during research. |
+| `error` | `{"detail": ...}`. For example when another research request of the session is still running. |
 | (comment) | `: keep-alive`, every 15 s without another event, so proxies keep the stream open. Clients ignore it. |
 
-Each model call is reserved on the student's daily quota before it starts, and settled with the reported usage afterwards.
+Each model call is reserved before it starts and settled with the reported usage afterwards. The reservation never stops a running question.
 
 ### Settings of the research agent
 
@@ -119,7 +120,9 @@ This area covers what a teacher does with their classes and labs: classes and st
 | GET | `/api/teacher/students` | Teacher | Every student of the teacher's classes. |
 | GET | `/api/teacher/classes/{class_id}/students` | Teacher | The students of one own class. |
 | DELETE | `/api/teacher/classes/{class_id}/students/{student_id}` | Teacher | Removes a student from the class. |
-| POST | `/api/teacher/classes/{class_id}/students/{student_id}/quota-refill` | Teacher | Gives the student a full daily quota again for today. Usage is kept: the teacher grants what the student used today beyond earlier grants (rows in `quota_grants`), and nothing when a full quota is still left. Returns `{used, limit, granted}`. `404` when the student is not in the class. |
+| POST | `/api/teacher/classes/{class_id}/students/{student_id}/quota-refill` | Teacher | Gives the student a full day and a full week again. Usage is kept: the teacher grants what the student used beyond earlier grants (rows in `quota_grants`, kind `day` and `week`), and nothing for a limit that is still full. Answers the student's reset request of today. Returns `{used, limit, granted, week_used, week_limit}`. `404` when the student is not in the class. |
+| POST | `/api/teacher/classes/{class_id}/quota-refill-all` | Teacher | The same for every student of the class. Returns `{students, refilled}`. |
+| GET | `/api/teacher/quota-requests` | Teacher | Today's open reset requests of students in the teacher's classes, oldest first: user, classes, usage, limits and which limit blocks. |
 | POST | `/api/teacher/classes/{class_id}/labs` | Teacher | Creates a lab in an own class. |
 | GET | `/api/teacher/classes/{class_id}/labs` | Teacher | The labs of an own class. |
 | PUT | `/api/teacher/labs/{lab_id}` | Teacher | Renames a lab, or opens or locks it with `is_active`. A locked lab refuses chat. |
@@ -155,7 +158,8 @@ This area covers users, classes, the model settings, data pruning and global ana
 | POST | `/api/admin/users` | Admin | Creates one user. |
 | POST | `/api/admin/users/import` | Admin | Imports users from a CSV file. A dry run by default. `?force=true` applies it. |
 | PUT | `/api/admin/users/{user_id}/role` | Admin | Changes the role (student, teacher, admin). |
-| PUT | `/api/admin/users/{user_id}/quota` | Admin | Sets the daily token quota. |
+| PUT | `/api/admin/users/{user_id}/quota` | Admin | Sets the daily token quota, and the weekly one when `weekly_token_quota` is given. |
+| POST | `/api/admin/users/{user_id}/quota-refill` | Admin | Gives any user a full day and week again (usage kept). |
 | PUT | `/api/admin/users/{user_id}/password` | Admin | Resets a password. No old password is needed. |
 | DELETE | `/api/admin/users/{user_id}` | Admin | Soft-deletes a user. |
 | GET | `/api/admin/classes` | Admin | All classes (`?skip=`, `?limit=`, at most 500). Each class has its owner and counts: `teacher_username`, `teacher_ok` (false when the owner was deleted or is no longer a teacher or admin, so nobody can manage the class until it is transferred), `lab_count`, `student_count`, `questions_7d` and `last_active`. Teacher test sessions are not counted. |

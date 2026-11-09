@@ -10,14 +10,14 @@ import asyncio
 import json
 import time
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Awaitable, Callable
 
 from sqlalchemy import func, select
 
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.model import ModelReply
-from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
+from backend.app.agent.result import ResearchRunStopped
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import AgentRun, ModelCallUsage, UsageReservation, UsageStat, User, _utcnow
 from backend.app.services import quota_service
@@ -49,7 +49,7 @@ class ResearchUsage:
                 or not purpose or not model):
             raise ValueError('invalid_reservation')
         call_id = call_id or uuid.uuid4()
-        today = date.today()
+        today = quota_service.today()
         reserve_tokens = compute_billed_tokens(input_tokens, max_output_tokens,
                                                 alpha=alpha, beta=beta)
         async with self.session_factory() as db:
@@ -77,15 +77,8 @@ class ResearchUsage:
                             and existing.token_beta == beta):
                         return call_id
                     raise ResearchCallConflict('call_id_payload_conflict')
-                consumed = await db.scalar(select(UsageStat.tokens_used).where(
-                    UsageStat.user_id == user.id, UsageStat.date == today)) or 0
-                held = await db.scalar(select(func.coalesce(func.sum(
-                    UsageReservation.reserved_tokens), 0)).where(
-                    UsageReservation.user_id == user.id,
-                    UsageReservation.date == today,
-                    UsageReservation.state.in_(('active', 'unknown')))) or 0
-                if consumed + held + reserve_tokens > await quota_service.daily_limit(db, user, today):
-                    raise ResearchQuotaExceeded('daily_token_quota_exceeded')
+                # No quota check here: a question that started always
+                # finishes (quota_service; the chat checks before it starts).
                 db.add(UsageReservation(
                     call_id=call_id, run_id=run_id, user_id=user.id, date=today,
                     reserved_tokens=reserve_tokens, estimated_input_tokens=input_tokens,
@@ -184,8 +177,8 @@ class ResearchUsage:
                    call: Callable[..., Awaitable[ModelReply]]):
         """The research model call (model.ResearchModel), billed call by call.
 
-        Each call reserves its estimated cost on the student's daily quota first
-        (ResearchQuotaExceeded stops the run), then settles the reported usage.
+        Each call reserves its estimated cost first, then settles the reported
+        usage. The quota does not stop a running question (quota_service).
         The call's purpose (agent, answer, citation_correction) is recorded.
         """
         async def wrapped(messages: list[dict], max_output: int, timeout: float, *,

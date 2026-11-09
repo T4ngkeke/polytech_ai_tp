@@ -219,6 +219,29 @@ class TestUpdateQuota:
         )
         assert resp.status_code == 404
 
+    async def test_weekly_quota_is_kept_unless_given(self, admin_client, seed_users):
+        url = f"/api/admin/users/{seed_users['student_a'].id}/quota"
+        both = await admin_client.put(url, json={"daily_token_quota": 7, "weekly_token_quota": 30})
+        daily_only = await admin_client.put(url, json={"daily_token_quota": 8})
+        assert (both.json()["daily_token_quota"], both.json()["weekly_token_quota"]) == (7, 30)
+        assert (daily_only.json()["daily_token_quota"], daily_only.json()["weekly_token_quota"]) == (8, 30)
+
+    async def test_admin_resets_any_user_and_keeps_usage(self, admin_client, seed_users, db_session):
+        from backend.app.models import UsageStat
+        from backend.app.services import quota_service
+        student = seed_users['student_a']
+        db_session.add(UsageStat(user_id=student.id, date=quota_service.today(), tokens_used=student.daily_token_quota))
+        await db_session.commit()
+        resp = await admin_client.post(f"/api/admin/users/{student.id}/quota-refill")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["used"] == student.daily_token_quota and body["limit"] == 2 * student.daily_token_quota
+        assert body["week_limit"] == student.weekly_token_quota + student.daily_token_quota
+
+    async def test_student_cannot_reset_403(self, student_client, seed_users):
+        resp = await student_client.post(f"/api/admin/users/{seed_users['student_a'].id}/quota-refill")
+        assert resp.status_code == 403
+
     async def test_negative_quota_422(self, admin_client, seed_users):
         resp = await admin_client.put(
             f"/api/admin/users/{seed_users['student_a'].id}/quota",

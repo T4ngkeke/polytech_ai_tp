@@ -17,7 +17,6 @@ import json
 import logging
 import time
 import uuid
-from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -32,13 +31,13 @@ from backend.app.config import settings
 from backend.app.auth import get_current_user
 from backend.app.database import get_db
 from backend.app.models import (
+    ChatRefusal,
     Class,
     ClassStudent,
     Lab,
     Message,
     MessageFeedback,
     Session,
-    UsageStat,
     User,
 )
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
@@ -79,6 +78,13 @@ def _research_frames(items):
     return frames
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+async def _refuse(db: AsyncSession, user: User, lab_id, reason: str, code: int, detail: str):
+    """Refuse a question before it starts, and count it for monitoring."""
+    db.add(ChatRefusal(user_id=user.id, lab_id=lab_id, reason=reason))
+    await db.commit()
+    raise HTTPException(status_code=code, detail=detail)
 
 
 # ===================================================================
@@ -130,10 +136,8 @@ async def chat_stream(
         )
         lab = lab_result.scalar_one_or_none()
         if lab is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="This lab is locked or no longer available",
-            )
+            await _refuse(db, current_user, lab_id, 'lab_locked', status.HTTP_403_FORBIDDEN,
+                          "This lab is locked or no longer available")
         class_id = lab.class_id
 
         # The owning teacher's test-drive session bypasses the student
@@ -154,26 +158,15 @@ async def chat_stream(
                 )
             )
             if membership.scalar_one_or_none() is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You are not a member of the class that owns this lab",
-                )
+                await _refuse(db, current_user, lab_id, 'not_member', status.HTTP_403_FORBIDDEN,
+                              "You are not a member of the class that owns this lab")
 
-    # Check quota
-    today = date.today()
-    usage_result = await db.execute(
-        select(UsageStat).where(
-            UsageStat.user_id == current_user.id,
-            UsageStat.date == today,
-        )
-    )
-    usage = usage_result.scalar_one_or_none()
-    # The limit includes what a teacher granted today (quota_service).
-    if usage and usage.tokens_used >= await quota_service.daily_limit(db, current_user, today):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Daily token quota exceeded",
-        )
+    # The quota is checked here only: a question that starts always finishes,
+    # even when it goes over; the next one is refused (quota_service).
+    blocked = (await quota_service.usage(db, current_user)).blocked
+    if blocked:
+        await _refuse(db, current_user, lab_id, f'{blocked}_quota', status.HTTP_429_TOO_MANY_REQUESTS,
+                      f'{blocked}_quota_reached')
 
     # ---------------------------------------------------------
     # STEP 2: the research agent (agent/runner.py, search.py, direct.py) answers

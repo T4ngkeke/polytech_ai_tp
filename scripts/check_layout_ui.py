@@ -6,10 +6,10 @@ page scrolls sideways, the theme is not applied, the phone menu does not open
 the navigation drawer, the student drawer is not ordered classes, sessions,
 account, the token quota is pushed off screen, or the admin model map is missing.
 In a teacher lab, the class name in the breadcrumb must open the class, and the
-Analytics tab must show its charts and refill a student's quota; Audit shows
+Analytics tab must show its charts and reset a student's limits; Audit shows
 the latest AI report on the lab.
 The admin Classes tab lists each class with its teacher (red when the class
-has no teacher left), opens a class on its Usage without refill buttons, and
+has no teacher left), opens a class on its Usage without reset buttons, and
 the Users tab warns before deleting a teacher who still owns classes.
 The admin Monitoring tab shows the real Grafana dashboards (not mocked), in the
 app's theme; it needs the monitoring containers running, and MONITORING_COOKIE
@@ -50,7 +50,14 @@ MOCKS = {
         {'id': 'm1', 'sender': 'user', 'content': 'Quelle différence entre WHERE et HAVING ?'},
         {'id': 'm2', 'sender': 'llm', 'content': LONG_ANSWER},
     ]},
-    '/api/student/usage': {'used': 1200, 'limit': 50000},
+    # At the day limit: the page shows the limit message and the reset button.
+    '/api/student/usage': {'used': 5_000_000, 'limit': 5_000_000, 'week_used': 6_200_000, 'week_limit': 25_000_000,
+                           'blocked': 'day', 'resets_at': '2026-10-15T22:00:00+00:00',
+                           'week_resets_at': '2026-10-19T22:00:00+00:00', 'reset_requested': False},
+    '/api/teacher/quota-requests': [
+        {'user_id': 's1', 'username': 'a.very.long.student.name@etu.univ-smb.fr', 'asked_at': '2026-10-15T09:10:00Z',
+         'classes': [{'id': 'class', 'name': 'Informatique'}], 'used': 5_000_000, 'limit': 5_000_000,
+         'week_used': 6_200_000, 'week_limit': 25_000_000, 'blocked': 'day'}],
     '/api/teacher/classes': [{'id': 'class', 'name': 'Informatique'}],
     '/api/teacher/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True}],
     '/api/admin/llm/config': {'llm_model': 'flash-next', 'features': {'research_agent': True, 'pdf_documents': True}},
@@ -69,14 +76,18 @@ MOCKS = {
         'students': [
             {'user_id': 's1', 'username': 'a.very.long.student.name@etu.univ-smb.fr', 'member': True,
              'questions': 30, 'sessions': 6, 'last_active': '2026-10-15T09:00:00Z', 'tokens': 90000,
-             'thumbs_down': 1, 'modes': {}, 'used_today': 50000, 'limit_today': 50000,
-             'granted_today': 0, 'at_limit': True},
+             'thumbs_down': 1, 'modes': {}, 'used_today': 5_000_000, 'limit_today': 5_000_000,
+             'granted_today': 0, 'used_week': 6_200_000, 'limit_week': 25_000_000, 'granted_week': 0,
+             'blocked': 'day', 'at_limit': True, 'reset_requested': True, 'resets': 1},
             {'user_id': 's2', 'username': 'bob', 'member': True, 'questions': 11, 'sessions': 3,
              'last_active': '2026-10-12T09:00:00Z', 'tokens': 20000, 'thumbs_down': 0, 'modes': {},
-             'used_today': 1000, 'limit_today': 50000, 'granted_today': 0, 'at_limit': False},
+             'used_today': 1000, 'limit_today': 5_000_000, 'granted_today': 0, 'used_week': 30000,
+             'limit_week': 25_000_000, 'granted_week': 0, 'blocked': None, 'at_limit': False,
+             'reset_requested': False, 'resets': 0},
             {'user_id': 's3', 'username': 'cat', 'member': True, 'questions': 0, 'sessions': 0,
              'last_active': None, 'tokens': 0, 'thumbs_down': 0, 'modes': {}, 'used_today': 0,
-             'limit_today': 50000, 'granted_today': 0, 'at_limit': False},
+             'limit_today': 5_000_000, 'granted_today': 0, 'used_week': 0, 'limit_week': 25_000_000,
+             'granted_week': 0, 'blocked': None, 'at_limit': False, 'reset_requested': False, 'resets': 0},
         ],
         'thumbs_down': [{'message_id': 'm', 'session_id': 'x', 'user_id': 's1', 'lab_id': 'lab',
                          'lab_name': 'TP agent', 'username': 'a.very.long.student.name@etu.univ-smb.fr',
@@ -84,7 +95,9 @@ MOCKS = {
         'problems': [{'session_id': 'y', 'user_id': 's2', 'username': 'bob', 'lab_id': 'lab', 'lab_name': 'TP agent',
                       'question': 'Explique Dijkstra', 'at': '2026-10-13T09:00:00Z', 'reason': 'Tool limit reached'}],
     },
-    '/api/teacher/classes/class/students/s1/quota-refill': {'used': 50000, 'limit': 100000, 'granted': 50000},
+    '/api/teacher/classes/class/students/s1/quota-refill': {'used': 5_000_000, 'limit': 10_000_000,
+                                                            'granted': 5_000_000, 'week_used': 6_200_000,
+                                                            'week_limit': 31_200_000},
     '/api/teacher/labs/lab/reports': {'report': {
         'id': 'r1', 'lab_id': 'lab', 'student_id': None, 'status': 'done', 'error': None, 'model': 'flash-next',
         'created_at': '2026-10-15T12:00:00Z', 'finished_at': '2026-10-15T12:00:30Z',
@@ -114,9 +127,9 @@ MOCKS['/api/teacher/classes/class/citation-report'] = {
                     'outcome': 'partial_deadline_exceeded'}]}
 MOCKS.update({
     '/api/admin/users': [
-        {'id': 'admin', 'username': 'admin', 'role': 'admin', 'daily_token_quota': 50000},
-        {'id': 't1', 'username': 'alice.martin', 'role': 'teacher', 'daily_token_quota': 50000},
-        {'id': 's1', 'username': 'bob', 'role': 'student', 'daily_token_quota': 50000},
+        {'id': 'admin', 'username': 'admin', 'role': 'admin', 'daily_token_quota': 5_000_000, 'weekly_token_quota': 25_000_000},
+        {'id': 't1', 'username': 'alice.martin', 'role': 'teacher', 'daily_token_quota': 5_000_000, 'weekly_token_quota': 25_000_000},
+        {'id': 's1', 'username': 'bob', 'role': 'student', 'daily_token_quota': 5_000_000, 'weekly_token_quota': 25_000_000},
     ],
     '/api/admin/classes': [
         {'id': 'class', 'name': 'Informatique', 'teacher_id': 't1', 'teacher_username': 'alice.martin',
@@ -224,8 +237,10 @@ def check_view(browser, target, shots, role, path, ready, steps, menu, theme, si
                 page.screenshot(path=str(shots / f'{name}.png'))
         if role == 'student':
             # Phones: the drawer is open here. Many sessions must not push the quota away.
-            quota = page.get_by_text('Token Quota', exact=True).bounding_box()
-            assert quota and quota['y'] + quota['height'] <= size[1], f'{name}: token quota off screen {quota}'
+            quota = page.get_by_role('meter', name='This week', exact=False).bounding_box()
+            assert quota and quota['y'] + quota['height'] <= size[1], f'{name}: token limits off screen {quota}'
+            # The mocked student is at the day limit: the message and the reset button show.
+            assert page.get_by_text("You have reached today's limit", exact=False).is_visible() or size[0] < 768, name
         assert not errors, f'{name}: {errors}'
         print(f'PASS: {name}')
     finally:
@@ -362,7 +377,9 @@ def check_exam_documents(browser, target, shots):
                 page.get_by_text('TP agent', exact=True).first.click()
                 page.get_by_role('button', name='Documents', exact=True).click()
                 expect(page.get_by_text('Exam mode is on.', exact=True)).to_be_visible()
-                expect(page.get_by_role('button', name='Upload', exact=False).first).to_be_enabled()
+                # Uploads stay open: the file picker can be used.
+                expect(page.locator('input[type=file]').first).to_be_enabled()
+                expect(page.get_by_text('+ Add PDFs', exact=True)).to_be_visible()
                 overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
                 assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
                 if shots:
@@ -481,7 +498,7 @@ def check_document_pictures(browser, target, shots):
 
 
 def check_analytics(browser, target, shots):
-    # The lab Analytics tab: charts, the student table and a quota refill, at every width.
+    # The lab Analytics tab: charts, the student table and a reset of the limits, at every width.
     for theme in ('light', 'dark'):
         for size in (DESKTOP, PHONE):
             name = f'analytics-{theme}-{size[0]}'
@@ -504,12 +521,15 @@ def check_analytics(browser, target, shots):
                     assert box['x'] >= 0 and box['x'] + box['width'] <= size[0], f'{name}: tooltip off screen {box}'
                 overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
                 assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
-                refill = page.get_by_role('button', name='Refill')
-                expect(refill).to_have_count(2)          # cat has used nothing: no refill
+                # The notice of the reset request is on top, and a reset of the whole class.
+                expect(page.get_by_text('asks for a reset', exact=False).first).to_be_visible()
+                expect(page.get_by_role('button', name='Reset all students in this class')).to_be_visible()
+                refill = page.locator('table').get_by_role('button', name='Reset', exact=True)
+                expect(refill).to_have_count(2)          # cat has used nothing: no reset
                 if shots:
                     page.screenshot(path=str(shots / f'{name}.png'), full_page=True)
                 refill.first.click()
-                expect(page.get_by_text('can use 50,000 tokens today', exact=False)).to_be_visible()
+                expect(page.get_by_text('has a full day and week again (5,000,000 tokens today)', exact=False)).to_be_visible()
                 assert not errors, f'{name}: {errors}'
                 print(f'PASS: {name}')
             finally:
@@ -537,7 +557,8 @@ def check_admin_classes(browser, target, shots):
                 page.get_by_text('Informatique', exact=True).click()
                 expect(page.get_by_text('When students ask', exact=True)).to_be_visible()
                 expect(page.get_by_text('Teacher:', exact=False)).to_be_visible()
-                expect(page.get_by_role('button', name='Refill')).to_have_count(0)
+                expect(page.locator('table').get_by_role('button', name='Reset', exact=True)).to_have_count(0)
+                expect(page.get_by_role('button', name='Reset all students in this class')).to_have_count(0)
                 overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
                 assert overflow <= 0, f'{name}: class page scrolls sideways by {overflow}px'
                 if shots:

@@ -303,19 +303,26 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
             assert sum(estimate_tokens(m['content']) for m in history) <= 2200
             assert [m['role'] for m in history] == ['user', 'assistant'] * (len(history) // 2)
             assert 'at most twelve course tool calls' in model_messages[0][0]['content']
-            # Enough quota for the pre-check, not for one model call.
+            # Room for the start, not for the whole answer: the question still
+            # finishes (over the quota); the next one is refused before it starts.
             used = await client.get('/api/student/usage')
             await db.refresh(student)
-            student.daily_token_quota = used.json()['used'] + 100
+            student.daily_token_quota = used.json()['used'] + 10   # one answer costs about 26
             await db.commit()
             response = await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'Encore ?',
                 'client_request_id': str(uuid.uuid4())})
-            assert ('error', {'detail': 'Daily token quota exceeded'}) in events(response.text)
+            assert any(name == 'done' for name, _ in events(response.text))
             run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id,
                                                           AgentRun.question == 'Encore ?'))
             await db.refresh(run)
-            assert run.status == 'failed'
+            assert run.status == 'finished' and run.mode == 'research'
+            after = (await client.get('/api/student/usage')).json()
+            assert after['used'] > after['limit'] and after['blocked'] == 'day'
+            refused = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Et encore ?',
+                'client_request_id': str(uuid.uuid4())})
+            assert refused.status_code == 429 and refused.json()['detail'] == 'day_quota_reached'
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 

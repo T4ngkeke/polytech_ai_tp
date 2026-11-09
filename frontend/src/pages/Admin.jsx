@@ -167,10 +167,21 @@ function UsersTab() {
     } catch (err) { toast.error(err.message); } finally { setResetting(false); }
   };
 
-  const handleQuotaChange = async (userId, quota) => {
+  // field: 'daily_token_quota' or 'weekly_token_quota' (the daily one is always sent).
+  const handleQuotaChange = async (user, field, value) => {
+    if (Number(value) === user[field]) return;
     try {
-      const u = await api.put(`/api/admin/users/${userId}/quota`, { daily_token_quota: Number(quota) });
-      setUsers((p) => p.map((x) => x.id === userId ? { ...x, daily_token_quota: u.daily_token_quota } : x));
+      const body = { daily_token_quota: user.daily_token_quota, [field]: Number(value) };
+      const u = await api.put(`/api/admin/users/${user.id}/quota`, body);
+      setUsers((p) => p.map((x) => x.id === user.id
+        ? { ...x, daily_token_quota: u.daily_token_quota, weekly_token_quota: u.weekly_token_quota } : x));
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleRefill = async (user) => {
+    try {
+      const out = await api.post(`/api/admin/users/${user.id}/quota-refill`);
+      toast.success(`${user.username}: ${(out.limit - out.used).toLocaleString()} tokens left today, ${(out.week_limit - out.week_used).toLocaleString()} this week`);
     } catch (err) { toast.error(err.message); }
   };
 
@@ -270,15 +281,22 @@ function UsersTab() {
                     </select>
                   </td>
                   <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <input type="number" defaultValue={u.daily_token_quota} min={0} step={1000}
-                        onBlur={(e) => handleQuotaChange(u.id, e.target.value)}
-                        className="w-24 bg-ink-surface border border-border-default text-cream-secondary text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-cyan/40" />
-                      <span className="text-[10px] text-cream-muted">tok/day</span>
+                    <div className="flex flex-col gap-1">
+                      {[['daily_token_quota', 'tok/day'], ['weekly_token_quota', 'tok/week']].map(([field, unit]) => (
+                        <div key={field} className="flex items-center gap-1.5">
+                          <input type="number" defaultValue={u[field]} min={0} step={100000} aria-label={`${u.username} ${unit}`}
+                            onBlur={(e) => handleQuotaChange(u, field, e.target.value)}
+                            className="w-28 bg-ink-surface border border-border-default text-cream-secondary text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-cyan/40" />
+                          <span className="text-[10px] text-cream-muted">{unit}</span>
+                        </div>
+                      ))}
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-1">
+                      <IconButton title="Reset token limits (a full day and week again; usage is kept)" onClick={() => handleRefill(u)}>
+                        <Icon name="reset" className="w-4 h-4" />
+                      </IconButton>
                       <IconButton title="Reset password" onClick={() => { setResetUser(u); setResetPw(''); }}>
                         <KeyIcon className="w-4 h-4" />
                       </IconButton>

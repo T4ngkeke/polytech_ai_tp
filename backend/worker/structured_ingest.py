@@ -495,7 +495,8 @@ async def _stage(db, claim: StructuredClaim, planned: list[PlannedAsset], settin
                                 sha256=item.sha256)
 
 
-async def _commit_parsed(db, claim, outcome: ParseOutcome, planned: list[PlannedAsset], now_fn):
+async def _commit_parsed(db, claim, outcome: ParseOutcome, planned: list[PlannedAsset], now_fn,
+                         parse_started_at=None):
     doc, job, rev = await _locked(db, claim, now=now_fn())
     report = build_report(outcome)
     # Keep who asked for a reparse, and why; the parse report is added to it.
@@ -503,6 +504,8 @@ async def _commit_parsed(db, claim, outcome: ParseOutcome, planned: list[Planned
     rev = await versions.set_processing_result(
         db, document_id=doc.id, revision_id=rev.id, expected_generation=claim.generation,
         state='parsed', report=report, index_ready=False)
+    # For monitoring: how long reading the PDF took (the latest attempt).
+    rev.parse_started_at, rev.parse_finished_at = parse_started_at, now_fn()
     for item in planned:
         if not item.reuse:
             db.add(DocumentAsset(id=item.db_id, source_version_id=claim.source_version_id,
@@ -590,7 +593,7 @@ async def process_structured_job(db, *, settings: StructuredSettings, extractor=
     claim = await claim_structured_job(db, lease_seconds=settings.lease_seconds, now=now_fn())
     if claim is None:
         return False
-    started = time.monotonic()
+    started, started_at = time.monotonic(), now_fn()
     planned: list[PlannedAsset] = []
     work_dir = Path(settings.task_root) / f'{claim.job_id.hex}-{claim.lock_token.hex[:12]}'
     try:
@@ -620,7 +623,7 @@ async def process_structured_job(db, *, settings: StructuredSettings, extractor=
             outcome.render['captions'] = await _caption(db, claim, outcome, copy, settings, now_fn)
         planned = plan_assets(outcome, claim)
         await _stage(db, claim, planned, settings, now_fn)
-        await _commit_parsed(db, claim, outcome, planned, now_fn)
+        await _commit_parsed(db, claim, outcome, planned, now_fn, parse_started_at=started_at)
         logger.info('structured job %s parsed in %.1fs', claim.job_id, time.monotonic() - started)
     except JobFailed as exc:
         await _discard(db, settings, planned, claim)

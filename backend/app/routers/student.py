@@ -16,11 +16,11 @@ GET    /api/student/sessions                   →  List own active sessions (op
 GET    /api/student/sessions/{session_id}      →  Fetch message history (IDOR check required).
 PUT    /api/student/sessions/{session_id}      →  Rename session title (cosmetic, no audit impact).
 DELETE /api/student/sessions/{session_id}      →  Soft-delete (hide) own session; retained for audit.
-GET    /api/student/usage                      →  Daily token usage stats.
+GET    /api/student/usage                      →  Day and week token usage, limits, resets.
+POST   /api/student/usage/reset-request        →  Ask the teacher for a reset (at the limit).
 """
 
 import uuid
-from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
@@ -287,10 +287,40 @@ async def get_usage(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db, scope="function"),
 ):
-    """Return the current user's daily token limit (quota plus today's
-    teacher grants) and used amount."""
-    usage = await quota_service.usage(db, current_user, date.today())
-    return {"used": usage.used, "limit": usage.limit}
+    """The current user's day and week limits (quota plus teacher grants),
+    what is used, whether a new question is blocked, and when it resets."""
+    return await _usage_payload(db, current_user)
+
+
+async def _usage_payload(db: AsyncSession, user: User) -> dict:
+    usage = await quota_service.usage(db, user)
+    asked = await quota_service.open_requests(db, [user.id])
+    return {"used": usage.used, "limit": usage.limit,
+            "week_used": usage.week_used, "week_limit": usage.week_limit,
+            "blocked": usage.blocked, "resets_at": usage.resets_at.isoformat(),
+            "week_resets_at": usage.week_resets_at.isoformat(),
+            "reset_requested": user.id in asked}
+
+
+# ===================================================================
+# POST /api/student/usage/reset-request
+# ===================================================================
+
+
+@router.post("/usage/reset-request")
+async def request_quota_reset(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+):
+    """A student at the limit asks the teachers of their classes for a reset.
+    One open request at a time; the teachers see it on their page (GET
+    /api/teacher/quota-requests). 409 when the student is not at the limit."""
+    usage = await quota_service.usage(db, current_user)
+    if usage.blocked is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="not_at_limit")
+    sent = await quota_service.request_reset(db, current_user)
+    await db.commit()
+    return {**await _usage_payload(db, current_user), "sent": sent}
 
 
 # ===================================================================

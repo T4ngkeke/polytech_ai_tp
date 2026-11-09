@@ -15,6 +15,8 @@
 // After `done`, a new conversation may receive its `title` (written from the
 // first question and answer).
 
+import { quotaRefusal } from './quota.js';
+
 function safeParse(data) {
   try {
     return JSON.parse(data);
@@ -81,7 +83,7 @@ export function interpretStreamEvent(ev) {
  * @param {string|null} detail the server's `detail`, when it is a string
  */
 export function streamRefusal(status, detail) {
-  if (status === 429) return { message: "You have used today's quota. It resets tomorrow.", reload: 'usage' };
+  if (status === 429) return { message: quotaRefusal(detail), reload: 'usage' };
   if (status === 403) return { message: detail || 'You can no longer ask questions in this lab.', reload: 'classes' };
   if (status === 404) return { message: 'This conversation no longer exists. Open the lab again.', reload: 'classes' };
   if (status >= 500) return { message: `The server could not take the question (error ${status}). Try again in a moment.`, reload: null };

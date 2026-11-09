@@ -319,6 +319,8 @@ async def test_a_changed_generation_discards_the_result_and_keeps_the_attempt(db
     rev = await db_session.get(DocumentRevision, uuid.UUID(body['revision_id']))
     await db_session.refresh(rev)
     assert rev.processing_state == 'parsed'
+    # The time of the reading is kept for monitoring (the attempt that was stored).
+    assert rev.parse_started_at is not None and rev.parse_finished_at >= rev.parse_started_at
 
 
 @pytest.mark.asyncio

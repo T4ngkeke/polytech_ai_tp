@@ -55,9 +55,10 @@ export function quotaShare(used, limit) {
   return Math.min(1, used / limit);
 }
 
-/** Refill gives back a full quota; it does nothing while a full quota is left. */
+/** Refill gives back a full day and week; it does nothing while both are full. */
 export function canRefill(student) {
-  return student.member && student.used_today > student.granted_today;
+  return student.member && (student.used_today > student.granted_today
+    || (student.used_week || 0) > (student.granted_week || 0));
 }
 
 const SORTS = {
@@ -65,6 +66,7 @@ const SORTS = {
   questions: (s) => s.questions,
   last_active: (s) => (s.last_active ? new Date(s.last_active).getTime() : 0),
   today: (s) => quotaShare(s.used_today, s.limit_today),
+  week: (s) => quotaShare(s.used_week, s.limit_week),
   thumbs_down: (s) => s.thumbs_down,
 };
 

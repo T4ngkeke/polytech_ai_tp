@@ -16,6 +16,8 @@ GET    /api/teacher/chat-history
 GET    /api/teacher/students
 DELETE /api/teacher/classes/{class_id}/students/{student_id}
 POST   /api/teacher/classes/{class_id}/students/{student_id}/quota-refill
+POST   /api/teacher/classes/{class_id}/quota-refill-all
+GET    /api/teacher/quota-requests
 POST   /api/teacher/classes/{class_id}/reset-code
 PUT    /api/teacher/classes/{class_id}
 DELETE /api/teacher/classes/{class_id}
@@ -131,7 +133,7 @@ async def _build_student_summaries(
     db: AsyncSession, students: list[User]
 ) -> list[StudentSummaryResponse]:
     """Attach today's token usage to each student (per-student lookup)."""
-    today = date.today()
+    today = quota_service.today()
     summaries: list[StudentSummaryResponse] = []
     for student in students:
         usage_result = await db.execute(
@@ -741,19 +743,84 @@ async def refill_student_quota(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """Give a student of this class a full daily quota again for today.
+    """Give a student of this class a full day and a full week again.
 
-    Usage is not erased: the teacher grants what the student used today
-    (quota_grants), so the statistics stay true.
+    Usage is not erased: the teacher grants what the student used
+    (quota_grants), so the statistics stay true. The student's reset
+    request of today, if any, is answered.
     """
     await _verify_class_ownership(db, class_id, teacher)
     student = await db.scalar(select(User).join(ClassStudent, ClassStudent.student_id == User.id).where(
         ClassStudent.class_id == class_id, User.id == student_id, User.is_deleted.is_(False)))
     if student is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not in this class")
-    usage = await quota_service.refill(db, student=student, teacher_id=teacher.id, day=date.today())
+    usage = await quota_service.refill(db, student=student, by=teacher.id)
     await db.commit()
-    return {"used": usage.used, "limit": usage.limit, "granted": usage.granted}
+    return {"used": usage.used, "limit": usage.limit, "granted": usage.granted,
+            "week_used": usage.week_used, "week_limit": usage.week_limit}
+
+
+# ===================================================================
+# POST /api/teacher/classes/{class_id}/quota-refill-all
+# ===================================================================
+
+
+@router.post("/classes/{class_id}/quota-refill-all")
+async def refill_class_quota(
+    class_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Give every student of the class a full day and week again (usage kept).
+    `refilled` counts the students who had used part of a limit."""
+    await _verify_class_ownership(db, class_id, teacher)
+    students = (await db.scalars(select(User).join(ClassStudent, ClassStudent.student_id == User.id).where(
+        ClassStudent.class_id == class_id, User.is_deleted.is_(False)))).all()
+    before = await quota_service.usages(db, list(students))
+    refilled = 0
+    for student in students:
+        u = before[student.id]
+        if u.used > u.granted or u.week_used > u.week_granted:
+            refilled += 1
+        await quota_service.refill(db, student=student, by=teacher.id)
+    await db.commit()
+    return {"students": len(students), "refilled": refilled}
+
+
+# ===================================================================
+# GET /api/teacher/quota-requests
+# ===================================================================
+
+
+@router.get("/quota-requests")
+async def list_quota_requests(
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[dict]:
+    """Today's open reset requests of students in this teacher's classes,
+    oldest first, with the classes they share with the teacher."""
+    rows = (await db.execute(select(User, Class.id, Class.name)
+        .join(ClassStudent, ClassStudent.student_id == User.id)
+        .join(Class, Class.id == ClassStudent.class_id)
+        .where(Class.teacher_id == teacher.id, Class.is_deleted.is_(False),
+               User.is_deleted.is_(False)))).all()
+    students: dict[uuid.UUID, User] = {}
+    classes: dict[uuid.UUID, list[dict]] = {}
+    for user, class_id, class_name in rows:
+        students[user.id] = user
+        classes.setdefault(user.id, []).append({"id": class_id, "name": class_name})
+    asked = await quota_service.open_requests(db, list(students))
+    if not asked:
+        return []
+    usage = await quota_service.usages(db, [students[i] for i in asked])
+    out = []
+    for user_id, at in sorted(asked.items(), key=lambda item: item[1]):
+        u = usage[user_id]
+        out.append({"user_id": user_id, "username": students[user_id].username, "asked_at": at,
+                    "classes": sorted(classes[user_id], key=lambda c: c["name"]),
+                    "used": u.used, "limit": u.limit, "week_used": u.week_used,
+                    "week_limit": u.week_limit, "blocked": u.blocked})
+    return out
 
 
 # ===================================================================

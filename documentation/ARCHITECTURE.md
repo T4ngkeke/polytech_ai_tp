@@ -33,7 +33,7 @@ The addresses and names are rows in `system_configs`. The admin changes them in 
 
 This section follows one request to `POST /api/chat/stream` (`backend/app/routers/chat.py`). There is one chat path. It is the research agent in `backend/app/agent/`.
 
-1. **Checks.** The session must belong to the user. The user must be a member of the class that owns the lab. The one exception is the owning teacher's test-drive session. The lab must be open. The daily quota must not be used up (`429` otherwise). Without `AGENTIC_SEARCH_ENABLED` the endpoint answers `503 chat_not_enabled`. A session without a lab gets `400 session_without_lab`.
+1. **Checks.** The session must belong to the user. The user must be a member of the class that owns the lab. The one exception is the owning teacher's test-drive session. The lab must be open. The day and week limits must not be reached (`429` otherwise). This is the only quota check: a question that starts always finishes, and the next one is refused. Each refusal is stored in `chat_refusals`. Without `AGENTIC_SEARCH_ENABLED` the endpoint answers `503 chat_not_enabled`. A session without a lab gets `400 session_without_lab`.
 2. **Teacher rules.** The active class, lab and student rules go into the system prompt of every mode, as `[CLASS RULES]`, `[LAB RULES]` and `[STUDENT RULES]`.
 3. **Mode.** The client asks for `direct`, `search` or `research`. A class in exam mode always gets `direct`.
 4. **Scope.** The course files of a run are the published PDF revisions of the lab and of the class. They are fixed when the run starts. Every course search filters `class_id` and `lab_id` in SQL. The model never sends a file address or a revision.
@@ -109,7 +109,7 @@ This section describes the worker. It is a loop that takes one job at a time and
 
 ## Quota and billing
 
-This section says how tokens are counted. Each user has a daily quota (`users.daily_token_quota`). A teacher can give a student a full quota again for the day (`quota_grants`). A model call is billed as `prompt tokens × TOKEN_ALPHA + completion tokens × TOKEN_BETA`. The two weights are settings (defaults 0.2 and 1.0). Calls are reserved before they run (`usage_reservations`) and recorded after (`model_call_usage`). Embedding and rerank calls are counted too. Code: `services/research_usage.py`, `services/quota_service.py`.
+This section says how tokens are counted. Each user has a daily and a weekly quota (`users.daily_token_quota`, default 5 000 000; `users.weekly_token_quota`, default 25 000 000). A day starts at midnight Paris time, a week on Monday. A student at a limit can ask for a reset (`quota_reset_requests`); a teacher or an admin gives a full day and week again (`quota_grants`), and usage is kept. A model call is billed as `prompt tokens × TOKEN_ALPHA + completion tokens × TOKEN_BETA`. The two weights are settings (defaults 0.2 and 1.0). Calls are reserved before they run (`usage_reservations`) and recorded after (`model_call_usage`). Embedding and rerank calls are counted too. Code: `services/research_usage.py`, `services/quota_service.py`.
 
 ## Teacher and admin tools
 

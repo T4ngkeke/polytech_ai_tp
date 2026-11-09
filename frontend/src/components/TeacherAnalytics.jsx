@@ -2,7 +2,9 @@
  * TeacherAnalytics.jsx — the teacher Analytics tab, for a class or one lab.
  *
  * Data: GET /api/teacher/analytics/classes/{classId}/details[?lab_id=]
- * Refill: POST /api/teacher/classes/{classId}/students/{studentId}/quota-refill
+ * Refill: POST /api/teacher/classes/{classId}/students/{studentId}/quota-refill,
+ * or POST /api/teacher/classes/{classId}/quota-refill-all for every student.
+ * A refill gives a full day and week again; usage is kept.
  *
  * Teacher test sessions are not counted. Days and hours are Paris time; the
  * charts cover the last 30 days. "Today" token figures are the student's
@@ -46,9 +48,9 @@ export default function TeacherAnalytics({
         <Stat label="Conversations" value={o.sessions} />
         <Stat label="Thumbs down" value={o.thumbs_down}
           hint={rated ? `${Math.round((100 * o.thumbs_down) / rated)}% of ${rated} rated answers` : 'No answer rated yet'} />
-        <Stat label="At limit today" value={o.at_limit_today} warn={o.at_limit_today > 0}
+        <Stat label="At a limit now" value={o.at_limit_today} warn={o.at_limit_today > 0}
           hint={!o.at_limit_today ? 'Nobody is blocked'
-            : refill ? 'Refill their quota in the table below' : 'Raise their quota in Users'} />
+            : refill ? 'Reset their limits in the table below' : 'Reset them in Users'} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -60,7 +62,10 @@ export default function TeacherAnalytics({
         </Card>
       </div>
 
-      <Card title="Students" note={<Modes modes={data.modes} />}>
+      <Card title="Students" note={<>
+        <Modes modes={data.modes} />
+        {refill && data.students.some(canRefill) && <RefillAll classId={classId} onReload={onReload} />}
+      </>}>
         <StudentTable students={data.students} classId={classId} onReload={onReload}
           onOpenStudent={onOpenStudent} refill={refill} />
       </Card>
@@ -208,7 +213,7 @@ function Modes({ modes }) {
 
 const COLUMNS = [
   ['username', 'Student'], ['questions', 'Questions'], ['last_active', 'Last active'],
-  ['today', 'Today'],
+  ['today', 'Today'], ['week', 'Week'],
   ['thumbs_down', <Icon key="icon" name="thumbsDown" className="inline h-3.5 w-3.5 align-[-2px]" title="Thumbs down" />],
 ];
 
@@ -224,7 +229,7 @@ function StudentTable({ students, classId, onReload, onOpenStudent, refill }) {
     setBusy(s.user_id);
     try {
       const out = await api.post(`/api/teacher/classes/${classId}/students/${s.user_id}/quota-refill`);
-      toast.success(`${s.username} can use ${(out.limit - out.used).toLocaleString()} tokens today`);
+      toast.success(`${s.username} has a full day and week again (${(out.limit - out.used).toLocaleString()} tokens today)`);
       await onReload?.();
     } catch (err) {
       toast.error(err.message);
@@ -236,7 +241,7 @@ function StudentTable({ students, classId, onReload, onOpenStudent, refill }) {
   if (!students.length) return <p className="text-xs italic text-cream-muted">No student has joined yet.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] text-xs">
+      <table className="w-full min-w-[640px] text-xs">
         <thead>
           <tr className="border-b border-border-subtle text-left text-cream-muted">
             {COLUMNS.map(([key, label]) => (
@@ -260,6 +265,8 @@ function StudentTable({ students, classId, onReload, onOpenStudent, refill }) {
                   </button>
                 ) : <span className={s.questions ? 'text-cream' : 'text-cream-muted'}>{s.username}</span>}
                 {!s.member && <span className="ml-1 text-cream-muted">(left)</span>}
+                {s.reset_requested && <span className="ml-1 rounded bg-gold-muted px-1 text-gold" title="Asked for a reset today">asks for a reset</span>}
+                {s.resets > 0 && <span className="ml-1 text-cream-muted" title="Times a teacher or an admin reset this student's limits">· reset {s.resets}×</span>}
               </td>
               <td className="px-2 py-2 font-mono text-cream-secondary">
                 {s.questions || <span className="text-cream-muted">none yet</span>}
@@ -267,27 +274,20 @@ function StudentTable({ students, classId, onReload, onOpenStudent, refill }) {
               </td>
               <td className="px-2 py-2 text-cream-secondary">{lastActive(s.last_active)}</td>
               <td className="px-2 py-2">
-                {s.limit_today != null ? (
-                  <div className="flex items-center gap-2" title={`${s.used_today.toLocaleString()} of ${s.limit_today.toLocaleString()} tokens today`}>
-                    <div className="h-1.5 w-20 overflow-hidden rounded bg-ink-surface">
-                      <div className={`h-full ${s.at_limit ? 'bg-danger' : 'bg-cyan'}`}
-                        style={{ width: `${100 * quotaShare(s.used_today, s.limit_today)}%` }} />
-                    </div>
-                    <span className={`font-mono ${s.at_limit ? 'text-danger' : 'text-cream-muted'}`}>
-                      {Math.round(100 * quotaShare(s.used_today, s.limit_today))}%
-                    </span>
-                  </div>
-                ) : '—'}
+                <Share used={s.used_today} limit={s.limit_today} blocked={s.blocked === 'day'} span="today" />
+              </td>
+              <td className="px-2 py-2">
+                <Share used={s.used_week} limit={s.limit_week} blocked={s.blocked === 'week'} span="this week" />
               </td>
               <td className="px-2 py-2 font-mono text-cream-secondary">{s.thumbs_down || ''}</td>
               {refill && <td className="px-2 py-1 text-right">
                 {canRefill(s) && (
                   <button type="button" disabled={busy === s.user_id} onClick={() => refillQuota(s)}
-                    title="Give a full daily quota again for today; usage is kept"
+                    title="A full day and week again; usage is kept"
                     className={`rounded-lg border px-2.5 py-1 text-xs transition-colors disabled:opacity-50 ${
                       s.at_limit ? 'border-cyan/40 bg-cyan-muted text-cream hover:bg-cyan/20'
                         : 'border-border-default text-cream-secondary hover:bg-ink-hover'}`}>
-                    Refill
+                    Reset
                   </button>
                 )}
               </td>}
@@ -296,6 +296,42 @@ function StudentTable({ students, classId, onReload, onOpenStudent, refill }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function Share({ used, limit, blocked, span }) {
+  if (limit == null) return '—';
+  const share = quotaShare(used, limit);
+  return (
+    <div className="flex items-center gap-2" title={`${used.toLocaleString()} of ${limit.toLocaleString()} tokens ${span}`}>
+      <div className="h-1.5 w-16 overflow-hidden rounded bg-ink-surface">
+        <div className={`h-full ${blocked ? 'bg-danger' : 'bg-cyan'}`} style={{ width: `${100 * share}%` }} />
+      </div>
+      <span className={`font-mono ${blocked ? 'text-danger' : 'text-cream-muted'}`}>{Math.round(100 * share)}%</span>
+    </div>
+  );
+}
+
+function RefillAll({ classId, onReload }) {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    if (!window.confirm('Give every student of this class a full day and week again? Their usage is kept.')) return;
+    setBusy(true);
+    try {
+      const out = await api.post(`/api/teacher/classes/${classId}/quota-refill-all`);
+      toast.success(`Limits reset for ${out.refilled} of ${out.students} students`);
+      await onReload?.();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button type="button" onClick={run} disabled={busy}
+      className="ml-3 cursor-pointer rounded-md border border-border-default px-2 py-0.5 text-cream-secondary hover:bg-ink-hover hover:text-cream disabled:opacity-50">
+      Reset all students in this class
+    </button>
   );
 }
 

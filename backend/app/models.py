@@ -229,7 +229,9 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="userrole"), nullable=False, default=UserRole.student
     )
-    daily_token_quota: Mapped[int] = mapped_column(Integer, nullable=False, default=50_000)
+    # Billed tokens a day (Paris midnight) and a week (Monday); see quota_service.
+    daily_token_quota: Mapped[int] = mapped_column(Integer, nullable=False, default=5_000_000)
+    weekly_token_quota: Mapped[int] = mapped_column(Integer, nullable=False, default=25_000_000)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -464,11 +466,12 @@ class AuditReport(Base):
 
 
 class QuotaGrant(Base):
-    """Tokens a teacher adds to a student's quota for one day.
+    """Tokens a teacher adds to a student's quota for one day or one week.
 
-    A student who used the whole daily quota is not stuck until tomorrow: the
+    A student who used the whole quota is not stuck until it resets: the
     teacher tops it up. Usage itself (UsageStat) is never rewritten, so the
-    statistics stay true, and every grant says who gave it.
+    statistics stay true, and every grant says who gave it. kind 'day' counts
+    on `date` only; kind 'week' counts for the week (Monday to Sunday) of `date`.
     """
     __tablename__ = "quota_grants"
 
@@ -477,6 +480,7 @@ class QuotaGrant(Base):
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False, default="day")
     granted_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -484,8 +488,49 @@ class QuotaGrant(Base):
 
     __table_args__ = (
         CheckConstraint("tokens > 0", name="ck_quota_grant_tokens"),
+        CheckConstraint("kind IN ('day','week')", name="ck_quota_grant_kind"),
         Index("ix_quota_grants_user_date", "user_id", "date"),
     )
+
+
+class QuotaResetRequest(Base):
+    """A student at the limit asks the teacher for a reset.
+
+    One open request at a time: it is open until someone refills the student's
+    quota. A request of an earlier day no longer counts.
+    """
+    __tablename__ = "quota_reset_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        Index("ix_quota_reset_requests_user_date", "user_id", "date"),
+    )
+
+
+class ChatRefusal(Base):
+    """A question the chat refused before it started (no agent run exists).
+
+    For monitoring only: the reason is one of the gate checks in routers/chat.py.
+    """
+    __tablename__ = "chat_refusals"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("labs.id", ondelete="SET NULL"), nullable=True)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -855,6 +900,9 @@ class DocumentRevision(Base):
     config_hash: Mapped[str] = mapped_column(String(64), default="")
     report: Mapped[dict] = mapped_column(JSON, default=dict)
     index_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When the worker started and finished reading the PDF (monitoring).
+    parse_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    parse_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1054,6 +1102,8 @@ class AgentRun(Base):
     user_message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey('messages.id', ondelete='SET NULL'))
     assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey('messages.id', ondelete='SET NULL'))
     stop_reason: Mapped[str | None] = mapped_column(String(64))
+    # direct, search or research: the mode the run answered in (exam mode applied).
+    mode: Mapped[str | None] = mapped_column(String(16))
     settlement_status: Mapped[str] = mapped_column(String(16), nullable=False, default='open')
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -46,6 +46,9 @@ test('refill is offered only when it would give tokens back', () => {
   assert.equal(canRefill({ member: true, used_today: 100, granted_today: 0 }), true);
   assert.equal(canRefill({ member: true, used_today: 100, granted_today: 100 }), false);
   assert.equal(canRefill({ member: false, used_today: 100, granted_today: 0 }), false);
+  // The week counts too: a student blocked for the week can be reset.
+  assert.equal(canRefill({ member: true, used_today: 0, granted_today: 0, used_week: 50, granted_week: 0 }), true);
+  assert.equal(canRefill({ member: true, used_today: 0, granted_today: 0, used_week: 50, granted_week: 50 }), false);
 });
 
 test('students sort by a column, then by name', () => {
