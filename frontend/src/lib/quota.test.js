@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { blockedMessage, nearLimit, nearLimitMessage, percent, quotaRefusal, resetIn } from './quota.js';
+import { blockedMessage, nearLimit, nearLimitMessage, percent, quotaRefusal, resetIn, resetNotice } from './quota.js';
 
 const NOW = new Date('2026-11-09T17:00:00Z');
 
@@ -24,6 +24,17 @@ test('blockedMessage names the limit and when it resets', () => {
     "You have reached today's limit. It resets at midnight (in 6 h).");
   assert.equal(blockedMessage({ blocked: 'week', week_resets_at: '2026-11-15T23:00:00Z' }, NOW),
     "You have reached this week's limit. It resets on Monday (in 6 days).");
+});
+
+test('the limit message says when the teacher ignored the request', () => {
+  assert.equal(blockedMessage({ blocked: 'day', reset_state: 'ignored', resets_at: '2026-11-09T23:00:00Z' }, NOW),
+    "You have reached today's limit. Your teacher did not reset it today. It resets at midnight (in 6 h).");
+});
+
+test('resetNotice shows once after a reset, never while blocked', () => {
+  assert.equal(resetNotice({ blocked: null, reset_state: 'reset', reset_state_at: 't1' }), 'quota-reset-seen:t1');
+  assert.equal(resetNotice({ blocked: 'day', reset_state: 'reset', reset_state_at: 't1' }), null);
+  assert.equal(resetNotice({ blocked: null, reset_state: 'asked', reset_state_at: 't1' }), null);
 });
 
 test('nearLimit warns at 80% once per day or week, never when blocked', () => {

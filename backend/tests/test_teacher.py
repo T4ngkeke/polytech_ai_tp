@@ -262,7 +262,52 @@ class TestRuleItems:
 
     async def test_built_in_presets(self, teacher_client):
         presets = (await teacher_client.get("/api/teacher/rule-presets")).json()
-        assert len(presets) >= 8 and all(p["name"] and p["text"] for p in presets)
+        assert len(presets) >= 8 and all(p["key"] and p["name"] and p["text"] for p in presets)
+
+    async def test_a_rule_keeps_where_it_came_from(self, teacher_client, seed_data, db_session):
+        url, lab = "/api/teacher/rule-items", str(seed_data["lab"].id)
+        added = await teacher_client.post(url, json={"level": "lab", "target_id": lab, "text": "Hints only.",
+                                                     "source": "b:hints"})
+        assert added.status_code == 201 and added.json()["source"] == "b:hints"
+        for bad in ("b:nope", "x:hints", f"m:{uuid.uuid4()}", "m:not-a-uuid"):
+            resp = await teacher_client.post(url, json={"level": "lab", "target_id": lab, "text": "x", "source": bad})
+            assert resp.status_code == 422, bad
+        # PATCH without source keeps it; source null unlinks it.
+        rid = added.json()["id"]
+        assert (await teacher_client.patch(f"{url}/{rid}", json={"is_active": False})).json()["source"] == "b:hints"
+        assert (await teacher_client.patch(f"{url}/{rid}", json={"source": None})).json()["source"] is None
+
+    async def test_an_undone_delete_goes_back_to_its_place(self, teacher_client, seed_data):
+        url, lab = "/api/teacher/rule-items", str(seed_data["lab"].id)
+        ids = [(await teacher_client.post(url, json={"level": "lab", "target_id": lab, "text": t})).json()["id"]
+               for t in ("one", "two", "three")]
+        assert (await teacher_client.delete(f"{url}/{ids[1]}")).status_code == 204
+        back = await teacher_client.post(url, json={"level": "lab", "target_id": lab, "text": "two", "position": 1})
+        assert back.status_code == 201
+        listed = (await teacher_client.get(f"{url}?level=lab&target_id={lab}")).json()
+        assert [r["text"] for r in listed] == ["one", "two", "three"]
+
+    async def test_saved_rules_stay_linked_to_the_lists(self, teacher_client, seed_data):
+        url, lab = "/api/teacher/rule-items", str(seed_data["lab"].id)
+        cls = str(seed_data["class"].id)
+        preset = (await teacher_client.post("/api/teacher/skill-presets",
+                                            json={"name": "C only", "content": "Use C."})).json()
+        source = f"m:{preset['id']}"
+        in_lab = (await teacher_client.post(url, json={"level": "lab", "target_id": lab, "text": "Use C.",
+                                                       "source": source})).json()
+        in_class = (await teacher_client.post(url, json={"level": "class", "target_id": cls, "text": "Use C.",
+                                                         "source": source})).json()
+        # Edited in the class list: that copy keeps its own text.
+        await teacher_client.patch(f"{url}/{in_class['id']}", json={"text": "Use C99."})
+        await teacher_client.put(f"/api/teacher/skill-presets/{preset['id']}", json={"name": "C only", "content": "Use C11."})
+        lab_rules = (await teacher_client.get(f"{url}?level=lab&target_id={lab}")).json()
+        class_rules = (await teacher_client.get(f"{url}?level=class&target_id={cls}")).json()
+        assert [r["text"] for r in lab_rules if r["id"] == in_lab["id"]] == ["Use C11."]
+        assert [r["text"] for r in class_rules if r["id"] == in_class["id"]] == ["Use C99."]
+        # Deleting the saved rule keeps the rules, unlinked.
+        assert (await teacher_client.delete(f"/api/teacher/skill-presets/{preset['id']}")).status_code == 204
+        lab_rules = (await teacher_client.get(f"{url}?level=lab&target_id={lab}")).json()
+        assert [(r["text"], r["source"]) for r in lab_rules if r["id"] == in_lab["id"]] == [("Use C11.", None)]
 
 
 class TestChatHistory:

@@ -115,6 +115,7 @@ The teacher's rules for the tutor, one row per rule, for a class, a lab or a stu
 | target_id | UUID | The class, lab or student. Indexed with `level`. |
 | class_id | UUID | Foreign key to `classes.id`. The class the rule belongs to; a student rule applies only in this class. |
 | text | Text | One rule, at most 1000 characters. |
+| source | String(64) | Nullable. Where it came from: `b:<key>` a ready-made rule, `m:<skill preset id>` a saved rule, null written for this list. The teacher page shows the button of that rule as added. Added by `m4m_rule_source_v1`, which gave ready-made texts their key. |
 | is_active | Boolean | Default true. |
 | position | Integer | Order in the list. |
 | created_at, updated_at | Timestamp | |
@@ -207,7 +208,7 @@ Tokens that a teacher or an admin adds to a student's limits (a reset). The limi
 
 ### quota_reset_requests
 
-A student at a limit asks for a reset. At most one open request per student; a reset answers it, and the student can ask again later.
+A student at a limit asks for a reset. At most one open request per student. A teacher answers it with a reset (the student can ask again later) or ignores it (not again that day).
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -215,8 +216,9 @@ A student at a limit asks for a reset. At most one open request per student; a r
 | user_id | UUID | Foreign key to `users.id`. The student. |
 | date | Date | The day of the request (Paris time). |
 | created_at | Timestamp | |
-| resolved_at | Timestamp | Nullable. When a reset answered it. |
+| resolved_at | Timestamp | Nullable. When a teacher answered it. |
 | resolved_by | UUID | Nullable. Foreign key to `users.id`. |
+| outcome | String(8) | Nullable. `reset` or `ignored` once answered. After `ignored` the student cannot ask again that day. Added by `m4n_reset_outcome_v1`. |
 
 ### chat_refusals
 

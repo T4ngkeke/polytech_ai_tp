@@ -282,6 +282,38 @@ class TestGateChecks:
         await db_session.commit()
         assert (await client1.post("/api/student/usage/reset-request")).json()["sent"] is True
 
+    async def test_teacher_can_ignore_a_request(self, client1, seed_chat, db_session):
+        student1 = seed_chat["student1"]
+        db_session.add(UsageStat(user_id=student1.id, date=quota_service.today(), tokens_used=100))
+        await db_session.commit()
+        assert (await client1.post("/api/student/usage/reset-request")).json()["reset_state"] == "asked"
+        teacher = await make_client(db_session, seed_chat["teacher"])
+        async with teacher:
+            ignored = await teacher.post(f"/api/teacher/quota-requests/{student1.id}/ignore")
+            twice = await teacher.post(f"/api/teacher/quota-requests/{student1.id}/ignore")
+            assert (await teacher.get("/api/teacher/quota-requests")).json() == []
+        assert ignored.status_code == 200 and twice.status_code == 409
+        # The limits stay, and the student cannot ask again today.
+        body = (await client1.get("/api/student/usage")).json()
+        assert (body["blocked"], body["reset_state"], body["reset_requested"]) == ("day", "ignored", False)
+        again = (await client1.post("/api/student/usage/reset-request")).json()
+        assert again["sent"] is False and again["reset_state"] == "ignored"
+        # Undo: the request is open again.
+        teacher = await make_client(db_session, seed_chat["teacher"])
+        async with teacher:
+            assert (await teacher.post(f"/api/teacher/quota-requests/{student1.id}/unignore")).status_code == 200
+            assert [r["username"] for r in (await teacher.get("/api/teacher/quota-requests")).json()] == ["student1"]
+            refill = await teacher.post(f"/api/teacher/classes/{seed_chat['class'].id}/students/{student1.id}/quota-refill")
+        assert refill.status_code == 200
+        assert (await client1.get("/api/student/usage")).json()["reset_state"] == "reset"
+        # Another teacher cannot ignore it.
+        stranger = make_user(role=UserRole.teacher)
+        db_session.add(stranger)
+        await db_session.commit()
+        other = await make_client(db_session, stranger)
+        async with other:
+            assert (await other.post(f"/api/teacher/quota-requests/{student1.id}/ignore")).status_code == 404
+
     async def test_teacher_refills_the_whole_class(self, client1, seed_chat, db_session):
         student1, student2 = seed_chat["student1"], seed_chat["student2"]
         db_session.add(UsageStat(user_id=student1.id, date=quota_service.today(), tokens_used=100))

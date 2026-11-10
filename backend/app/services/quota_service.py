@@ -127,13 +127,26 @@ async def open_requests(db: AsyncSession, user_ids: list[uuid.UUID],
     return dict(rows)
 
 
+async def reset_state(db: AsyncSession, user_id: uuid.UUID) -> tuple[str | None, datetime | None]:
+    """How today's last request stands: ('asked', when asked), ('reset' or
+    'ignored', when answered), or (None, None) without a request today."""
+    row = (await db.execute(select(QuotaResetRequest.outcome, QuotaResetRequest.created_at,
+                                   QuotaResetRequest.resolved_at)
+        .where(QuotaResetRequest.user_id == user_id, QuotaResetRequest.date == today())
+        .order_by(QuotaResetRequest.created_at.desc()).limit(1))).first()
+    if row is None:
+        return None, None
+    return (row.outcome or "asked"), (row.resolved_at or row.created_at)
+
+
 async def request_reset(db: AsyncSession, user: User) -> bool:
     """The student asks a teacher for a reset. False when a request of today
-    is still open: one open request at a time (a new one after a reset)."""
+    is still open (one at a time) or was ignored (not again that day).
+    After a reset the student can ask again."""
     day = today()
     existing = await db.scalar(select(QuotaResetRequest.id).where(
         QuotaResetRequest.user_id == user.id, QuotaResetRequest.date == day,
-        QuotaResetRequest.resolved_at.is_(None)))
+        QuotaResetRequest.resolved_at.is_(None) | (QuotaResetRequest.outcome == "ignored")))
     if existing is not None:
         return False
     db.add(QuotaResetRequest(user_id=user.id, date=day))
@@ -155,9 +168,27 @@ async def refill(db: AsyncSession, *, student: User, by: uuid.UUID) -> Usage:
                               kind=kind, granted_by=by, created_at=stamp))
     await db.execute(update(QuotaResetRequest).where(
         QuotaResetRequest.user_id == student.id, QuotaResetRequest.date == current.day,
-        QuotaResetRequest.resolved_at.is_(None)).values(resolved_at=stamp, resolved_by=by))
+        QuotaResetRequest.resolved_at.is_(None)).values(resolved_at=stamp, resolved_by=by, outcome="reset"))
     await db.flush()
     return await usage(db, student)
+
+
+async def ignore_request(db: AsyncSession, *, student_id: uuid.UUID, by: uuid.UUID, undo: bool = False) -> bool:
+    """A teacher ignores today's open request (the limits stay; the student
+    cannot ask again today), or undoes that. False when there is nothing to do."""
+    day = today()
+    if undo:
+        query = update(QuotaResetRequest).where(
+            QuotaResetRequest.user_id == student_id, QuotaResetRequest.date == day,
+            QuotaResetRequest.outcome == "ignored").values(resolved_at=None, resolved_by=None, outcome=None)
+    else:
+        query = update(QuotaResetRequest).where(
+            QuotaResetRequest.user_id == student_id, QuotaResetRequest.date == day,
+            QuotaResetRequest.resolved_at.is_(None)).values(
+            resolved_at=datetime.now(timezone.utc), resolved_by=by, outcome="ignored")
+    result = await db.execute(query.execution_options(synchronize_session=False))
+    await db.flush()
+    return result.rowcount > 0
 
 
 async def reset_count(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:

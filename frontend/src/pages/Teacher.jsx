@@ -394,7 +394,7 @@ export default function Teacher() {
                 <Icon name="close" className="h-4 w-4" />
               </button>
             </div>
-            <RuleList level="student" targetId={studentRuleModal.studentId} classId={selectedClass.id} compact />
+            <RuleList level="student" targetId={studentRuleModal.studentId} classId={selectedClass.id} />
           </div>
         </div>
       )}

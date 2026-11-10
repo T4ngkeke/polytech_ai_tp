@@ -45,8 +45,8 @@ This area covers joining classes, labs and chat sessions, and the daily usage. A
 | GET | `/api/student/sessions/{session_id}` | Any user | The messages of one own session. Each answer has its citations (with `available` and `href` checked again against current access), `clarification` for a question back, and `answer_mode` (`direct`, `search`, `research`; `null` for answers written before the modes). |
 | PUT | `/api/student/sessions/{session_id}` | Any user | Renames an own session. |
 | DELETE | `/api/student/sessions/{session_id}` | Any user | Soft-deletes an own session (see above). |
-| GET | `/api/student/usage` | Any user | `{used, limit, week_used, week_limit, blocked, resets_at, week_resets_at, reset_requested}`. A day starts at midnight Paris time, a week on Monday. A limit is the quota plus the grants of that day or week. `blocked` is `day`, `week` or `null`: whether a new question is refused now. |
-| POST | `/api/student/usage/reset-request` | Any user | Asks the teachers of the user's classes for a reset. One open request at a time (`sent` is false while one is open); after a reset the student can ask again. `409 not_at_limit` when no limit is reached. Returns the usage above plus `sent`. |
+| GET | `/api/student/usage` | Any user | `{used, limit, week_used, week_limit, blocked, resets_at, week_resets_at, reset_requested}`. A day starts at midnight Paris time, a week on Monday. A limit is the quota plus the grants of that day or week. `blocked` is `day`, `week` or `null`: whether a new question is refused now. `reset_state` is today's request: `asked` (open), `reset`, `ignored`, or `null`; `reset_state_at` when it was asked or answered. |
+| POST | `/api/student/usage/reset-request` | Any user | Asks the teachers of the user's classes for a reset. One open request at a time (`sent` is false while one is open, and for the rest of the day after a teacher ignored one); after a reset the student can ask again. `409 not_at_limit` when no limit is reached. Returns the usage above plus `sent`. |
 
 ## Chat
 
@@ -126,20 +126,22 @@ This area covers what a teacher does with their classes and labs: classes and st
 | POST | `/api/teacher/classes/{class_id}/students/{student_id}/quota-refill` | Teacher | Gives the student a full day and a full week again. Usage is kept: the teacher grants what the student used beyond earlier grants (rows in `quota_grants`, kind `day` and `week`), and nothing for a limit that is still full. Answers the student's reset request of today. Returns `{used, limit, granted, week_used, week_limit}`. `404` when the student is not in the class. |
 | POST | `/api/teacher/classes/{class_id}/quota-refill-all` | Teacher | The same for every student of the class. Returns `{students, refilled}`. |
 | GET | `/api/teacher/quota-requests` | Teacher | Today's open reset requests of students in the teacher's classes, oldest first: user, classes, usage, limits and which limit blocks. |
+| POST | `/api/teacher/quota-requests/{student_id}/ignore` | Teacher | Ignores the student's open request: the limits stay and the student cannot ask again today. `409 no_open_request` without one; `404` for a student outside the teacher's classes. |
+| POST | `/api/teacher/quota-requests/{student_id}/unignore` | Teacher | Undoes today's ignore: the request is open again. `409 nothing_to_undo`. |
 | POST | `/api/teacher/classes/{class_id}/labs` | Teacher | Creates a lab in an own class. |
 | GET | `/api/teacher/classes/{class_id}/labs` | Teacher | The labs of an own class. |
 | PUT | `/api/teacher/labs/{lab_id}` | Teacher | Renames a lab, or opens or locks it with `is_active`. A locked lab refuses chat. |
 | DELETE | `/api/teacher/labs/{lab_id}` | Teacher | Soft-deletes an own lab. |
 | POST | `/api/teacher/labs/{lab_id}/test-session` | Teacher | Opens a test-drive session (`is_test`) in an own lab. The teacher chats as a preview, without being a member. The session is left out of analytics and of the citation report. |
 | GET | `/api/teacher/rule-items?level=&target_id=[&class_id=]` | Teacher | The rules of a class, a lab, or a student in one class (`class_id`, required for a student), in their order. `403` outside the teacher's classes. |
-| POST | `/api/teacher/rule-items` | Teacher | Adds a rule at the end: `{level, target_id, class_id?, text, is_active}`. Text 1–1000 characters, not blank. At most 30 rules per class, lab or student (`409 too_many_rules`). |
-| PATCH | `/api/teacher/rule-items/{item_id}` | Teacher | Changes `text` and/or `is_active`. `404` for a rule outside the teacher's classes. |
+| POST | `/api/teacher/rule-items` | Teacher | Adds a rule: `{level, target_id, class_id?, text, is_active, source?, position?}`. Text 1–1000 characters, not blank. `source` is `b:<key>` (a ready-made rule) or `m:<saved rule id>` (one of the teacher's saved rules), else `422 unknown_rule_source`. `position` puts it at that place in the list (an undone delete); default last. At most 30 rules per class, lab or student (`409 too_many_rules`). |
+| PATCH | `/api/teacher/rule-items/{item_id}` | Teacher | Changes `text`, `is_active` and/or `source` (only when sent; `null` unlinks). `404` for a rule outside the teacher's classes. |
 | DELETE | `/api/teacher/rule-items/{item_id}` | Teacher | Deletes a rule. |
-| GET | `/api/teacher/rule-presets` | Teacher | Ready-made rules (`name`, `text`) to add with one click. |
+| GET | `/api/teacher/rule-presets` | Teacher | Ready-made rules (`key`, `name`, `text`). The page adds one with `source: "b:<key>"`, and a second click removes it. |
 | GET | `/api/teacher/skill-presets` | Teacher | The teacher's own saved rules, "My rules" (`id`, `name`, `content`). |
 | POST | `/api/teacher/skill-presets` | Teacher | Saves a rule (`name`, `content`). |
-| PUT | `/api/teacher/skill-presets/{preset_id}` | Teacher | Updates an own saved rule. |
-| DELETE | `/api/teacher/skill-presets/{preset_id}` | Teacher | Deletes an own saved rule. Rules already added from it are kept. |
+| PUT | `/api/teacher/skill-presets/{preset_id}` | Teacher | Updates an own saved rule. The rules added from it (`source: "m:<id>"`) whose text was not edited since follow the new text, in all the teacher's classes. |
+| DELETE | `/api/teacher/skill-presets/{preset_id}` | Teacher | Deletes an own saved rule. Rules already added from it are kept, with `source` set to null. |
 | GET | `/api/teacher/chat-history` | Teacher | Chat history. Filters `?class_id=`, `?lab_id=`, `?student_id=`, `?session_id=`. It includes the sessions that students deleted; each row has `is_deleted`. |
 | GET | `/api/teacher/analytics/classes/{class_id}` | Teacher | Token use of a class: class, then lab, then student. |
 | GET | `/api/teacher/analytics/classes/{class_id}/details` | Teacher | The Analytics tab, for the class or one lab (`?lab_id=`). It has an overview (members, active in 7 days, questions, conversations, thumbs, students at their limit today), answers by mode, questions per day and per weekday and hour over 30 days (Paris time), every student (questions, conversations, last active, today's usage and limit), the latest 20 thumbs-down questions and the latest 20 answers that failed or stopped early. Teacher test sessions are left out. |

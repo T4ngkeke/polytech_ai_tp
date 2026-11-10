@@ -58,7 +58,9 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
                             ("users", "weekly_token_quota"), ("quota_grants", "kind"),
                             ("agent_runs", "mode"), ("document_revisions", "parse_started_at"),
                             # M4-K, M4-L
-                            ("documents", "exam_allowed"), ("users", "tour_seen_at")]
+                            ("documents", "exam_allowed"), ("users", "tour_seen_at"),
+                            # M4-M, M4-N
+                            ("rule_items", "source"), ("quota_reset_requests", "outcome")]
         def needs_migration(sync_conn):
             inspector = inspect(sync_conn)
             return any(inspector.has_table(table) and column not in {

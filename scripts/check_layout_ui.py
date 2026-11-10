@@ -644,7 +644,7 @@ def check_class_course_use(browser, target, shots):
             context, page, errors = open_page(browser, target, 'teacher', '/teacher', theme, size)
             try:
                 page.evaluate(NO_DIALOG)
-                page.get_by_text('Informatique', exact=True).first.click()
+                page.locator('[data-tour=classes]:visible').get_by_text('Informatique', exact=True).first.click()
                 if size == PHONE:
                     # Choosing a class keeps the drawer open for its labs: close it.
                     page.mouse.click(size[0] - 10, size[1] // 2)

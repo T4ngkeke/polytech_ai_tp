@@ -21,6 +21,7 @@ DELETE /api/teacher/classes/{class_id}/students/{student_id}
 POST   /api/teacher/classes/{class_id}/students/{student_id}/quota-refill
 POST   /api/teacher/classes/{class_id}/quota-refill-all
 GET    /api/teacher/quota-requests
+POST   /api/teacher/quota-requests/{student_id}/ignore   (and /unignore)
 POST   /api/teacher/classes/{class_id}/reset-code
 PUT    /api/teacher/classes/{class_id}
 DELETE /api/teacher/classes/{class_id}
@@ -53,7 +54,7 @@ from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    AuditReport, Class, ClassStudent, Document, Lab, RuleItem, Session,
+    AuditReport, Class, ClassStudent, Document, Lab, RuleItem, Session, SkillPreset,
     UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
@@ -130,6 +131,21 @@ async def _rule_class(
     if owned is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this rule target")
     return owned
+
+
+async def _check_source(db: AsyncSession, source: str | None, teacher: User) -> str | None:
+    """A rule's source must be a ready-made rule or one of this teacher's saved rules (422 otherwise)."""
+    if source is None:
+        return None
+    kind, _, ref = source.partition(":")
+    if kind == "b" and ref in rule_service.BUILT_IN_KEYS:
+        return source
+    if kind == "m":
+        with contextlib.suppress(ValueError):
+            if await db.scalar(select(SkillPreset.id).where(
+                    SkillPreset.id == uuid.UUID(ref), SkillPreset.owner_teacher_id == teacher.id)):
+                return source
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="unknown_rule_source")
 
 
 async def _owned_item(db: AsyncSession, item_id: uuid.UUID, teacher: User) -> RuleItem:
@@ -478,11 +494,13 @@ async def add_rule_item(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> RuleItemResponse:
-    """Add a rule at the end of the list. 409 too_many_rules past 30."""
+    """Add a rule at the end of the list (or at `position`). 409 too_many_rules past 30."""
     owned_class = await _rule_class(db, body.level, body.target_id, body.class_id, teacher)
+    source = await _check_source(db, body.source, teacher)
     try:
         item = await rule_service.add_item(db, level=body.level, target_id=body.target_id,
-                                           class_id=owned_class, text=body.text, is_active=body.is_active)
+                                           class_id=owned_class, text=body.text, is_active=body.is_active,
+                                           source=source, position=body.position)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
     await db.commit()
@@ -496,9 +514,12 @@ async def update_rule_item(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> RuleItemResponse:
-    """Change the text of a rule, or switch it on or off."""
+    """Change the text of a rule, switch it on or off, or change its source."""
     item = await _owned_item(db, item_id, teacher)
-    item = await rule_service.update_item(db, item, text=body.text, is_active=body.is_active)
+    extra = {}
+    if "source" in body.model_fields_set:
+        extra["source"] = await _check_source(db, body.source, teacher)
+    item = await rule_service.update_item(db, item, text=body.text, is_active=body.is_active, **extra)
     await db.commit()
     return RuleItemResponse.model_validate(item)
 
@@ -553,6 +574,8 @@ async def update_skill_preset(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SkillPresetResponse:
+    """Change a saved rule. The rules added from it whose text was not changed
+    since follow the new text, in every class of the teacher."""
     try:
         preset = await skill_preset_service.update_preset(
             db, owner_teacher_id=teacher.id, preset_id=preset_id,
@@ -570,6 +593,7 @@ async def delete_skill_preset(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
+    """Delete a saved rule. Rules added from it stay in their lists, unlinked."""
     try:
         await skill_preset_service.delete_preset(
             db, owner_teacher_id=teacher.id, preset_id=preset_id)
@@ -805,6 +829,43 @@ async def refill_class_quota(
 # ===================================================================
 # GET /api/teacher/quota-requests
 # ===================================================================
+
+
+async def _my_student(db: AsyncSession, student_id: uuid.UUID, teacher: User) -> None:
+    """404 unless the student is in one of the teacher's classes."""
+    found = await db.scalar(select(ClassStudent.student_id).join(Class, Class.id == ClassStudent.class_id).where(
+        ClassStudent.student_id == student_id, Class.teacher_id == teacher.id, Class.is_deleted.is_(False)).limit(1))
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not in your classes")
+
+
+@router.post("/quota-requests/{student_id}/ignore")
+async def ignore_quota_request(
+    student_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Ignore the student's open request: the limits stay, and the student
+    cannot ask again today. 409 no_open_request when there is none."""
+    await _my_student(db, student_id, teacher)
+    if not await quota_service.ignore_request(db, student_id=student_id, by=teacher.id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="no_open_request")
+    await db.commit()
+    return {"ignored": True}
+
+
+@router.post("/quota-requests/{student_id}/unignore")
+async def unignore_quota_request(
+    student_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Undo an ignore of today: the request is open again."""
+    await _my_student(db, student_id, teacher)
+    if not await quota_service.ignore_request(db, student_id=student_id, by=teacher.id, undo=True):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="nothing_to_undo")
+    await db.commit()
+    return {"ignored": False}
 
 
 @router.get("/quota-requests")

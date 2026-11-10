@@ -400,6 +400,9 @@ class RuleItem(Base):
     class_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False, index=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Where the rule came from: 'b:<key>' a ready-made rule, 'm:<skill preset id>'
+    # one of the teacher's saved rules, None written for this list only.
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -526,8 +529,9 @@ class QuotaGrant(Base):
 class QuotaResetRequest(Base):
     """A student at the limit asks the teacher for a reset.
 
-    One open request at a time: it is open until someone refills the student's
-    quota. A request of an earlier day no longer counts.
+    One open request at a time: it is open until a teacher resets the student's
+    limits (outcome 'reset') or ignores it (outcome 'ignored'; the student cannot
+    ask again that day). A request of an earlier day no longer counts.
     """
     __tablename__ = "quota_reset_requests"
 
@@ -540,6 +544,7 @@ class QuotaResetRequest(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     __table_args__ = (
         Index("ix_quota_reset_requests_user_date", "user_id", "date"),

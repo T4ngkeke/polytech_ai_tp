@@ -19,6 +19,8 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm4j_rule_items_v1',
     'm4k_exam_files_v1',
     'm4l_tour_v1',
+    'm4m_rule_source_v1',
+    'm4n_reset_outcome_v1',
 )
 
 # Structured ingestion alone needs the versions before the research ones.

@@ -23,12 +23,13 @@ import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import { PdfPreviewModal } from '../components/PdfPreview';
 import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
 import ModeSwitch from '../components/ModeSwitch';
+import Icon from '../components/Icon';
 import Tour from '../components/Tour';
 import { TOURS } from '../lib/tours';
 import useMediaQuery from '../lib/useMediaQuery';
 import { DEFAULT_MODE, offersResearch, saveMode, sessionMode, storedMode } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
-import { blockedMessage, nearLimit, nearLimitMessage, percent } from '../lib/quota';
+import { blockedMessage, nearLimit, nearLimitMessage, percent, resetNotice } from '../lib/quota';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
 // assistant message renders as real markdown instead of the raw-text
@@ -459,6 +460,14 @@ export default function Chat() {
 
   // ── Derived ──
   const blockedText = blockedMessage(usage);
+  // The teacher reset the limits: say so until the student closes the note.
+  const resetKey = resetNotice(usage);
+  const [seenTick, setSeenTick] = useState(0);
+  const seenReset = (() => { try { return !resetKey || localStorage.getItem(resetKey) === '1'; } catch { return false; } })();
+  const dismissReset = () => {
+    try { if (resetKey) localStorage.setItem(resetKey, '1'); } catch { /* private window */ }
+    setSeenTick(seenTick + 1);
+  };
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   // Desktop: its own column next to the classes. Phones: inside the drawer.
@@ -676,12 +685,21 @@ export default function Chat() {
 
         {/* Input */}
         <div className="shrink-0 px-3 py-3 md:px-6 md:py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
+          {resetKey && !seenReset && (
+            <div role="status" className="mb-2 flex items-center gap-3 rounded-lg border border-success/40 bg-success-muted px-3 py-2 text-xs text-cream">
+              <span className="flex-1">Your teacher reset your limits. You can ask again.</span>
+              <button type="button" onClick={dismissReset} aria-label="Close" title="Close"
+                className="cursor-pointer rounded-md p-1 text-cream-muted hover:bg-ink-hover hover:text-cream">
+                <Icon name="close" className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           {blockedText && (
             <div role="status" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-gold/40 bg-gold-muted px-3 py-2 text-xs text-cream">
               <span className="flex-1 min-w-[12rem]">{blockedText}</span>
               {usage.reset_requested ? (
                 <span className="text-cream-muted">Request sent to your teacher.</span>
-              ) : (
+              ) : usage.reset_state === 'ignored' ? null : (
                 <button type="button" onClick={askForReset} disabled={askingReset}
                   className="cursor-pointer rounded-md border border-border-default bg-ink-base px-2.5 py-1 text-cream hover:bg-ink-hover disabled:opacity-50">
                   Ask my teacher for a reset

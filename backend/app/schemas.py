@@ -388,6 +388,10 @@ class RuleItemCreate(BaseModel):
     class_id: uuid.UUID | None = None
     text: str = Field(..., min_length=1, max_length=1000)
     is_active: bool = True
+    # 'b:<key>' a ready-made rule, 'm:<saved rule id>' one of the teacher's saved rules.
+    source: str | None = Field(None, max_length=64)
+    # Put the rule at this place in the list (an undone delete); default: last.
+    position: int | None = Field(None, ge=0)
 
     @field_validator("text")
     @classmethod
@@ -400,6 +404,8 @@ class RuleItemCreate(BaseModel):
 class RuleItemUpdate(BaseModel):
     text: str | None = Field(None, min_length=1, max_length=1000)
     is_active: bool | None = None
+    # Only changed when sent; null unlinks the rule from its button.
+    source: str | None = Field(None, max_length=64)
 
     @field_validator("text")
     @classmethod
@@ -417,6 +423,7 @@ class RuleItemResponse(BaseModel):
     target_id: uuid.UUID
     class_id: uuid.UUID
     text: str
+    source: str | None = None
     is_active: bool
     position: int
 

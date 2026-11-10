@@ -24,15 +24,24 @@ export function resetIn(iso, now = new Date()) {
   return `in ${Math.round(hours / 24)} days`;
 }
 
-/** The sentence shown while a new question is refused, or null. */
+/** The sentence shown while a new question is refused, or null. It says so
+ * when the teacher ignored today's request (reset_state 'ignored'). */
 export function blockedMessage(usage, now = new Date()) {
+  const ignored = usage?.reset_state === 'ignored' ? ' Your teacher did not reset it today.' : '';
   if (usage?.blocked === 'day') {
-    return `You have reached today's limit. It resets at midnight (${resetIn(usage.resets_at, now)}).`;
+    return `You have reached today's limit.${ignored} It resets at midnight (${resetIn(usage.resets_at, now)}).`;
   }
   if (usage?.blocked === 'week') {
-    return `You have reached this week's limit. It resets on Monday (${resetIn(usage.week_resets_at || usage.resets_at, now)}).`;
+    return `You have reached this week's limit.${ignored} It resets on Monday (${resetIn(usage.week_resets_at || usage.resets_at, now)}).`;
   }
   return null;
+}
+
+/** The teacher reset the limits today and the student has not seen it yet:
+ * the key to remember once it is seen, else null. */
+export function resetNotice(usage) {
+  if (usage?.blocked || usage?.reset_state !== 'reset' || !usage.reset_state_at) return null;
+  return `quota-reset-seen:${usage.reset_state_at}`;
 }
 
 /**

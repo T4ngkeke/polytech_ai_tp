@@ -301,12 +301,14 @@ async def get_usage(
 
 async def _usage_payload(db: AsyncSession, user: User) -> dict:
     usage = await quota_service.usage(db, user)
-    asked = await quota_service.open_requests(db, [user.id])
+    state, state_at = await quota_service.reset_state(db, user.id)
     return {"used": usage.used, "limit": usage.limit,
             "week_used": usage.week_used, "week_limit": usage.week_limit,
             "blocked": usage.blocked, "resets_at": usage.resets_at.isoformat(),
             "week_resets_at": usage.week_resets_at.isoformat(),
-            "reset_requested": user.id in asked}
+            # Today's request: 'asked' (open), 'reset' or 'ignored' (answered), or None.
+            "reset_requested": state == "asked", "reset_state": state,
+            "reset_state_at": state_at.isoformat() if state_at else None}
 
 
 # ===================================================================
@@ -320,8 +322,9 @@ async def request_quota_reset(
     db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """A student at the limit asks the teachers of their classes for a reset.
-    One open request at a time; the teachers see it on their page (GET
-    /api/teacher/quota-requests). 409 when the student is not at the limit."""
+    One open request at a time, none after a teacher ignored one today; the
+    teachers see it on their page (GET /api/teacher/quota-requests).
+    409 when the student is not at the limit."""
     usage = await quota_service.usage(db, current_user)
     if usage.blocked is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="not_at_limit")
