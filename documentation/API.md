@@ -26,7 +26,8 @@ This area covers sign-up, login and the user's own profile and password.
 | --- | --- | --- | --- |
 | POST | `/api/auth/signup` | none | Student self-registration. The role is always `student`. Fails if the username exists. Returns a token. |
 | POST | `/api/auth/login` | none | Checks the credentials. Returns a token that holds only `user_id`. A deleted user cannot log in. |
-| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily and weekly quota and `is_deleted`. The app calls it after login. |
+| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily and weekly quota, `is_deleted` and `tour_seen_at`. The app calls it after login. |
+| POST | `/api/auth/tour-seen` | Any user | The guided tour was finished or skipped: it no longer starts by itself at sign-in (the ? button still opens it). Sets `tour_seen_at` once. |
 | POST | `/api/auth/change-password` | Any user | Changes the user's own password. Needs `old_password` (checked) and `new_password`. |
 
 ## Student
@@ -37,7 +38,7 @@ This area covers joining classes, labs and chat sessions, and the daily usage. A
 | --- | --- | --- | --- |
 | POST | `/api/student/classes/join` | Student | Joins a class with its 6-character `invite_code`. Teachers and admins get `403`, so their questions never count in a class's analytics. |
 | GET | `/api/student/classes` | Any user | The joined classes, with their labs. Each class has `exam_mode`. |
-| GET | `/api/student/classes/{class_id}/labs` | Any user | The active labs of a joined class. |
+| GET | `/api/student/classes/{class_id}/labs` | Any user | The active labs of a joined class. In exam mode each lab has `exam_files`: how many files it can still search (0: Direct only). |
 | DELETE | `/api/student/classes/{class_id}/leave` | Any user | Leaves a joined class. |
 | POST | `/api/student/labs/{lab_id}/sessions` | Any user | Creates a chat session in a lab. `title` is optional. The app sends none, and the first answer gives the title (the `title` event). |
 | GET | `/api/student/sessions` | Any user | The user's own sessions. Optional filter `?lab_id=`. |
@@ -66,7 +67,7 @@ The request body has `session_id` and `message`, and two optional fields:
   - `search`: one search, the found pages and their neighbours, and one answer (`backend/app/agent/search.py`). It has the same citations.
   - `direct`: one answer without the course files and without citations (`backend/app/agent/direct.py`).
 
-A class in exam mode answers in `direct` mode whatever is sent. The teacher's rules apply in every mode. The answer is saved, with its citations, before any of it is sent. How the answer is made is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+A class in exam mode searches only the files its teacher allowed in the exam (`documents.exam_allowed`); with none for this lab, it answers in `direct` mode whatever is sent. The teacher's rules apply in every mode. The answer is saved, with its citations, before any of it is sent. How the answer is made is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 The events, in order:
 
@@ -116,7 +117,9 @@ This area covers what a teacher does with their classes and labs: classes and st
 | PUT | `/api/teacher/classes/{class_id}` | Teacher | Renames a class. |
 | DELETE | `/api/teacher/classes/{class_id}` | Teacher | Soft-deletes an own class. |
 | POST | `/api/teacher/classes/{class_id}/reset-code` | Teacher | Makes a new invite code. The old one stops working. |
-| PUT | `/api/teacher/classes/{class_id}/exam-mode` | Teacher | Body `{exam_mode: bool}`. On: every lab of the class answers in Direct mode only, enforced by `POST /api/chat/stream`. Returns the class. |
+| PUT | `/api/teacher/classes/{class_id}/exam-mode` | Teacher | Body `{exam_mode: bool}`. On: students search and open only the files allowed in the exam; a lab without one answers in Direct mode only. Enforced by `POST /api/chat/stream` and the document routes. Returns the class. |
+| GET | `/api/teacher/classes/{class_id}/exam-files` | Teacher | The class's files (whole class and each lab): `id, filename, status, lab_id, lab_name, exam_allowed`. |
+| PUT | `/api/teacher/classes/{class_id}/exam-files` | Teacher | Body `{document_ids: [...]}`: these files are allowed in the exam, no others (ids outside the class are ignored). Returns the list above. Can be set while exam mode is off. |
 | GET | `/api/teacher/students` | Teacher | Every student of the teacher's classes. |
 | GET | `/api/teacher/classes/{class_id}/students` | Teacher | The students of one own class. |
 | DELETE | `/api/teacher/classes/{class_id}/students/{student_id}` | Teacher | Removes a student from the class. |
@@ -128,13 +131,15 @@ This area covers what a teacher does with their classes and labs: classes and st
 | PUT | `/api/teacher/labs/{lab_id}` | Teacher | Renames a lab, or opens or locks it with `is_active`. A locked lab refuses chat. |
 | DELETE | `/api/teacher/labs/{lab_id}` | Teacher | Soft-deletes an own lab. |
 | POST | `/api/teacher/labs/{lab_id}/test-session` | Teacher | Opens a test-drive session (`is_test`) in an own lab. The teacher chats as a preview, without being a member. The session is left out of analytics and of the citation report. |
-| GET | `/api/teacher/rules` | Teacher | Reads rules. Filters `?level=` and `?target_id=`. |
-| PUT | `/api/teacher/rules` | Teacher | Creates or updates a rule at level `class`, `lab` or `student`. The class-level rule is the `skill.md` text that sets the tutor's style. |
-| GET | `/api/teacher/skill-presets` | Teacher | The teacher's own skill presets (`id`, `name`, `content`). |
-| POST | `/api/teacher/skill-presets` | Teacher | Creates a preset (`name`, `content`). |
-| PUT | `/api/teacher/skill-presets/{preset_id}` | Teacher | Updates an own preset. |
-| DELETE | `/api/teacher/skill-presets/{preset_id}` | Teacher | Deletes an own preset. Classes that already copied it keep their text. |
-| POST | `/api/teacher/classes/{class_id}/skill` | Teacher | Applies a preset to a class by copying its text into the class-level rule. Body `{preset_id}`, or `{content}` for a text written by hand. |
+| GET | `/api/teacher/rule-items?level=&target_id=[&class_id=]` | Teacher | The rules of a class, a lab, or a student in one class (`class_id`, required for a student), in their order. `403` outside the teacher's classes. |
+| POST | `/api/teacher/rule-items` | Teacher | Adds a rule at the end: `{level, target_id, class_id?, text, is_active}`. Text 1–1000 characters, not blank. At most 30 rules per class, lab or student (`409 too_many_rules`). |
+| PATCH | `/api/teacher/rule-items/{item_id}` | Teacher | Changes `text` and/or `is_active`. `404` for a rule outside the teacher's classes. |
+| DELETE | `/api/teacher/rule-items/{item_id}` | Teacher | Deletes a rule. |
+| GET | `/api/teacher/rule-presets` | Teacher | Ready-made rules (`name`, `text`) to add with one click. |
+| GET | `/api/teacher/skill-presets` | Teacher | The teacher's own saved rules, "My rules" (`id`, `name`, `content`). |
+| POST | `/api/teacher/skill-presets` | Teacher | Saves a rule (`name`, `content`). |
+| PUT | `/api/teacher/skill-presets/{preset_id}` | Teacher | Updates an own saved rule. |
+| DELETE | `/api/teacher/skill-presets/{preset_id}` | Teacher | Deletes an own saved rule. Rules already added from it are kept. |
 | GET | `/api/teacher/chat-history` | Teacher | Chat history. Filters `?class_id=`, `?lab_id=`, `?student_id=`, `?session_id=`. It includes the sessions that students deleted; each row has `is_deleted`. |
 | GET | `/api/teacher/analytics/classes/{class_id}` | Teacher | Token use of a class: class, then lab, then student. |
 | GET | `/api/teacher/analytics/classes/{class_id}/details` | Teacher | The Analytics tab, for the class or one lab (`?lab_id=`). It has an overview (members, active in 7 days, questions, conversations, thumbs, students at their limit today), answers by mode, questions per day and per weekday and hour over 30 days (Paris time), every student (questions, conversations, last active, today's usage and limit), the latest 20 thumbs-down questions and the latest 20 answers that failed or stopped early. Teacher test sessions are left out. |
@@ -222,7 +227,7 @@ Teacher endpoints work on drafts and published revisions of an own document. Stu
 | GET | `/api/documents/{document_id}/revisions/{revision_id}/preview` | Any user | The PDF used to show the revision. Needs `?session_id=`. |
 | GET | `/api/documents/{document_id}/pdf` | Any user | The complete course PDF, with the session's access checked again. Needs `?session_id=`. Optional `?revision_id=`. |
 
-The five `/api/documents/` routes above answer `403 exam_mode` when the session's class is in exam mode: a student cannot open course documents, even pages cited in earlier answers. The owning teacher's test session still opens them. Stored citations are kept and show again when exam mode is off.
+The five `/api/documents/` routes above answer `403 exam_mode` when the session's class is in exam mode and the file is not allowed in the exam: a student cannot open it, even pages cited in earlier answers. The owning teacher's test session still opens them. Stored citations are kept and show again when exam mode is off.
 
 ## Health
 

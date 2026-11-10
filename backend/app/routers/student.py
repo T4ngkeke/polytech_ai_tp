@@ -41,6 +41,7 @@ from backend.app.schemas import (
     SessionWithMessagesResponse,
 )
 from backend.app.services import quota_service, session_service
+from backend.app.agent.tools import readable_files
 from backend.app.services.research_runs import ResearchRuns
 
 router = APIRouter(prefix="/api/student", tags=["student"])
@@ -158,7 +159,13 @@ async def list_labs_for_class(
         .order_by(Lab.created_at.desc())
     )
     labs = result.scalars().all()
-    return [LabResponse.model_validate(l) for l in labs]
+    out = [LabResponse.model_validate(l) for l in labs]
+    # Exam mode: how many files each lab can still search (0: Direct only).
+    if await db.scalar(select(Class.exam_mode).where(Class.id == class_id)):
+        for lab in out:
+            lab.exam_files = len((await db.execute(
+                readable_files(class_id, lab.id, exam_only=True))).all())
+    return out
 
 
 # ===================================================================

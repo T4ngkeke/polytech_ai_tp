@@ -15,7 +15,7 @@ from backend.app.auth import create_access_token, hash_password
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import (
-    Class, ClassStudent, Lab, Message, Rule, RuleLevel,
+    Class, ClassStudent, Lab, Message, RuleItem,
     SenderType, Session, UsageStat, User, UserRole,
 )
 from tests.conftest import make_user
@@ -63,8 +63,8 @@ async def seed_data(db_session: AsyncSession) -> dict:
                       tokens_used=1234, request_count=5)
     db_session.add(usage)
 
-    rule = Rule(level=RuleLevel.class_, target_id=cls.id,
-                rules_text="Be formal.", is_active=True)
+    rule = RuleItem(level="class", target_id=cls.id, class_id=cls.id,
+                    text="Be formal.", is_active=True)
     db_session.add(rule)
 
     await db_session.commit()
@@ -191,84 +191,78 @@ class TestListLabs:
         assert resp.status_code == 404
 
 
-class TestUpsertRule:
-    async def test_create_new_rule(self, teacher_client, seed_data):
-        resp = await teacher_client.put("/api/teacher/rules", json={
-            "level": "lab", "target_id": str(seed_data["lab"].id),
-            "rules_text": "No code sharing.", "is_active": True,
-        })
-        assert resp.status_code == 200
-        assert resp.json()["rules_text"] == "No code sharing."
+class TestRuleItems:
+    async def test_add_edit_switch_off_and_delete(self, teacher_client, seed_data):
+        lab = seed_data["lab"]
+        url = "/api/teacher/rule-items"
+        first = await teacher_client.post(url, json={"level": "lab", "target_id": str(lab.id), "text": "No code."})
+        second = await teacher_client.post(url, json={"level": "lab", "target_id": str(lab.id), "text": "Be short."})
+        assert first.status_code == second.status_code == 201
+        assert first.json()["class_id"] == str(seed_data["class"].id)      # set by the server
+        listed = (await teacher_client.get(f"{url}?level=lab&target_id={lab.id}")).json()
+        assert [r["text"] for r in listed] == ["No code.", "Be short."]
+        rid = first.json()["id"]
+        edited = await teacher_client.patch(f"{url}/{rid}", json={"text": "No full code."})
+        off = await teacher_client.patch(f"{url}/{rid}", json={"is_active": False})
+        assert edited.json()["text"] == "No full code." and off.json()["is_active"] is False
+        assert (await teacher_client.patch(f"{url}/{rid}", json={"text": "   "})).status_code == 422
+        assert (await teacher_client.delete(f"{url}/{rid}")).status_code == 204
+        listed = (await teacher_client.get(f"{url}?level=lab&target_id={lab.id}")).json()
+        assert [r["text"] for r in listed] == ["Be short."]
 
-    async def test_upsert_updates_existing(self, teacher_client, seed_data):
-        rule = seed_data["rule"]
-        resp = await teacher_client.put("/api/teacher/rules", json={
-            "level": "class", "target_id": str(rule.target_id),
-            "rules_text": "Updated.", "is_active": False,
-        })
-        assert resp.status_code == 200
-        assert resp.json()["rules_text"] == "Updated."
-        assert resp.json()["id"] == str(rule.id)
+    async def test_blank_or_missing_text_422(self, teacher_client, seed_data):
+        url = "/api/teacher/rule-items"
+        target = str(seed_data["class"].id)
+        assert (await teacher_client.post(url, json={"level": "class", "target_id": target, "text": "  "})).status_code == 422
+        assert (await teacher_client.post(url, json={})).status_code == 422
 
-    async def test_student_cannot_upsert_403(self, student_client, seed_data):
-        resp = await student_client.put("/api/teacher/rules", json={
-            "level": "class", "target_id": str(seed_data["class"].id),
-            "rules_text": "hack",
-        })
+    async def test_student_rule_belongs_to_one_class(self, teacher_client, seed_data):
+        url = "/api/teacher/rule-items"
+        student, cls = seed_data["student_a"], seed_data["class"]
+        no_class = await teacher_client.post(url, json={"level": "student", "target_id": str(student.id), "text": "x"})
+        assert no_class.status_code == 403
+        ok = await teacher_client.post(url, json={"level": "student", "target_id": str(student.id),
+                                                  "class_id": str(cls.id), "text": "Speak slowly."})
+        assert ok.status_code == 201
+        listed = await teacher_client.get(f"{url}?level=student&target_id={student.id}&class_id={cls.id}")
+        assert [r["text"] for r in listed.json()] == ["Speak slowly."]
+
+    async def test_student_cannot_use_rules_403(self, student_client, seed_data):
+        resp = await student_client.post("/api/teacher/rule-items", json={
+            "level": "class", "target_id": str(seed_data["class"].id), "text": "hack"})
         assert resp.status_code == 403
 
-    async def test_missing_fields_422(self, teacher_client):
-        resp = await teacher_client.put("/api/teacher/rules", json={})
-        assert resp.status_code == 422
-
-    async def test_cannot_upsert_rule_on_foreign_class_403(self, teacher_client, db_session):
-        # A teacher must not write rules (injected into the prompt) on
-        # another teacher's class.
+    async def test_foreign_class_and_lab_403_and_foreign_item_404(self, teacher_client, db_session):
+        # Rules go into the prompt: a teacher must not touch another teacher's class.
         other = make_user(role=UserRole.teacher, username="other_t3")
         db_session.add(other)
         await db_session.flush()
-        foreign = Class(name="Foreign", teacher_id=other.id, invite_code="FRGN02")
-        db_session.add(foreign)
-        await db_session.commit()
-
-        resp = await teacher_client.put("/api/teacher/rules", json={
-            "level": "class", "target_id": str(foreign.id), "rules_text": "hijack",
-        })
-        assert resp.status_code == 403
-
-    async def test_cannot_upsert_rule_on_foreign_lab_403(self, teacher_client, db_session):
-        other = make_user(role=UserRole.teacher, username="other_t4")
-        db_session.add(other)
-        await db_session.flush()
-        fcls = Class(name="Foreign", teacher_id=other.id, invite_code="FRGN03")
+        fcls = Class(name="Foreign", teacher_id=other.id, invite_code="FRGN02")
         db_session.add(fcls)
         await db_session.flush()
         flab = Lab(class_id=fcls.id, name="Foreign Lab")
-        db_session.add(flab)
+        item = RuleItem(level="class", target_id=fcls.id, class_id=fcls.id, text="theirs")
+        db_session.add_all([flab, item])
         await db_session.commit()
+        url = "/api/teacher/rule-items"
+        for level, target in (("class", fcls.id), ("lab", flab.id)):
+            assert (await teacher_client.post(url, json={"level": level, "target_id": str(target),
+                                                         "text": "hijack"})).status_code == 403
+            assert (await teacher_client.get(f"{url}?level={level}&target_id={target}")).status_code == 403
+        assert (await teacher_client.patch(f"{url}/{item.id}", json={"text": "hijack"})).status_code == 404
+        assert (await teacher_client.delete(f"{url}/{item.id}")).status_code == 404
 
-        resp = await teacher_client.put("/api/teacher/rules", json={
-            "level": "lab", "target_id": str(flab.id), "rules_text": "hijack",
-        })
-        assert resp.status_code == 403
+    async def test_at_most_thirty_rules(self, teacher_client, seed_data):
+        url = "/api/teacher/rule-items"
+        lab = str(seed_data["lab"].id)
+        for n in range(30):
+            assert (await teacher_client.post(url, json={"level": "lab", "target_id": lab, "text": f"r{n}"})).status_code == 201
+        resp = await teacher_client.post(url, json={"level": "lab", "target_id": lab, "text": "one more"})
+        assert resp.status_code == 409 and resp.json()["detail"] == "too_many_rules"
 
-
-class TestListRules:
-    async def test_list_all(self, teacher_client, seed_data):
-        resp = await teacher_client.get("/api/teacher/rules")
-        assert resp.status_code == 200
-        assert len(resp.json()) >= 1
-
-    async def test_filter_by_level(self, teacher_client, seed_data):
-        resp = await teacher_client.get("/api/teacher/rules?level=class")
-        assert resp.status_code == 200
-        assert all(r["level"] == "class" for r in resp.json())
-
-    async def test_filter_by_target_id(self, teacher_client, seed_data):
-        target = seed_data["class"].id
-        resp = await teacher_client.get(f"/api/teacher/rules?target_id={target}")
-        assert resp.status_code == 200
-        assert all(r["target_id"] == str(target) for r in resp.json())
+    async def test_built_in_presets(self, teacher_client):
+        presets = (await teacher_client.get("/api/teacher/rule-presets")).json()
+        assert len(presets) >= 8 and all(p["name"] and p["text"] for p in presets)
 
 
 class TestChatHistory:
@@ -524,7 +518,7 @@ class TestTeacherClassAnalytics:
 
 
 # ===================================================================
-# Skill presets (library + apply-to-class)
+# Skill presets (a teacher's own rules)
 # ===================================================================
 
 class TestSkillPresets:
@@ -546,43 +540,10 @@ class TestSkillPresets:
         assert deleted.status_code == 204
         assert (await teacher_client.get("/api/teacher/skill-presets")).json() == []
 
-    async def test_apply_preset_to_class_snapshots_rule(self, teacher_client, seed_data):
-        created = await teacher_client.post("/api/teacher/skill-presets",
-                                            json={"name": "P", "content": "BE SOCRATIC"})
-        pid = created.json()["id"]
-        class_id = seed_data["class"].id
-
-        resp = await teacher_client.post(f"/api/teacher/classes/{class_id}/skill",
-                                         json={"preset_id": pid})
-        assert resp.status_code == 200
-
-        rules = await teacher_client.get(
-            f"/api/teacher/rules?level=class&target_id={class_id}")
-        assert any(r["rules_text"] == "BE SOCRATIC" for r in rules.json())
-
-    async def test_apply_raw_content_to_class(self, teacher_client, seed_data):
-        class_id = seed_data["class"].id
-        resp = await teacher_client.post(f"/api/teacher/classes/{class_id}/skill",
-                                         json={"content": "AD HOC STYLE"})
-        assert resp.status_code == 200
-        rules = await teacher_client.get(
-            f"/api/teacher/rules?level=class&target_id={class_id}")
-        assert any(r["rules_text"] == "AD HOC STYLE" for r in rules.json())
-
     async def test_student_cannot_create_preset_403(self, student_client):
         resp = await student_client.post("/api/teacher/skill-presets",
                                          json={"name": "x", "content": "y"})
         assert resp.status_code == 403
-
-    async def test_blank_content_does_not_wipe_class_rule_400(self, teacher_client, seed_data):
-        class_id = seed_data["class"].id
-        # seed_data has a class rule "Be formal." — a blank apply must not erase it.
-        resp = await teacher_client.post(f"/api/teacher/classes/{class_id}/skill",
-                                         json={"content": "   "})
-        assert resp.status_code == 400
-        rules = await teacher_client.get(
-            f"/api/teacher/rules?level=class&target_id={class_id}")
-        assert any(r["rules_text"] == "Be formal." for r in rules.json())
 
     async def test_chat_history_scoped_to_own_classes(self, teacher_client, seed_data, db_session):
         # A foreign teacher's class/lab/session must be invisible even
@@ -614,18 +575,3 @@ class TestSkillPresets:
         assert resp.status_code == 200
         assert [s["id"] for s in resp.json()] == [str(sess_id)]
 
-    async def test_apply_to_unowned_class_403(self, teacher_client, db_session):
-        # A class owned by a different teacher.
-        other = make_user(role=UserRole.teacher, username="other_t")
-        db_session.add(other)
-        await db_session.flush()
-        foreign = Class(name="Foreign", teacher_id=other.id, invite_code="ZZZ999")
-        db_session.add(foreign)
-        await db_session.commit()
-
-        created = await teacher_client.post("/api/teacher/skill-presets",
-                                            json={"name": "P", "content": "X"})
-        resp = await teacher_client.post(
-            f"/api/teacher/classes/{foreign.id}/skill",
-            json={"preset_id": created.json()["id"]})
-        assert resp.status_code == 403

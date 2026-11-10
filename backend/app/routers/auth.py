@@ -8,6 +8,8 @@ POST /api/auth/login   →  Validate credentials, return JWT with user_id only.
 GET  /api/auth/me      →  Return current user profile (id, username, role).
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,6 +130,25 @@ async def get_me(
     ``username``, and ``role`` after login (since the JWT intentionally
     contains only ``sub``).
     """
+    return UserResponse.model_validate(current_user)
+
+
+# ===================================================================
+# POST /api/auth/tour-seen
+# ===================================================================
+
+
+@router.post("/tour-seen", response_model=UserResponse)
+async def tour_seen(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> UserResponse:
+    """The user finished or skipped the guided tour: it no longer starts by
+    itself (the ? button still opens it)."""
+    if current_user.tour_seen_at is None:
+        current_user.tour_seen_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(current_user)
     return UserResponse.model_validate(current_user)
 
 

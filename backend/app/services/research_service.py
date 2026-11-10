@@ -107,10 +107,12 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  allow_ask: bool = False,
                                  vision_model: str = '',
                                  mode: str = 'research', exam_mode: bool = False,
+                                 exam_files: bool = False,
                                  limits: ResearchLimits = ResearchLimits()) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call).
-    mode: direct, search or research; exam_mode only changes the direct prompt
-    (the chat endpoint already chose direct for a class in exam mode)."""
+    mode: direct, search or research; exam_mode and exam_files (some files are
+    allowed in the exam) only change the direct prompt. The chat endpoint has
+    already limited the scope to the allowed files, or chosen direct."""
     if mode not in ('direct', 'search', 'research'):
         raise ValueError('unknown_mode')
     runs = ResearchRuns(session_factory)
@@ -182,7 +184,8 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
         billed = usage.wrap_model(run_id=started.run_id, model=model_name,
                                   alpha=token_alpha, beta=token_beta, call=model)
         if mode == 'direct':
-            runner = DirectRunner(billed, exam_mode=exam_mode, concise=direct_mode.CONCISE,
+            runner = DirectRunner(billed, exam_mode=exam_mode, exam_files=exam_files,
+                                  concise=direct_mode.CONCISE,
                                   total_timeout=limits.total_seconds,
                                   model_timeout=limits.call_seconds, on_draft=on_draft)
         elif mode == 'search':

@@ -35,11 +35,20 @@ M4H_VERSION = 'm4h_job_not_before_v1'
 M4H_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4h.sql')
 M4I_VERSION = 'm4i_quota_week_v1'
 M4I_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4i.sql')
+M4J_VERSION = 'm4j_rule_items_v1'
+M4J_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4j.sql')
+M4K_VERSION = 'm4k_exam_files_v1'
+M4K_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4k.sql')
+M4L_VERSION = 'm4l_tour_v1'
+M4L_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4l.sql')
 MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_SQL_PATH),
               (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH),
               (M4C_VERSION, M4C_SQL_PATH), (M4E_VERSION, M4E_SQL_PATH),
               (M4F_VERSION, M4F_SQL_PATH), (M4G_VERSION, M4G_SQL_PATH),
-              (M4H_VERSION, M4H_SQL_PATH), (M4I_VERSION, M4I_SQL_PATH))
+              (M4H_VERSION, M4H_SQL_PATH), (M4I_VERSION, M4I_SQL_PATH),
+              (M4J_VERSION, M4J_SQL_PATH),
+              (M4K_VERSION, M4K_SQL_PATH),
+              (M4L_VERSION, M4L_SQL_PATH))
 
 
 async def _apply_one(conn, version, path):

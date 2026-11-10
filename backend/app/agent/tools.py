@@ -142,20 +142,29 @@ async def _live_session(db, user_id: uuid.UUID, session_id: uuid.UUID):
     return lab, cls
 
 
-async def create_scope(db, *, user_id: uuid.UUID, session_id: uuid.UUID,
-                       run_id: uuid.UUID | None = None) -> ResearchScope:
-    """Freeze only current, published PDF revisions in this live session."""
-    lab, cls = await _live_session(db, user_id, session_id)
-    rows = (await db.execute(select(Document.id, DocumentRevision.id)
+def readable_files(class_id: uuid.UUID, lab_id: uuid.UUID, *, exam_only: bool = False):
+    """The query of the files a question of this lab can use: (document id,
+    current revision id) of published, indexed PDFs of the lab or the whole
+    class. exam_only keeps the files the teacher allowed in exam mode."""
+    query = (select(Document.id, DocumentRevision.id)
         .join(DocumentRevision, (DocumentRevision.document_id == Document.id) &
                                 (DocumentRevision.id == Document.current_revision_id))
         .join(DocumentSource, DocumentSource.id == DocumentRevision.source_version_id)
-        .where(Document.class_id == cls.id,
-               (Document.lab_id == lab.id) | Document.lab_id.is_(None),
+        .where(Document.class_id == class_id,
+               (Document.lab_id == lab_id) | Document.lab_id.is_(None),
                Document.lifecycle == 'active', Document.structured.is_(True),
                DocumentRevision.publication_state == 'published',
                DocumentRevision.index_ready.is_(True),
-               DocumentSource.format == 'pdf'))).all()
+               DocumentSource.format == 'pdf'))
+    return query.where(Document.exam_allowed.is_(True)) if exam_only else query
+
+
+async def create_scope(db, *, user_id: uuid.UUID, session_id: uuid.UUID,
+                       run_id: uuid.UUID | None = None, exam_only: bool = False) -> ResearchScope:
+    """Freeze only current, published PDF revisions in this live session.
+    exam_only (a class in exam mode): only the files allowed in the exam."""
+    lab, cls = await _live_session(db, user_id, session_id)
+    rows = (await db.execute(readable_files(cls.id, lab.id, exam_only=exam_only))).all()
     return ResearchScope(user_id, session_id, run_id or uuid.uuid4(), cls.id, lab.id,
                          MappingProxyType(dict(rows)))
 
@@ -189,6 +198,7 @@ class ResearchTools:
         and next page of a read. Unreadable documents are left out.
         """
         index = {}
+        lab_name = None
         for document_id, revision_id in self.scope.snapshot_revisions.items():
             try:
                 await self._revision(document_id)
@@ -198,8 +208,13 @@ class ResearchTools:
             pages = (await self.db.scalars(select(DocumentPage)
                 .where(DocumentPage.revision_id == revision_id)
                 .order_by(DocumentPage.order_index))).all()
+            # A file of this lab, or of the whole class (lab_id None): the
+            # model reads the lab's files first for questions about the lab.
+            if document.lab_id is not None and lab_name is None:
+                lab_name = await self.db.scalar(select(Lab.name).where(Lab.id == self.scope.lab_id)) or 'this TP'
             index[str(document_id)] = {'filename': document.filename, 'pages': [
-                {'page_id': str(p.page_id), 'pdf_page_no': p.preview_page_no} for p in pages]}
+                {'page_id': str(p.page_id), 'pdf_page_no': p.preview_page_no} for p in pages],
+                'lab_name': lab_name if document.lab_id is not None else None}
         return index
 
     async def execute(self, name: str, arguments: dict) -> dict:

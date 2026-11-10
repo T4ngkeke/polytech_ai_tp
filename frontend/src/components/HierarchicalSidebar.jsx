@@ -12,6 +12,7 @@
  *   onLabAction(action, lab)  — (teacher/admin) toggle/rename/delete
  *   children                  — shown between the tree and the footer (student sessions on phones)
  *   loading: bool
+ *   onHelp()                  — opens the guided tour (the ? button)
  *
  * ClassNode shape: { id, name, invite_code, labs: LabNode[] }
  * LabNode shape:   { id, name, is_active, is_deleted }
@@ -34,6 +35,7 @@ export default function HierarchicalSidebar({
   onClassAction,
   onLabAction,
   loading = false,
+  onHelp,
   children,
 }) {
   const { username, userRole, logout } = useAuthStore();
@@ -68,6 +70,7 @@ export default function HierarchicalSidebar({
         {role === 'student' && (
           <button
             id="join-class-btn"
+            data-tour="join-class"
             onClick={onJoinClass}
             className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border-default text-xs font-medium text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
           >
@@ -77,6 +80,7 @@ export default function HierarchicalSidebar({
         {(role === 'teacher' || role === 'admin') && (
           <button
             id="create-class-btn"
+            data-tour="new-class"
             onClick={onCreateClass}
             className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border-default text-xs font-medium text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
           >
@@ -86,7 +90,7 @@ export default function HierarchicalSidebar({
       </div>
 
       {/* Tree */}
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      <div data-tour="classes" className="flex-1 overflow-y-auto px-2 py-2">
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <div className="w-4 h-4 rounded-full border-2 border-cyan border-t-transparent animate-[spin_0.8s_linear_infinite]" />
@@ -124,7 +128,18 @@ export default function HierarchicalSidebar({
             <p className="text-sm font-semibold text-cream truncate">{username || 'User'}</p>
             <p className="text-[10px] uppercase tracking-wider text-cyan">{userRole}</p>
           </div>
-          <div className="shrink-0 ml-3 flex items-center gap-2">
+          <div className="shrink-0 ml-2 flex items-center gap-1">
+            {onHelp && (
+              <button
+                onClick={onHelp}
+                data-tour="help"
+                title="Guided tour"
+                aria-label="Guided tour"
+                className="w-8 h-8 rounded-lg bg-ink-surface border border-border-default text-sm font-semibold text-cream-secondary hover:text-cyan hover:border-cyan/30 transition-all cursor-pointer"
+              >
+                ?
+              </button>
+            )}
             <ThemeToggle />
             <button
               onClick={() => navigate('/account')}

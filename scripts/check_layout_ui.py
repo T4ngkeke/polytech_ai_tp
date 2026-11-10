@@ -158,11 +158,19 @@ PAGES = [
 LONG_REPLY = '\n\n'.join(f'Paragraphe {n} : ' + 'une condition sur les groupes. ' * 12 for n in range(1, 31))
 
 
+TOUR_FIRST = {}   # role -> True: /api/auth/me says the tour was never seen
+
+
 def handler(role):
     def api(route):
         path = urlsplit(route.request.url).path
         if path == '/api/auth/me':
-            route.fulfill(json={'id': role, 'username': role, 'role': role})
+            # The guided tour was seen (check_tour shows a first sign-in).
+            route.fulfill(json={'id': role, 'username': role, 'role': role,
+                                'tour_seen_at': None if TOUR_FIRST.get(role) else '2026-11-01T00:00:00Z'})
+        elif path == '/api/auth/tour-seen':
+            TOUR_FIRST[role] = False
+            route.fulfill(json={'id': role, 'username': role, 'role': role, 'tour_seen_at': '2026-11-09T00:00:00Z'})
         elif path == '/api/chat/stream':
             route.fulfill(content_type='text/event-stream', body=(
                 'event: status\ndata: {"route": "agent", "phase": "thinking", "mode": "research"}\n\n'
@@ -308,7 +316,7 @@ def check_roles_and_tabs(browser, target):
         path = urlsplit(route.request.url).path
         if path == '/api/auth/me':
             role = (route.request.headers.get('authorization') or '').removeprefix('Bearer as-')
-            route.fulfill(json={'id': role, 'username': role, 'role': role})
+            route.fulfill(json={'id': role, 'username': role, 'role': role, 'tour_seen_at': '2026-11-01T00:00:00Z'})
         else:
             route.fulfill(json=MOCKS.get(path, []))
 
@@ -721,6 +729,32 @@ def check_monitoring(browser, target, shots):
                 context.close()
 
 
+def check_tour(browser, target, shots):
+    # First sign-in: the tour starts by itself; Skip marks it seen; ? opens it again.
+    for role, path, size in (('student', '/chat', PHONE), ('teacher', '/teacher', DESKTOP)):
+        TOUR_FIRST[role] = True
+        name = f'tour-{role}-{size[0]}'
+        context, page, errors = open_page(browser, target, role, path, 'light', size)
+        try:
+            dialog = page.get_by_role('dialog')
+            expect(dialog).to_be_visible()
+            box = dialog.locator('div.fixed.rounded-xl.border').bounding_box()
+            assert box['x'] >= 0 and box['x'] + box['width'] <= size[0], f'{name}: tour box off screen {box}'
+            if shots:
+                page.screenshot(path=str(shots / f'{name}.png'))
+            dialog.get_by_role('button', name='Skip tour').click()
+            expect(dialog).to_have_count(0)
+            assert TOUR_FIRST[role] is False, f'{name}: skipping did not mark the tour seen'
+            page.locator('[data-tour=help]:visible').first.click() if size == DESKTOP else None
+            if size == DESKTOP:
+                expect(dialog).to_be_visible()
+            assert not errors, f'{name}: {errors}'
+            print(f'PASS: {name}')
+        finally:
+            TOUR_FIRST[role] = False
+            context.close()
+
+
 def main():
     target = os.getenv('UI_TEST_URL', 'http://127.0.0.1:8080')
     assert urlsplit(target).hostname == '127.0.0.1', 'Use an explicit loopback frontend'
@@ -748,6 +782,7 @@ def main():
             check_admin_classes(browser, target, shots)
             check_monitoring(browser, target, shots)
             check_long_answer_stays_at_its_start(browser, target)
+            check_tour(browser, target, shots)
         finally:
             browser.close()
 

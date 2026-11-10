@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from backend.app.main import app
 from backend.app.models import (
     ClassStudent, DocChunk, Document, DocumentAsset, DocumentBlock, DocumentPage,
-    DocumentRevision, EMBEDDING_DIM, IngestionJob, Session,
+    DocumentRevision, EMBEDDING_DIM, IngestionJob, Lab, Session,
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.app.agent.tools import ResearchTools, create_scope
@@ -110,6 +110,8 @@ async def test_scoped_pdf_search_read_cursor_and_asset_contract(pg_session, tmp_
         page = await db.scalar(select(DocumentPage).where(DocumentPage.revision_id == rev.id))
         index = await tools.page_index()
         assert list(index) == [str(doc.id)] and index[str(doc.id)]['filename'] == doc.filename
+        # A file of the lab carries the lab's name (the model reads it first for the TP).
+        assert index[str(doc.id)]['lab_name'] == await db.scalar(select(Lab.name).where(Lab.id == doc.lab_id))
         assert index[str(doc.id)]['pages'][0] == {'page_id': str(page.page_id), 'pdf_page_no': 1}
         assert await ResearchTools(db, await create_scope(
             db, user_id=student.id, session_id=chat.id)).page_index() == index

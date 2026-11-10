@@ -62,6 +62,7 @@ The accounts of all three roles.
 | role | Enum | `student`, `teacher` or `admin`. Default `student`. |
 | daily_token_quota | Integer | Daily limit of billed tokens (a day starts at midnight Paris time). Default 5 000 000. Set by the admin. |
 | weekly_token_quota | Integer | Weekly limit of billed tokens (a week starts on Monday). Default 25 000 000. Set by the admin. |
+| tour_seen_at | Timestamp | Nullable. When the user finished or skipped the guided tour; until then it starts at sign-in. Added by `m4l_tour_v1`. |
 | is_deleted | Boolean | Default false. A deleted user cannot log in. |
 
 ### classes
@@ -103,9 +104,24 @@ A lab is one activity inside a class. Chat sessions and lab documents belong to 
 
 ## Rules
 
+### rule_items
+
+The teacher's rules for the tutor, one row per rule, for a class, a lab or a student in one class. The active rules of each level go into the prompt as a numbered list, class first, then lab, then student (`services/rule_service.py`). Added by `m4j_rule_items_v1`, which copied each text of `rules` into one row.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| level | String(8) | `class`, `lab` or `student`. |
+| target_id | UUID | The class, lab or student. Indexed with `level`. |
+| class_id | UUID | Foreign key to `classes.id`. The class the rule belongs to; a student rule applies only in this class. |
+| text | Text | One rule, at most 1000 characters. |
+| is_active | Boolean | Default true. |
+| position | Integer | Order in the list. |
+| created_at, updated_at | Timestamp | |
+
 ### rules
 
-The teacher's instructions for the model, at three levels. The pair (`level`, `target_id`) is unique. The class-level rule is also the `skill.md` text that sets the tutor's style. It is placed first in the instructions, and the other rules come after it.
+No longer read (replaced by `rule_items`). One text per (`level`, `target_id`); a student rule applied in every class.
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -117,7 +133,7 @@ The teacher's instructions for the model, at three levels. The pair (`level`, `t
 
 ### skill_presets
 
-A private library of style texts that a teacher can reuse. Applying a preset to a class copies its `content` into the class's rule. Changing the preset later does not change classes that already copied it.
+A teacher's own saved rules ("My rules"), to add to any list with one click. Adding copies the text into a new rule, so changing the preset later changes no rule.
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -263,6 +279,7 @@ One row per document of a lab (`lab_id` set) or of a whole class (`lab_id` null)
 | lifecycle | String(16) | `active` (default), `archived` or `deleted`. |
 | generation | Integer | Default 0. Goes up with each change. A request that carries an old value gets `409`. |
 | current_revision_id | UUID | Nullable. The published revision. |
+| exam_allowed | Boolean | Default false. In exam mode, students may search and open only these files. Added by `m4k_exam_files_v1`. |
 | structured | Boolean | Default false. True for documents read by MinerU. Older documents are false. |
 | deleted_at | Timestamp | Nullable. |
 

@@ -1,10 +1,6 @@
 """
-test_skill_preset_service.py — teacher skill-preset library + apply-to-class.
-
-A teacher keeps a private library of reusable instructor-style presets. Applying
-one to a class *snapshot-copies* its content into the class's level=class rule —
-the prompt-injection path is unchanged. Editing a preset afterwards must NOT
-retro-change classes that already selected it.
+test_skill_preset_service.py — a teacher's own presets, and the rule lists
+that go into the prompt (rule_service).
 """
 
 import uuid
@@ -37,41 +33,16 @@ async def test_create_and_list_presets_are_owner_scoped(db_session):
     assert [p.name for p in t1_presets] == ["Strict"]
 
 
-async def test_apply_preset_snapshots_into_class_rule(db_session):
+async def test_rules_reach_the_prompt_as_numbered_active_lists(db_session):
+    from backend.app.models import Class
     t = await _teacher(db_session)
-    class_id = uuid.uuid4()
-    preset = await skill_preset_service.create_preset(
-        db_session, owner_teacher_id=t.id, name="Socratic", content="Guide, don't tell.")
-
-    await skill_preset_service.apply_preset_to_class(
-        db_session, owner_teacher_id=t.id, class_id=class_id, preset_id=preset.id)
-
-    texts = await rule_service.get_active_rule_texts(db_session, class_id, None, uuid.uuid4())
-    assert texts["class_rules"] == "Guide, don't tell."
-
-
-async def test_editing_preset_does_not_retro_change_applied_class(db_session):
-    t = await _teacher(db_session)
-    class_id = uuid.uuid4()
-    preset = await skill_preset_service.create_preset(
-        db_session, owner_teacher_id=t.id, name="v1", content="ORIGINAL")
-    await skill_preset_service.apply_preset_to_class(
-        db_session, owner_teacher_id=t.id, class_id=class_id, preset_id=preset.id)
-
-    await skill_preset_service.update_preset(
-        db_session, owner_teacher_id=t.id, preset_id=preset.id, name="v2", content="CHANGED")
-
-    # Snapshot semantics: the class rule keeps the ORIGINAL content.
-    texts = await rule_service.get_active_rule_texts(db_session, class_id, None, uuid.uuid4())
-    assert texts["class_rules"] == "ORIGINAL"
-
-
-async def test_apply_other_teachers_preset_is_rejected(db_session):
-    owner = await _teacher(db_session)
-    other = await _teacher(db_session)
-    preset = await skill_preset_service.create_preset(
-        db_session, owner_teacher_id=owner.id, name="P", content="X")
-
-    with pytest.raises(PermissionError):
-        await skill_preset_service.apply_preset_to_class(
-            db_session, owner_teacher_id=other.id, class_id=uuid.uuid4(), preset_id=preset.id)
+    cls = Class(name="C", teacher_id=t.id, invite_code="RULE01")
+    db_session.add(cls)
+    await db_session.flush()
+    student = uuid.uuid4()
+    await rule_service.add_item(db_session, level="class", target_id=cls.id, class_id=cls.id, text=" Guide. ")
+    off = await rule_service.add_item(db_session, level="class", target_id=cls.id, class_id=cls.id, text="Off.")
+    await rule_service.add_item(db_session, level="class", target_id=cls.id, class_id=cls.id, text="Short.")
+    await rule_service.update_item(db_session, off, is_active=False)
+    texts = await rule_service.get_active_rule_texts(db_session, cls.id, None, student)
+    assert texts == {"class_rules": "1. Guide.\n2. Short.", "lab_rules": None, "student_rules": None}

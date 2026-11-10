@@ -142,7 +142,10 @@ def _without_document_handles(text: str) -> str:
 # The evidence ID at the start of a malformed reference: "[E21 in d1.p21]".
 _LEADING_ID = re.compile(r'\[(E[1-9]\d*)(?![\d])')
 
-CATALOGUE_NOTE = ('Course files of this lab (handle, file, pages). When the student names a file '
+CATALOGUE_NOTE = ('Course files of this lab (handle, file, pages). The files of this TP are '
+                  'listed first: for a question about the TP itself (what to do, the subject, '
+                  'the instructions, what to hand in) read them first. Class files are general '
+                  'course material shared by every TP. When the student names a file '
                   'and a page, read that page directly, e.g. d2.p23; otherwise search first.')
 FINISH_TURN = ('Research is over: tools are no longer available. Write your final answer to the '
                'student now, in plain text, citing only evidence IDs already returned [E1]. '

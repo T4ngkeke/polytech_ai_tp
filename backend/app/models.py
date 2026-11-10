@@ -232,6 +232,8 @@ class User(Base):
     # Billed tokens a day (Paris midnight) and a week (Monday); see quota_service.
     daily_token_quota: Mapped[int] = mapped_column(Integer, nullable=False, default=5_000_000)
     weekly_token_quota: Mapped[int] = mapped_column(Integer, nullable=False, default=25_000_000)
+    # When the user finished or skipped the guided tour; None: show it at sign-in.
+    tour_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -375,6 +377,34 @@ class Rule(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Rule id={self.id} level={self.level} target={self.target_id} active={self.is_active}>"
+
+
+class RuleItem(Base):
+    """One rule a teacher gives the tutor, for a class, a lab or a student.
+
+    The active rules of each level are sent to the model as a numbered list
+    (rule_service.get_active_rule_texts). A student rule belongs to one class
+    (class_id) and applies only there. Replaces the one text per level of
+    `rules` (kept, no longer read).
+    """
+    __tablename__ = "rule_items"
+    __table_args__ = (
+        CheckConstraint("level IN ('class','lab','student')", name="ck_rule_item_level"),
+        Index("ix_rule_items_target", "level", "target_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    level: Mapped[str] = mapped_column(String(8), nullable=False)
+    # The class, the lab or the student (no FK: it depends on the level).
+    target_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    class_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
 class SkillPreset(Base):
@@ -641,6 +671,8 @@ class Document(Base):
     generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     current_revision_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     structured: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # In exam mode, students may search and open only the files the teacher allowed.
+    exam_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(

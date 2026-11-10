@@ -11,6 +11,7 @@ from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import (
     AgentRun, DocumentBlock, DocumentPage, Lab, Message, MessageCitation, ModelCallUsage, SenderType, SystemConfig,
+    User,
 )
 from backend.app.routers.teacher import get_storage_root
 from backend.tests.conftest import make_client
@@ -652,6 +653,39 @@ async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, 
             assert 'exam mode' in calls[0]['messages'][0]['content']
             classes = (await client.get('/api/student/classes')).json()
             assert classes[0]['exam_mode'] is True
+            labs = (await client.get(f"/api/student/classes/{doc.class_id}/labs")).json()
+            assert {lab['id']: lab['exam_files'] for lab in labs}[str(doc.lab_id)] == 0
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_exam_mode_searches_only_the_files_the_teacher_allowed(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].'])
+        from backend.app.models import Class
+        cls = await db.get(Class, doc.class_id)
+        cls.exam_mode = True
+        await db.commit()
+        teacher = await make_client(db, await db.get(User, cls.teacher_id))
+        async with teacher:
+            listed = (await teacher.get(f'/api/teacher/classes/{cls.id}/exam-files')).json()
+            assert [(f['id'], f['exam_allowed']) for f in listed] == [(str(doc.id), False)]
+            put = await teacher.put(f'/api/teacher/classes/{cls.id}/exam-files',
+                                    json={'document_ids': [str(doc.id)]})
+            assert put.status_code == 200 and put.json()[0]['exam_allowed'] is True
+        client = await make_client(db, student)
+        async with client:
+            labs = (await client.get(f"/api/student/classes/{doc.class_id}/labs")).json()
+            assert {lab['id']: lab['exam_files'] for lab in labs}[str(doc.lab_id)] == 1
+            stream = events((await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Définition θ₁', 'mode': 'search'})).text)
+            # Search is allowed, inside the allowed file, with the exam note.
+            assert ('status', {'route': 'agent', 'phase': 'thinking', 'mode': 'search',
+                               'exam_mode': True}) in stream
+            assert ('token', 'Voir [E1].') in stream
+            assert '[EXAM MODE]' in calls[0]['messages'][0]['content']
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 
@@ -661,17 +695,29 @@ async def test_the_three_tiers_of_teacher_rules_reach_the_prompt(pg_session, tmp
     try:
         db = pg_session
         doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Réponse.'])
-        from backend.app.models import Rule, RuleLevel
-        db.add_all([Rule(level=RuleLevel.class_, target_id=doc.class_id, rules_text='CLASS-RULE', is_active=True),
-                    Rule(level=RuleLevel.lab, target_id=doc.lab_id, rules_text='LAB-RULE', is_active=True),
-                    Rule(level=RuleLevel.student, target_id=student.id, rules_text='STUDENT-RULE', is_active=True)])
+        from backend.app.models import Class, ClassStudent, RuleItem
+        cls = doc.class_id
+        db.add_all([RuleItem(level='class', target_id=cls, class_id=cls, text='CLASS-RULE'),
+                    RuleItem(level='class', target_id=cls, class_id=cls, text='OFF-RULE', is_active=False,
+                             position=1),
+                    RuleItem(level='class', target_id=cls, class_id=cls, text='SECOND-RULE', position=2),
+                    RuleItem(level='lab', target_id=doc.lab_id, class_id=cls, text='LAB-RULE'),
+                    RuleItem(level='student', target_id=student.id, class_id=cls, text='STUDENT-RULE')])
+        # A student rule of another class does not apply here.
+        other = Class(name='Other', teacher_id=(await db.get(Class, cls)).teacher_id, invite_code='OTHR01')
+        db.add(other)
+        await db.flush()
+        db.add_all([ClassStudent(class_id=other.id, student_id=student.id),
+                    RuleItem(level='student', target_id=student.id, class_id=other.id, text='ELSEWHERE')])
         await db.commit()
         client = await make_client(db, student)
         async with client:
             await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'Bonjour', 'mode': 'direct'})
         system = calls[0]['messages'][0]['content']
-        assert '[CLASS RULES]\nCLASS-RULE' in system and '[LAB RULES]\nLAB-RULE' in system
-        assert '[STUDENT RULES]\nSTUDENT-RULE' in system
+        # Active rules only, numbered, in their order.
+        assert '[CLASS RULES]\n1. CLASS-RULE\n2. SECOND-RULE' in system and 'OFF-RULE' not in system
+        assert '[LAB RULES]\n1. LAB-RULE' in system
+        assert '[STUDENT RULES]\n1. STUDENT-RULE' in system and 'ELSEWHERE' not in system
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

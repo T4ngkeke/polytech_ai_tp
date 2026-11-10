@@ -19,7 +19,10 @@ import DocumentManager from '../components/DocumentManager';
 import TeacherAnalytics from '../components/TeacherAnalytics';
 import QuotaRequests from '../components/QuotaRequests';
 import TeachingReport from '../components/TeachingReport';
-import SkillPresetManager from '../components/SkillPresetManager';
+import RuleList from '../components/RuleList';
+import ExamFiles from '../components/ExamFiles';
+import Tour from '../components/Tour';
+import { TOURS } from '../lib/tours';
 import CitationReport from '../components/CitationReport';
 import ModeSwitch from '../components/ModeSwitch';
 import { DEFAULT_MODE, modeLabel, offersResearch } from '../lib/answerModes';
@@ -43,16 +46,17 @@ export default function Teacher() {
   const [activeTab, setActiveTab] = useState(0);
   // Phones: the class tree is a drawer opened from the top bar.
   const [navOpen, setNavOpen] = useState(true);
+  // The guided tour starts by itself until it has been finished or skipped once.
+  const { tourSeen, markTourSeen } = useAuthStore();
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => { if (!tourSeen) setTourOpen(true); }, [tourSeen]);
 
   // ── Right panel data ──
   const [students, setStudents] = useState([]);
-  const [ruleText, setRuleText] = useState('');
-  const [ruleActive, setRuleActive] = useState(true);
   const [analytics, setAnalytics] = useState(null);
   const [auditSessions, setAuditSessions] = useState([]);
   const [expandedStudentId, setExpandedStudentId] = useState(null);
   const [expandedSession, setExpandedSession] = useState(null);
-  const [inheritedClassRule, setInheritedClassRule] = useState('');
 
   // ── Modals ──
   const [showCreateClass, setShowCreateClass] = useState(false);
@@ -68,8 +72,6 @@ export default function Teacher() {
   const [renameLabValue, setRenameLabValue] = useState('');
   
   const [studentRuleModal, setStudentRuleModal] = useState(null); // { studentId, username }
-  const [studentRuleText, setStudentRuleText] = useState('');
-  const [studentRuleActive, setStudentRuleActive] = useState(true);
 
   // ── Load classes + labs ──
   const loadClasses = useCallback(async () => {
@@ -138,26 +140,11 @@ export default function Teacher() {
     const level = selectedLab ? 'lab' : 'class';
 
     if (level === 'class') {
-      if (activeTab === 1) {
-        api.get(`/api/teacher/rules?level=class&target_id=${selectedClass.id}`)
-          .then((rules) => { const r = rules[0] || null; setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true); })
-          .catch(() => { setRuleText(''); });
-      } else if (activeTab === 2) {
+      if (activeTab === 2) {
         loadAnalytics();
       }
     } else {
-      if (activeTab === 1) {
-        Promise.all([
-          api.get(`/api/teacher/rules?level=lab&target_id=${selectedLab.id}`),
-          api.get(`/api/teacher/rules?level=class&target_id=${selectedClass.id}`)
-        ])
-          .then(([labRules, classRules]) => {
-            const r = labRules[0] || null; 
-            setRuleText(r?.rules_text || ''); setRuleActive(r?.is_active ?? true);
-            setInheritedClassRule(classRules[0]?.rules_text || '');
-          })
-          .catch(() => { setRuleText(''); setInheritedClassRule(''); });
-      } else if (activeTab === 2) {
+      if (activeTab === 2) {
         loadAnalytics();
       } else if (activeTab === 3 || activeTab === 4) {
         Promise.all([
@@ -258,16 +245,6 @@ export default function Teacher() {
     } catch (err) { toast.error(err.message); }
   };
 
-  const handleSaveRule = async () => {
-    if (!ruleText.trim()) return;
-    const level = selectedLab ? 'lab' : 'class';
-    const targetId = selectedLab ? selectedLab.id : selectedClass?.id;
-    try {
-      await api.put('/api/teacher/rules', { level, target_id: targetId, rules_text: ruleText, is_active: ruleActive });
-      toast.success('Rule saved');
-    } catch (err) { toast.error(err.message); }
-  };
-
   const handleKickStudent = async (studentId) => {
     if (!selectedClass || !confirm('Remove this student from class?')) return;
     try {
@@ -277,28 +254,8 @@ export default function Teacher() {
     } catch (err) { toast.error(err.message); }
   };
 
-  const handleOpenStudentRule = async (student) => {
+  const handleOpenStudentRule = (student) => {
     setStudentRuleModal({ studentId: student.id, username: student.username });
-    try {
-      const rules = await api.get(`/api/teacher/rules?level=student&target_id=${student.id}`);
-      const r = rules[0];
-      setStudentRuleText(r?.rules_text || '');
-      setStudentRuleActive(r?.is_active ?? true);
-    } catch {
-      setStudentRuleText('');
-      setStudentRuleActive(true);
-    }
-  };
-
-  const handleSaveStudentRule = async () => {
-    if (!studentRuleText.trim() || !studentRuleModal) return;
-    try {
-      await api.put('/api/teacher/rules', {
-        level: 'student', target_id: studentRuleModal.studentId, rules_text: studentRuleText, is_active: studentRuleActive
-      });
-      toast.success('Student rule saved');
-      setStudentRuleModal(null);
-    } catch (err) { toast.error(err.message); }
   };
 
   // ── Tabs ──
@@ -328,6 +285,7 @@ export default function Teacher() {
           onClassAction={handleClassAction}
           onLabAction={handleLabAction}
           loading={loading}
+          onHelp={() => setTourOpen(true)}
         />
       </div>
 
@@ -353,7 +311,7 @@ export default function Teacher() {
               <Breadcrumb cls={selectedClass} lab={selectedLab} onClass={() => handleSelectClass(selectedClass)}
                 className="hidden md:block mb-1 text-[11px] text-cream-muted uppercase tracking-widest font-mono" />
               {/* Phones: the tabs wrap onto a second line, so none is hidden off screen. */}
-              <div className="flex flex-wrap gap-x-5 md:flex-nowrap md:gap-6 md:overflow-x-auto no-scrollbar">
+              <div data-tour="tabs" className="flex flex-wrap gap-x-5 md:flex-nowrap md:gap-6 md:overflow-x-auto no-scrollbar">
                 {tabs.map((tab, i) => (
                   <button
                     key={tab}
@@ -371,7 +329,7 @@ export default function Teacher() {
             {/* Panel content */}
             <div className="flex-1 p-4 md:p-8 overflow-y-auto">
               {level === 'class' && activeTab === 0 && <ClassSettingsPanel cls={selectedClass} onChange={handleClassChanged} />}
-              {level === 'class' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule="" showPresets />}
+              {level === 'class' && activeTab === 1 && <RulesPanel level="class" targetId={selectedClass.id} classId={selectedClass.id} context={context} />}
               {level === 'class' && activeTab === 2 && (
                 <TeacherAnalytics data={analytics} classId={selectedClass.id} onReload={loadAnalytics}
                   onOpenConversation={openConversation} />
@@ -385,7 +343,7 @@ export default function Teacher() {
               )}
 
               {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
-              {level === 'lab' && activeTab === 1 && <RulesPanel ruleText={ruleText} setRuleText={setRuleText} ruleActive={ruleActive} setRuleActive={setRuleActive} onSave={handleSaveRule} context={context} inheritedRule={inheritedClassRule} />}
+              {level === 'lab' && activeTab === 1 && <RulesPanel level="lab" targetId={selectedLab.id} classId={selectedClass.id} context={context} />}
               {level === 'lab' && activeTab === 2 && (
                 <TeacherAnalytics data={analytics} classId={selectedClass.id} onReload={loadAnalytics}
                   onOpenConversation={openConversation}
@@ -395,7 +353,7 @@ export default function Teacher() {
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id}
                 examMode={!!selectedClass?.exam_mode} onOpenClassSettings={() => handleSelectClass(selectedClass)} />}
-              {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} examMode={!!selectedClass?.exam_mode} />}
+              {level === 'lab' && activeTab === 6 && <TestDrivePanel labId={selectedLab.id} labName={selectedLab.name} classId={selectedClass?.id} examMode={!!selectedClass?.exam_mode} />}
             </div>
           </>
         )}
@@ -418,30 +376,25 @@ export default function Teacher() {
         <SimpleModal title="Rename Lab" value={renameLabValue} setValue={setRenameLabValue}
           placeholder="" onConfirm={handleRenameLab} onClose={() => setShowRenameLab(false)} confirmLabel="Rename" />
       )}
+      {tourOpen && (
+        <Tour steps={TOURS.teacher} onNav={setNavOpen}
+          onClose={() => { setTourOpen(false); if (!tourSeen) markTourSeen(); }} />
+      )}
       {studentRuleModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-ink-surface border border-border-default rounded-2xl w-full max-w-md p-6 shadow-elevated animate-scale-in">
-            <h3 className="text-lg font-semibold text-cream mb-1">Student Rule</h3>
-            <p className="text-xs text-cream-muted mb-4">Prompt injected only for <span className="text-cyan font-medium">{studentRuleModal.username}</span></p>
-            <textarea
-              value={studentRuleText}
-              onChange={(e) => setStudentRuleText(e.target.value)}
-              rows={5}
-              placeholder="e.g. 'Explain concepts using simpler terms...'"
-              className="w-full px-4 py-3 rounded-xl bg-ink-deep border border-border-default text-cream text-sm font-mono placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 resize-none transition-colors mb-4"
-            />
-            <div className="flex items-center justify-between mb-6">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <div onClick={() => setStudentRuleActive(!studentRuleActive)} className={`w-9 h-5 rounded-full transition-colors ${studentRuleActive ? 'bg-cyan' : 'bg-ink-base'} relative`}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-cream shadow transition-all ${studentRuleActive ? 'left-4' : 'left-0.5'}`} />
-                </div>
-                <span className="text-xs text-cream-secondary">{studentRuleActive ? 'Active' : 'Disabled'}</span>
-              </label>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setStudentRuleModal(null); }}>
+          <div className="bg-ink-surface border border-border-default rounded-2xl w-full max-w-lg max-h-[90dvh] overflow-y-auto p-6 shadow-elevated animate-scale-in">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-cream mb-1">Rules for one student</h3>
+                <p className="text-xs text-cream-muted">Only for <span className="text-cyan font-medium">{studentRuleModal.username}</span>, in {selectedClass?.name}. They come after the class and lab rules.</p>
+              </div>
+              <button onClick={() => setStudentRuleModal(null)} aria-label="Close"
+                className="rounded-lg p-1.5 text-cream-muted hover:bg-ink-hover hover:text-cream cursor-pointer">
+                <Icon name="close" className="h-4 w-4" />
+              </button>
             </div>
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setStudentRuleModal(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-cream-secondary hover:text-cream hover:bg-ink-hover transition-colors">Cancel</button>
-              <button onClick={handleSaveStudentRule} className="px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-colors">Save</button>
-            </div>
+            <RuleList level="student" targetId={studentRuleModal.studentId} classId={selectedClass.id} compact />
           </div>
         </div>
       )}
@@ -480,7 +433,7 @@ function StudentsPanel({ students, onKick, onSetRule }) {
           </div>
           <div className="flex gap-2">
             <button onClick={() => onSetRule(s)} className="text-xs text-cyan hover:bg-cyan-muted px-3 py-1 rounded-lg transition-colors cursor-pointer border border-cyan/20">
-              Set Rule
+              Student rules
             </button>
             <button onClick={() => onKick(s.id)} className="text-xs text-danger hover:bg-danger-muted px-3 py-1 rounded-lg transition-colors cursor-pointer border border-transparent">
               Kick
@@ -514,50 +467,26 @@ function Breadcrumb({ cls, lab, onClass, className }) {
   );
 }
 
-function RulesPanel({ ruleText, setRuleText, ruleActive, setRuleActive, onSave, context, inheritedRule, showPresets }) {
+function RulesPanel({ level, targetId, classId, context }) {
+  // A lab shows the class rules it inherits above its own.
+  const [inherited, setInherited] = useState([]);
+  useEffect(() => {
+    if (level !== 'lab') { setInherited([]); return; }
+    api.get(`/api/teacher/rule-items?level=class&target_id=${classId}`)
+      .then((items) => setInherited(items.filter((r) => r.is_active)))
+      .catch(() => setInherited([]));
+  }, [level, classId]);
   return (
     <div className="max-w-2xl space-y-4">
       <div>
-        <h3 className="text-sm font-semibold text-cream mb-1">Prompt Rules</h3>
-        <p className="text-xs text-cream-muted mb-4">Target: <span className="text-cyan font-mono">{context}</span></p>
+        <h3 className="text-sm font-semibold text-cream mb-1">Rules for the tutor</h3>
+        <p className="text-xs text-cream-muted">
+          {level === 'class' ? 'For every TP of ' : 'For this TP only: '}
+          <span className="text-cyan font-mono">{context}</span>. The tutor follows the rules that are on.
+        </p>
       </div>
-
-      {showPresets && (
-        <SkillPresetManager currentText={ruleText} onUse={(content) => setRuleText(content)} />
-      )}
-
-      {inheritedRule && (
-        <div className="mb-4">
-          <p className="text-[10px] text-cream-muted uppercase tracking-widest mb-2 font-semibold">Inherited Class Rule</p>
-          <div className="w-full px-4 py-3 rounded-xl bg-ink-raised border border-border-subtle text-cream-secondary text-xs font-mono opacity-70">
-            {inheritedRule}
-          </div>
-        </div>
-      )}
-
-      <p className="text-[10px] text-cream-muted uppercase tracking-widest mb-2 font-semibold">Current Level Rule</p>
-      <textarea
-        value={ruleText}
-        onChange={(e) => setRuleText(e.target.value)}
-        rows={10}
-        placeholder="Enter system prompt rules… e.g. 'Only answer in French. Do not discuss topics unrelated to Python programming.'"
-        className="w-full px-4 py-3 rounded-xl bg-ink-deep border border-border-default text-cream text-sm font-mono placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 resize-none transition-colors"
-      />
-      <div className="flex items-center justify-between">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <div
-            onClick={() => setRuleActive(!ruleActive)}
-            className={`w-9 h-5 rounded-full transition-colors ${ruleActive ? 'bg-cyan' : 'bg-ink-surface'} relative`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-cream shadow transition-all ${ruleActive ? 'left-4' : 'left-0.5'}`} />
-          </div>
-          <span className="text-xs text-cream-secondary">{ruleActive ? 'Active' : 'Disabled'}</span>
-        </label>
-        <button onClick={onSave} disabled={!ruleText.trim()}
-          className="px-5 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40">
-          Save Rule
-        </button>
-      </div>
+      <RuleList key={`${level}-${targetId}`} level={level} targetId={targetId} classId={classId}
+        inherited={inherited} inheritedLabel="From the class (change them in the class Rules tab)" />
     </div>
   );
 }
@@ -609,8 +538,8 @@ function ClassSettingsPanel({ cls, onChange }) {
           <p className="text-sm font-medium text-cream">Exam mode</p>
           <p className="mt-1 text-xs text-cream-muted">
             {cls.exam_mode
-              ? 'On: in every lab of this class, students get Direct answers only. The course files are not searched, and students cannot open them, not even pages cited in earlier answers.'
-              : 'Off: students choose Direct, Search or Research. Turn it on during an exam to stop course search and close the course files in every lab.'}
+              ? 'On: in every lab of this class, students can search and open only the files ticked below; the others are closed, even pages cited in earlier answers. With no file ticked, students get Direct answers only.'
+              : 'Off: students choose Direct, Search or Research. Turn it on during an exam: only the files ticked below stay open.'}
           </p>
         </div>
         <button type="button" role="switch" aria-checked={!!cls.exam_mode} aria-label="Exam mode"
@@ -619,11 +548,12 @@ function ClassSettingsPanel({ cls, onChange }) {
           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${cls.exam_mode ? 'left-[18px]' : 'left-0.5'}`} />
         </button>
       </div>
+      <ExamFiles classId={cls.id} examMode={!!cls.exam_mode} />
     </div>
   );
 }
 
-function TestDrivePanel({ labId, labName, examMode = false }) {
+function TestDrivePanel({ labId, labName, classId, examMode = false }) {
   // The same agent, stream and message bubbles as the student chat: research
   // phases, the answer draft, a question back with clickable options, and
   // cited pages that open in the source preview.
@@ -636,6 +566,15 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
   const [phase, setPhase] = useState(null);
   const [preview, setPreview] = useState(null);
   const [mode, setMode] = useState(DEFAULT_MODE);
+  // Exam mode: the files of this lab the class keeps open (0: Direct only).
+  const [examFiles, setExamFiles] = useState(0);
+  useEffect(() => {
+    if (!examMode || !classId) { setExamFiles(0); return; }
+    api.get(`/api/teacher/classes/${classId}/exam-files`)
+      .then((files) => setExamFiles(files.filter((f) => f.exam_allowed && (!f.lab_id || f.lab_id === labId)).length))
+      .catch(() => setExamFiles(0));
+  }, [examMode, classId, labId]);
+  const directOnly = examMode && !examFiles;
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
   const { onScroll, update: updateScroll, follow } = useChatScroll(scrollRef);
@@ -693,7 +632,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: sessionId, message: text, client_request_id: createRequestId(),
-          mode: examMode ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
+          mode: directOnly ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
         signal: ctrl.signal,
         openWhenHidden: true,
         onopen: openStream,
@@ -730,7 +669,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
       setPhase(null);
       setIsStreaming(false);
     }
-  }, [input, isStreaming, sessionId, token, mode, examMode, follow]);
+  }, [input, isStreaming, sessionId, token, mode, directOnly, follow]);
 
   if (!sessionId) {
     return (
@@ -770,7 +709,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
               phase={isStreaming && m.sender === 'llm' && last ? phase : null}
               canRate={false}
               onPick={!isStreaming && last && m.clarification ? send : null}
-              onResearch={!isStreaming && !examMode && last && offersResearch(m) ? () => {
+              onResearch={!isStreaming && !directOnly && last && offersResearch(m) ? () => {
                 const question = messages.slice(0, i).reverse().find((x) => x.sender === 'user');
                 if (question) send(question.content, 'research');
               } : null} />
@@ -779,7 +718,7 @@ function TestDrivePanel({ labId, labName, examMode = false }) {
         })}
       </div>
       <div className="px-3 pt-3 border-t border-border-subtle">
-        <ModeSwitch mode={mode} onChange={setMode} examMode={examMode} disabled={isStreaming} />
+        <ModeSwitch mode={mode} onChange={setMode} examMode={examMode} examFiles={examFiles} disabled={isStreaming} />
       </div>
       <div className="flex gap-2 p-3">
         <input

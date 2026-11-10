@@ -11,7 +11,7 @@ import uuid
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Shared enums (mirrors SQLAlchemy enums)
@@ -95,6 +95,7 @@ class UserResponse(UserBase):
 
     id: uuid.UUID
     is_deleted: bool
+    tour_seen_at: datetime | None = None
 
 
 class UserCreateRequest(BaseModel):
@@ -266,6 +267,8 @@ class LabResponse(BaseModel):
     is_deleted: bool
     is_active: bool
     created_at: datetime
+    # For students, in a class in exam mode: files they may still search (0: Direct only).
+    exam_files: int = 0
 
 
 class DocumentResponse(BaseModel):
@@ -374,21 +377,48 @@ class JoinClassResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class RuleUpsertRequest(BaseModel):
-    level: RuleLevel
+class ExamFilesRequest(BaseModel):
+    document_ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
+
+
+class RuleItemCreate(BaseModel):
+    level: Literal["class", "lab", "student"]
     target_id: uuid.UUID
-    rules_text: str = Field(..., min_length=1)
+    # Required for a student rule: the class it applies in.
+    class_id: uuid.UUID | None = None
+    text: str = Field(..., min_length=1, max_length=1000)
     is_active: bool = True
 
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("empty rule")
+        return value
 
-class RuleResponse(BaseModel):
+
+class RuleItemUpdate(BaseModel):
+    text: str | None = Field(None, min_length=1, max_length=1000)
+    is_active: bool | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("empty rule")
+        return value
+
+
+class RuleItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    level: RuleLevel
+    level: str
     target_id: uuid.UUID
-    rules_text: str
+    class_id: uuid.UUID
+    text: str
     is_active: bool
+    position: int
 
 
 # ---------------------------------------------------------------------------
@@ -407,12 +437,6 @@ class SkillPresetResponse(BaseModel):
     id: uuid.UUID
     name: str
     content: str
-
-
-class ApplySkillRequest(BaseModel):
-    """Apply a preset (by id) or ad-hoc raw content to a class's skill rule."""
-    preset_id: uuid.UUID | None = None
-    content: str | None = None
 
 
 # ---------------------------------------------------------------------------

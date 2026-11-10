@@ -23,6 +23,8 @@ import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import { PdfPreviewModal } from '../components/PdfPreview';
 import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
 import ModeSwitch from '../components/ModeSwitch';
+import Tour from '../components/Tour';
+import { TOURS } from '../lib/tours';
 import useMediaQuery from '../lib/useMediaQuery';
 import { DEFAULT_MODE, offersResearch, saveMode, sessionMode, storedMode } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
@@ -40,7 +42,10 @@ const MIN_REFRESH_GAP_MS = 10_000;
 export default function Chat() {
   const { labId: urlLabId } = useParams();
   const navigate = useNavigate();
-  const { token, username } = useAuthStore();
+  const { token, username, tourSeen, markTourSeen } = useAuthStore();
+  // The guided tour starts by itself until it has been finished or skipped once.
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => { if (!tourSeen) setTourOpen(true); }, [tourSeen]);
 
   // ── Hierarchical state ──
   const [classes, setClasses] = useState([]);
@@ -75,6 +80,9 @@ export default function Chat() {
   // Exam mode (set by the teacher for the class): answers without course search.
   const activeClass = classes.find((c) => c.labs?.some((l) => l.id === activeLabId));
   const examMode = !!activeClass?.exam_mode;
+  // In exam mode, the files of this lab the teacher allowed (0: Direct only).
+  const examFiles = activeClass?.labs?.find((l) => l.id === activeLabId)?.exam_files || 0;
+  const directOnly = examMode && !examFiles;
   const abortRef = useRef(null);
   const listRef = useRef(null);
   const { onScroll, update: updateScroll, follow } = useChatScroll(listRef);
@@ -333,6 +341,7 @@ export default function Chat() {
               // The teacher may have turned exam mode on or off since the page loaded.
               if (activeClass && action.examMode !== !!activeClass.exam_mode) {
                 setClasses((prev) => prev.map((c) => c.id === activeClass.id ? { ...c, exam_mode: action.examMode } : c));
+                loadClasses({ quiet: true });   // and which files the exam keeps open
               }
               return;
             case 'done':
@@ -459,6 +468,7 @@ export default function Chat() {
         <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
         <button
           id="new-session-btn"
+          data-tour="new-session"
           onClick={handleNewSession}
           className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
         >
@@ -552,6 +562,7 @@ export default function Chat() {
           onSelectLab={handleSelectLab}
           onJoinClass={() => setShowJoinModal(true)}
           loading={classesLoading}
+          onHelp={() => setTourOpen(true)}
         >
           {/* Phones: the sessions sit under the classes, above the account footer. */}
           {activeLabId && !isWide && (
@@ -562,7 +573,7 @@ export default function Chat() {
         </HierarchicalSidebar>
 
         {/* Token limits at bottom: today and this week */}
-        <div className="shrink-0 px-4 py-3 border-t border-border-subtle space-y-2"
+        <div data-tour="quota" className="shrink-0 px-4 py-3 border-t border-border-subtle space-y-2"
           title="A question that has started always finishes. Today resets at midnight, the week on Monday.">
           <QuotaBar label="Today" used={usage.used} limit={usage.limit} />
           <QuotaBar label="This week" used={usage.week_used} limit={usage.week_limit} />
@@ -653,7 +664,7 @@ export default function Chat() {
               // Only the latest question back can still be answered with a click.
               onPick={!isStreaming && i === messages.length - 1 && msg.clarification ? handleSend : null}
               // An uncited Search answer offers the same question in Research.
-              onResearch={!isStreaming && !examMode && i === messages.length - 1 && offersResearch(msg)
+              onResearch={!isStreaming && !directOnly && i === messages.length - 1 && offersResearch(msg)
                 ? () => {
                   const question = messages.slice(0, i).reverse().find((m) => m.sender === 'user');
                   if (question) handleSend(question.content, 'research');
@@ -679,11 +690,11 @@ export default function Chat() {
             </div>
           )}
           {activeSessionId && (
-            <div className="mb-2">
-              <ModeSwitch mode={mode} onChange={chooseMode} examMode={examMode} disabled={isStreaming} />
+            <div className="mb-2" data-tour="modes">
+              <ModeSwitch mode={mode} onChange={chooseMode} examMode={examMode} examFiles={examFiles} disabled={isStreaming} />
             </div>
           )}
-          <div className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
+          <div data-tour="input" className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
             activeSessionId ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
           } bg-ink-deep`}>
             <textarea
@@ -717,6 +728,11 @@ export default function Chat() {
           </p>
         </div>
       </div>
+
+      {tourOpen && (
+        <Tour steps={TOURS.student} onNav={(open) => { if (!isWide) setNavOpen(open); }}
+          onClose={() => { setTourOpen(false); if (!tourSeen) markTourSeen(); }} />
+      )}
 
       {preview && preview.sessionId === activeSessionId && (
         <PdfPreviewModal source={preview} onClose={closeSource} />

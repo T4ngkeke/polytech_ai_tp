@@ -193,11 +193,17 @@ async def test_exam_mode_closes_course_documents_to_students(db_session, tmp_pat
         async with client:
             closed = await client.get(url, params=params)
             closed_image = await client.get(image, params=params)
+            # A file the teacher allowed in the exam stays open.
+            doc.exam_allowed = True
+            await db.flush()
+            allowed = await client.get(url, params=params)
+            doc.exam_allowed = False
             cls.exam_mode = False
             await db.flush()
             opened = await client.get(url, params=params)
         assert closed.status_code == 403 and closed.json()['detail'] == 'exam_mode'
         assert closed_image.status_code == 403   # checked before the revision is looked up
+        assert allowed.status_code == 200 and allowed.content == pdf_bytes
         assert opened.status_code == 200 and opened.content == pdf_bytes
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

@@ -284,6 +284,14 @@ class TestMe:
         assert body["role"] == "student"
         assert body["id"] == str(user.id)
 
+    async def test_the_tour_is_marked_seen_once(self, authed_client):
+        client, _ = authed_client
+        assert (await client.get("/api/auth/me")).json()["tour_seen_at"] is None
+        first = (await client.post("/api/auth/tour-seen")).json()["tour_seen_at"]
+        again = (await client.post("/api/auth/tour-seen")).json()["tour_seen_at"]
+        assert first is not None and again == first
+        assert (await client.get("/api/auth/me")).json()["tour_seen_at"] == first
+
 
 # ===================================================================
 # 7. POST /api/auth/change-password  (self-service)

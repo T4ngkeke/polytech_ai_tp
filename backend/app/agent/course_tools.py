@@ -161,18 +161,23 @@ class ToolView:
     """Run-local handles and the compact rendering of one run's results."""
 
     def __init__(self, index: dict):
-        # index: {document_id: {'filename': str, 'pages': [{'page_id', 'pdf_page_no'}, ...]}}
+        # index: {document_id: {'filename': str, 'pages': [{'page_id', 'pdf_page_no'}, ...],
+        #         'lab_name': name of this lab for a file of the lab, None for a class file}}.
+        # The lab's files get the first handles.
         self.documents: dict[str, str] = {}          # d1 -> document_id
+        self.lab_names: dict[str, str | None] = {}   # document_id -> lab name, None for a class file
         self.filenames: dict[str, str] = {}          # document_id -> filename
         self.pages: dict[str, tuple[str, str]] = {}  # d1.p20 -> (document_id, page_id)
         self.page_handles: dict[str, str] = {}       # page_id -> d1.p20
         self.neighbours: dict[str, tuple[str | None, str | None, int, int]] = {}
         self.doc_pages: dict[str, list[str]] = {}    # d1 -> [d1.p1, d1.p2, …]
         for number, (document_id, entry) in enumerate(
-                sorted(index.items(), key=lambda kv: (kv[1]['filename'], kv[0])), 1):
+                sorted(index.items(), key=lambda kv: (not kv[1].get('lab_name'), kv[1]['filename'], kv[0])), 1):
             doc = f'd{number}'
             self.documents[doc] = document_id
             self.filenames[document_id] = entry['filename']
+            if 'lab_name' in entry:
+                self.lab_names[document_id] = entry['lab_name']
             handles = []
             for position, page in enumerate(entry['pages'], 1):
                 handle = f'{doc}.p{page["pdf_page_no"]}' if page.get('pdf_page_no') else f'{doc}.o{position}'
@@ -195,14 +200,25 @@ class ToolView:
     def catalogue(self, limit: int = 40) -> str:
         """The run's documents for the prompt, one line each: 'd1 file.pdf (27 pages)'.
         A document whose parts have no PDF page number names its handles, which
-        are not dN.pK: 'd3 cours.odp (12 parts, d3.o1–d3.o12)'."""
+        are not dN.pK: 'd3 cours.odp (12 parts, d3.o1–d3.o12)'. When the index
+        says where each file belongs, the files of this lab come first under
+        their own heading, then the class files (shared by every lab)."""
         def size(doc):
             handles = self.doc_pages[doc]
             if all('.p' in h for h in handles):
                 return f'{len(handles)} pages'
             return f'{len(handles)} parts, {handles[0]}–{handles[-1]}'
-        lines = [f'{doc} {self.filenames[document_id]} ({size(doc)})'
-                 for doc, document_id in list(self.documents.items())[:limit]]
+        lines = []
+        section = None
+        for doc, document_id in list(self.documents.items())[:limit]:
+            if document_id in self.lab_names:
+                lab = self.lab_names[document_id]
+                heading = (f'Files of this TP ({lab}):' if lab
+                           else 'Class files (shared by every TP of the class):')
+                if heading != section:
+                    lines.append(heading)
+                    section = heading
+            lines.append(f'{doc} {self.filenames[document_id]} ({size(doc)})')
         if len(self.documents) > limit:
             lines.append(f'… and {len(self.documents) - limit} more files; search finds them.')
         return '\n'.join(lines)

@@ -1,7 +1,8 @@
 /**
  * authStore.js — Zustand global auth state for Edu-LLM.
  *
- * Stores: token, userId, username, userRole
+ * Stores: token, userId, username, userRole, tourSeen (the guided tour was
+ * finished or skipped: it no longer starts by itself)
  * Persists JWT to localStorage; hydrates on app boot.
  *
  * Every tab of the browser shares the one token in localStorage. When another
@@ -29,6 +30,7 @@ const useAuthStore = create((set, get) => ({
   userId: null,
   username: null,
   userRole: null,
+  tourSeen: true,
   isHydrated: false,
 
   // ── Derived ──
@@ -61,6 +63,7 @@ const useAuthStore = create((set, get) => ({
         userId: user.id,
         username: user.username,
         userRole: user.role,
+        tourSeen: !!user.tour_seen_at,
       });
 
       return user.role;
@@ -112,12 +115,21 @@ const useAuthStore = create((set, get) => ({
         userId: user.id,
         username: user.username,
         userRole: user.role,
+        tourSeen: !!user.tour_seen_at,
         isHydrated: true,
       });
     } catch {
       get().logout();
       set({ isHydrated: true });
     }
+  },
+
+  /** The guided tour was finished or skipped: remember it on the server. */
+  markTourSeen: async () => {
+    set({ tourSeen: true });
+    try {
+      await fetch('/api/auth/tour-seen', { method: 'POST', headers: { Authorization: `Bearer ${get().token}` } });
+    } catch { /* it starts again next time; not worth an error */ }
   },
 
   /**

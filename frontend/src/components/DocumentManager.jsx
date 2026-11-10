@@ -196,13 +196,13 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   return (
     <div className="space-y-4">
       {examMode && (
-        // Exam mode stops course search, not uploads: documents can be made ready for later.
+        // Exam mode keeps only the allowed files open; uploads go on, for later.
         <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-gold/40 bg-gold-muted px-3 py-2 text-xs text-cream">
           <Icon name="lock" className="h-4 w-4 shrink-0 text-gold" />
           <p className="min-w-0 flex-1">
             <span className="font-semibold text-gold">Exam mode is on.</span>{' '}
-            Students get answers without these documents for now. You can still upload and publish them;
-            they will be used when exam mode is turned off.
+            Students can search and open only the files you allow in the exam (Class settings); the
+            others wait until exam mode is off. You can still upload and publish files.
           </p>
           {onOpenClassSettings && (
             <button type="button" onClick={onOpenClassSettings}

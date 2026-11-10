@@ -16,6 +16,9 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm4g_picture_captions_v1',
     'm4h_job_not_before_v1',
     'm4i_quota_week_v1',
+    'm4j_rule_items_v1',
+    'm4k_exam_files_v1',
+    'm4l_tour_v1',
 )
 
 # Structured ingestion alone needs the versions before the research ones.

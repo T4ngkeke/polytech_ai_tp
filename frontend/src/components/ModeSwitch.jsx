@@ -1,11 +1,13 @@
 /**
  * Direct / Search / Research, next to the chat input. In exam mode the
- * teacher has turned course search off: only Direct is shown, with the reason.
+ * teacher may keep some files open (examFiles): the three modes stay, and
+ * Search and Research look only in them. With none, only Direct is shown,
+ * with the reason.
  */
 import { MODES } from '../lib/answerModes';
 
-export default function ModeSwitch({ mode, onChange, examMode = false, disabled = false }) {
-  if (examMode) {
+export default function ModeSwitch({ mode, onChange, examMode = false, examFiles = 0, disabled = false }) {
+  if (examMode && !examFiles) {
     return (
       <p className="text-[11px] text-gold" role="status">
         Exam mode: your teacher has turned course search off and closed the course documents. Answers are Direct only.
@@ -15,6 +17,12 @@ export default function ModeSwitch({ mode, onChange, examMode = false, disabled 
   const current = MODES.find((m) => m.key === mode) || MODES[2];
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {examMode && (
+        <p className="w-full text-[11px] text-gold" role="status">
+          Exam mode: Search and Research look only in the {examFiles === 1 ? 'file' : `${examFiles} files`} your
+          teacher allows. The other course files are closed.
+        </p>
+      )}
       <div role="radiogroup" aria-label="Answer mode"
         className="inline-flex rounded-lg border border-border-default bg-ink-deep p-0.5">
         {MODES.map((m) => (

@@ -4,7 +4,7 @@
  * Automatically attaches Authorization header from the auth store.
  * Redirects to /login on 401 responses.
  *
- * Generic verbs (get/post/put/delete/upload/raw); endpoints live at call sites.
+ * Generic verbs (get/post/put/patch/delete/upload/raw); endpoints live at call sites.
  * Note: student DELETE /api/student/sessions/{id} is a soft delete (the session
  * is hidden from the student but retained for teacher/admin audit).
  */
@@ -71,6 +71,9 @@ const api = {
 
   put: (endpoint, body) =>
     jsonRequest(endpoint, { method: 'PUT', body: JSON.stringify(body) }),
+
+  patch: (endpoint, body) =>
+    jsonRequest(endpoint, { method: 'PATCH', body: JSON.stringify(body) }),
 
   delete: (endpoint) => jsonRequest(endpoint, { method: 'DELETE' }),
 

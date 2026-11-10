@@ -10,8 +10,11 @@ POST   /api/teacher/classes
 GET    /api/teacher/classes
 POST   /api/teacher/classes/{class_id}/labs
 GET    /api/teacher/classes/{class_id}/labs
-PUT    /api/teacher/rules
-GET    /api/teacher/rules
+GET    /api/teacher/rule-items?level=&target_id=[&class_id=]   the rules of a class, lab or student
+POST   /api/teacher/rule-items
+PATCH  /api/teacher/rule-items/{item_id}
+DELETE /api/teacher/rule-items/{item_id}
+GET    /api/teacher/rule-presets
 GET    /api/teacher/chat-history
 GET    /api/teacher/students
 DELETE /api/teacher/classes/{class_id}/students/{student_id}
@@ -37,6 +40,7 @@ import os
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
+from typing import Literal
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status,
@@ -49,7 +53,7 @@ from backend.app.auth import require_teacher
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import (
-    AuditReport, Class, ClassStudent, Lab, RuleLevel, Session,
+    AuditReport, Class, ClassStudent, Document, Lab, RuleItem, Session,
     UsageStat, User, UserRole,
 )
 from backend.app.schemas import (
@@ -65,9 +69,10 @@ from backend.app.schemas import (
     LabUpdateRequest,
     DocumentResponse,
     DocumentSummaryResponse,
-    ApplySkillRequest,
-    RuleResponse,
-    RuleUpsertRequest,
+    ExamFilesRequest,
+    RuleItemCreate,
+    RuleItemResponse,
+    RuleItemUpdate,
     SessionWithMessagesResponse,
     SkillPresetResponse,
     SkillPresetUpsertRequest,
@@ -102,31 +107,37 @@ async def _verify_class_ownership(db: AsyncSession, class_id: uuid.UUID, teacher
     return cls
 
 
-async def _verify_rule_target_ownership(
-    db: AsyncSession, level: RuleLevel, target_id: uuid.UUID, teacher: User
-) -> None:
-    """A teacher may only read/write rules for a target inside one of their
-    own classes — these rules are injected into the chat prompt, so cross-tenant
-    writes would let one teacher hijack another's tutor behavior."""
-    if level == RuleLevel.class_:
-        owned = (await db.execute(
-            select(Class.id).where(Class.id == target_id, Class.teacher_id == teacher.id)
-        )).scalar_one_or_none()
-    elif level == RuleLevel.lab:
-        owned = (await db.execute(
-            select(Lab.id).join(Class, Lab.class_id == Class.id)
-            .where(Lab.id == target_id, Class.teacher_id == teacher.id)
-        )).scalar_one_or_none()
-    else:  # student — must be enrolled in a class the teacher owns
-        owned = (await db.execute(
-            select(ClassStudent.student_id).join(Class, ClassStudent.class_id == Class.id)
-            .where(ClassStudent.student_id == target_id, Class.teacher_id == teacher.id)
-        )).first()
+async def _rule_class(
+    db: AsyncSession, level: str, target_id: uuid.UUID, class_id: uuid.UUID | None, teacher: User
+) -> uuid.UUID:
+    """The class a rule target belongs to, when it is one of the teacher's.
+
+    These rules go into the chat prompt, so a teacher may touch only targets in
+    their own classes (403 otherwise). A student's rules belong to one class:
+    class_id is required, and the student must be in that class.
+    """
+    owned = None
+    if level == "class":
+        owned = await db.scalar(select(Class.id).where(
+            Class.id == target_id, Class.teacher_id == teacher.id, Class.is_deleted.is_(False)))
+    elif level == "lab":
+        owned = await db.scalar(select(Lab.class_id).join(Class, Lab.class_id == Class.id).where(
+            Lab.id == target_id, Class.teacher_id == teacher.id, Class.is_deleted.is_(False)))
+    elif level == "student" and class_id is not None:
+        owned = await db.scalar(select(Class.id).join(ClassStudent, ClassStudent.class_id == Class.id).where(
+            Class.id == class_id, Class.teacher_id == teacher.id, Class.is_deleted.is_(False),
+            ClassStudent.student_id == target_id))
     if owned is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized for this rule target",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this rule target")
+    return owned
+
+
+async def _owned_item(db: AsyncSession, item_id: uuid.UUID, teacher: User) -> RuleItem:
+    item = await db.scalar(select(RuleItem).join(Class, Class.id == RuleItem.class_id).where(
+        RuleItem.id == item_id, Class.teacher_id == teacher.id))
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    return item
 
 
 async def _build_student_summaries(
@@ -442,46 +453,76 @@ async def create_test_session(
     return TestSessionResponse(session_id=session.id)
 
 
-@router.put("/rules", response_model=RuleResponse)
-async def upsert_rule(
-    body: RuleUpsertRequest,
+# ===================================================================
+# Rules: a list per class, lab or student (rule_service)
+# ===================================================================
+
+
+@router.get("/rule-items", response_model=list[RuleItemResponse])
+async def list_rule_items(
+    level: Literal["class", "lab", "student"],
+    target_id: uuid.UUID,
+    class_id: uuid.UUID | None = None,
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
-) -> RuleResponse:
-    """Create or update a 3-tier rule based on (level, target_id)."""
-    await _verify_rule_target_ownership(db, body.level, body.target_id, teacher)
-    r = await rule_service.upsert_rule(
-        db,
-        level=body.level,
-        target_id=body.target_id,
-        rules_text=body.rules_text,
-        is_active=body.is_active,
-    )
-    return RuleResponse.model_validate(r)
+) -> list[RuleItemResponse]:
+    """The rules of a class, a lab, or a student in one class (class_id), in order."""
+    owned_class = await _rule_class(db, level, target_id, class_id, teacher)
+    items = await rule_service.list_items(db, level=level, target_id=target_id, class_id=owned_class)
+    return [RuleItemResponse.model_validate(i) for i in items]
 
 
-# ===================================================================
-# GET /api/teacher/rules
-# ===================================================================
-
-
-@router.get("/rules", response_model=list[RuleResponse])
-async def list_rules(
-    level: str | None = Query(None, description="Filter by level: class, lab, student"),
-    target_id: uuid.UUID | None = Query(None, description="Filter by target ID"),
+@router.post("/rule-items", response_model=RuleItemResponse, status_code=201)
+async def add_rule_item(
+    body: RuleItemCreate,
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
-) -> list[RuleResponse]:
-    """List rules with optional level and target_id filters."""
-    # When asking for a specific target's rule, verify the teacher owns it.
-    if target_id is not None and level is not None:
-        await _verify_rule_target_ownership(db, RuleLevel(level), target_id, teacher)
-    rules = await rule_service.list_rules(db, level=level, target_id=target_id)
-    return [RuleResponse.model_validate(r) for r in rules]
+) -> RuleItemResponse:
+    """Add a rule at the end of the list. 409 too_many_rules past 30."""
+    owned_class = await _rule_class(db, body.level, body.target_id, body.class_id, teacher)
+    try:
+        item = await rule_service.add_item(db, level=body.level, target_id=body.target_id,
+                                           class_id=owned_class, text=body.text, is_active=body.is_active)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    await db.commit()
+    return RuleItemResponse.model_validate(item)
+
+
+@router.patch("/rule-items/{item_id}", response_model=RuleItemResponse)
+async def update_rule_item(
+    item_id: uuid.UUID,
+    body: RuleItemUpdate,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> RuleItemResponse:
+    """Change the text of a rule, or switch it on or off."""
+    item = await _owned_item(db, item_id, teacher)
+    item = await rule_service.update_item(db, item, text=body.text, is_active=body.is_active)
+    await db.commit()
+    return RuleItemResponse.model_validate(item)
+
+
+@router.delete("/rule-items/{item_id}", status_code=204)
+async def delete_rule_item(
+    item_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    item = await _owned_item(db, item_id, teacher)
+    await db.delete(item)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/rule-presets")
+async def rule_presets(teacher: User = Depends(require_teacher)) -> list[dict]:
+    """Ready-made rules to add with one click (rule_service.BUILT_IN)."""
+    return rule_service.BUILT_IN
 
 
 # ===================================================================
-# Skill presets — instructor-style library + apply-to-class
+# Skill presets — a teacher's own rules to reuse (the rule lists add them)
 # ===================================================================
 
 
@@ -539,32 +580,6 @@ async def delete_skill_preset(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/classes/{class_id}/skill", response_model=RuleResponse)
-async def apply_class_skill(
-    class_id: uuid.UUID,
-    body: ApplySkillRequest,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> RuleResponse:
-    """Apply a preset (snapshot-copy) or ad-hoc content to a class's skill rule."""
-    await _verify_class_ownership(db, class_id, teacher)
-
-    if body.preset_id is not None:
-        try:
-            rule = await skill_preset_service.apply_preset_to_class(
-                db, owner_teacher_id=teacher.id, class_id=class_id, preset_id=body.preset_id)
-        except LookupError:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preset not found")
-        except PermissionError:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner")
-    elif body.content and body.content.strip():
-        rule = await rule_service.upsert_rule(
-            db, level=RuleLevel.class_, target_id=class_id, rules_text=body.content)
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Provide preset_id or non-empty content")
-
-    return RuleResponse.model_validate(rule)
 
 
 # ===================================================================
@@ -865,13 +880,63 @@ async def set_exam_mode(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassResponse:
-    """Turn exam mode on or off: on, every lab of the class answers in direct
-    mode only (no course search), enforced by the chat endpoint."""
+    """Turn exam mode on or off. On, students search and open only the files
+    allowed in the exam (PUT .../exam-files); with none, every lab answers in
+    direct mode only. The chat endpoint enforces it."""
     cls = await _verify_class_ownership(db, class_id, teacher)
     cls.exam_mode = body.exam_mode
     await db.commit()
     await db.refresh(cls)
     return ClassResponse.model_validate(cls)
+
+
+# ===================================================================
+# GET/PUT /api/teacher/classes/{class_id}/exam-files
+# ===================================================================
+
+
+async def _exam_files(db: AsyncSession, class_id: uuid.UUID) -> list[dict]:
+    rows = (await db.execute(
+        select(Document.id, Document.filename, Document.exam_allowed, Document.status,
+               Lab.id, Lab.name)
+        .outerjoin(Lab, Lab.id == Document.lab_id)
+        .where(Document.class_id == class_id, Document.lifecycle == "active",
+               Document.structured.is_(True),
+               (Document.lab_id.is_(None)) | (Lab.is_deleted.is_(False)))
+        .order_by(Lab.name.is_not(None), Lab.name, Document.filename))).all()
+    return [{"id": doc_id, "filename": filename, "exam_allowed": allowed,
+             "status": getattr(state, "value", state), "lab_id": lab_id, "lab_name": lab_name}
+            for doc_id, filename, allowed, state, lab_id, lab_name in rows]
+
+
+@router.get("/classes/{class_id}/exam-files")
+async def list_exam_files(
+    class_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[dict]:
+    """The class's files (whole class and each lab), and which ones students
+    may still search and open in exam mode."""
+    await _verify_class_ownership(db, class_id, teacher)
+    return await _exam_files(db, class_id)
+
+
+@router.put("/classes/{class_id}/exam-files")
+async def set_exam_files(
+    class_id: uuid.UUID,
+    body: ExamFilesRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[dict]:
+    """Set the files allowed in exam mode: the given ones, no others.
+    An id that is not a file of this class is ignored."""
+    await _verify_class_ownership(db, class_id, teacher)
+    allowed = set(body.document_ids)
+    for doc in (await db.scalars(select(Document).where(
+            Document.class_id == class_id, Document.lifecycle == "active"))).all():
+        doc.exam_allowed = doc.id in allowed
+    await db.commit()
+    return await _exam_files(db, class_id)
 
 
 # ===================================================================

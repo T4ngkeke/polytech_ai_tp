@@ -1,11 +1,9 @@
 """
 services/skill_preset_service.py — teacher skill-preset library.
 
-A teacher maintains a private library of reusable instructor-style (`skill.md`)
-presets. Applying one to a class **snapshot-copies** its content into the class's
-`level=class` rule via ``rule_service.upsert_rule`` — the prompt-injection path is
-unchanged (it still reads `rules`). Editing a preset afterwards does not
-retro-change classes that already selected it (snapshot, not live reference).
+A teacher keeps a private library of their own rules ("My presets"). The rule
+lists of the teacher page add one with a click: the text is copied into a new
+rule (rule_service), so editing the preset later changes no rule.
 """
 
 import uuid
@@ -13,8 +11,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models import Rule, RuleLevel, SkillPreset
-from backend.app.services import rule_service
+from backend.app.models import SkillPreset
 
 
 async def create_preset(
@@ -67,14 +64,3 @@ async def delete_preset(
     preset = await _get_owned(db, owner_teacher_id=owner_teacher_id, preset_id=preset_id)
     await db.delete(preset)
     await db.flush()
-
-
-async def apply_preset_to_class(
-    db: AsyncSession, *, owner_teacher_id: uuid.UUID, class_id: uuid.UUID,
-    preset_id: uuid.UUID,
-) -> Rule:
-    """Snapshot-copy a preset's content into the class's level=class skill rule."""
-    preset = await _get_owned(db, owner_teacher_id=owner_teacher_id, preset_id=preset_id)
-    return await rule_service.upsert_rule(
-        db, level=RuleLevel.class_, target_id=class_id, rules_text=preset.content,
-    )

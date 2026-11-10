@@ -23,8 +23,7 @@ from backend.app.models import (
     ClassStudent,
     Lab,
     Message,
-    Rule,
-    RuleLevel,
+    RuleItem,
     SenderType,
     Session,
     SystemConfig,
@@ -93,9 +92,9 @@ async def seed_chat(db_session: AsyncSession) -> dict:
     db_session.add_all(configs)
 
     # Three-tier rules
-    rule_class = Rule(level=RuleLevel.class_, target_id=cls.id, rules_text="Class: Be educational.", is_active=True)
-    rule_lab = Rule(level=RuleLevel.lab, target_id=lab.id, rules_text="Lab: Focus on physics.", is_active=True)
-    rule_student = Rule(level=RuleLevel.student, target_id=student1.id, rules_text="Student: Speak French.", is_active=True)
+    rule_class = RuleItem(level="class", target_id=cls.id, class_id=cls.id, text="Class: Be educational.")
+    rule_lab = RuleItem(level="lab", target_id=lab.id, class_id=cls.id, text="Lab: Focus on physics.")
+    rule_student = RuleItem(level="student", target_id=student1.id, class_id=cls.id, text="Student: Speak French.")
     db_session.add_all([rule_class, rule_lab, rule_student])
 
     await db_session.commit()

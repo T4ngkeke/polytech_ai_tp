@@ -5,8 +5,9 @@ routers/chat.py — the streaming chat endpoint.
    test drive), an open lab, the daily quota.
 2. The teacher's rules (class, lab, student) become part of the system prompt.
 3. The research agent answers in the requested mode — direct, search or
-   research (services/research_service.py); a class in exam mode answers in
-   direct mode only. The answer is saved with its citations and billed call by
+   research (services/research_service.py). A class in exam mode searches only
+   the files its teacher allowed in the exam, and answers in direct mode when
+   there are none. The answer is saved with its citations and billed call by
    call before it is sent as server-sent events.
 
 Models and limits come from SystemConfig (admin) with environment fallbacks.
@@ -182,12 +183,14 @@ async def chat_stream(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "session_without_lab")
     # All source scope and focus IDs are resolved from the authenticated
     # session. The model never supplies a URL or a revision map.
-    # A class in exam mode answers in direct mode only, whatever the client asks.
+    # A class in exam mode searches only the files allowed in the exam; with
+    # none, it answers in direct mode whatever the client asks.
     exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == class_id)))
-    mode = 'direct' if exam_mode else body.mode
     try:
         scope = await create_scope(db, user_id=current_user.id,
-                                   session_id=body.session_id)
+                                   session_id=body.session_id, exam_only=exam_mode)
+        exam_files = exam_mode and bool(scope.snapshot_revisions)
+        mode = 'direct' if exam_mode and not exam_files else body.mode
         research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
         runs = ResearchRuns(research_factory)
         # History may take a quarter of the research input tokens.
@@ -204,6 +207,9 @@ async def chat_stream(
         f'[{label.upper()} RULES]\n{rule_texts[key]}'
         for key, label in (('class_rules', 'class'), ('lab_rules', 'lab'),
                            ('student_rules', 'student')) if rule_texts.get(key))
+    if exam_files and mode != 'direct':
+        teaching_rules += ('\n\n[EXAM MODE]\nThe class is in exam mode: only the course files the '
+                           'teacher allowed for the exam are available. Use only these.')
     embedder = _make_embed_fn(llm_config)
     async def embed_query(query: str):
         return (await embedder([query]))[0]
@@ -243,7 +249,7 @@ async def chat_stream(
             rerank_model=llm_config['rerank_model'], on_phase=phase,
             vision_fn=vision, vision_model=vlm.model, limits=limits,
             on_draft=draft, allow_ask=allow_ask and mode == 'research',
-            mode=mode, exam_mode=exam_mode, session_factory=research_factory))
+            mode=mode, exam_mode=exam_mode, exam_files=exam_files, session_factory=research_factory))
         last_sent = time.monotonic()
         try:
             while not task.done():

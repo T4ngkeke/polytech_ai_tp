@@ -93,6 +93,20 @@ def test_the_catalogue_lists_files_in_handle_order_and_stops_at_the_limit():
     assert slides.catalogue() == 'd1 cours.odp (2 parts, d1.o1–d1.o2)'
 
 
+def test_the_catalogue_puts_the_files_of_this_tp_first_under_their_own_heading():
+    from backend.app.agent.course_tools import ToolView
+    page = lambda k: [{'page_id': f'p{k}', 'pdf_page_no': 1}]
+    view = ToolView({'a': {'filename': 'Cours1.pdf', 'pages': page(1), 'lab_name': None},
+                     'b': {'filename': 'TP1-sujet.pdf', 'pages': page(2), 'lab_name': 'tp1'},
+                     'c': {'filename': 'Annexe.pdf', 'pages': page(3), 'lab_name': None}})
+    assert view.catalogue() == ('Files of this TP (tp1):\nd1 TP1-sujet.pdf (1 pages)\n'
+                                'Class files (shared by every TP of the class):\n'
+                                'd2 Annexe.pdf (1 pages)\nd3 Cours1.pdf (1 pages)')
+    assert view.documents['d1'] == 'b'
+    only_class = ToolView({'a': {'filename': 'Cours1.pdf', 'pages': page(1), 'lab_name': None}})
+    assert only_class.catalogue().startswith('Class files (shared by every TP of the class):\nd1 ')
+
+
 def test_sampling_is_qwen_advice_unless_given():
     from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.services.model_routing import Endpoint
