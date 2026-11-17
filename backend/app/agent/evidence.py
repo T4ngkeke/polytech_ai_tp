@@ -55,6 +55,9 @@ class EvidenceStore:
         # ID in an earlier answer never names a different source in a later run.
         self.snapshot_revisions = snapshot_revisions
         self.first_number = first_number
+        # The number of the next new ID. The TP text (tp_text.py) sets it back
+        # to 1 before anything is read, so the TP keeps the same IDs in every run.
+        self.next_number = first_number
         self._items: dict[str, Evidence] = {}
         self._keys: dict[tuple, str] = {}
 
@@ -99,7 +102,8 @@ class EvidenceStore:
                    origin, content)
             evidence_id = self._keys.get(key)
             if evidence_id is None:
-                evidence_id = f'E{self.first_number + len(self._items)}'
+                evidence_id = f'E{self.next_number}'
+                self.next_number += 1
                 evidence = Evidence(
                     evidence_id, document_id, revision_id, page_id,
                     page['preview_page_no'], block_id, start, end, length, content,
@@ -137,7 +141,8 @@ class EvidenceStore:
             key = (doc_id, rev_id, page_id, asset_id, content)
             evidence_id = self._keys.get(key)
             if evidence_id is None:
-                evidence_id = f'E{self.first_number + len(self._items)}'
+                evidence_id = f'E{self.next_number}'
+                self.next_number += 1
                 evidence = Evidence(evidence_id, doc_id, rev_id, page_id,
                     page_no, block_id, 0, 0, 0, content, 'figure', 'visual_observation',
                     tuple(item.get('uncertainties') or ()), 'live_visual',

@@ -119,9 +119,9 @@ def build_describe_fn(configs: dict) -> DescribeFn:
         raise VisionUnavailable('vision_model_not_configured')
 
     async def describe(image: bytes, mime: str, context: dict) -> VisionResult:
-        from openai import AsyncOpenAI
+        from backend.app.services.shared_clients import openai_client
 
-        client = AsyncOpenAI(api_key=endpoint.api_key, base_url=endpoint.base_url)
+        client = openai_client(endpoint.base_url, endpoint.api_key)
         url = f'data:{mime};base64,{base64.b64encode(image).decode()}'
         started = time.monotonic()
         response = await client.chat.completions.create(

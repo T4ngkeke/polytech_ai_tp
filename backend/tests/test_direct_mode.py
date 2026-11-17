@@ -1,4 +1,4 @@
-"""Direct mode: one model call, no course material, the teacher's rules."""
+"""Direct mode: one model call, no search, the TP text when there is one, the teacher's rules."""
 import pytest
 
 from backend.app.agent.direct import CONCISE_NOTE, COURSE_NOTE, DIRECT_PROMPT, EXAM_NOTE, DirectRunner
@@ -67,3 +67,55 @@ async def test_the_answer_is_streamed():
 async def test_a_failed_call_still_answers_the_student():
     result = await DirectRunner(Model(error=RuntimeError('down'))).run('Q ?')
     assert result.stop_reason == 'partial_model_unavailable' and result.answer.startswith("La réponse")
+
+
+@pytest.mark.asyncio
+async def test_the_tp_text_follows_the_rules_without_ids():
+    from backend.app.agent.course_tools import CourseTools
+    from backend.app.agent.direct import DIRECT_TP_PROMPT, TP_COURSE_NOTE, TP_NOTE
+    from backend.tests.test_search_mode import TwoFiles
+    tools = TwoFiles()
+    model = Model('Le rendu se fait en binôme [E1] (page 1 du TP).')
+    result = await DirectRunner(model, course_tools=CourseTools(tools)).run(
+        'On fait quoi ?', teaching_rules='[LAB RULES]\n1. Pas de solution complète.')
+    system = model.seen[0][0]['content']
+    # A prompt that says the TP was read, not the one that says no course file was.
+    assert system.startswith(DIRECT_TP_PROMPT) and DIRECT_PROMPT not in system
+    assert TP_COURSE_NOTE in system and COURSE_NOTE not in system
+    assert system.index('[LAB RULES]') < system.index(TP_NOTE)
+    assert system.endswith(TP_NOTE + '\n\n--- [This TP] TP1.pdf, page 1 ---\nTP1 : objectifs, rendu en binôme'
+                           '\n\n--- [This TP] TP1.pdf, page 2 ---\nQuestion 3 : tracer la courbe')
+    # Only the TP pages are read; no search, no class course page.
+    assert [name for name, _ in tools.calls] == ['read', 'read'] and 'Le langage C' not in system
+    assert result.answer == 'Le rendu se fait en binôme  (page 1 du TP).' and result.citations == []
+    assert result.trace == [{'event': 'tp_text', 'pages': 2, 'chars': len(system) - system.index('--- [This TP]'),
+                             'in_prompt': True, 'left_out': 0}]
+
+
+@pytest.mark.asyncio
+async def test_without_a_tp_file_or_over_the_limit_direct_is_as_before(monkeypatch):
+    from backend.app.agent import tp_text
+    from backend.app.agent.course_tools import CourseTools
+    from backend.tests.test_course_tools import ViewFixture
+    from backend.tests.test_search_mode import TwoFiles
+    model = Model('Réponse.')
+    await DirectRunner(model).run('Q ?', teaching_rules='RULES')
+    fixture = ViewFixture()
+    await DirectRunner(model, course_tools=CourseTools(fixture)).run('Q ?', teaching_rules='RULES')
+    assert model.seen[1] == model.seen[0] and fixture.calls == []
+    monkeypatch.setattr(tp_text, 'TP_CHARS', 50)
+    await DirectRunner(model, course_tools=CourseTools(TwoFiles())).run('Q ?', teaching_rules='RULES')
+    assert model.seen[2] == model.seen[0]
+
+
+@pytest.mark.asyncio
+async def test_exam_mode_keeps_its_note_with_the_tp_text():
+    from backend.app.agent.course_tools import CourseTools
+    from backend.app.agent.direct import EXAM_FILES_NOTE, TP_COURSE_NOTE, TP_NOTE
+    from backend.tests.test_search_mode import TwoFiles
+    # The scope holds only the files the teacher allowed (tools.create_scope); here the TP file is one.
+    model = Model('Réponse.')
+    await DirectRunner(model, course_tools=CourseTools(TwoFiles()), exam_mode=True, exam_files=True).run('Q ?')
+    system = model.seen[0][0]['content']
+    assert EXAM_FILES_NOTE in system and TP_NOTE in system
+    assert TP_COURSE_NOTE not in system and COURSE_NOTE not in system

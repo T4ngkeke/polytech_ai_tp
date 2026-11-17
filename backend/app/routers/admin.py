@@ -56,7 +56,6 @@ from backend.app.schemas import (
     AdminAnalyticsResponse,
     AdminClassResponse,
     AdminDocumentResponse,
-    AdminResetPasswordRequest,
     ClassAnalyticsResponse,
     ClassResponse,
     CSVImportPreviewResponse,
@@ -194,8 +193,12 @@ async def update_role(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
-    """Change a user's role."""
+    """Change a user's role. An admin cannot change their own role (400
+    cannot_change_own_role): with the self-delete rule, the admin who acts
+    always stays, so there is always one admin."""
     user = await _get_active_user_or_404(db, user_id)
+    if body.role != user.role and user.id == _admin.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot_change_own_role")
     user.role = body.role
     db.add(user)
     await db.flush()
@@ -211,13 +214,17 @@ async def update_role(
 @router.put("/users/{user_id}/password", response_model=UserResponse)
 async def reset_user_password(
     user_id: uuid.UUID,
-    body: AdminResetPasswordRequest,
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
-    """Admin reset of a user's password — no old password required."""
+    """Reset a user's password to settings.RESET_PASSWORD (123456). The user
+    must choose a new one at the next sign-in (must_change_password): until
+    then only /api/auth/me and /api/auth/change-password answer."""
+    from backend.app.config import settings
+
     user = await _get_active_user_or_404(db, user_id)
-    user.hashed_password = await hash_password_async(body.new_password)
+    user.hashed_password = await hash_password_async(settings.RESET_PASSWORD)
+    user.must_change_password = True
     db.add(user)
     await db.flush()
     await db.refresh(user)
@@ -235,8 +242,11 @@ async def delete_user(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
-    """Soft-delete a user."""
+    """Soft-delete a user. An admin cannot delete their own account (400
+    cannot_delete_self): there is always one admin left."""
     user = await _get_active_user_or_404(db, user_id, detail="User not found or already deleted")
+    if user.id == _admin.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot_delete_self")
     user.is_deleted = True
     db.add(user)
     await db.flush()
@@ -294,6 +304,7 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "agent_total_seconds": "AGENT_TOTAL_SECONDS",
     "agent_call_seconds": "AGENT_CALL_SECONDS",
     "agent_max_input_tokens": "AGENT_MAX_INPUT_TOKENS",
+    "tp_context_percent": "TP_CONTEXT_PERCENT",
 }
 
 

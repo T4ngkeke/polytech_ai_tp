@@ -26,7 +26,7 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -123,7 +123,12 @@ def decode_access_token(token: str) -> uuid.UUID:
 # ---------------------------------------------------------------------------
 
 
+# While an account must change its reset password, only these answer.
+PASSWORD_CHANGE_PATHS = frozenset({"/api/auth/me", "/api/auth/change-password"})
+
+
 async def get_current_user(
+    request: Request,
     auth: HTTPAuthorizationCredentials = Depends(_security),
     db: AsyncSession = Depends(get_db, scope="function"),
 ):
@@ -134,6 +139,9 @@ async def get_current_user(
     - The token is invalid or expired.
     - No user with that ID exists in the database.
     - The user's ``is_deleted`` flag is True.
+
+    Rejects with HTTP 403 ``password_change_required`` while an admin-reset
+    password was not changed yet, except on PASSWORD_CHANGE_PATHS.
 
     The DB query is made on every request so that soft-deletes and role
     changes take effect immediately without waiting for tokens to expire.
@@ -152,6 +160,8 @@ async def get_current_user(
             detail="User not found or account has been deactivated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if user.must_change_password and request.url.path not in PASSWORD_CHANGE_PATHS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="password_change_required")
     return user
 
 

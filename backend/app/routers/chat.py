@@ -203,10 +203,7 @@ async def chat_stream(
                            limits.input_tokens // 4))
     except DocumentNotFound:
         raise HTTPException(404, 'source_unavailable') from None
-    teaching_rules = '\n\n'.join(
-        f'[{label.upper()} RULES]\n{rule_texts[key]}'
-        for key, label in (('class_rules', 'class'), ('lab_rules', 'lab'),
-                           ('student_rules', 'student')) if rule_texts.get(key))
+    teaching_rules = rule_service.teaching_rules_text(rule_texts)
     if exam_files and mode != 'direct':
         teaching_rules += ('\n\n[EXAM MODE]\nThe class is in exam mode: only the course files the '
                            'teacher allowed for the exam are available. Use only these.')
@@ -224,6 +221,11 @@ async def chat_stream(
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
               if vlm.model and vlm.base_url else None)
     request_id = str(body.client_request_id or uuid.uuid4())
+    # The TP text may use a share of the model's context (agent/tp_text.py).
+    from backend.app.agent.tp_text import tp_char_budget
+    from backend.app.services.model_servers import context_tokens
+    tp_chars = tp_char_budget(await context_tokens(agent.base_url, agent.model, agent.api_key),
+                              limits.tp_context_percent) if mode != 'research' else None
     title_model = ResearchModel(agent)
 
     async def research_events():
@@ -247,7 +249,7 @@ async def chat_stream(
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
             rerank_model=llm_config['rerank_model'], on_phase=phase,
-            vision_fn=vision, vision_model=vlm.model, limits=limits,
+            vision_fn=vision, vision_model=vlm.model, limits=limits, tp_chars=tp_chars,
             on_draft=draft, allow_ask=allow_ask and mode == 'research',
             mode=mode, exam_mode=exam_mode, exam_files=exam_files, session_factory=research_factory))
         last_sent = time.monotonic()

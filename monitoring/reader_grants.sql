@@ -41,3 +41,5 @@ GRANT SELECT (user_id, date, resolved_at) ON quota_reset_requests TO grafana_rea
 GRANT SELECT (user_id, lab_id, reason, created_at) ON chat_refusals TO grafana_reader;
 -- statement
 GRANT SELECT (class_id, student_id) ON class_students TO grafana_reader;
+-- statement
+GRANT SELECT (component, kind, created_at) ON service_failures TO grafana_reader;

@@ -9,15 +9,23 @@
  * remembers its button through `source` ('b:<key>' or 'm:<saved rule id>').
  * The active rules go into the prompt as a numbered list (backend rule_service).
  *
+ * After a rule is added, switched on or edited, the model checks the active
+ * rules of this list for pairs that contradict (POST /api/teacher/rule-items/check).
+ * A pair is shown as a warning: the teacher reviews the two rules, or ignores
+ * the warning (remembered in this browser by the two texts). Switching a rule
+ * off or deleting it removes its warning without a model call.
+ *
  * Data: GET/POST /api/teacher/rule-items, PATCH/DELETE /api/teacher/rule-items/{id},
  * GET /api/teacher/rule-presets (ready-made), /api/teacher/skill-presets (My rules).
- * The interaction was agreed on a prototype first (2026-11-10).
+ * The interaction was agreed on a prototype first (2026-11-10; the check 2026-11-17).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 
 import api from '../lib/api';
-import { autoName } from '../lib/rules';
+import {
+  autoName, conflictKey, conflictNumbers, liveConflicts, loadIgnored, saveIgnored,
+} from '../lib/rules';
 import Icon from './Icon';
 
 const MAX_RULES = 30;
@@ -46,8 +54,30 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
   const [busy, setBusy] = useState(false);
   const [editingRule, setEditingRule] = useState(null);  // { id, text }
   const [editor, setEditor] = useState(null);            // { mode: 'new'|'edit', id?, text, name, save }
+  // The contradiction check: idle | checking | done | unavailable
+  const [check, setCheck] = useState({ state: 'idle', conflicts: [] });
+  const [review, setReview] = useState(null);            // the key of the conflict being reviewed
+  const [showIgnored, setShowIgnored] = useState(false);
+  const checkRun = useRef(0);
 
   const query = `level=${level}&target_id=${targetId}${level === 'student' ? `&class_id=${classId}` : ''}`;
+  const listKey = `${level}:${targetId}${level === 'student' ? `:${classId}` : ''}`;
+  const [ignored, setIgnored] = useState(() => loadIgnored(listKey));
+  useEffect(() => { setIgnored(loadIgnored(listKey)); setCheck({ state: 'idle', conflicts: [] }); setReview(null); }, [listKey]);
+  const ignore = (keys) => { setIgnored(keys); saveIgnored(listKey, keys); };
+
+  // Only the latest check counts: a slower earlier answer is dropped.
+  const runCheck = useCallback(async () => {
+    const run = ++checkRun.current;
+    setCheck((prev) => ({ ...prev, state: 'checking' }));
+    try {
+      const body = { level, target_id: targetId, ...(level === 'student' ? { class_id: classId } : {}) };
+      const { conflicts } = await api.post('/api/teacher/rule-items/check', body);
+      if (run === checkRun.current) setCheck({ state: 'done', conflicts });
+    } catch {
+      if (run === checkRun.current) setCheck({ state: 'unavailable', conflicts: [] });
+    }
+  }, [level, targetId, classId]);
   const load = useCallback(async () => {
     try { setItems(await api.get(`/api/teacher/rule-items?${query}`)); }
     catch (err) { setItems([]); toast.error(err.message); }
@@ -83,6 +113,7 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
         text: text.trim(), source, ...extra,
       });
       await load();
+      if (created.is_active) runCheck();
       return created;
     } catch (err) {
       toast.error(err.message === 'too_many_rules' ? `At most ${MAX_RULES} rules` : err.message);
@@ -96,6 +127,7 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
     try {
       const updated = await api.patch(`/api/teacher/rule-items/${item.id}`, body);
       setItems((prev) => prev.map((r) => (r.id === item.id ? updated : r)));
+      if (updated.is_active && (body.is_active === true || body.text !== undefined)) runCheck();
       return true;
     } catch (err) {
       toast.error(err.message);
@@ -108,7 +140,10 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
     const position = items.findIndex((r) => r.id === item.id);
     try {
       await api.delete(`/api/teacher/rule-items/${item.id}`);
-      setItems((prev) => prev.filter((r) => r.id !== item.id));
+      const left = items.filter((r) => r.id !== item.id);
+      setItems(left);
+      // The reasons name rule numbers, which move after a delete.
+      if (liveConflicts(check.conflicts, left).length) runCheck();
       undoToast(`Removed “${short(item.text)}”`, () => add(item.text, item.source,
         { is_active: item.is_active, position }));
     } catch (err) { toast.error(err.message); }
@@ -131,6 +166,7 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
         await api.put(`/api/teacher/skill-presets/${editor.id}`, { name, content: text });
         toast.success(`Saved “${name}”`);
         loadMine(); minesChanged(); await load();
+        if ((items || []).some((r) => r.source === `m:${editor.id}` && r.is_active)) runCheck();
       } else if (editor.save) {
         const preset = await api.post('/api/teacher/skill-presets', { name, content: text });
         loadMine(); minesChanged();
@@ -168,6 +204,11 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
   if (items === null) return <p className="text-xs text-cream-muted">Loading rules…</p>;
   const active = items.filter((r) => r.is_active).length;
   const full = items.length >= MAX_RULES;
+  const live = liveConflicts(check.conflicts, items).map((c) => ({ ...c, key: conflictKey(items, c) }));
+  const shown = live.filter((c) => !ignored.includes(c.key));
+  const hidden = live.filter((c) => ignored.includes(c.key));
+  const reviewed = shown.find((c) => c.key === review);
+  const flagged = new Set((reviewed ? [reviewed] : shown).flatMap((c) => c.rule_ids));
   return (
     <div className="space-y-4">
       {inherited?.length > 0 && (
@@ -195,8 +236,9 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
         ) : (
           <ol className="space-y-1.5">
             {items.map((r, i) => (
-              <li key={r.id} className={`flex items-start gap-3 rounded-xl border px-3 py-2 ${
-                r.is_active ? 'border-border-default bg-ink-raised' : 'border-border-subtle bg-ink-base'}`}>
+              <li key={r.id} id={`rule-${r.id}`} className={`flex items-start gap-3 rounded-xl border px-3 py-2 transition-shadow ${
+                !r.is_active ? 'border-border-subtle bg-ink-base'
+                  : flagged.has(r.id) ? 'border-gold/50 bg-ink-raised ring-2 ring-gold-muted' : 'border-border-default bg-ink-raised'}`}>
                 <span className="mt-0.5 w-5 shrink-0 text-right font-mono text-xs text-cream-muted">{i + 1}.</span>
                 {editingRule?.id === r.id ? (
                   <div className="flex-1 space-y-2">
@@ -217,7 +259,14 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
                 ) : (
                   <div className="min-w-0 flex-1">
                     <p className={`whitespace-pre-wrap text-sm ${r.is_active ? 'text-cream' : 'text-cream-muted line-through'}`}>{r.text}</p>
-                    <p className="mt-0.5 text-[11px] text-cream-muted">{origin(r.source)}</p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-cream-muted">
+                      <span>{origin(r.source)}</span>
+                      {flagged.has(r.id) && r.is_active && (
+                        <span className="inline-flex items-center gap-1 text-gold">
+                          <Icon name="warning" className="h-3 w-3" />May contradict
+                        </span>
+                      )}
+                    </p>
                   </div>
                 )}
                 {editingRule?.id !== r.id && (
@@ -233,6 +282,20 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
           </ol>
         )}
       </div>
+
+      <ConflictPanel check={check} items={items} shown={shown} hidden={hidden} reviewed={reviewed}
+        showIgnored={showIgnored} setShowIgnored={setShowIgnored}
+        onReview={(c) => {
+          setReview(c.key);
+          document.getElementById(`rule-${c.rule_ids[0]}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }}
+        onDone={() => setReview(null)}
+        onIgnore={(c) => {
+          ignore([...ignored, c.key]);
+          setReview(null);
+          undoToast('Warning ignored for these two rules', () => ignore(ignored.filter((k) => k !== c.key)));
+        }}
+        onWarnAgain={(c) => ignore(ignored.filter((k) => k !== c.key))} />
 
       <div className="rounded-xl border border-border-subtle bg-ink-raised/40 p-3 space-y-3">
         <Group title="Ready-made rules" note="Click to add, click again to remove">
@@ -306,6 +369,70 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ConflictPanel({ check, items, shown, hidden, reviewed, showIgnored, setShowIgnored,
+  onReview, onDone, onIgnore, onWarnAgain }) {
+  if (check.state === 'checking') {
+    return <p className="text-xs text-cream-muted" role="status">Checking the rules for contradictions…</p>;
+  }
+  if (check.state === 'unavailable') {
+    return <p className="text-xs text-cream-muted" role="status">The rules could not be checked for contradictions just now.</p>;
+  }
+  if (check.state !== 'done') return null;
+  if (!shown.length && !hidden.length) {
+    return (
+      <p className="inline-flex items-center gap-1.5 text-xs text-cream-muted" role="status">
+        <Icon name="check" className="h-3.5 w-3.5 text-cyan" />No contradiction found between these rules.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2" role="status">
+      {shown.map((c) => {
+        const [a, b] = conflictNumbers(items, c);
+        const reviewing = reviewed?.key === c.key;
+        return (
+          <div key={c.key} className="space-y-2 rounded-xl border border-gold/40 bg-gold-muted px-3 py-2.5">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-gold">
+              <Icon name="warning" className="h-4 w-4" />Rules {a} and {b} may contradict
+            </p>
+            {c.reason && <p className="text-sm text-cream-secondary">{c.reason}</p>}
+            <p className="text-[11px] text-cream-muted">
+              {reviewing
+                ? 'Switch one of the two rules off, edit it, or delete it. The warning goes away by itself.'
+                : 'The tutor would follow one of them without telling the student. Rules of different levels do not need this: a student rule wins over a TP rule, a TP rule over a class rule.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {reviewing ? (
+                <button type="button" onClick={onDone}
+                  className="cursor-pointer rounded-lg px-3 py-1 text-xs text-cream-secondary hover:bg-ink-hover">Done</button>
+              ) : (
+                <button type="button" onClick={() => onReview(c)}
+                  className="cursor-pointer rounded-lg border border-gold/40 px-3 py-1 text-xs text-gold hover:bg-gold-muted">Review the two rules</button>
+              )}
+              <button type="button" onClick={() => onIgnore(c)}
+                className="cursor-pointer rounded-lg px-3 py-1 text-xs text-cream-secondary hover:bg-ink-hover">Ignore</button>
+            </div>
+          </div>
+        );
+      })}
+      {hidden.length > 0 && (
+        <p className="text-[11px] text-cream-muted">
+          {hidden.length} ignored warning{hidden.length > 1 ? 's' : ''} ·{' '}
+          <button type="button" onClick={() => setShowIgnored(!showIgnored)}
+            className="cursor-pointer text-cyan hover:underline">{showIgnored ? 'Hide' : 'Show'}</button>
+        </p>
+      )}
+      {showIgnored && hidden.map((c) => (
+        <div key={c.key} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle px-3 py-2">
+          <p className="text-xs text-cream-secondary">Rules {conflictNumbers(items, c).join(' and ')}: {c.reason}</p>
+          <button type="button" onClick={() => onWarnAgain(c)}
+            className="cursor-pointer rounded-lg px-2 py-1 text-xs text-cyan hover:bg-cyan-muted">Warn me again</button>
+        </div>
+      ))}
     </div>
   );
 }

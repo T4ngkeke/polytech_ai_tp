@@ -1810,6 +1810,133 @@
         "orientation": "auto",
         "wideLayout": true
       }
+    },
+    {
+      "type": "row",
+      "id": 43,
+      "title": "Service failures",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 63,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 44,
+      "title": "Service failures",
+      "description": "Failures the student does not see: a service failed and the answer went on without it (the reranker: merged order kept; the embeddings: full-text search only; a picture view; a TP page; a session title). Retried means the second try worked. Failed model calls are in Model calls (Errors).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 10,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT CASE component WHEN 'rerank' THEN 'Reranker' WHEN 'embedding' THEN 'Embeddings' WHEN 'vision' THEN 'Picture view' WHEN 'tp_text' THEN 'TP text' WHEN 'title' THEN 'Session title' WHEN 'report' THEN 'Teacher report' WHEN 'report_embedding' THEN 'Teacher report (embeddings)' WHEN 'captions' THEN 'Figure captions (worker)' WHEN 'worker' THEN 'Worker' ELSE component END AS \"Service\", kind AS \"Error\", count(*) AS \"Count\", max(created_at) AS \"Last\"\nFROM service_failures WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 3 DESC",
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 45,
+      "title": "Service failures per hour",
+      "description": "By service, in the time range.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${db}"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 64,
+        "w": 14,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${db}"
+          },
+          "rawSql": "SELECT $__timeGroupAlias(created_at, 1h), CASE component WHEN 'rerank' THEN 'Reranker' WHEN 'embedding' THEN 'Embeddings' WHEN 'vision' THEN 'Picture view' WHEN 'tp_text' THEN 'TP text' WHEN 'title' THEN 'Session title' WHEN 'report' THEN 'Teacher report' WHEN 'report_embedding' THEN 'Teacher report (embeddings)' WHEN 'captions' THEN 'Figure captions (worker)' WHEN 'worker' THEN 'Worker' ELSE component END AS metric, count(*) AS value\nFROM service_failures WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     }
   ]
 }

@@ -60,7 +60,9 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
                             # M4-K, M4-L
                             ("documents", "exam_allowed"), ("users", "tour_seen_at"),
                             # M4-M, M4-N
-                            ("rule_items", "source"), ("quota_reset_requests", "outcome")]
+                            ("rule_items", "source"), ("quota_reset_requests", "outcome"),
+                            # M4-O
+                            ("users", "must_change_password")]
         def needs_migration(sync_conn):
             inspector = inspect(sync_conn)
             return any(inspector.has_table(table) and column not in {
@@ -85,8 +87,20 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
             missing = [version for version in required if version not in applied]
             if missing:
                 raise RuntimeError(f"Structured migrations not applied: {', '.join(missing)}")
+    # Failures the user does not see, written for monitoring every few seconds.
+    import asyncio
+    from backend.app.database import AsyncSessionLocal
+    from backend.app.services.failure_log import run_writer
+    writer = asyncio.create_task(run_writer(AsyncSessionLocal))
     yield
-    # Teardown: nothing to clean up — connection pool disposes automatically.
+    writer.cancel()
+    try:
+        await writer
+    except asyncio.CancelledError:
+        pass
+    # The database pool disposes itself; the model clients do not.
+    from backend.app.services.shared_clients import close_all
+    await close_all()
 
 
 # ---------------------------------------------------------------------------

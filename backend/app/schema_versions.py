@@ -21,6 +21,7 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm4l_tour_v1',
     'm4m_rule_source_v1',
     'm4n_reset_outcome_v1',
+    'm4o_must_change_password_v1',
 )
 
 # Structured ingestion alone needs the versions before the research ones.

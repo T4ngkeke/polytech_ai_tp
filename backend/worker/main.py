@@ -228,11 +228,10 @@ async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
 def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
     """Construct the embedding client from one SystemConfig snapshot. Called by
     the fn-builder only when the config changed."""
-    from openai import AsyncOpenAI
+    from backend.app.services.shared_clients import openai_client
 
-    embed_client = AsyncOpenAI(
-        api_key=cfg["embedding_api_key"], base_url=cfg["embedding_base_url"]
-    )
+    # Shared and never dropped: see backend/app/services/shared_clients.py.
+    embed_client = openai_client(cfg["embedding_base_url"], cfg["embedding_api_key"])
     from backend.app.services.model_routing import Endpoint
     from backend.worker.picture_captions import settings_from_config
 
@@ -250,8 +249,11 @@ async def main() -> None:  # pragma: no cover - entrypoint
     logging.basicConfig(level=logging.INFO)
 
     from backend.app.database import AsyncSessionLocal
+    from backend.app.services.failure_log import run_writer
     from backend.worker.gpu_gate import ChatLoadGate, GpuGate
 
+    # Failures the admin should see (captions, leases), written every few seconds.
+    writer = asyncio.create_task(run_writer(AsyncSessionLocal))  # noqa: F841 - kept referenced
     async with AsyncSessionLocal() as db:
         build_fns = make_fn_builder()
         chat_gate = ChatLoadGate()

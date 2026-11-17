@@ -6,7 +6,7 @@
 
 export const MODES = [
   // Times measured alone on the v9 stack (2026-10-15), one question at a time.
-  { key: 'direct', label: 'Direct', hint: 'Answers at once, without the course files' },
+  { key: 'direct', label: 'Direct', hint: 'Fast answer, no course search. Knows this TP statement only.' },
   { key: 'search', label: 'Search', hint: 'One search in the course files, about 10 seconds' },
   { key: 'research', label: 'Research', hint: 'Deep search in the course files, about a minute' },
 ];
@@ -53,7 +53,7 @@ export function saveMode(sessionId, mode, getStorage = () => localStorage) {
 
 /** The label under an answer, or null for answers written before the modes. */
 export function modeLabel(mode) {
-  if (mode === 'direct') return 'Direct · course files not consulted';
+  if (mode === 'direct') return 'Direct · course not searched';
   if (mode === 'search') return 'Search';
   if (mode === 'research') return 'Research';
   return null;

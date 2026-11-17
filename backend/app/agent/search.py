@@ -11,6 +11,15 @@ several steps. The model gets no tools:
      lines; unknown IDs are removed, and one check turn is sent only when the
      answer cites nothing although pages were found.
 
+A lab can have its own files (the TP statement) next to the class files (the
+course). The TP statement is background of the whole session, not something to
+search for ("what are we doing?", "question 3?" do not describe its content).
+When its text is small enough (tp_text.py), all of it is in the system message,
+the same for every question, and the search gives class course pages only; an
+empty or weak search then still answers from the TP. A longer TP text is left
+out, and the best pages of a search inside the TP files are given with the
+found pages instead. Each page says whether it is from this TP or the course.
+
 Evidence, citations and the final access check are the research agent's
 (CourseTools, EvidenceStore), so a search answer is stored, shown and audited
 like a research answer.
@@ -25,12 +34,13 @@ import time
 import uuid
 from typing import Callable
 
-from backend.app.agent.course_tools import CourseTools, _page_furniture
+from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.result import (
     CITATION_RE, LABEL_RE, ResearchQuotaExceeded, ResearchResult, ResearchRunStopped,
     cited_ids, malformed_refs,
 )
-from backend.app.agent.runner import DONE_RE, NO_DOCUMENTS_TURN, _LEADING_ID, _without_document_handles
+from backend.app.agent.runner import DONE_RE, NO_DOCUMENTS_TURN, _LEADING_ID, _without_document_handles, answer_ending
+from backend.app.agent.tp_text import CLASS_COURSE, PAGE_CHARS, THIS_TP, page_header, page_text, tp_text
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +70,7 @@ CHECK_TURN = ('The student has not seen this reply yet. If it states course cont
               'not cover the question and the reply says so, or it needs no course material, reply '
               'only with the word DONE.')
 NO_PAGES = '(The course search found no page for this question.)'
+NO_CLASS_PAGES = '(The course search found no class course page for this question.)'
 
 # The product's settings, chosen from the 2026-10-15 comparison (M4_AGENT_EVALUATION.md):
 # the question as written (a rewrite lost 5 points on v4), with the reranker. Below a
@@ -83,11 +94,23 @@ def min_score_for(rerank_model: str | None) -> float | None:
     name = (rerank_model or '').lower()
     return next((v for k, v in MIN_SCORES.items() if k in name), MIN_SCORE)
 SEARCH_TOP_K = 10      # blocks per query (the search tool allows at most 12)
-PAGE_CHARS = 6000      # text of one page
-CONTEXT_CHARS = 24000  # text of all pages
+CONTEXT_CHARS = 24000  # text of all found and adjacent pages (PAGE_CHARS: one page)
 MAX_PAGES = 16         # pages read, found and adjacent
 MAX_QUERIES = 3
 HISTORY_TURNS = 4      # earlier messages the rewrite sees
+TP_PAGES = 2           # TP pages given with the found pages when the TP text is too long
+
+SOURCES_NOTE = ('Pages marked [This TP] are the statement of the TP (the lab) the student is working '
+                'on. Pages marked [Class course] come from the course files shared by every TP of the '
+                'class. Cite both kinds by their [E#] IDs. For a question about the TP itself (what to '
+                'do, a numbered question or exercise, what to hand in), answer from the [This TP] '
+                'pages; for a concept, use the pages that explain it. When the student\'s reference to '
+                'a question or exercise can mean more than one place in the TP, say in one short '
+                'sentence which one you take, then answer it. Answer what the student asks: '
+                'do not work through or reveal later questions of the TP that the student did not ask '
+                'about.')
+TP_HEADING = ("The statement of this TP, all its pages (the class course pages found for a question "
+              "follow the student's message):")
 
 
 def _without_unknown(text: str, permitted) -> str:
@@ -116,6 +139,7 @@ class SearchRunner:
     def __init__(self, course_tools: CourseTools, model, *, rewrite: bool = False,
                  min_score: float | None = None, concise: bool = False, total_timeout: float = 120.0,
                  model_timeout: float = 60.0, context_chars: int = CONTEXT_CHARS,
+                 tp_chars: int | None = None,
                  on_phase: Callable[[str], None] | None = None,
                  on_draft: Callable[[str | None], None] | None = None,
                  clock: Callable[[], float] = time.monotonic):
@@ -126,6 +150,8 @@ class SearchRunner:
         self.rewrite, self.min_score, self.concise = rewrite, min_score, concise
         self.total_timeout, self.model_timeout = total_timeout, model_timeout
         self.context_chars, self.clock = context_chars, clock
+        # tp_chars: limit of the TP text (tp_text.tp_char_budget; None: TP_CHARS).
+        self.tp_chars = tp_chars
         self.on_phase = on_phase or (lambda _phase: None)
         self.on_draft = on_draft
 
@@ -181,6 +207,9 @@ class SearchRunner:
                                   model_calls, tools.trace + trace, usage, mode='search')
 
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
+        # Ends the answer turn: the rules again and the answer language
+        # (runner.answer_ending, agent/language.py).
+        language = answer_ending(question, history, teaching_rules)
         system = (SEARCH_PROMPT + ('\n' + CONCISE_NOTE if self.concise else '')
                   + '\n' + teaching_rules + '\n' + research_note)
         catalogue = await tools.catalogue()
@@ -190,7 +219,12 @@ class SearchRunner:
             messages = [{'role': 'system', 'content': system}, *turns,
                         {'role': 'user', 'content': question + '\n\n' + NO_DOCUMENTS_TURN}]
             return await self._finish(messages, call, note, result, {}, earlier_citations,
-                                      'no_documents', pages_given=False)
+                                      'no_documents', pages_given=False, language=language)
+
+        index = tools.view
+        # The files of this lab (the TP) and of the whole class (the course).
+        tp_docs = [d for d in index.filenames if index.lab_names.get(d)]
+        mixed = bool(tp_docs) and any(not index.lab_names.get(d) for d in index.filenames)
 
         # 1. Queries.
         queries, source = [question[:500]], 'raw'
@@ -209,37 +243,53 @@ class SearchRunner:
                 source = 'rewrite_failed'
         note('search_queries', queries=queries, source=source)
 
-        # 2. Search, merge by page (best score, else best rank), read.
+        # 2. Search, and the TP text (its reads register evidence first: a
+        # search registers none). Merge the found pages by page (best score,
+        # else best rank), read.
         self.on_phase('finding')
-        found = await asyncio.gather(*(tools.execute('search', {'query': q, 'top_k': SEARCH_TOP_K})
-                                       for q in queries))
+        tp, found = await asyncio.gather(
+            tp_text(tools, cite=True, earlier_citations=earlier_citations, max_chars=self.tp_chars),
+            asyncio.gather(*(tools.execute('search', {'query': q, 'top_k': SEARCH_TOP_K}) for q in queries)))
+        with_tp = bool(tp and tp.text)
+        if tp:
+            note('tp_text', pages=tp.pages, chars=tp.chars, in_prompt=with_tp, left_out=len(tp.left_out))
+        # The TP text sits after the rules, before the conversation: the same
+        # for every question of the session.
+        if with_tp:
+            system += '\n' + SOURCES_NOTE + '\n\n' + TP_HEADING + '\n\n' + tp.text
+        elif mixed:
+            system += '\n' + SOURCES_NOTE
         pages: dict[tuple[str, str], dict] = {}
         for results in found:
             for rank, item in enumerate(results.get('items') or [] if results.get('ok') else []):
                 key = (item['document_id'], item['page_id'])
+                if with_tp and item['document_id'] in tp.documents:
+                    continue  # already in the prompt
                 page = pages.setdefault(key, {'rank': rank, 'score': None})
                 page['rank'] = min(page['rank'], rank)
                 if item.get('score') is not None:
                     page['score'] = max(page['score'] if page['score'] is not None else item['score'],
                                         item['score'])
+        tp_pages = await self._tp_pages(question, tp_docs, note) if mixed and not with_tp else []
         scores = [p['score'] for p in pages.values() if p['score'] is not None]
         best = max(scores) if scores else None
         order = sorted(pages, key=lambda k: (-pages[k]['score'] if best is not None and pages[k]['score']
                                              is not None else 0, pages[k]['rank']))
         weak = best is not None and self.min_score is not None and best < self.min_score
         note('search_found', pages=len(order), best_score=best, below_min_score=weak)
-        if not order or weak:
+        if (not order or weak) and not tp_pages and not with_tp:
             messages = [{'role': 'system', 'content': system}, *turns,
                         {'role': 'user', 'content': question + '\n\n' + NO_PAGES}]
             return await self._finish(messages, call, note, result, {}, earlier_citations,
-                                      'not_found', pages_given=False)
+                                      'not_found', pages_given=False, language=language)
 
-        index = tools.view
+        # The TP pages first; the other found pages only above the score bound.
+        order = tp_pages + [key for key in ([] if weak else order) if key not in tp_pages]
         position = {}
         for doc_handle, handles in index.doc_pages.items():
             for number, handle in enumerate(handles):
                 position[index.pages[handle][1]] = (index.documents[doc_handle], number, handles)
-        candidates = [(key, 'found') for key in order if key[1] in position]
+        candidates = [(key, 'tp' if key in tp_pages else 'found') for key in order if key[1] in position]
         seen = {key for key, _ in candidates}
         for (document_id, page_id), _ in list(candidates):
             _, number, handles = position[page_id]
@@ -256,7 +306,7 @@ class SearchRunner:
             for (document_id, page_id), _ in candidates))
         chosen, used = [], 0
         for ((document_id, page_id), role), read in zip(candidates, reads):
-            text = self._page_text(read)
+            text = page_text(read)
             if text and used + len(text) <= self.context_chars:
                 chosen.append((document_id, page_id, role, text))
                 used += len(text)
@@ -269,49 +319,53 @@ class SearchRunner:
             'page': index.page_handles.get(page_id), 'role': role, 'chars': len(text),
             'score': pages.get((document_id, page_id), {}).get('score')}
             for document_id, page_id, role, text in chosen])
-        if not chosen:
+        if not chosen and not with_tp:
             messages = [{'role': 'system', 'content': system}, *turns,
                         {'role': 'user', 'content': question + '\n\n' + NO_PAGES}]
             return await self._finish(messages, call, note, result, {}, earlier_citations,
-                                      'not_found', pages_given=False)
+                                      'not_found', pages_given=False, language=language)
 
         # 3. One answer from the pages.
         blocks = []
         for document_id, page_id, _role, text in chosen:
-            page_no = index.page_handles.get(page_id, '').rsplit('.p', 1)[-1]
-            blocks.append(f'--- {index.filenames.get(document_id, "document")}, page {page_no} ---\n{text}')
+            source = (THIS_TP if index.lab_names.get(document_id) else CLASS_COURSE) if with_tp or mixed else ''
+            blocks.append(page_header(index, document_id, page_id, source) + '\n' + text)
+        found_text = ('Course pages found:\n\n' + '\n\n'.join(blocks)) if blocks else NO_CLASS_PAGES
         messages = [{'role': 'system', 'content': system}, *turns,
-                    {'role': 'user', 'content': question + '\n\nCourse pages found:\n\n' + '\n\n'.join(blocks)}]
+                    {'role': 'user', 'content': question + '\n\n' + found_text}]
         permitted = {e.id: e.citation() for e in tools.evidence.all()}
         return await self._finish(messages, call, note, result, permitted, earlier_citations,
-                                  'finished', pages_given=True)
+                                  'finished', pages_given=True, language=language)
 
-    @staticmethod
-    def _page_text(read: dict) -> str:
-        """A page as the model sees it: one line per block, with its evidence ID."""
-        if not read.get('ok'):
-            return ''
-        ids = read.get('item_evidence_ids') or []
-        lines = []
-        for number, item in enumerate(read.get('items') or []):
-            if _page_furniture(item):
-                continue
-            content = (item.get('content') or '').strip()
-            if item.get('content_description'):
-                note = 'unchecked model ' if item.get('description_checked') is False else ''
-                content += f' ({note}description of the {item.get("type") or "block"}: {item["content_description"]})'
-            if content:
-                evidence_id = ids[number] if number < len(ids) else None
-                lines.append(f'[{evidence_id}] {content}' if evidence_id else content)
-        text = '\n'.join(lines)
-        if len(text) > PAGE_CHARS or read.get('next_cursor'):
-            text = text[:PAGE_CHARS] + '\n(page text shortened)'
-        return text
+    async def _tp_pages(self, question, tp_docs, note) -> list[tuple[str, str]]:
+        """When the TP text is too long for the prompt and the lab also has
+        class files: the best TP_PAGES hits of a search within the TP files,
+        given whatever the main search found."""
+        tools = self.course_tools
+        found = await asyncio.gather(*(tools.execute('search', {
+            'query': question[:500], 'document_id': d, 'top_k': 3}) for d in tp_docs))
+        hits = [item for result in found if result.get('ok') for item in result.get('items') or []]
+        hits.sort(key=lambda item: -(item.get('score') if item.get('score') is not None else -1))
+        reserved: list[tuple[str, str]] = []
+        for item in hits:
+            key = (item['document_id'], item['page_id'])
+            if key not in reserved:
+                reserved.append(key)
+            if len(reserved) == TP_PAGES:
+                break
+        if reserved:
+            note('tp_pages', reserved=[tools.view.page_handles.get(p) for _, p in reserved])
+        return reserved
 
     async def _finish(self, messages, call, note, result, permitted, earlier_citations,
-                      stop, *, pages_given):
-        """The answer call, the cleaning of its citations and the access check."""
+                      stop, *, pages_given, language=''):
+        """The answer call, the cleaning of its citations and the access check.
+        language: the end of the answer turn (the rules again and the answer
+        language, runner.answer_ending), added to the last user message and to
+        the check turn."""
         tools = self.course_tools
+        if language:
+            messages = [*messages[:-1], {**messages[-1], 'content': messages[-1]['content'] + '\n\n' + language}]
         permitted = {**(earlier_citations or {}), **permitted}
 
         def failed(reason):
@@ -345,7 +399,7 @@ class SearchRunner:
             note('answer_check', reply_chars=len(answer))
             try:
                 reply = await call([*messages, {'role': 'assistant', 'content': answer},
-                                    {'role': 'user', 'content': CHECK_TURN}],
+                                    {'role': 'user', 'content': CHECK_TURN + ('\n\n' + language if language else '')}],
                                    'search_check', 2048, streamed=True)
                 content = reply.content.strip()
                 if content and not DONE_RE.match(content):

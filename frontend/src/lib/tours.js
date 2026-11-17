@@ -13,7 +13,7 @@ export const TOURS = {
     { target: 'join-class', nav: true, title: 'Join a class', text: 'Join a class with the 6-character code your teacher gives you.' },
     { target: 'classes', nav: true, title: 'Pick a TP', text: 'Your classes and their TPs. Pick a TP: each one has its own course files.' },
     { target: 'new-session', nav: true, title: 'Conversations', text: 'Each conversation is saved. Start a new one for a new topic. Your teacher can read them.' },
-    { target: 'modes', title: 'Three ways to answer', text: 'Direct answers at once, without the course files. Search finds the right pages in a few seconds. Research reads the files in depth, in about a minute.' },
+    { target: 'modes', title: 'Three ways to answer', text: 'Direct answers at once, without searching the course. It knows only the statement of this TP. Search finds the right pages in a few seconds. Research reads the files in depth, in about a minute.' },
     { target: 'input', title: 'Ask', text: 'Ask in any language. An answer cites the course: click [E1] or a page under the answer to open it.' },
     { target: 'quota', nav: true, title: 'Your limits', text: 'How much you have used today and this week. A question that has started always finishes.' },
     { target: 'help', nav: true, title: 'Help', text: 'Open this tour again here at any time.' },

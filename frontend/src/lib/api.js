@@ -32,6 +32,11 @@ async function request(endpoint, options = {}) {
     window.location.href = '/login';
     throw new Error('Unauthorized');
   }
+  if (res.status === 403) {
+    // The password was reset while signed in: show "Choose a new password".
+    const body = await res.clone().json().catch(() => null);
+    if (body?.detail === 'password_change_required') useAuthStore.setState({ mustChangePassword: true });
+  }
 
   return res;
 }

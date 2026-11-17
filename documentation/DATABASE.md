@@ -10,7 +10,7 @@ This file describes every table and column of the PostgreSQL database (with the 
 - **New tables.** The backend creates missing tables at startup with `Base.metadata.create_all`. There is no Alembic.
 - **Changes to existing tables.** `create_all` cannot add columns to a table that exists. These changes are SQL files in `scripts/`, applied in order by `python -m scripts.migrate_document_snapshots --database-url URL [--apply]`. The command is a dry run without `--apply`. The script keeps its record in the table `document_schema_migrations` (`version`, `checksum`, `applied_at`), which is not an ORM model.
 - **Startup checks.** The backend stops with an error if an old table lacks a column that a migration adds. With `STRUCTURED_INGEST_ENABLED` or `AGENTIC_SEARCH_ENABLED` on, it also stops if a required migration is missing. The required list is `backend/app/schema_versions.py`.
-- **Tables that came without a migration file.** `quota_grants` and `audit_reports` are new tables, so `create_all` makes them. `quota_reset_requests` and `chat_refusals` are made by `create_all` too, and by the M4-I file.
+- **Tables that came without a migration file.** `quota_grants` and `audit_reports` are new tables, so `create_all` makes them. `quota_reset_requests` and `chat_refusals` are made by `create_all` too, and by the M4-I file. `service_failures` is made by `create_all` only.
 - **Types in tests.** The tests run on SQLite for most cases. There a UUID is stored as `CHAR(36)`, and the vector and full-text columns are plain text. Tests of search use PostgreSQL.
 
 **Known gap: two indexes do not exist.** Search over `doc_chunks` needs an HNSW index on `embedding` (`USING hnsw (embedding vector_cosine_ops)`) and a GIN index on `tsv` (`USING gin (tsv)`). No code creates them, so both searches read the whole table. The answers are correct, but the search will slow down as the material grows.
@@ -63,6 +63,7 @@ The accounts of all three roles.
 | daily_token_quota | Integer | Daily limit of billed tokens (a day starts at midnight Paris time). Default 5 000 000. Set by the admin. |
 | weekly_token_quota | Integer | Weekly limit of billed tokens (a week starts on Monday). Default 25 000 000. Set by the admin. |
 | tour_seen_at | Timestamp | Nullable. When the user finished or skipped the guided tour; until then it starts at sign-in. Added by `m4l_tour_v1`. |
+| must_change_password | Boolean | Default false. Set by an admin password reset (the password becomes `RESET_PASSWORD`, `123456` by default); until the user chooses a new password, only `/api/auth/me` and `/api/auth/change-password` answer. Added by `m4o_must_change_password_v1`. |
 | is_deleted | Boolean | Default false. A deleted user cannot log in. |
 
 ### classes
@@ -230,6 +231,17 @@ A question the chat refused before it started, so it has no run. For monitoring.
 | user_id | UUID | Foreign key to `users.id`. |
 | lab_id | UUID | Nullable. Foreign key to `labs.id`. |
 | reason | String(32) | `day_quota`, `week_quota`, `lab_locked` or `not_member`. |
+| created_at | Timestamp | Indexed. |
+
+### service_failures
+
+A failure the user does not see: a service failed and the code went on without it. For monitoring. Written by `services/failure_log.py` every 10 seconds, from the backend and from the worker. New table, made by `create_all`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| component | String(32) | `rerank`, `embedding`, `vision`, `tool_<name>`, `tp_text`, `title`, `report`, `report_embedding`, `captions` or `worker`. |
+| kind | String(64) | The error name (`ConnectTimeout`, `vision_timeout`...). `retried_...` for a rerank call whose second try was made. No question or course text. |
 | created_at | Timestamp | Indexed. |
 
 ## Reports

@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     # JWT
     JWT_SECRET: str = "change-me-in-production"
+    # The password an admin reset gives; the user must change it at the next sign-in.
+    RESET_PASSWORD: str = "123456"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 8 hours
 

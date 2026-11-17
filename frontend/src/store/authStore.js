@@ -31,6 +31,8 @@ const useAuthStore = create((set, get) => ({
   username: null,
   userRole: null,
   tourSeen: true,
+  // An admin reset the password: the app shows only "Choose a new password".
+  mustChangePassword: false,
   isHydrated: false,
 
   // ── Derived ──
@@ -64,6 +66,7 @@ const useAuthStore = create((set, get) => ({
         username: user.username,
         userRole: user.role,
         tourSeen: !!user.tour_seen_at,
+        mustChangePassword: !!user.must_change_password,
       });
 
       return user.role;
@@ -83,6 +86,7 @@ const useAuthStore = create((set, get) => ({
       userId: null,
       username: null,
       userRole: null,
+      mustChangePassword: false,
     });
   },
 
@@ -116,6 +120,7 @@ const useAuthStore = create((set, get) => ({
         username: user.username,
         userRole: user.role,
         tourSeen: !!user.tour_seen_at,
+        mustChangePassword: !!user.must_change_password,
         isHydrated: true,
       });
     } catch {

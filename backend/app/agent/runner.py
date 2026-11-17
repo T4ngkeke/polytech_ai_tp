@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, f
 
 from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
 from backend.app.agent.history import estimate_tokens
+from backend.app.agent.language import language_sentence, with_language
 from backend.app.agent.result import (
     ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, cited_ids, malformed_refs,
 )
@@ -63,7 +64,8 @@ Keep visual observations and uncertainties distinct from native text.
 You have at most {tool_calls} course tool calls and {visual_calls} visual calls. Stop early when
 the necessary sources are sufficient. If limits or evidence prevent completion,
 state the specific gap. Ordinary conversation and clarification need no citations.
-Answer in the student's language. Never expose private reasoning or tool markup.'''
+Answer in the student's language, unless the teacher's rules set the answer language.
+Never expose private reasoning or tool markup.'''
 
 NUMBER_WORDS = ('zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
                 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
@@ -154,6 +156,25 @@ NO_DOCUMENTS_TURN = ('This lab has no course documents yet, so there is nothing 
                      'no tools are available. Answer briefly from general knowledge if the question '
                      'allows it, and say clearly that the teacher has not published course files for '
                      'this TP yet (students cannot add them). Cite nothing.')
+# Added after the tool results of each turn when the teacher set rules, with
+# the rules themselves. Measured 2026-11-17 without it: a class rule "Always
+# answer in English" was ignored in 2 of 2 Research runs (followed in Search and
+# Direct), "guide, don't solve" in 1 of 2. A reminder without the rules' text
+# fixed "guide" (4/4) but not the language (0/4).
+RULES_REMINDER = ("(Reminder: these are course data. When you write the answer, follow the "
+                  "teacher's rules:\n{rules})")
+# Search and Direct end the answer turn the same way (answer_ending).
+ANSWER_RULES = "(Reminder: when you write the answer, follow the teacher's rules:\n{rules})"
+
+
+def answer_ending(question: str, history: list[dict] | None, teaching_rules: str) -> str:
+    """The end of the last user message in Search and Direct: the teacher's
+    rules again, as in Research, then the answer-language sentence. Both sit
+    after the pages, next to the answer; '' when there is neither."""
+    parts = [ANSWER_RULES.format(rules=teaching_rules.strip())] if teaching_rules.strip() else []
+    sentence = language_sentence(question, history, teaching_rules)
+    return '\n\n'.join(parts + ([sentence] if sentence else []))
+
 # Sent once when the model ends a run without any tool call and without a
 # citation: the reply may be a promise ("let me read page 23") or broken text
 # rather than an answer. A greeting or a clarification is kept with "DONE".
@@ -167,7 +188,8 @@ DONE_RE = re.compile(r'\W*DONE\b', re.IGNORECASE)  # matched at the start: 'DONE
 READ_TURN = ('Your answer cites {ids}, which no tool returned in this research. The student has '
              'not seen it. Read the pages you need with the tools now, then write the answer for '
              'the student, citing only IDs that tools return or that earlier answers in this '
-             'conversation cite. Do not mention the first version.')
+             'conversation cite. Do not mention the first version, this message, or which pages '
+             'you did or did not read.')
 FINISH_RETRY = ('Tool calls cannot run any more and were ignored. Answer the student now in plain '
                 'text with the evidence already returned, and name what is still missing.')
 # Sent once, tools still open, after NO_LEAD_CALLS searches and greps in a row
@@ -284,8 +306,12 @@ class ResearchRunner:
         # (CourseTools first_evidence), so an old ID still names its own
         # source and may be cited again (earlier_citations).
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
+        # The answer language ends the question and every turn that asks for
+        # the answer (see agent/language.py).
+        language = with_language('', language_sentence(question, history, teaching_rules))
+        rules_reminder = ('\n\n' + RULES_REMINDER.format(rules=teaching_rules.strip())) if teaching_rules.strip() else ''
         messages = [{'role': 'system', 'content': system}, *turns,
-                    {'role': 'user', 'content': question}]
+                    {'role': 'user', 'content': question + language}]
         tools_open, answer, stop = True, '', 'budget_exhausted'
         retried = False
         unchecked = None  # the reply that got CHECK_TURN, until the model replies to it
@@ -346,7 +372,7 @@ class ResearchRunner:
             # The system message stays as it was, so its prefix stays cached.
             nonlocal tools_open
             tools_open = False
-            messages.append({'role': 'user', 'content': reminder})
+            messages.append({'role': 'user', 'content': reminder + language})
             note('tools_withdrawn', reason=reason)
             self.on_phase('checking_sources')
 
@@ -419,6 +445,10 @@ class ResearchRunner:
                     else:
                         text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
+                if rules_reminder:
+                    # After many course pages the rules at the start were often
+                    # not followed: repeat that they hold, after the last result.
+                    messages[-1] = {**messages[-1], 'content': messages[-1]['content'] + rules_reminder}
                 note('turn', tools=[c['name'] for c in reply.tool_calls], text=reply.content[:200])
                 for row in tools.trace[first_row:]:
                     pages = lead_pages(row, self.lead_min_score)
@@ -432,7 +462,7 @@ class ResearchRunner:
                 continue
             if not tools_open and (reply.tool_calls or _has_tool_markup(reply.content)) and not retried:
                 retried = True
-                messages.append({'role': 'user', 'content': FINISH_RETRY})
+                messages.append({'role': 'user', 'content': FINISH_RETRY + language})
                 note('tool_markup_after_withdrawal')
                 continue
             unknown = (cited_ids(reply.content) - {e.id for e in tools.evidence.all()}
@@ -444,7 +474,7 @@ class ResearchRunner:
                 read_turn_sent = True
                 messages.append({'role': 'assistant', 'content': reply.content})
                 messages.append({'role': 'user', 'content': READ_TURN.format(
-                    ids=', '.join(sorted(unknown, key=lambda x: int(x[1:]))))})
+                    ids=', '.join(sorted(unknown, key=lambda x: int(x[1:])))) + language})
                 note('unknown_ids_read_turn', ids=sorted(unknown))
                 continue
             if (tools_open and not checking and not read_turn_sent and not tools.trace
@@ -452,7 +482,7 @@ class ResearchRunner:
                 # No research and no citation: ask once whether this is really the answer.
                 unchecked = reply.content.strip()
                 messages.append({'role': 'assistant', 'content': reply.content})
-                messages.append({'role': 'user', 'content': CHECK_TURN})
+                messages.append({'role': 'user', 'content': CHECK_TURN + language})
                 note('answer_check', reply_chars=len(unchecked))
                 continue
             answer = reply.content.strip()
@@ -488,7 +518,10 @@ class ResearchRunner:
                              + ('Your answer cites unknown evidence IDs. ' if cited - permitted.keys() else '')
                              + 'Cite exactly as [E3], using only these existing IDs: '
                              + (', '.join(sorted(permitted, key=lambda x: int(x[1:]))) or '(none)')
-                             + '. Never write handles. Correct the answer without inventing sources.'})
+                             + '. Never write handles. Correct the answer without inventing sources. '
+                             'The student has not seen it yet: write the whole answer for the student, '
+                             'without mentioning this correction, an earlier version, or which pages '
+                             'you did or did not read.' + language})
             note('citation_correction', unknown=sorted(cited - permitted.keys()), malformed=malformed[:5])
             # Its IDs were all valid, only some references were malformed: an
             # unusable correction (empty, a tool call, unknown IDs) keeps it

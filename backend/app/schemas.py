@@ -69,13 +69,11 @@ class TokenResponse(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     """Self-service password change — old password is verified."""
-    old_password: str = Field(..., min_length=1)
+    # Not needed while the account must change its reset password.
+    old_password: str | None = None
     new_password: str = Field(..., min_length=6)
 
 
-class AdminResetPasswordRequest(BaseModel):
-    """Admin reset of any user's password — no old password required."""
-    new_password: str = Field(..., min_length=6)
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +94,7 @@ class UserResponse(UserBase):
     id: uuid.UUID
     is_deleted: bool
     tour_seen_at: datetime | None = None
+    must_change_password: bool = False
 
 
 class UserCreateRequest(BaseModel):
@@ -160,6 +159,7 @@ class LLMConfigRequest(BaseModel):
     agent_total_seconds: str | None = None
     agent_call_seconds: str | None = None
     agent_max_input_tokens: str | None = None
+    tp_context_percent: str | None = None
     token_alpha: float | None = None
     token_beta: float | None = None
 
@@ -199,6 +199,7 @@ class LLMConfigResponse(BaseModel):
     agent_total_seconds: str = ""
     agent_call_seconds: str = ""
     agent_max_input_tokens: str = ""
+    tp_context_percent: str = ""
     # Default and allowed range of each research limit field, for the form:
     # {"agent_max_tool_calls": {"default": 30, "min": 1, "max": 40}, …}.
     research_limits: dict[str, dict[str, int]] = Field(default_factory=dict)

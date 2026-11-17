@@ -26,9 +26,9 @@ This area covers sign-up, login and the user's own profile and password.
 | --- | --- | --- | --- |
 | POST | `/api/auth/signup` | none | Student self-registration. The role is always `student`. Fails if the username exists. Returns a token. |
 | POST | `/api/auth/login` | none | Checks the credentials. Returns a token that holds only `user_id`. A deleted user cannot log in. |
-| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily and weekly quota, `is_deleted` and `tour_seen_at`. The app calls it after login. |
+| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily and weekly quota, `is_deleted`, `tour_seen_at` and `must_change_password`. The app calls it after login. |
 | POST | `/api/auth/tour-seen` | Any user | The guided tour was finished or skipped: it no longer starts by itself at sign-in (the ? button still opens it). Sets `tour_seen_at` once. |
-| POST | `/api/auth/change-password` | Any user | Changes the user's own password. Needs `old_password` (checked) and `new_password`. |
+| POST | `/api/auth/change-password` | Any user | Changes the user's own password. Needs `old_password` (checked) and `new_password` (6 characters or more). After an admin reset (`must_change_password`) the old password is not asked, and the new one may not be the reset password (`400 choose_another_password`). |
 
 ## Student
 
@@ -65,7 +65,7 @@ The request body has `session_id` and `message`, and two optional fields:
 - `mode` (default `research`):
   - `research`: the research agent (`backend/app/agent/runner.py`) searches and reads several times, and may ask the student a question back.
   - `search`: one search, the found pages and their neighbours, and one answer (`backend/app/agent/search.py`). It has the same citations.
-  - `direct`: one answer without the course files and without citations (`backend/app/agent/direct.py`).
+  - `direct`: one answer without searching the course files and without citations (`backend/app/agent/direct.py`). It sees the text of the lab's own files (the TP statement) when that text is short enough, never the class course files.
 
 A class in exam mode searches only the files its teacher allowed in the exam (`documents.exam_allowed`); with none for this lab, it answers in `direct` mode whatever is sent. The teacher's rules apply in every mode. The answer is saved, with its citations, before any of it is sent. How the answer is made is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -103,6 +103,7 @@ Limits of one research run. Values are whole numbers. An empty or invalid value 
 | `AGENT_TOTAL_SECONDS` (`agent_total_seconds`) | 420 | 10-1800 | Time for the whole run, answer included. |
 | `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 120 | 5-600 | Time for one model call, `view_image` included. |
 | `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 28000 | 4000-200000 | Estimated input tokens of one model call. The chat history may use a quarter of it. |
+| `TP_CONTEXT_PERCENT` (`tp_context_percent`) | 30 | 0-60 | Share of the model's context (its `max_model_len`) that the TP files' text may use in Search and Direct. Files go in whole, the shortest first; 0 puts no TP text in the prompt. |
 
 The system prompt states the tool and image limits. A long answer can take two minutes, so the total time should be at least one model call longer than the research time.
 
@@ -137,6 +138,7 @@ This area covers what a teacher does with their classes and labs: classes and st
 | POST | `/api/teacher/rule-items` | Teacher | Adds a rule: `{level, target_id, class_id?, text, is_active, source?, position?}`. Text 1–1000 characters, not blank. `source` is `b:<key>` (a ready-made rule) or `m:<saved rule id>` (one of the teacher's saved rules), else `422 unknown_rule_source`. `position` puts it at that place in the list (an undone delete); default last. At most 30 rules per class, lab or student (`409 too_many_rules`). |
 | PATCH | `/api/teacher/rule-items/{item_id}` | Teacher | Changes `text`, `is_active` and/or `source` (only when sent; `null` unlinks). `404` for a rule outside the teacher's classes. |
 | DELETE | `/api/teacher/rule-items/{item_id}` | Teacher | Deletes a rule. |
+| POST | `/api/teacher/rule-items/check` | Teacher | `{level, target_id, class_id?}`. The model reads the active rules of that list and returns the pairs that contradict: `{conflicts: [{positions: [1, 3], rule_ids, reason}]}`. `positions` are the numbers the page shows (switched-off rules keep their number). Fewer than two active rules: no model call, no conflict. One call with greedy decoding, not charged to a quota; `503 rule_check_unavailable` when the model fails. Nothing is stored. |
 | GET | `/api/teacher/rule-presets` | Teacher | Ready-made rules (`key`, `name`, `text`). The page adds one with `source: "b:<key>"`, and a second click removes it. |
 | GET | `/api/teacher/skill-presets` | Teacher | The teacher's own saved rules, "My rules" (`id`, `name`, `content`). |
 | POST | `/api/teacher/skill-presets` | Teacher | Saves a rule (`name`, `content`). |
@@ -152,6 +154,7 @@ This area covers what a teacher does with their classes and labs: classes and st
 | POST | `/api/teacher/labs/{lab_id}/documents` | Teacher | Uploads a course PDF for this lab. Multipart form. The file is the only field that matters (the language is found from the text). `shared` (older clients) makes the file class-wide. A new file is read by MinerU and indexed, then published at once when every page was read. Otherwise it stays a draft that the teacher publishes. To replace a document, send `mode=replace`, `replace_document_id` and `expected_generation`. Errors: `400 only_pdf` for another format (`odp_not_supported` for ODP), `413 file_too_large` (limit 200 MB), `400 invalid_pdf` or `pdf_password_or_page_limit` (at most 150 pages, no password), `409 structured_ingest_disabled` when the ingestion flags are off. Sending the same file again to the same document returns `200` and creates nothing. |
 | POST | `/api/teacher/classes/{class_id}/documents` | Teacher | Uploads a class-wide PDF, which every lab of the class reads (for example the course handout). Same form and errors as the lab upload, without `shared`. |
 | GET | `/api/teacher/labs/{lab_id}/documents` | Teacher | The documents a lab uses, with status, summary and `ingest_report`: the class-wide documents first, then the lab's own. Each row has `scope` (`class` or `lab`). While a PDF waits or is read, `latest_revision` also has `jobs_ahead` (reading jobs that the worker takes first) or `progress` (`{done, total, seconds_left}`: pages read; `seconds_left` is `null` before 3 pages). |
+| GET | `/api/teacher/labs/{lab_id}/tp-text` | Teacher | Which of the lab's own files the tutor reads in full with every question in Search and Direct, and which it only searches: `{limit_chars, percent, context_tokens, left_out, files: [{document_id, filename, pages, chars, in_full}]}`. The same rule as the chat (whole files, the shortest first, within `TP_CONTEXT_PERCENT` of the model context and 120 pages); `chars` is estimated from the stored text. The Documents tab shows a warning when `left_out` > 0. |
 | GET | `/api/teacher/classes/{class_id}/documents` | Teacher | The class-wide documents of a class. Same fields as above, with `scope` = `class`. |
 | DELETE | `/api/teacher/documents/{document_id}` | Teacher | Deletes a document. For a structured document the query `expected_generation` is required (`422 expected_generation_required`), and the answer is `202 {"document_id", "state": "pending"}`: the stored files and chunks are removed in the background. |
 
@@ -164,11 +167,11 @@ This area covers users, classes, the model settings, data pruning and global ana
 | GET | `/api/admin/users` | Admin | All users that are not deleted. |
 | POST | `/api/admin/users` | Admin | Creates one user. |
 | POST | `/api/admin/users/import` | Admin | Imports users from a CSV file. A dry run by default. `?force=true` applies it. |
-| PUT | `/api/admin/users/{user_id}/role` | Admin | Changes the role (student, teacher, admin). |
+| PUT | `/api/admin/users/{user_id}/role` | Admin | Changes the role (student, teacher, admin). An admin cannot change their own role (`400 cannot_change_own_role`). |
 | PUT | `/api/admin/users/{user_id}/quota` | Admin | Sets the daily token quota, and the weekly one when `weekly_token_quota` is given. |
 | POST | `/api/admin/users/{user_id}/quota-refill` | Admin | Gives any user a full day and week again (usage kept). |
-| PUT | `/api/admin/users/{user_id}/password` | Admin | Resets a password. No old password is needed. |
-| DELETE | `/api/admin/users/{user_id}` | Admin | Soft-deletes a user. |
+| PUT | `/api/admin/users/{user_id}/password` | Admin | No body. Resets the password to `RESET_PASSWORD` (default `123456`) and sets `must_change_password`: until the user chooses a new password, every other route answers `403 password_change_required`, except `/api/auth/me` and `/api/auth/change-password`. |
+| DELETE | `/api/admin/users/{user_id}` | Admin | Soft-deletes a user. An admin cannot delete their own account (`400 cannot_delete_self`), so one admin always stays. When no admin can sign in, `scripts/make_admin.py` gives an account the role again on the server. |
 | GET | `/api/admin/classes` | Admin | All classes (`?skip=`, `?limit=`, at most 500). Each class has its owner and counts: `teacher_username`, `teacher_ok` (false when the owner was deleted or is no longer a teacher or admin, so nobody can manage the class until it is transferred), `lab_count`, `student_count`, `questions_7d` and `last_active`. Teacher test sessions are not counted. |
 | GET | `/api/admin/classes/{class_id}/labs` | Admin | The labs of a class. |
 | GET | `/api/admin/classes/{class_id}/students` | Admin | The students of a class. |

@@ -234,6 +234,10 @@ class User(Base):
     weekly_token_quota: Mapped[int] = mapped_column(Integer, nullable=False, default=25_000_000)
     # When the user finished or skipped the guided tour; None: show it at sign-in.
     tour_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set when an admin resets the password to the default one: until the user
+    # chooses a new password, only /api/auth/me and change-password answer.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                       server_default='false')
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -564,6 +568,22 @@ class ChatRefusal(Base):
     lab_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("labs.id", ondelete="SET NULL"), nullable=True)
     reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class ServiceFailure(Base):
+    """A failure the user does not see: a model service failed and the code
+    went on without it (the reranker, the embeddings, a picture view...).
+
+    For monitoring only (services/failure_log.py). No text of the question or
+    the course: a component name and an error name.
+    """
+    __tablename__ = "service_failures"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    component: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
 

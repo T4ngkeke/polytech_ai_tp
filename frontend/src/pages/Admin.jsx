@@ -99,6 +99,8 @@ export default function Admin() {
 
 /* ═══════════════════════════════ USERS TAB ═══════════════════════════════ */
 const ROLE_FILTERS = ['all', 'student', 'teacher', 'admin'];
+// The server's RESET_PASSWORD (backend config), shown to the admin.
+const RESET_PASSWORD = '123456';
 
 function UsersTab() {
   const [users, setUsers] = useState([]);
@@ -109,8 +111,8 @@ function UsersTab() {
   const [csvPreview, setCsvPreview] = useState(null);
   const [importing, setImporting] = useState(false);
   const [resetUser, setResetUser] = useState(null);   // user being password-reset
-  const [resetPw, setResetPw] = useState('');
   const [resetting, setResetting] = useState(false);
+  const myId = useAuthStore((s) => s.userId);
   const [deleteUser, setDeleteUser] = useState(null);  // user pending delete confirm
   const [deleting, setDeleting] = useState(false);
   // table controls
@@ -156,14 +158,15 @@ function UsersTab() {
     } catch (err) { toast.error(err.message); }
   };
 
+  // The password becomes the reset one (123456); the user must change it at sign-in.
   const handleResetPassword = async () => {
-    if (!resetUser || resetPw.length < 6) return;
+    if (!resetUser) return;
     setResetting(true);
     try {
-      await api.put(`/api/admin/users/${resetUser.id}/password`, { new_password: resetPw });
-      toast.success(`Password reset for ${resetUser.username}`);
+      const u = await api.put(`/api/admin/users/${resetUser.id}/password`);
+      setUsers((p) => p.map((x) => x.id === u.id ? { ...x, must_change_password: u.must_change_password } : x));
+      toast.success(`Password of ${resetUser.username} reset to ${RESET_PASSWORD}`);
       setResetUser(null);
-      setResetPw('');
     } catch (err) { toast.error(err.message); } finally { setResetting(false); }
   };
 
@@ -264,7 +267,14 @@ function UsersTab() {
               {visible.map((u) => (
                 <tr key={u.id} className="border-b border-border-subtle last:border-0 hover:bg-ink-hover/40 transition-colors">
                   <td className="px-4 py-2.5 max-w-[240px]">
-                    <p className="font-medium text-cream truncate">{u.username}</p>
+                    <p className="flex items-center gap-1.5 font-medium text-cream">
+                      <span className="truncate">{u.username}</span>
+                      {u.id === myId && <span className="shrink-0 rounded-full border border-cyan/40 px-1.5 text-[10px] font-normal text-cyan">you</span>}
+                      {u.must_change_password && (
+                        <span className="shrink-0 rounded-full border border-gold/50 px-1.5 text-[10px] font-normal text-gold"
+                          title="The password was reset: the user chooses a new one at the next sign-in">must change password</span>
+                      )}
+                    </p>
                     {owned[u.id] && (
                       <p className="text-[11px] text-cream-muted truncate" title={owned[u.id].join(', ')}>
                         {plural(owned[u.id].length, 'class', 'classes')}: {owned[u.id].join(', ')}
@@ -297,10 +307,11 @@ function UsersTab() {
                       <IconButton title="Reset token limits (a full day and week again; usage is kept)" onClick={() => handleRefill(u)}>
                         <Icon name="reset" className="w-4 h-4" />
                       </IconButton>
-                      <IconButton title="Reset password" onClick={() => { setResetUser(u); setResetPw(''); }}>
+                      <IconButton title={`Reset password to ${RESET_PASSWORD}`} onClick={() => setResetUser(u)}>
                         <KeyIcon className="w-4 h-4" />
                       </IconButton>
-                      <IconButton title="Delete user" danger onClick={() => setDeleteUser(u)}>
+                      <IconButton danger disabled={u.id === myId} onClick={() => setDeleteUser(u)}
+                        title={u.id === myId ? 'You cannot delete your own account' : 'Delete user'}>
                         <TrashIcon className="w-4 h-4" />
                       </IconButton>
                     </div>
@@ -319,13 +330,15 @@ function UsersTab() {
       {resetUser && (
         <Modal title={`Reset password — ${resetUser.username}`} onClose={() => setResetUser(null)}>
           <div className="space-y-4">
-            <p className="text-xs text-cream-muted">Set a new password for this user. They are not notified — share it securely.</p>
-            <input type="text" value={resetPw} autoFocus
-              onChange={(e) => setResetPw(e.target.value)} placeholder="New password (min 6 chars)"
-              className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm font-mono placeholder:text-cream-muted focus:outline-none focus:border-cyan/40" />
-            <button onClick={handleResetPassword} disabled={resetPw.length < 6 || resetting}
+            <p className="text-sm text-cream-secondary">
+              The password of <span className="text-cream font-medium">{resetUser.username}</span> becomes{' '}
+              <span className="rounded bg-ink-deep px-1.5 font-mono text-cream">{RESET_PASSWORD}</span>.
+              At the next sign-in, {resetUser.username} must choose a new password before using the app.
+            </p>
+            <p className="text-xs text-cream-muted">Tell {resetUser.username} the password yourself: they are not notified.</p>
+            <button onClick={handleResetPassword} disabled={resetting} autoFocus
               className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-              {resetting ? 'Resetting…' : 'Reset password'}
+              {resetting ? 'Resetting…' : `Reset to ${RESET_PASSWORD}`}
             </button>
           </div>
         </Modal>
@@ -746,6 +759,7 @@ const MAP_NODES = [
       { key: 'agent_total_seconds', label: 'Total time, answer included (s)', limit: true },
       { key: 'agent_call_seconds', label: 'One model call (s)', limit: true },
       { key: 'agent_max_input_tokens', label: 'Input tokens per model call', limit: true },
+      { key: 'tp_context_percent', label: 'TP text, % of the model context (Search, Direct)', limit: true },
     ],
   },
   {
@@ -1336,11 +1350,11 @@ function SortableTh({ label, active, dir, onClick }) {
   );
 }
 
-function IconButton({ onClick, title, danger, children }) {
+function IconButton({ onClick, title, danger, disabled = false, children }) {
   return (
-    <button onClick={onClick} title={title}
-      className={`p-2 rounded-lg transition-colors cursor-pointer ${
-        danger ? 'text-cream-muted hover:text-danger hover:bg-danger-muted' : 'text-cream-muted hover:text-cyan hover:bg-cyan-muted'
+    <button type="button" onClick={onClick} title={title} aria-label={title} disabled={disabled}
+      className={`p-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-30 ${
+        danger ? 'text-cream-muted enabled:hover:text-danger enabled:hover:bg-danger-muted' : 'text-cream-muted enabled:hover:text-cyan enabled:hover:bg-cyan-muted'
       }`}>
       {children}
     </button>

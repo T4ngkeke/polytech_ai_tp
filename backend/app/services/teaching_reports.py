@@ -29,6 +29,7 @@ from backend.app.models import (
     SenderType, Session, User,
 )
 from backend.app.services.retrieval_service import detect_language, hybrid_search
+from backend.app.services import failure_log
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
             vectors = await embed_fn([q["text"][:QUESTION_CHARS * 3] for q in unmatched])
         except Exception as exc:       # the report is still useful without it
             logger.warning("Report: embedding failed (%s); questions stay unmatched", type(exc).__name__)
+            failure_log.record('report_embedding', type(exc).__name__)
             vectors = []
         for q, vector in zip(unmatched, vectors):
             hits, _ = await hybrid_search(db, q["text"], vector, lab.id, class_id=lab.class_id,
@@ -251,6 +253,7 @@ async def write_report(factory, report_id: uuid.UUID, model, *, model_name: str 
         content, status, error = None, "failed", "no_questions"
     except Exception as exc:
         logger.exception("Teacher report failed")
+        failure_log.record('report', type(exc).__name__)
         content, status, error = None, "failed", type(exc).__name__
     async with factory() as db:
         report = await db.get(AuditReport, report_id)

@@ -23,6 +23,7 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import DocChunk, Document, DocumentBlock, DocumentRevision, DocumentSource
+from backend.app.services import failure_log
 from backend.app.services.document_versions import chunk_of_description
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ async def apply_rerank(
         logger.warning(
             "Rerank failed (%s); degrading to fusion-only ordering.", repr(exc)
         )
+        failure_log.record('rerank', type(exc).__name__)
         return hits[:top_k], False
     order = sorted(range(len(hits)), key=lambda i: scores[i], reverse=True)
     scored = [replace(h, score=float(s)) for h, s in zip(hits, scores)]

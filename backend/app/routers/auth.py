@@ -168,14 +168,23 @@ async def change_password(
 
     The current (old) password is verified before the new one is stored,
     so a stolen/active session alone cannot silently re-key the account.
-    Returns HTTP 400 if the old password is incorrect.
+    Returns HTTP 400 if the old password is incorrect. After an admin reset
+    (must_change_password) the old password is the known reset one, so it is
+    not asked; the new one may not be the reset password (400
+    choose_another_password).
     """
-    if not await verify_password_async(body.old_password, current_user.hashed_password):
+    from backend.app.config import settings
+
+    if not current_user.must_change_password and not await verify_password_async(
+            body.old_password or '', current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Old password is incorrect",
         )
+    if body.new_password == settings.RESET_PASSWORD:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="choose_another_password")
     current_user.hashed_password = await hash_password_async(body.new_password)
+    current_user.must_change_password = False
     db.add(current_user)
     await db.flush()
     return {"detail": "Password changed"}

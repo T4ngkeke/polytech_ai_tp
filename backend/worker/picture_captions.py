@@ -22,6 +22,7 @@ import pymupdf
 from sqlalchemy import select
 
 from backend.app.models import PictureCaption
+from backend.app.services import failure_log
 from backend.app.services.model_routing import Endpoint
 
 PROMPT_VERSION = 'caption-fr-1'
@@ -225,11 +226,13 @@ async def write_captions(pictures: list[Picture], *, model: str, describe: Descr
         for task in pending:
             task.cancel()
             report['not_reached'] += len(todo[tasks[task]])
+            failure_log.record('captions', 'not_reached')
         for task in done:
             digest = tasks[task]
             if task.exception() is not None:
                 report['failed'] += len(todo[digest])
                 report.setdefault('error', type(task.exception()).__name__)
+                failure_log.record('captions', type(task.exception()).__name__)
                 continue
             written[digest] = task.result()
             for picture in todo[digest]:

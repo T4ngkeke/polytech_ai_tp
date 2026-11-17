@@ -48,6 +48,7 @@ from backend.app.models import (
 )
 from backend.app.services import document_storage as storage
 from backend.app.services import document_versions as versions
+from backend.app.services import failure_log
 from backend.app.services.document_cleanup import aware, sweep_staged_objects
 from backend.app.services.document_edits import CAPTION_UNCHECKED, carry_forward
 from backend.worker import picture_captions
@@ -383,6 +384,7 @@ async def _keep_lease(db, claim: StructuredClaim, stop: asyncio.Event, *, lease_
         except Exception:
             await db.rollback()
             logger.warning('structured job %s: lease not extended', claim.job_id, exc_info=True)
+            failure_log.record('worker', 'lease_not_extended')
 
 
 async def _caption(db, claim: StructuredClaim, outcome: ParseOutcome, pdf: Path,
@@ -414,6 +416,7 @@ async def _caption(db, claim: StructuredClaim, outcome: ParseOutcome, pdf: Path,
     except Exception as exc:
         await db.rollback()
         logger.warning('structured job %s: captions not written', claim.job_id, exc_info=True)
+        failure_log.record('captions', 'not_written_' + type(exc).__name__)
         return {'error': type(exc).__name__}
 
 
@@ -445,6 +448,7 @@ async def _write_progress(db, claim: StructuredClaim, progress: PageProgress, st
         except Exception:
             await db.rollback()
             logger.warning('structured job %s: progress not written', claim.job_id, exc_info=True)
+            failure_log.record('worker', 'progress_not_written')
 
 
 async def _mark_processing(db, claim: StructuredClaim, *, now) -> None:

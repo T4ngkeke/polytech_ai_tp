@@ -8,6 +8,7 @@ model call fail with a 404 on 2026-10-16 and nothing on the page showed it.
 from __future__ import annotations
 
 import asyncio
+import time
 from urllib.parse import urlsplit
 
 import httpx
@@ -43,6 +44,29 @@ async def _fetch(url: str, api_key: str) -> dict:
         response = await client.get(url, headers=headers)
         response.raise_for_status()
         return response.json()
+
+
+# The served context of a model, cached: one /v1/models call per server and
+# CONTEXT_TTL seconds at most (the chat asks for each question).
+CONTEXT_TTL = 300.0
+_contexts: dict[tuple[str, str], tuple[float, int | None]] = {}
+
+
+async def context_tokens(base_url: str, model: str, api_key: str = '', fetch=None,
+                         clock=time.monotonic) -> int | None:
+    """The max_model_len the server gives for model, or None when it does not answer."""
+    url = models_url(base_url)
+    if url is None or not model:
+        return None
+    cached = _contexts.get((url, model))
+    if cached and clock() - cached[0] < CONTEXT_TTL:
+        return cached[1]
+    try:
+        value = check(model, await (fetch or _fetch)(url, api_key))['max_model_len']
+    except (httpx.HTTPError, ValueError):
+        value = None
+    _contexts[(url, model)] = (clock(), value)
+    return value
 
 
 async def server_status(routing: ModelRouting, fetch=None) -> list[dict]:

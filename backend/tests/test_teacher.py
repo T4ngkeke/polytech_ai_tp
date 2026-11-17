@@ -210,6 +210,37 @@ class TestRuleItems:
         listed = (await teacher_client.get(f"{url}?level=lab&target_id={lab.id}")).json()
         assert [r["text"] for r in listed] == ["Be short."]
 
+    async def test_check_names_contradicting_active_rules_by_page_number(self, teacher_client, seed_data,
+                                                                           monkeypatch):
+        from backend.app.services import model_clients, rule_check
+        lab, url = seed_data["lab"], "/api/teacher/rule-items"
+        ids = [(await teacher_client.post(url, json={"level": "lab", "target_id": str(lab.id), "text": t})).json()["id"]
+               for t in ("Answer in French.", "Off rule.", "Answer in English.")]
+        await teacher_client.patch(f"{url}/{ids[1]}", json={"is_active": False})
+        seen = {}
+
+        async def config(db):
+            return {"agent_base_url": "http://m.invalid/v1", "agent_api_key": "", "agent_model": "m"}
+
+        async def judge(model, rules, **_):
+            seen["rules"] = rules
+            return [{"rules": [1, 3], "reason": "French or English."}]
+
+        monkeypatch.setattr(model_clients, "get_llm_config", config)
+        monkeypatch.setattr(rule_check, "find_conflicts", judge)
+        resp = await teacher_client.post(f"{url}/check", json={"level": "lab", "target_id": str(lab.id)})
+        assert resp.status_code == 200
+        # Only active rules, numbered as the page shows them (the off rule keeps number 2).
+        assert seen["rules"] == {1: "Answer in French.", 3: "Answer in English."}
+        assert resp.json() == {"conflicts": [{"positions": [1, 3], "rule_ids": [ids[0], ids[2]],
+                                              "reason": "French or English."}]}
+
+        async def broken(model, rules, **_):
+            raise TimeoutError()
+        monkeypatch.setattr(rule_check, "find_conflicts", broken)
+        resp = await teacher_client.post(f"{url}/check", json={"level": "lab", "target_id": str(lab.id)})
+        assert resp.status_code == 503 and resp.json()["detail"] == "rule_check_unavailable"
+
     async def test_blank_or_missing_text_422(self, teacher_client, seed_data):
         url = "/api/teacher/rule-items"
         target = str(seed_data["class"].id)

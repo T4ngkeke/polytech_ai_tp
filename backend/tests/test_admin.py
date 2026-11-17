@@ -285,6 +285,21 @@ class TestDeleteUser:
         resp = await admin_client.delete(f"/api/admin/users/{seed_users['deleted'].id}")
         assert resp.status_code == 404
 
+    async def test_admin_cannot_delete_self_nor_change_own_role(self, admin_client, seed_users, db_session):
+        admin = seed_users["admin"]
+        resp = await admin_client.delete(f"/api/admin/users/{admin.id}")
+        assert resp.status_code == 400 and resp.json()["detail"] == "cannot_delete_self"
+        resp = await admin_client.put(f"/api/admin/users/{admin.id}/role", json={"role": "teacher"})
+        assert resp.status_code == 400 and resp.json()["detail"] == "cannot_change_own_role"
+        assert (await admin_client.put(f"/api/admin/users/{admin.id}/role", json={"role": "admin"})).status_code == 200
+        await db_session.refresh(admin)
+        assert admin.role == UserRole.admin and not admin.is_deleted
+
+    async def test_another_admin_can_be_removed_while_one_stays(self, admin_client, seed_users):
+        other = seed_users["teacher"]
+        assert (await admin_client.put(f"/api/admin/users/{other.id}/role", json={"role": "admin"})).status_code == 200
+        assert (await admin_client.delete(f"/api/admin/users/{other.id}")).status_code == 204
+
     async def test_student_cannot_delete_403(self, student_client, seed_users):
         resp = await student_client.delete(f"/api/admin/users/{seed_users['student_b'].id}")
         assert resp.status_code == 403
@@ -419,7 +434,8 @@ class TestLLMConfig:
         # The form shows each default and range from the backend.
         assert got["research_limits"]["agent_max_tool_calls"] == {"default": 30, "min": 1, "max": 40}
         assert got["research_limits"]["agent_max_input_tokens"]["default"] == 28000
-        assert len(got["research_limits"]) == 6
+        assert len(got["research_limits"]) == 7
+        assert got["research_limits"]["tp_context_percent"] == {"default": 30, "min": 0, "max": 60}
         # An empty value goes back to the default.
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m", "agent_max_tool_calls": "",
@@ -840,35 +856,39 @@ class TestAdminClassAnalyticsDetails:
 # ===================================================================
 
 class TestAdminResetPassword:
-    async def test_admin_resets_user_password(self, admin_client, seed_users, db_session):
+    async def test_reset_gives_the_default_password_and_forces_a_change(self, admin_client, seed_users, db_session):
         target = seed_users["student_a"]
-        resp = await admin_client.put(
-            f"/api/admin/users/{target.id}/password",
-            json={"new_password": "resetpw123"},
-        )
-        assert resp.status_code == 200
+        resp = await admin_client.put(f"/api/admin/users/{target.id}/password")
+        assert resp.status_code == 200 and resp.json()["must_change_password"] is True
         await db_session.refresh(target)
-        assert verify_password("resetpw123", target.hashed_password)
+        assert verify_password("123456", target.hashed_password) and target.must_change_password
+
+        # Until a new password is chosen, only /me and change-password answer.
+        token = create_access_token(user_id=target.id)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test",
+                               headers={"Authorization": f"Bearer {token}"}) as student:
+            assert (await student.get("/api/student/classes")).json()["detail"] == "password_change_required"
+            me = await student.get("/api/auth/me")
+            assert me.status_code == 200 and me.json()["must_change_password"] is True
+            same = await student.post("/api/auth/change-password", json={"new_password": "123456"})
+            assert same.status_code == 400 and same.json()["detail"] == "choose_another_password"
+            ok = await student.post("/api/auth/change-password", json={"new_password": "my-own-pw"})
+            assert ok.status_code == 200
+            assert (await student.get("/api/student/classes")).status_code == 200
+        await db_session.refresh(target)
+        assert verify_password("my-own-pw", target.hashed_password) and not target.must_change_password
+
+    async def test_a_normal_change_still_needs_the_old_password(self, student_client):
+        resp = await student_client.post("/api/auth/change-password", json={"new_password": "another-pw"})
+        assert resp.status_code == 400 and resp.json()["detail"] == "Old password is incorrect"
 
     async def test_nonexistent_user_404(self, admin_client):
-        resp = await admin_client.put(
-            f"/api/admin/users/{uuid.uuid4()}/password",
-            json={"new_password": "resetpw123"},
-        )
+        resp = await admin_client.put(f"/api/admin/users/{uuid.uuid4()}/password")
         assert resp.status_code == 404
 
-    async def test_short_password_422(self, admin_client, seed_users):
-        resp = await admin_client.put(
-            f"/api/admin/users/{seed_users['student_a'].id}/password",
-            json={"new_password": "123"},
-        )
-        assert resp.status_code == 422
-
     async def test_student_cannot_reset_403(self, student_client, seed_users):
-        resp = await student_client.put(
-            f"/api/admin/users/{seed_users['student_b'].id}/password",
-            json={"new_password": "resetpw123"},
-        )
+        resp = await student_client.put(f"/api/admin/users/{seed_users['student_b'].id}/password")
         assert resp.status_code == 403
 
 

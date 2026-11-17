@@ -20,6 +20,7 @@ from backend.app.models import (
     DocumentRevision, DocumentSource, Lab, Session, User,
 )
 from backend.app.services import document_reader as reader
+from backend.app.services import failure_log
 from backend.app.services.document_access import DocumentNotFound, readable_asset, readable_revision
 from backend.app.services.document_edits import description_checked
 from backend.app.services.document_versions import indexed_text
@@ -264,8 +265,9 @@ class ResearchTools:
         if self.embed_fn is not None:
             try:
                 embedding = await self.embed_fn(args.query)
-            except Exception:  # model failure degrades to lexical recall, visibly
+            except Exception as exc:  # model failure degrades to lexical recall, visibly
                 issues.append('embedding_unavailable')
+                failure_log.record('embedding', type(exc).__name__)
         else:
             issues.append('embedding_unavailable')
         # A network embedding call may take long enough for access to change.

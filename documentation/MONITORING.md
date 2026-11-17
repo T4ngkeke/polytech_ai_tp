@@ -44,6 +44,13 @@ no longer in the class) has no run; the chat writes it to `chat_refusals` so
 that it can be counted. The time a PDF took to read is stored on its revision
 (`parse_started_at`, `parse_finished_at`).
 
+Some failures do not stop the answer, so nobody sees them: the reranker (the
+merged order is kept), the embeddings (full-text search only), a picture view,
+a TP page that cannot be read, a session title, a teacher report, the figure
+captions of the worker. Each one is written to `service_failures` (service and
+error name only) and shown under "Service failures" in the Answers dashboard.
+Failed model calls are counted in "Model calls" (column Errors).
+
 On the DGX Spark the GPU has no memory of its own: it uses the main memory, so
 "Memory available" is also what is left for the models.
 

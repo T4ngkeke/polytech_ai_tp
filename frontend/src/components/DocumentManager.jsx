@@ -72,7 +72,7 @@ const fileKey = (file) => `${file.name}|${file.size}|${file.lastModified}`;
 // A row still to send: newly added, or failed and sent again on the next Upload.
 const toSend = (row) => row.state === 'chosen' || row.state === 'failed';
 
-export default function DocumentManager({ labId, classId, examMode = false, onOpenClassSettings }) {
+export default function DocumentManager({ labId, classId, examMode = false, onOpenClassSettings, onOpenClassDocuments }) {
   const base = classId ? `/api/teacher/classes/${classId}/documents` : labId ? `/api/teacher/labs/${labId}/documents` : null;
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -82,12 +82,16 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   const [files, setFiles] = useState([]);
   const fileRef = useRef(null);
 
+  // A lab: which of its files the tutor reads in full (GET /api/teacher/labs/{id}/tp-text).
+  const [tpText, setTpText] = useState(null);
   const loadDocuments = useCallback(async () => {
     if (!base) return [];
     const rows = await api.get(base);
     setDocuments(rows);
+    if (labId && !classId) api.get(`/api/teacher/labs/${labId}/tp-text`).then(setTpText).catch(() => setTpText(null));
     return rows;
-  }, [base]);
+  }, [base, labId, classId]);
+  const inFull = (doc) => tpText?.files.find((f) => f.document_id === doc.id)?.in_full;
 
   // Initial load when the class or lab changes.
   useEffect(() => {
@@ -109,7 +113,7 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
     return () => clearInterval(id);
   }, [documents, loadDocuments]);
 
-  // Add the picked files to the list. Files already sent leave it; the same file twice is kept once.
+  // Add the picked files to the list; the same file twice is kept once.
   const addFiles = (picked) => {
     const skipped = picked.filter((file) => !isPdf(file)).map((file) => file.name);
     if (skipped.length) toast.error(`Not a PDF, not added: ${skipped.join(', ')}`, { duration: 6000 });
@@ -151,6 +155,8 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
       }
     }
     setUploading(false);
+    // The sent files are in the document list now; only the failed ones stay here, to retry.
+    setFiles((rows) => rows.filter((row) => row.state !== 'done'));
     if (failed) toast.error(`${done} uploaded, ${failed} failed. Upload again to retry the failed ones.`, { duration: 8000 });
     else toast.success(`${done === 1 ? 'Uploaded' : `${done} files uploaded`}. The pages are being read; you can leave this page meanwhile.`, { duration: 6000 });
   };
@@ -256,6 +262,7 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
           can be a little slower.
         </p>
       )}
+      {!classId && <TpTextNotice tp={tpText} onOpenClassDocuments={onOpenClassDocuments} />}
       {loading ? (
         <p className="text-sm text-cream-muted">Loading documents…</p>
       ) : documents.length === 0 ? (
@@ -276,6 +283,13 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
                 <span className="flex min-w-0 max-w-full items-center gap-2">
                   {!classId && <ScopeBadge scope={doc.scope} />}
                   <span className="truncate text-sm font-medium text-cream">{doc.filename}</span>
+                  {!classId && doc.scope === 'lab' && inFull(doc) !== undefined && (inFull(doc) ? (
+                    <span title="Given whole to the tutor with every question (Search and Direct)"
+                      className="shrink-0 whitespace-nowrap rounded-full border border-cyan/40 px-2 text-[11px] text-cyan">Read in full</span>
+                  ) : (
+                    <span title="Too long for the limit: the tutor only searches it"
+                      className="shrink-0 whitespace-nowrap rounded-full border border-gold/50 px-2 text-[11px] text-gold">Searched only</span>
+                  ))}
                   {WARNING_HINT[status] && (
                     <span title={doc.error_message || WARNING_HINT[status]} className="text-gold"><Icon name="warning" className="w-4 h-4" /></span>
                   )}
@@ -389,5 +403,41 @@ function SummaryChips({ doc }) {
       {pages && <span>{pages.usable} usable · {pages.unavailable} unavailable{pages.noIndex ? ` · ${pages.noIndex} not indexed` : ''}</span>}
       {pages?.pending != null && <span>{pages.pending} visual reviews pending</span>}
     </span>
+  );
+}
+
+
+// The lab's files are too long for the tutor to read them all with every
+// question: say which are only searched, and that slides belong in the class.
+// Agreed on a prototype first (2026-11-17).
+function TpTextNotice({ tp, onOpenClassDocuments }) {
+  if (!tp || !tp.left_out) return null;
+  const total = tp.files.reduce((sum, f) => sum + f.chars, 0);
+  const full = tp.files.filter((f) => f.in_full);
+  const out = tp.files.filter((f) => !f.in_full);
+  const pages = full.reduce((sum, f) => sum + f.pages, 0);
+  const fmt = (n) => n.toLocaleString('en-US');
+  return (
+    <div className="space-y-2 rounded-xl border border-gold/40 bg-gold-muted px-4 py-3" role="status">
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-gold">
+        <Icon name="warning" className="h-4 w-4" />Too much text in this TP to read it all
+      </p>
+      <p className="text-sm text-cream-secondary">
+        The tutor reads the TP files in full for every question, up to about {fmt(tp.limit_chars)} characters.
+        These files have about {fmt(total)}. It reads {full.length} of {tp.files.length} files in full
+        ({pages} pages) and only searches the other {out.length}: {out.map((f) => f.filename).join(', ')}.
+      </p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-ink-hover" aria-hidden="true">
+        <div className="h-full bg-gold" style={{ width: `${Math.min(100, Math.round((100 * tp.limit_chars) / total))}%` }} />
+      </div>
+      <p className="text-sm text-cream-secondary">
+        <span className="font-semibold text-cream">Put course slides in the class Documents tab and keep only the TP statement here.</span>{' '}
+        The tutor then reads the whole statement, and still searches the slides.
+      </p>
+      {onOpenClassDocuments && (
+        <button type="button" onClick={onOpenClassDocuments}
+          className="cursor-pointer text-sm text-cyan underline hover:text-cyan-hover">Open the class Documents tab</button>
+      )}
+    </div>
   );
 }

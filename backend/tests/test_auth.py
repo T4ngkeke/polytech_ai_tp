@@ -38,6 +38,11 @@ from tests.conftest import make_user
 # ===================================================================
 
 
+
+def _request(path):
+    from starlette.requests import Request
+    return Request({'type': 'http', 'path': path, 'headers': [], 'query_string': b''})
+
 class TestPasswordUtils:
     def test_hash_returns_non_empty_string(self):
         assert len(hash_password("secret")) > 0
@@ -111,7 +116,7 @@ class TestGetCurrentUser:
         from fastapi.security import HTTPAuthorizationCredentials
         token = create_access_token(active_user.id)
         auth = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        user = await get_current_user(auth=auth, db=db_session)
+        user = await get_current_user(request=_request('/api/auth/me'), auth=auth, db=db_session)
         assert user.id == active_user.id
 
     async def test_deleted_user_raises_401(self, db_session):
@@ -122,7 +127,7 @@ class TestGetCurrentUser:
         token = create_access_token(user.id)
         auth = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(auth=auth, db=db_session)
+            await get_current_user(request=_request('/api/auth/me'), auth=auth, db=db_session)
         assert exc.value.status_code == 401
 
     async def test_nonexistent_user_raises_401(self, db_session):
@@ -130,7 +135,7 @@ class TestGetCurrentUser:
         token = create_access_token(uuid.uuid4())
         auth = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(auth=auth, db=db_session)
+            await get_current_user(request=_request('/api/auth/me'), auth=auth, db=db_session)
         assert exc.value.status_code == 401
 
 

@@ -46,6 +46,9 @@ class ResearchLimits:
     total_seconds: int = 420
     call_seconds: int = 120
     input_tokens: int = 28000
+    # Share of the model's context the TP text may use in Search and Direct
+    # (agent/tp_text.py). 30% of 128k is about 39k tokens; 0: no TP text.
+    tp_context_percent: int = 30
 
     @classmethod
     def from_config(cls, configs: Mapping[str, str]) -> ResearchLimits:
@@ -66,6 +69,7 @@ LIMIT_KEYS = {
     'AGENT_TOTAL_SECONDS': ('total_seconds', 10, 1800),
     'AGENT_CALL_SECONDS': ('call_seconds', 5, 600),
     'AGENT_MAX_INPUT_TOKENS': ('input_tokens', 4000, 200000),
+    'TP_CONTEXT_PERCENT': ('tp_context_percent', 0, 60),
 }
 DEFAULT_LIMITS = {f.name: f.default for f in fields(ResearchLimits)}
 
@@ -108,11 +112,13 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  vision_model: str = '',
                                  mode: str = 'research', exam_mode: bool = False,
                                  exam_files: bool = False,
-                                 limits: ResearchLimits = ResearchLimits()) -> dict:
+                                 limits: ResearchLimits = ResearchLimits(),
+                                 tp_chars: int | None = None) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call).
     mode: direct, search or research; exam_mode and exam_files (some files are
     allowed in the exam) only change the direct prompt. The chat endpoint has
-    already limited the scope to the allowed files, or chosen direct."""
+    already limited the scope to the allowed files, or chosen direct with an
+    empty scope; Direct reads the TP files of the scope only."""
     if mode not in ('direct', 'search', 'research'):
         raise ValueError('unknown_mode')
     runs = ResearchRuns(session_factory)
@@ -184,9 +190,13 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
         billed = usage.wrap_model(run_id=started.run_id, model=model_name,
                                   alpha=token_alpha, beta=token_beta, call=model)
         if mode == 'direct':
-            runner = DirectRunner(billed, exam_mode=exam_mode, exam_files=exam_files,
+            # Direct reads only the TP files of the scope (agent/tp_text.py), no other tool.
+            course_tools = CourseTools(tools, max_tool_calls=0, research_seconds=limits.total_seconds,
+                                       max_visual_calls=0)
+            runner = DirectRunner(billed, course_tools=course_tools, exam_mode=exam_mode,
+                                  exam_files=exam_files,
                                   concise=direct_mode.CONCISE,
-                                  total_timeout=limits.total_seconds,
+                                  total_timeout=limits.total_seconds, tp_chars=tp_chars,
                                   model_timeout=limits.call_seconds, on_draft=on_draft)
         elif mode == 'search':
             # Searches and page reads are not research tool calls: no tool budget.
@@ -195,7 +205,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                        first_evidence=await runs.next_evidence_number(scope.session_id))
             runner = SearchRunner(course_tools, billed, rewrite=search_mode.REWRITE,
                                   min_score=search_mode.min_score_for(rerank_model), concise=search_mode.CONCISE,
-                                  total_timeout=limits.total_seconds,
+                                  total_timeout=limits.total_seconds, tp_chars=tp_chars,
                                   model_timeout=limits.call_seconds, on_phase=on_phase, on_draft=on_draft)
         else:
             course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,

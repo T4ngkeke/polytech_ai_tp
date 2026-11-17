@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from backend.app.agent.language import SENTENCES
 from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchRunStopped
@@ -52,6 +53,9 @@ def test_research_limits_from_admin_values():
     assert (limits.tool_calls, limits.visual_calls, limits.input_tokens) == (12, 4, 28000)
     # Research time never exceeds the total time.
     assert (limits.research_seconds, limits.total_seconds) == (120, 120)
+
+
+FR = SENTENCES['fr']
 
 
 @pytest.mark.asyncio
@@ -137,7 +141,7 @@ async def test_tools_are_withdrawn_when_the_budget_is_spent():
     model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1].')
     result = await ResearchRunner(CourseTools(ViewFixture()), model, max_tool_calls=1).run('Q ?')
     assert model.with_tools == [True, False]
-    assert model.seen[-1][-1] == {'role': 'user', 'content': FINISH_TURN}
+    assert model.seen[-1][-1] == {'role': 'user', 'content': FINISH_TURN + '\n\n' + FR}
     # The system message is unchanged, so the model server can reuse its prefix.
     assert model.seen[-1][0] == model.seen[0][0]
     assert result.stop_reason == 'budget_exhausted' and [c['evidence_id'] for c in result.citations] == ['E1']
@@ -290,7 +294,7 @@ async def test_history_is_sent_as_turns_with_their_evidence_ids():
     assert model.seen[0][1:] == [
         {'role': 'user', 'content': 'Produit cartésien ?'},
         {'role': 'assistant', 'content': 'Voir la page 10 [E1, E2].'},
-        {'role': 'user', 'content': 'Et la page 11 ?'}]
+        {'role': 'user', 'content': 'Et la page 11 ?\n\n' + FR}]
 
 
 @pytest.mark.asyncio
@@ -609,3 +613,16 @@ async def test_no_lead_calls_zero_sends_no_note():
     await ResearchRunner(CourseTools(ViewFixture(), max_tool_calls=10), model, max_tool_calls=10,
                          no_lead_calls=0).run('Question ?')
     assert not any(m['content'] == NO_LEAD_TURN.format(n=3) for m in model.seen[-1] if m['role'] == 'user')
+
+
+@pytest.mark.asyncio
+async def test_with_teacher_rules_the_tool_results_end_with_a_reminder():
+    from backend.app.agent.runner import RULES_REMINDER
+    model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1].')
+    await ResearchRunner(CourseTools(ViewFixture()), model).run(
+        'Q ?', teaching_rules='[CLASS RULES]\n1. Court.')
+    tool = [m for m in model.seen[-1] if m['role'] == 'tool']
+    assert tool[-1]['content'].endswith('\n\n' + RULES_REMINDER.format(rules='[CLASS RULES]\n1. Court.'))
+    plain = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1].')
+    await ResearchRunner(CourseTools(ViewFixture()), plain).run('Q ?')
+    assert 'Reminder:' not in [m for m in plain.seen[-1] if m['role'] == 'tool'][-1]['content']

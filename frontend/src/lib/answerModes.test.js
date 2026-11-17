@@ -26,7 +26,7 @@ test('an unknown stored value or blocked storage falls back to research', () => 
 });
 
 test('labels name the mode; older answers have none', () => {
-  assert.match(modeLabel('direct'), /not consulted/);
+  assert.match(modeLabel('direct'), /not searched/);
   assert.equal(modeLabel('search'), 'Search');
   assert.equal(modeLabel(null), null);
 });

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
+from backend.app.services import shared_clients
+
 from backend.app.agent.model import sampling_request
 from backend.app.services.model_routing import Endpoint
 
@@ -62,8 +64,19 @@ class ResearchVision:
         self.endpoint, self.timeout, self.max_tokens = endpoint, timeout, max_tokens
         # The same sampling as the research calls (QWEN_NON_THINKING when None).
         self.sampling, self.extra_body = sampling_request(sampling)
-        self.client = AsyncOpenAI(base_url=endpoint.base_url,
-                                  api_key=endpoint.api_key or 'local', max_retries=0)
+        self._client: AsyncOpenAI | None = None
+
+    @property
+    def client(self) -> AsyncOpenAI:
+        """The shared client of the endpoint for the running loop, unless one was set."""
+        if self._client is not None:
+            return self._client
+        return shared_clients.openai_client(self.endpoint.base_url, self.endpoint.api_key or 'local',
+                                            max_retries=0)
+
+    @client.setter
+    def client(self, client: AsyncOpenAI) -> None:
+        self._client = client
 
     async def __call__(self, image: bytes, mime: str, question: str) -> VisualReply:
         if mime not in ('image/png', 'image/jpeg') or len(image) > 3_000_000:

@@ -4,11 +4,13 @@
 
 import { Navigate, Outlet } from 'react-router-dom';
 import useAuthStore, { DEFAULT_ROUTES } from '../store/authStore';
+import ChoosePassword from '../pages/ChoosePassword';
 
 export default function ProtectedRoute({ allowedRoles }) {
   const token = useAuthStore((s) => s.token);
   const userRole = useAuthStore((s) => s.userRole);
   const isHydrated = useAuthStore((s) => s.isHydrated);
+  const mustChangePassword = useAuthStore((s) => s.mustChangePassword);
 
   // Still loading auth state — show nothing (avoids flash)
   if (!isHydrated) {
@@ -22,6 +24,12 @@ export default function ProtectedRoute({ allowedRoles }) {
   // Not authenticated → login
   if (!token) {
     return <Navigate to="/login" replace />;
+  }
+
+  // An admin reset the password: nothing else until a new one is chosen
+  // (the server answers 403 password_change_required meanwhile).
+  if (mustChangePassword) {
+    return <ChoosePassword />;
   }
 
   // Authenticated but wrong role → redirect to their default route

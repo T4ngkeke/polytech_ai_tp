@@ -6,13 +6,14 @@ the embedding and rerank functions. The student chat and the teacher reports
 build their clients from here.
 """
 
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import SystemConfig
+from backend.app.services import failure_log
 from backend.app.services.model_routing import resolve_model_routing
 from backend.app.services.research_service import ResearchLimits
+from backend.app.services.shared_clients import RERANK_TIMEOUT, http_client, openai_client
 
 
 async def get_llm_config(db: AsyncSession) -> dict:
@@ -59,10 +60,9 @@ async def get_llm_config(db: AsyncSession) -> dict:
 def make_embed_fn(llm_config: dict[str, str]):
     """Build an async embedder hitting the configured embedding model."""
     async def embed(texts: list[str]) -> list[list[float]]:
-        client = AsyncOpenAI(
-            api_key=llm_config["embedding_api_key"],
-            base_url=llm_config["embedding_base_url"],
-        )
+        # One shared client per endpoint: a client per call that is never
+        # closed made the rerank connections hang (see shared_clients.py).
+        client = openai_client(llm_config["embedding_base_url"], llm_config["embedding_api_key"])
         # encoding_format="float" is mandatory: the OpenAI SDK otherwise defaults
         # to "base64", which some OpenAI-compatible servers (e.g. Albert) reject
         # with a 500. Float is universally supported.
@@ -107,14 +107,16 @@ def make_rerank_fn(llm_config: dict[str, str]):
 
     async def rerank(query: str, documents: list[str]) -> list[float]:  # pragma: no cover
         query, documents = rerank_inputs(llm_config["rerank_model"], query, documents)
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json={
-                "model": llm_config["rerank_model"],
-                "query": query,
-                "documents": documents,
-            })
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
+        body = {"model": llm_config["rerank_model"], "query": query, "documents": documents}
+        client = http_client("rerank", RERANK_TIMEOUT)
+        try:
+            resp = await client.post(url, json=body)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            # One retry: a lost connection should not cost the reranked order.
+            failure_log.record('rerank', 'retried_' + type(exc).__name__)
+            resp = await client.post(url, json=body)
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
         scores = [0.0] * len(documents)
         for item in results:
             scores[item["index"]] = item["relevance_score"]

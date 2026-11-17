@@ -15,6 +15,7 @@ import uuid
 from sqlalchemy import func, select
 
 from backend.app.models import Message, SenderType, Session
+from backend.app.services import failure_log
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ async def title_first_exchange(factory, session_id: uuid.UUID, model, question: 
         title = clean_title(reply.content)
     except Exception as exc:          # the conversation still gets a title
         logger.warning('Session title failed (%s); using the question.', type(exc).__name__)
+        failure_log.record('title', type(exc).__name__)
     title = title or clean_title(question) or None
     if title is None:
         return None

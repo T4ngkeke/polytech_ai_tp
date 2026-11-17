@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, Valida
 from backend.app.agent.evidence import EvidenceStore
 from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
 from backend.app.agent.tools import Kind
+from backend.app.services import failure_log
 
 
 class ViewArgs(BaseModel):
@@ -654,6 +655,8 @@ class CourseTools:
                 # still takes a tool slot.
                 if name == 'view_image' and result.get('ok'):
                     self.visual_calls += 1
+                elif name == 'view_image' and str((result.get('error') or {}).get('code', '')).startswith('vision_'):
+                    failure_log.record('vision', result['error']['code'])
                 if result.get('ok'):
                     ids = self._ids(name, result, UUID(arguments['document_id']) if name == 'read' else None)
                     if any(ids):
@@ -667,6 +670,7 @@ class CourseTools:
             raise
         except Exception as exc:
             row['ok'], row['error'] = False, type(exc).__name__
+            failure_log.record('tool_' + name, type(exc).__name__)
             result = {'ok': False, 'error': {'code': 'tool_failed', 'type': type(exc).__name__}}
             row['result'] = result
             return result

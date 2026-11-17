@@ -596,7 +596,10 @@ async def _mode_chat(db, tmp_path, monkeypatch, replies):
 async def test_search_mode_answers_from_found_pages_and_records_the_mode(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
-        _, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].'])
+        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].'])
+        # A class file, found by the search (a file of the lab is the TP text, below).
+        doc.lab_id = None
+        await db.commit()
         client = await make_client(db, student)
         async with client:
             stream = events((await client.post('/api/chat/stream', json={
@@ -616,7 +619,29 @@ async def test_search_mode_answers_from_found_pages_and_records_the_mode(pg_sess
 
 
 @pytest.mark.asyncio
-async def test_direct_mode_reads_nothing_and_cites_nothing(pg_session, tmp_path, monkeypatch):
+async def test_search_mode_gives_the_tp_text_and_its_citations_are_stored(pg_session, tmp_path, monkeypatch):
+    try:
+        db = pg_session
+        _, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].', 'Encore [E1].'])
+        client = await make_client(db, student)
+        async with client:
+            stream = events((await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'On fait quoi ?', 'mode': 'search'})).text)
+            assert [c['label'] for c in next(data for name, data in stream if name == 'citations')] == ['E1']
+            # The lab's file is the TP: all of it in the system message, with its IDs.
+            system = calls[0]['messages'][0]['content']
+            assert '--- [This TP] ' in system and '\n[E1] ' in system
+            assert 'Course pages found' not in calls[0]['messages'][-1]['content']
+            # The next question: the same TP text (same IDs), the first answer as history.
+            await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Et ensuite ?', 'mode': 'search'})
+            assert calls[2]['purpose'] == 'search_answer' and calls[2]['messages'][0]['content'] == system
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_reads_only_the_tp_and_cites_nothing(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
         _, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Une récursion [E3] appelle…'])
@@ -627,7 +652,10 @@ async def test_direct_mode_reads_nothing_and_cites_nothing(pg_session, tmp_path,
             # An ID copied from nowhere is removed: no page was read.
             assert ('token', 'Une récursion  appelle…') in stream and ('citations', []) in stream
             assert [c['purpose'] for c in calls] == ['direct_answer', 'title'] and calls[0]['tools'] is None
-            assert 'Search or Research' in calls[0]['messages'][0]['content']
+            system = calls[0]['messages'][0]['content']
+            assert 'Search or Research' in system
+            # The lab's file is the TP statement: its text, without evidence IDs.
+            assert '--- [This TP] ' in system and '[E1]' not in system[system.index('--- [This TP] '):]
             stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
             assert stored[-1]['answer_mode'] == 'direct'
     finally:
@@ -651,6 +679,8 @@ async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, 
                                'exam_mode': True}) in stream
             assert [c['purpose'] for c in calls] == ['direct_answer', 'title']
             assert 'exam mode' in calls[0]['messages'][0]['content']
+            # The TP file is not allowed in the exam: its text is not given either.
+            assert '[This TP]' not in calls[0]['messages'][0]['content']
             classes = (await client.get('/api/student/classes')).json()
             assert classes[0]['exam_mode'] is True
             labs = (await client.get(f"/api/student/classes/{doc.class_id}/labs")).json()
@@ -719,5 +749,6 @@ async def test_the_three_tiers_of_teacher_rules_reach_the_prompt(pg_session, tmp
         assert '[CLASS RULES]\n1. CLASS-RULE\n2. SECOND-RULE' in system and 'OFF-RULE' not in system
         assert '[LAB RULES]\n1. LAB-RULE' in system
         assert '[STUDENT RULES]\n1. STUDENT-RULE' in system and 'ELSEWHERE' not in system
+        assert system.index('a STUDENT rule wins over a LAB') < system.index('[CLASS RULES]')
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
