@@ -88,7 +88,13 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
     if (!base) return [];
     const rows = await api.get(base);
     setDocuments(rows);
-    if (labId && !classId) api.get(`/api/teacher/labs/${labId}/tp-text`).then(setTpText).catch(() => setTpText(null));
+    // A reply without a file list (an older backend, a proxy page) shows no notice
+    // instead of breaking the tab.
+    if (labId && !classId) {
+      api.get(`/api/teacher/labs/${labId}/tp-text`)
+        .then((tp) => setTpText(Array.isArray(tp?.files) ? tp : null))
+        .catch(() => setTpText(null));
+    }
     return rows;
   }, [base, labId, classId]);
   const inFull = (doc) => tpText?.files.find((f) => f.document_id === doc.id)?.in_full;
