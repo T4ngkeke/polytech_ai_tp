@@ -285,8 +285,6 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "agent_base_url": "AGENT_BASE_URL",
     "agent_api_key": "AGENT_API_KEY",
     "agent_model": "AGENT_MODEL",
-    # estimated-token budget for chat history (OOM protection).
-    "context_max_tokens": "CONTEXT_MAX_TOKENS",
     # VLM slot (garbled-formula transcription; empty model = off).
     "vlm_base_url": "VLM_BASE_URL",
     "vlm_api_key": "VLM_API_KEY",
@@ -305,6 +303,7 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "agent_call_seconds": "AGENT_CALL_SECONDS",
     "agent_max_input_tokens": "AGENT_MAX_INPUT_TOKENS",
     "tp_context_percent": "TP_CONTEXT_PERCENT",
+    "history_context_percent": "HISTORY_CONTEXT_PERCENT",
 }
 
 

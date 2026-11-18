@@ -199,6 +199,13 @@ async def test_earlier_citations_by_label_leave_out_ambiguous_labels(pg_session,
         history, earlier = await runs.load_safe_context(scope)
         assert sum(m['role'] == 'assistant' for m in history) == 2
         assert set(earlier) == {'E2'} and earlier['E2']['range'] == {'start': 0, 'end': 6}
+        # Only answers still sent give citations: with a history limit that
+        # keeps the last turn only, E1 is no longer ambiguous and is the
+        # second answer's; an answer above the line gives nothing.
+        await answer(3, [('E3', 4)])
+        history, earlier, hidden = await runs.load_context(scope, limit=20, max_tokens=4)
+        assert hidden == 4 and [m['content'] for m in history] == ['Q3?', '[E3]']
+        assert set(earlier) == {'E3'}
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 

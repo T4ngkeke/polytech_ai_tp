@@ -42,7 +42,7 @@ The keys below are the ones the code reads. An empty value means "use the defaul
 | `RERANK_API_KEY` | the main model's key | Key for the reranker. |
 | `RERANK_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | The reranker. A name that contains `qwen3-reranker` is treated as Qwen3-Reranker (the current deployment). |
 | `TOKEN_ALPHA`, `TOKEN_BETA` | `0.2`, `1.0` | Weights of the billed tokens: `prompt tokens * alpha + completion tokens * beta`. |
-| `CONTEXT_MAX_TOKENS` | `8000` | Estimated tokens of chat history sent with a message (characters divided by 3). The oldest turns are dropped first. In Research mode it is also capped at a quarter of `AGENT_MAX_INPUT_TOKENS`. Keep it below the context length of the model server. |
+| `HISTORY_CONTEXT_PERCENT` | `30` | Share of the model's context (0-50%) that the chat history sent with a message may use, in estimated tokens (characters divided by 3). The oldest turns are dropped first, several at once (see ARCHITECTURE.md). Replaces `CONTEXT_MAX_TOKENS` (8000 tokens), which is no longer read. |
 | `PDF_MINERU_SERVER_URL` | the `PDF_MINERU_SERVER_URL` of the worker's environment | The MinerU server. The worker reads it again at each tick. |
 | `AGENT_MAX_TOOL_CALLS`, `AGENT_MAX_VISUAL_CALLS`, `AGENT_RESEARCH_SECONDS`, `AGENT_TOTAL_SECONDS`, `AGENT_CALL_SECONDS`, `AGENT_MAX_INPUT_TOKENS` | the defaults in [API.md](API.md) | The limits of one research run. |
 
@@ -605,7 +605,7 @@ One row per model, embedding or rerank call of a run.
 | --- | --- | --- |
 | call_id | UUID | Primary key. |
 | run_id | UUID | Foreign key to `agent_runs.id`. |
-| purpose | String(32) | `agent`, `answer`, `answer_check`, `citation_correction`, `vision`, `embedding` or `rerank`. |
+| purpose | String(32) | `agent`, `answer`, `answer_check`, `citation_correction`, `answer_language`, `vision`, `embedding` or `rerank` (Search and Direct also `search_query`, `search_answer`, `search_check`, `direct_answer`). |
 | model | String(255) | |
 | input_tokens, output_tokens | Integer | Nullable. |
 | usage_source | String(16) | `actual`, `estimated` or `none`. |

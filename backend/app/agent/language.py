@@ -1,4 +1,5 @@
-"""The answer language: French or English, decided from the student's words.
+"""The answer language: named by a small model call, then one sentence at the
+end of the last user message.
 
 With long French course pages in the prompt, the model often answered an
 English question in French (measured 2026-11-16: Search 24/35 and Direct 29/35
@@ -6,97 +7,94 @@ English answers to 7 English questions, five runs each). "Answer in the
 student's language" in the system message is too far from the answer. One
 explicit sentence at the end of the last user message fixes the language.
 
-Only French and English are told apart: the students write one or the other.
-For any other language no sentence is added, and the system message's "answer
-in the student's language" stays the only rule. The sentence is not put in the
-system message, so the cached prefix does not change with the language.
+The language is not guessed from word lists any more (2026-11-18): lists of
+French and English words sent German questions to English or French, and
+other languages to French. A separate small call, which sees only the
+student's messages and the teacher's rules and no course text, names the
+language; the sentence then names it. Measured 2026-11-18 (2 TPs of 19k and
+57k characters, Search, Direct, Research, 140 answers in en/fr/de/es/zh):
+word lists 2/28 German and 0/14 Spanish; one generic sentence without a
+language name 42/56 English (short English questions drifted to French);
+the small call 140/140.
+
+The sentence is not put in the system message, so the cached prefix does not
+change with the language.
 """
 
 from __future__ import annotations
 
 import re
 
-# Words that are frequent in one language and do not exist, or are rare, in the
-# other. C keywords (if, for, do, while, int, return...) are left out: students
-# paste code in both languages.
-ENGLISH = frozenset('''
-the what how why which who where when is are was were does did can could should would
-will i we you they it this that these those there here my your our their with without
-from about into have has had am be been not and but please help stuck explain mean
-next previous exercise understand know want need get got does doesn't don't isn't
-can't i'm what's how's it's thanks thank hello hi any some
-'''.split())
-FRENCH = frozenset('''
-le la les un une des du est sont était quoi que qui quel quelle quels quelles comment
-pourquoi où quand je tu nous vous il elle ils elles ce cette ces mon ma mes ton ta tes
-notre votre leur leurs avec sans dans sur sous pour par pas ne plus mais et donc car
-fait faire faut peux peut veux dois suis sommes êtes ai avons avez bloqué bloquée aide
-aider explique expliquer suivante suivant précédente exercice comprends comprendre
-merci bonjour salut c'est qu'est-ce est-ce j'ai je suis n'est d'un d'une l'exercice
-'''.split())
-FRENCH_LETTERS = re.compile(r'[éèêàùçôîâûëï]')
-CODE = re.compile(r'```.*?(```|$)|`[^`]*`', re.S)
-# Exercise numbers such as I.1, II.3.b: the I is not the English word.
-NUMBERING = re.compile(r'\b[IVXivx]+\.\d+(?:\.\w+)*')
-WORD = re.compile(r"[^\W\d_]+(?:['’-][^\W\d_]+)*")
-LATIN = re.compile(r'[a-zA-Z\u00C0-\u024F]')
-LETTER = re.compile(r'[^\W\d_]')
+ASK_PROMPT = (
+    "You choose the language of a tutor's answer to a student. Reply with the English name "
+    "of one language and nothing else (for example: French, English, German, Spanish, "
+    "Chinese), or Unknown.\n"
+    "- If the teacher's rules say in which language to answer, reply with that language.\n"
+    "- Otherwise reply with the language of the student's last message, even when the "
+    "earlier messages are in another language.\n"
+    "- Only when the last message does not show its language (just code, a number, a file "
+    "name or one technical word such as \"malloc?\"), reply with the language of the "
+    "student's earlier messages, or Unknown when there are none.")
+# What the small call sees of the conversation.
+EARLIER_MESSAGES = 3
+EARLIER_CHARS = 300
+LAST_HEAD, LAST_TAIL = 1200, 300   # a long message is mostly pasted code
+RULES_CHARS = 4000
+ASK_TOKENS = 8
+ASK_SECONDS = 15
+NAME = re.compile(r"[A-Za-z][A-Za-z ()'-]{1,40}")
 
-SENTENCES = {
-    'en': 'Write the answer in English.',
-    'fr': 'Write the answer in French.',
-}
+# When the call says Unknown: the courses are French.
+DEFAULT_LANGUAGE = 'French'
+# When the call fails: no language name.
+GENERIC_SENTENCE = ("Write the answer in the language the student writes in, unless the "
+                    "teacher's rules set the answer language.")
 
 
-def detect(text: str) -> str | None:
-    """'fr', 'en', 'other' (mostly letters of another script, e.g. Chinese), or
-    None when the words do not tell."""
-    text = NUMBERING.sub(' ', CODE.sub(' ', text or ''))
-    words = WORD.findall(text.lower().replace('’', "'"))
-    # Another script: more of its letters than Latin words (a Chinese
-    # character is about one word).
-    other = len(LETTER.findall(text)) - len(LATIN.findall(text))
-    if other > sum(bool(LATIN.search(word)) for word in words):
-        return 'other'
-    english = sum(word in ENGLISH for word in words)
-    french = sum(word in FRENCH or bool(FRENCH_LETTERS.search(word)) for word in words)
-    if english > french:
-        return 'en'
-    if french > english:
-        return 'fr'
-    return None
+def _clip(text: str, head: int, tail: int = 0) -> str:
+    text = (text or '').strip()
+    if len(text) <= head + tail:
+        return text
+    return text[:head] + ' […] ' + (text[-tail:] if tail else '')
 
 
-def answer_language(question: str, history: list[dict] | None = None) -> str:
-    """'fr', 'en' or 'other': the question's language; else that of the
-    student's earlier messages, the latest first; else French (the courses
-    are French)."""
-    found = detect(question)
-    for message in reversed(history or []):
-        if found:
-            break
-        if message.get('role') == 'user':
-            found = detect(message.get('content') or '')
-    return found or 'fr'
+def ask_messages(question: str, history: list[dict] | None, teaching_rules: str) -> list[dict]:
+    """The small call: the teacher's rules, the student's last few messages
+    and the question; no course text and no answers."""
+    earlier = [m.get('content') or '' for m in history or [] if m.get('role') == 'user']
+    earlier = earlier[-EARLIER_MESSAGES:]
+    lines = ["Teacher's rules:", _clip(teaching_rules, RULES_CHARS) or '(none)', '',
+             "Student's earlier messages:"]
+    lines += [f'- {_clip(m, EARLIER_CHARS)}' for m in earlier] or ['(none)']
+    lines += ['', "Student's last message:", _clip(question, LAST_HEAD, LAST_TAIL)]
+    return [{'role': 'system', 'content': ASK_PROMPT}, {'role': 'user', 'content': '\n'.join(lines)}]
 
 
-# A teacher rule that names a language decides: with the rule and a sentence
-# naming the student's language, the model followed the sentence in 2 of 8 runs
-# (2026-11-17). Without any sentence, Research answered a French question in
-# French 4 of 4 times under the rule "Always answer in English": the sentence
-# then points to the rule instead. "language" alone is left out: "the C
-# language" is not an answer language.
-RULE_LANGUAGE = re.compile(r'\b(french|english|fran[cç]ais|anglais|langue)\b', re.I)
-RULE_SENTENCE = "Write the answer in the language that the teacher's rules ask for."
+def parse_language(reply: str) -> str | None:
+    """The language name in the reply; DEFAULT_LANGUAGE for Unknown; None when
+    the reply is not a language name."""
+    first = (reply or '').strip().splitlines()[0] if (reply or '').strip() else ''
+    name = first.strip(' .*_`"\'')
+    if not NAME.fullmatch(name):
+        return None
+    if name.lower() == 'unknown':
+        return DEFAULT_LANGUAGE
+    return name[0].upper() + name[1:]
 
 
-def language_sentence(question: str, history: list[dict] | None = None,
-                      teaching_rules: str = '') -> str:
-    """The sentence to end the last user message with: the rule's language
-    when a teacher rule names one, '' for another language."""
-    if RULE_LANGUAGE.search(teaching_rules or ''):
-        return RULE_SENTENCE
-    return SENTENCES.get(answer_language(question, history), '')
+async def ask_language(model, question: str, history: list[dict] | None,
+                       teaching_rules: str = '') -> str | None:
+    """The answer language named by a small model call, or None when the reply
+    is not a language name. model: a ResearchModel-like call; errors are
+    raised to the caller."""
+    reply = await model(ask_messages(question, history, teaching_rules), ASK_TOKENS, ASK_SECONDS,
+                        purpose='answer_language')
+    return parse_language(reply.content)
+
+
+def language_sentence(language: str | None) -> str:
+    """The sentence that ends the last user message."""
+    return f'Write the answer in {language}.' if language else GENERIC_SENTENCE
 
 
 def with_language(text: str, sentence: str) -> str:

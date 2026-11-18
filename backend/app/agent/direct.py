@@ -81,7 +81,8 @@ class DirectRunner:
         self.on_draft, self.clock = on_draft, clock
 
     async def run(self, question: str, *, history: list[dict] | None = None,
-                  teaching_rules: str = '', **_ignored) -> ResearchResult:
+                  teaching_rules: str = '', answer_language: str | None = None,
+                  **_ignored) -> ResearchResult:
         trace = []
         tp = None
         if self.course_tools is not None:
@@ -107,7 +108,7 @@ class DirectRunner:
         messages = [{'role': 'system', 'content': system},
                     *({'role': m['role'], 'content': m['content']} for m in history or []),
                     # The rules again and the answer language at the end (runner.answer_ending).
-                    {'role': 'user', 'content': with_language(question, answer_ending(question, history, teaching_rules))}]
+                    {'role': 'user', 'content': with_language(question, answer_ending(teaching_rules, answer_language))}]
         timeout = min(self.model_timeout, self.total_timeout)
         tick = self.clock()
         usage = []

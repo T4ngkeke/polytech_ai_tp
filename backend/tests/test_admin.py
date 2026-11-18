@@ -379,16 +379,18 @@ class TestLLMConfig:
         assert got["vlm_model"] == "qwen3.5-122b-a10b"
         assert got["vlm_base_url"] == "http://vision/v1"
 
-    async def test_v81_context_max_tokens_roundtrip(self, admin_client):
-        """The per-turn history token budget (OOM protection) is
-        admin-configurable and survives a GET after PUT."""
-        resp = await admin_client.put("/api/admin/llm/config", json={
-            "base_url": "http://main/v1", "api_key": "k", "model": "m",
-            "context_max_tokens": "12000",
-        })
+    async def test_history_context_percent_roundtrip(self, admin_client):
+        """The share of the model context the chat history may use is
+        admin-configurable (0-50) and survives a GET after PUT."""
+        base = {"base_url": "http://main/v1", "api_key": "k", "model": "m"}
+        resp = await admin_client.put("/api/admin/llm/config", json={**base, "history_context_percent": "20"})
         assert resp.status_code == 200
         got = (await admin_client.get("/api/admin/llm/config")).json()
-        assert got["context_max_tokens"] == "12000"
+        assert got["history_context_percent"] == "20"
+        assert got["research_limits"]["history_context_percent"] == {"default": 30, "min": 0, "max": 50}
+        resp = await admin_client.put("/api/admin/llm/config", json={**base, "history_context_percent": "51"})
+        assert resp.status_code == 422
+        assert "context_max_tokens" not in got
 
     async def test_mineru_server_roundtrip_and_read_only_deployment_info(self, admin_client, monkeypatch):
         monkeypatch.setenv("PDF_MINERU_SERVER_URL", "http://edullm-mineru-vlm:8000/v1")
@@ -434,7 +436,7 @@ class TestLLMConfig:
         # The form shows each default and range from the backend.
         assert got["research_limits"]["agent_max_tool_calls"] == {"default": 30, "min": 1, "max": 40}
         assert got["research_limits"]["agent_max_input_tokens"]["default"] == 28000
-        assert len(got["research_limits"]) == 7
+        assert len(got["research_limits"]) == 8
         assert got["research_limits"]["tp_context_percent"] == {"default": 30, "min": 0, "max": 60}
         # An empty value goes back to the default.
         resp = await admin_client.put("/api/admin/llm/config", json={

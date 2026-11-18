@@ -61,9 +61,11 @@ test('a research status carries its phase; done carries the saved message id', (
   const status = interpretStreamEvent({ event: 'status', data: '{"route": "agent", "phase": "reading"}' });
   assert.equal(status.phase, 'reading');
   assert.equal(interpretStreamEvent({ event: 'status', data: '{"route": "rag"}' }).phase, null);
-  const done = interpretStreamEvent({ event: 'done', data: '{"message_id": "m-1"}' });
+  const done = interpretStreamEvent({ event: 'done', data: '{"message_id": "m-1", "user_message_id": "u-1"}' });
   assert.equal(done.messageId, 'm-1');
+  assert.equal(done.userMessageId, 'u-1');
   assert.equal(interpretStreamEvent({ event: 'done', data: '{}' }).messageId, null);
+  assert.equal(interpretStreamEvent({ event: 'done', data: '{}' }).userMessageId, null);
 });
 
 test('draft text and its withdrawal are never content tokens', () => {

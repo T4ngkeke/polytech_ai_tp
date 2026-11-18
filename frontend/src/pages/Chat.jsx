@@ -29,6 +29,7 @@ import { TOURS } from '../lib/tours';
 import useMediaQuery from '../lib/useMediaQuery';
 import { DEFAULT_MODE, offersResearch, saveMode, sessionMode, storedMode } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
+import { historyLineIndex, messageLength } from '../lib/historyLine';
 import { blockedMessage, nearLimit, nearLimitMessage, percent, resetNotice } from '../lib/quota';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
@@ -271,6 +272,37 @@ export default function Chat() {
   // ── Scroll while an answer is written (lib/chatScroll.js) ──
   useEffect(() => { updateScroll(); }, [messages, updateScroll]);
 
+  // ── Where the assistant's view of the conversation starts (lib/historyLine.js) ──
+  // Asked again when the session, the mode or the conversation changes.
+  const [historyStart, setHistoryStart] = useState(null);
+  const reloadedForLineRef = useRef(null);
+  useEffect(() => {
+    if (!activeSessionId || isStreaming) return undefined;
+    let current = true;
+    api.get(`/api/chat/sessions/${activeSessionId}/history-start?mode=${mode}`)
+      .then((start) => { if (current) setHistoryStart({ ...start, sessionId: activeSessionId }); })
+      .catch(() => {});
+    return () => { current = false; };
+  }, [activeSessionId, mode, isStreaming]);
+  const line = historyLineIndex(messages, historyStart?.sessionId === activeSessionId ? historyStart : null);
+  // The line falls on a message this page knows only by a temporary id (the
+  // done event normally gives the real one): load the session again, once.
+  // Not while an answer is written: the reload would wipe it.
+  const streamingRef = useRef(false);
+  useEffect(() => { streamingRef.current = isStreaming; }, [isStreaming]);
+  useEffect(() => {
+    if (!line.missing || !activeSessionId || isStreaming || reloadedForLineRef.current === historyStart) return;
+    reloadedForLineRef.current = historyStart;
+    const sessionId = activeSessionId;
+    api.get(`/api/student/sessions/${sessionId}`)
+      .then((data) => { if (!streamingRef.current) setMessages(data.messages || []); })
+      .catch(() => {});
+  }, [line.missing, activeSessionId, isStreaming, historyStart]);
+  const length = messageLength(input);
+  // The last answer asks the student a question back.
+  const lastMessage = messages[messages.length - 1];
+  const awaitingAnswer = !isStreaming && lastMessage?.sender === 'llm' && !!lastMessage.clarification?.options?.length;
+
   // ── Abort the SSE stream on unmount (no leaked EventSource / setState) ──
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -280,7 +312,7 @@ export default function Chat() {
   // modeOverride: that question's mode (Research again after an empty Search).
   const handleSend = useCallback(async (picked, modeOverride) => {
     const text = (typeof picked === 'string' ? picked : input).trim();
-    if (!text || !activeSessionId || isStreaming) return;
+    if (!text || !activeSessionId || isStreaming || messageLength(text).over) return;
 
     let currentSessionId = activeSessionId;
     // Auto-create session if none exists
@@ -350,6 +382,10 @@ export default function Chat() {
                 streamedIdsRef.current.delete(assistantMsgId);
                 setMessages((prev) => prev.map((m) => m.id === assistantMsgId
                   ? { ...m, id: action.messageId } : m));
+              }
+              // The question's real id, so the history line can sit above it.
+              if (action.userMessageId) {
+                setMessages((prev) => prev.map((m) => m.id === userMsgId ? { ...m, id: action.userMessageId } : m));
               }
               setResearchPhase(null);
               setIsStreaming(false);
@@ -662,7 +698,9 @@ export default function Chat() {
 
           {messages.map((msg, i) => (
             // The latest answer: scrolling stops when its first line reaches the top.
-            <div key={msg.id} data-latest-answer={i === messages.length - 1 && msg.sender === 'llm' ? '' : undefined}>
+            <div key={msg.id} data-latest-answer={i === messages.length - 1 && msg.sender === 'llm' ? '' : undefined}
+              className={i < line.index ? 'opacity-60' : undefined}>
+            {i === line.index && <HistoryLine onNewSession={handleNewSession} />}
             <MessageBubble
               message={msg}
               streaming={isStreaming && msg.sender === 'llm' && i === messages.length - 1}
@@ -672,6 +710,7 @@ export default function Chat() {
               canRate={msg.sender === 'llm' && !!msg.content && !streamedIdsRef.current.has(msg.id)}
               // Only the latest question back can still be answered with a click.
               onPick={!isStreaming && i === messages.length - 1 && msg.clarification ? handleSend : null}
+              onType={() => { inputRef.current?.focus(); inputRef.current?.scrollIntoView({ block: 'nearest' }); }}
               // An uncited Search answer offers the same question in Research.
               onResearch={!isStreaming && !directOnly && i === messages.length - 1 && offersResearch(msg)
                 ? () => {
@@ -681,6 +720,7 @@ export default function Chat() {
             />
             </div>
           ))}
+          {line.index === messages.length && messages.length > 0 && <HistoryLine onNewSession={handleNewSession} />}
         </div>
 
         {/* Input */}
@@ -713,7 +753,8 @@ export default function Chat() {
             </div>
           )}
           <div data-tour="input" className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
-            activeSessionId ? 'border-border-default focus-within:border-cyan/40' : 'border-border-subtle opacity-50'
+            !activeSessionId ? 'border-border-subtle opacity-50'
+              : length.over ? 'border-danger' : 'border-border-default focus-within:border-cyan/40'
           } bg-ink-deep`}>
             <textarea
               ref={inputRef}
@@ -723,14 +764,16 @@ export default function Chat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={activeSessionId ? 'Type your message… (Enter to send)' : 'Select a session first'}
+              placeholder={!activeSessionId ? 'Select a session first'
+                : awaitingAnswer ? 'Type your answer… (Enter to send)' : 'Type your message… (Enter to send)'}
+              aria-describedby="chat-input-note"
               className="flex-1 bg-transparent text-cream text-sm resize-none outline-none placeholder:text-cream-muted max-h-32 min-h-[1.5rem] leading-relaxed"
               style={{ height: 'auto' }}
             />
             <button
               id="send-btn"
               onClick={isStreaming ? () => abortRef.current?.abort() : handleSend}
-              disabled={!activeSessionId}
+              disabled={!activeSessionId || (!isStreaming && length.over)}
               className={`shrink-0 p-2 rounded-lg transition-all cursor-pointer ${
                 isStreaming
                   ? 'bg-danger-muted text-danger hover:bg-danger/20'
@@ -740,10 +783,21 @@ export default function Chat() {
               {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
             </button>
           </div>
-          {/* Transparency: students are told their teacher can see the chat. */}
-          <p className="mt-2 text-center text-[11px] text-cream-muted">
-            Your teacher can see this conversation.
-          </p>
+          {/* Transparency: students are told their teacher can see the chat.
+              Near the length limit, the count; past it, what to do. */}
+          <div id="chat-input-note" className="mt-2 flex items-start justify-center gap-3 text-[11px] text-cream-muted">
+            {length.over ? (
+              <p className="flex-1 text-danger" role="alert">
+                Too long: {length.excess.toLocaleString('en')} characters over the limit. Shorten the message,
+                or send only the part of the code that matters.
+              </p>
+            ) : (
+              <p className={length.count ? 'flex-1' : 'text-center'}>Your teacher can see this conversation.</p>
+            )}
+            {length.count && (
+              <span className={`shrink-0 font-mono tabular-nums ${length.over ? 'text-danger' : 'text-gold'}`}>{length.count}</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -800,6 +854,26 @@ export default function Chat() {
 }
 
 /* ── Icons ── */
+// The line above which the assistant no longer sees the messages (lib/historyLine.js).
+function HistoryLine({ onNewSession }) {
+  return (
+    // Phones: the text fills the width, so the dashed rule goes above it.
+    <div role="note" className="flex items-center justify-center gap-3 mb-5 pt-2 sm:pt-1 pb-1 text-xs text-cream-muted
+      border-t border-dashed border-border-default sm:border-t-0">
+      <span className="hidden sm:block flex-1 border-t border-dashed border-border-default" />
+      <p className="max-w-md text-center leading-relaxed">
+        <span className="font-semibold text-cream-secondary">The assistant no longer sees the messages above this line.</span>
+        <br />
+        Paste again what it still needs, or{' '}
+        <button type="button" onClick={onNewSession} className="cursor-pointer text-cyan underline hover:brightness-110">
+          start a new conversation
+        </button>.
+      </p>
+      <span className="hidden sm:block flex-1 border-t border-dashed border-border-default" />
+    </div>
+  );
+}
+
 function MenuIcon({ className }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
 }

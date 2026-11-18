@@ -58,8 +58,6 @@ DEFAULT_SYSTEM_CONFIGS = [
     {"key": "AGENT_MODEL", "value": ""},
     {"key": "AGENT_BASE_URL", "value": ""},
     {"key": "AGENT_API_KEY", "value": ""},
-    # estimated-token budget for chat history (OOM protection; chars//3).
-    {"key": "CONTEXT_MAX_TOKENS", "value": "8000"},
     # VLM slot — garbled-formula transcription (empty model = off).
     {"key": "VLM_BASE_URL", "value": ""},
     {"key": "VLM_API_KEY", "value": ""},

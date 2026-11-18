@@ -14,7 +14,7 @@ from backend.app.models import (
     User,
 )
 from backend.app.routers.teacher import get_storage_root
-from backend.tests.conftest import make_client
+from backend.tests.conftest import make_client, make_user
 from backend.tests.test_m4_tools_pg import _indexed_pdf
 
 
@@ -256,13 +256,70 @@ async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_the_answer_language_is_named_first_and_billed(pg_session, tmp_path, monkeypatch):
+    """A small call names the answer language (agent/language.py); the
+    answer turn ends with it. When that call fails, the answer still comes,
+    with the generic sentence. done gives the question's id too."""
+    from backend.app.agent.language import GENERIC_SENTENCE
+    try:
+        db = pg_session
+        _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
+        db.add_all(models('http://example.invalid/v1'))
+        await db.commit()
+        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
+        import backend.app.routers.chat as chat_api
+        seen = []
+        class FakeModel:
+            def __init__(self, endpoint, **_):
+                pass
+            async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                seen.append((purpose, messages))
+                return ModelReply('DONE' if purpose == 'answer_check' else 'Hallo!', [], 'flash-next', 25, 8)
+        class LanguageModel:
+            fail = False
+            async def __call__(self, messages, max_output, timeout, *, purpose='', **_):
+                if LanguageModel.fail:
+                    raise TimeoutError()
+                seen.append((purpose, messages))
+                return ModelReply('German', [], 'flash-next', 40, 1)
+        monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
+        monkeypatch.setattr(chat_api, 'language_model', lambda agent: LanguageModel())
+        client = await make_client(db, student)
+        async with client:
+            response = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Was ist ein Zeiger?', 'mode': 'direct',
+                'client_request_id': str(uuid.uuid4())})
+            done = [data for name, data in events(response.text) if name == 'done'][0]
+            assert seen[0][0] == 'answer_language'
+            assert 'Was ist ein Zeiger?' in seen[0][1][-1]['content']
+            answer_turn = [m for purpose, m in seen if purpose == 'direct_answer'][0]
+            assert answer_turn[-1]['content'].endswith('Write the answer in German.')
+            question = await db.get(Message, uuid.UUID(done['user_message_id']))
+            assert question.content == 'Was ist ein Zeiger?'
+            run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id))
+            purposes = (await db.scalars(select(ModelCallUsage.purpose).where(
+                ModelCallUsage.run_id == run.id))).all()
+            assert sorted(purposes) == ['answer_language', 'direct_answer']
+            LanguageModel.fail = True
+            seen.clear()
+            response = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'Und jetzt?', 'mode': 'direct',
+                'client_request_id': str(uuid.uuid4())})
+            assert any(name == 'done' for name, _ in events(response.text))
+            assert seen[-1][1][-1]['content'].endswith(GENERIC_SENTENCE)
+    finally:
+        app.dependency_overrides.pop(get_storage_root, None)
+
+
+@pytest.mark.asyncio
 async def test_research_history_capped_and_quota_error(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
         db.add_all(models('http://example.invalid/v1'))
         db.add_all([SystemConfig(key='AGENT_MAX_TOOL_CALLS', value='12'),
-                    SystemConfig(key='AGENT_MAX_INPUT_TOKENS', value='8000')])
+                    SystemConfig(key='AGENT_MAX_INPUT_TOKENS', value='8000'),
+                    SystemConfig(key='HISTORY_CONTEXT_PERCENT', value='5')])
         # Ten long earlier questions with their research answers, about 13k
         # estimated tokens in all.
         from datetime import datetime, timedelta, timezone
@@ -297,12 +354,32 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
                 'client_request_id': str(uuid.uuid4())})
             assert any(name == 'done' for name, _ in events(response.text))
             history = model_messages[0][1:-1]
-            # History may take a quarter of the admin's 8000 input tokens; it
-            # starts with a question and alternates.
+            # History may take 5% of the context (the fake server does not say
+            # it: 65,536 tokens, so 3,276); it starts with a question and
+            # alternates.
             text = json.dumps(history)
             assert 'Q9 ' in text and 'A9 ' in text and 'Q0 ' not in text
-            assert sum(estimate_tokens(m['content']) for m in history) <= 2200
+            assert sum(estimate_tokens(m['content']) for m in history) <= 3276
             assert [m['role'] for m in history] == ['user', 'assistant'] * (len(history) // 2)
+            # The research room comes on top of the history.
+            assert 'at most twelve course tool calls' in model_messages[0][0]['content']
+            # The chat page learns where the next question's history starts:
+            # the first question still sent, after the ones that are not.
+            start = (await client.get(f'/api/chat/sessions/{chat.id}/history-start',
+                                      params={'mode': 'research'})).json()
+            first = await db.get(Message, uuid.UUID(start['seen_from']))
+            assert first.sender == SenderType.user and start['hidden'] >= 2
+            assert start['hidden'] % 2 == 0 and int(first.content[1]) == start['hidden'] // 2
+            stranger = make_user()
+            db.add(stranger)
+            await db.commit()
+            async with await make_client(db, stranger) as other:
+                assert (await other.get(f'/api/chat/sessions/{chat.id}/history-start')).status_code == 404
+            # A message over the limit is refused before anything runs.
+            too_long = await client.post('/api/chat/stream', json={
+                'session_id': str(chat.id), 'message': 'x' * 20001,
+                'client_request_id': str(uuid.uuid4())})
+            assert too_long.status_code == 422
             assert 'at most twelve course tool calls' in model_messages[0][0]['content']
             # Room for the start, not for the whole answer: the question still
             # finishes (over the quota); the next one is refused before it starts.

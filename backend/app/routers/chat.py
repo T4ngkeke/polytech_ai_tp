@@ -18,14 +18,16 @@ import json
 import logging
 import time
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from backend.app.agent.history import trim_history
-from backend.app.agent.model import ResearchModel
+from backend.app.agent.history import history_budget
+from backend.app.agent.model import GREEDY, ResearchModel
+from backend.app.agent.tp_text import tp_char_budget
 from backend.app.agent.result import ResearchQuotaExceeded
 from backend.app.agent.tools import create_scope
 from backend.app.config import settings
@@ -44,6 +46,7 @@ from backend.app.models import (
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
 from backend.app.services import quota_service, rule_service
 from backend.app.services.model_routing import Endpoint
+from backend.app.services.model_servers import context_tokens
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
 from backend.app.services.research_service import run_persisted_research
@@ -58,6 +61,22 @@ logger = logging.getLogger(__name__)
 # Seconds without an event before the research stream sends an SSE comment
 # (proxies such as nginx close a stream after 60 s of silence by default).
 KEEPALIVE_SECONDS = 15
+# Messages read for the history; its size limit (agent/history.py) decides
+# how many are sent.
+HISTORY_MESSAGES = 400
+
+
+def language_model(agent: Endpoint):
+    """The model that names the answer language before each answer
+    (agent/language.py): the agent, without sampling. Tests replace it."""
+    return ResearchModel(agent, sampling=GREEDY)
+
+
+def _history_budget(context: int | None, limits, mode: str) -> int:
+    """Estimated tokens of history a question may carry. Search and Direct
+    share the context with the TP text; Research has its own reading room."""
+    return history_budget(context, limits.history_context_percent,
+                          tp_percent=limits.tp_context_percent if mode != 'research' else 0)
 
 
 def _research_frames(items):
@@ -186,6 +205,16 @@ async def chat_stream(
     # A class in exam mode searches only the files allowed in the exam; with
     # none, it answers in direct mode whatever the client asks.
     exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == class_id)))
+    # The research model is the AGENT_* endpoint (default: the main LLM);
+    # view_image uses the VLM_* endpoint and is off when no VLM_MODEL is set.
+    agent = Endpoint(llm_config['agent_base_url'],
+                     llm_config['agent_api_key'], llm_config['agent_model'])
+    if not agent.model or not agent.base_url:
+        raise HTTPException(503, 'agent_model_not_configured')
+    # The TP text and the history may each use a share of the model's context
+    # (agent/tp_text.py, agent/history.py).
+    context = await context_tokens(agent.base_url, agent.model, agent.api_key)
+    limits = llm_config['research_limits']
     try:
         scope = await create_scope(db, user_id=current_user.id,
                                    session_id=body.session_id, exam_only=exam_mode)
@@ -193,14 +222,12 @@ async def chat_stream(
         mode = 'direct' if exam_mode and not exam_files else body.mode
         research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
         runs = ResearchRuns(research_factory)
-        # History may take a quarter of the research input tokens.
-        limits = llm_config['research_limits']
-        safe_history, earlier_citations = await runs.load_safe_context(scope)
+        # Only what fits the history limit is sent, with the citations of
+        # those answers only.
+        safe_history, earlier_citations, _ = await runs.load_context(
+            scope, limit=HISTORY_MESSAGES, max_tokens=_history_budget(context, limits, mode))
         # Right after a question back the model must answer, not ask again.
         allow_ask = not await runs.last_answer_asked(scope.session_id)
-        safe_history = trim_history(safe_history,
-            max_tokens=min(int(llm_config["context_max_tokens"] or 8000),
-                           limits.input_tokens // 4))
     except DocumentNotFound:
         raise HTTPException(404, 'source_unavailable') from None
     teaching_rules = rule_service.teaching_rules_text(rule_texts)
@@ -210,22 +237,12 @@ async def chat_stream(
     embedder = _make_embed_fn(llm_config)
     async def embed_query(query: str):
         return (await embedder([query]))[0]
-    # The research model is the AGENT_* endpoint (default: the main LLM);
-    # view_image uses the VLM_* endpoint and is off when no VLM_MODEL is set.
-    agent = Endpoint(llm_config['agent_base_url'],
-                     llm_config['agent_api_key'], llm_config['agent_model'])
-    if not agent.model or not agent.base_url:
-        raise HTTPException(503, 'agent_model_not_configured')
     vlm = Endpoint(llm_config['vlm_base_url'],
                    llm_config['vlm_api_key'], llm_config['vlm_model'])
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
               if vlm.model and vlm.base_url else None)
     request_id = str(body.client_request_id or uuid.uuid4())
-    # The TP text may use a share of the model's context (agent/tp_text.py).
-    from backend.app.agent.tp_text import tp_char_budget
-    from backend.app.services.model_servers import context_tokens
-    tp_chars = tp_char_budget(await context_tokens(agent.base_url, agent.model, agent.api_key),
-                              limits.tp_context_percent) if mode != 'research' else None
+    tp_chars = tp_char_budget(context, limits.tp_context_percent) if mode != 'research' else None
     title_model = ResearchModel(agent)
 
     async def research_events():
@@ -250,6 +267,7 @@ async def chat_stream(
             embed_model=llm_config['embedding_model'],
             rerank_model=llm_config['rerank_model'], on_phase=phase,
             vision_fn=vision, vision_model=vlm.model, limits=limits, tp_chars=tp_chars,
+            language_model=language_model(agent), context_tokens=context,
             on_draft=draft, allow_ask=allow_ask and mode == 'research',
             mode=mode, exam_mode=exam_mode, exam_files=exam_files, session_factory=research_factory))
         last_sent = time.monotonic()
@@ -279,7 +297,8 @@ async def chat_stream(
             if result.get('clarification'):
                 yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
             yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
-            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id']})}\n\n"
+            # The question's id too: the page shows it under a temporary id.
+            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id'], 'user_message_id': result.get('user_message_id')})}\n\n"
             # After the answer is final: a new conversation gets its title.
             # A failure here must not turn a delivered answer into an error.
             try:
@@ -307,6 +326,42 @@ async def chat_stream(
     return StreamingResponse(research_events(), media_type='text/event-stream',
                              headers={'Cache-Control': 'no-store',
                                       'X-Accel-Buffering': 'no'})
+
+
+@router.get("/sessions/{session_id}/history-start")
+async def history_start_of_session(
+    session_id: uuid.UUID,
+    mode: Literal['direct', 'search', 'research'] = 'search',
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+):
+    """Where the history of the next question would start, for the line the
+    chat page draws: ``seen_from`` is the first message still sent (None when
+    none is), ``hidden`` how many earlier messages no longer are. The same rule
+    as /stream (the safe history, then agent/history.history_start)."""
+    session = (await db.execute(select(Session).where(
+        Session.id == session_id, Session.user_id == current_user.id,
+        Session.is_deleted.is_(False)))).scalar_one_or_none()
+    if session is None or session.lab_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    exam_mode = bool(await db.scalar(select(Class.exam_mode).join(Lab, Lab.class_id == Class.id)
+                                     .where(Lab.id == session.lab_id)))
+    llm_config = await _get_llm_config(db)
+    agent = Endpoint(llm_config['agent_base_url'], llm_config['agent_api_key'], llm_config['agent_model'])
+    context = await context_tokens(agent.base_url, agent.model, agent.api_key) if agent.base_url else None
+    try:
+        scope = await create_scope(db, user_id=current_user.id, session_id=session_id,
+                                   exam_only=exam_mode)
+        mode = 'direct' if exam_mode and not scope.snapshot_revisions else mode
+        runs = ResearchRuns(async_sessionmaker(db.bind, expire_on_commit=False))
+        history, _, hidden = await runs.load_context(
+            scope, limit=HISTORY_MESSAGES,
+            max_tokens=_history_budget(context, llm_config['research_limits'], mode))
+    except DocumentNotFound:
+        raise HTTPException(404, 'source_unavailable') from None
+    if not hidden:
+        return {"seen_from": None, "hidden": 0}
+    return {"seen_from": history[0]['id'] if history else None, "hidden": hidden}
 
 
 @router.post("/messages/{message_id}/feedback")

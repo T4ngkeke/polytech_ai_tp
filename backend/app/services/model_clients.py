@@ -40,7 +40,6 @@ async def get_llm_config(db: AsyncSession) -> dict:
         "rerank_api_key": routing.rerank.api_key,
         "rerank_model": routing.rerank.model,
         # estimated-token budget for chat history (OOM protection).
-        "context_max_tokens": configs.get("CONTEXT_MAX_TOKENS", "8000"),
         "token_alpha": str(routing.token_alpha),
         "token_beta": str(routing.token_beta),
         "agent_base_url": routing.agent.base_url,

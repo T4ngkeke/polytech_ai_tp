@@ -39,7 +39,8 @@ export function interpretStreamEvent(ev) {
         mode: parsed?.mode ?? null, examMode: parsed?.exam_mode === true };
     }
     case 'done':
-      return { type: 'done', messageId: safeParse(ev.data)?.message_id ?? null };
+      return { type: 'done', messageId: safeParse(ev.data)?.message_id ?? null,
+        userMessageId: safeParse(ev.data)?.user_message_id ?? null };
     case 'error':
       return { type: 'error', detail: safeParse(ev.data)?.detail || 'Generation failed' };
     case 'draft': {

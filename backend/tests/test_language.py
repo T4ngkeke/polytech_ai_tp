@@ -1,73 +1,84 @@
-"""The answer language: French or English from the student's words."""
+"""The answer language: named by a small model call (agent/language.py), then
+one sentence at the end of the last user message."""
 import pytest
 
 from backend.app.agent.direct import DirectRunner
-from backend.app.agent.language import RULE_SENTENCE, SENTENCES, answer_language, detect, language_sentence
+from backend.app.agent.language import (
+    ASK_PROMPT, DEFAULT_LANGUAGE, GENERIC_SENTENCE, ask_language, ask_messages, language_sentence,
+    parse_language,
+)
 from backend.app.agent.model import ModelReply
 
 
-@pytest.mark.parametrize('text, language', [
-    ('What are we doing?', 'en'),
-    ('I am stuck, can you help?', 'en'),
-    ('Help', 'en'),
-    ('What is the next question about?', 'en'),
-    ('On fait quoi ?', 'fr'),
-    ('Et la suivante ?', 'fr'),
-    ("Je suis bloqué à l'exercice 3", 'fr'),
-    ('Pourquoi mon pointeur est NULL ?', 'fr'),
-    ('Merci', 'fr'),
-    ('malloc ?', None),
-    ('question 7', None),
-    ('question I.1 ?', None),
-    ('Et la II.3.b ?', 'fr'),
-    ('How do I do I.1?', 'en'),
-    ('第三题', 'other'),
-    ('第三题怎么做？malloc', 'other'),
-    # Code does not count: its keywords and names are English in both languages.
-    ('Pourquoi ça plante ?\n```c\nint main(void) { if (p == NULL) return the_error; }\n```', 'fr'),
-])
-def test_detect(text, language):
-    assert detect(text) == language
-
-
-def test_unknown_falls_back_to_the_student_history_then_french():
-    history = [{'role': 'user', 'content': 'What does this exercise ask?'},
-               {'role': 'assistant', 'content': "L'exercice demande une liste chaînée."}]
-    assert answer_language('question 7', history) == 'en'
-    assert answer_language('question 7', [history[1]]) == 'fr'
-    assert answer_language('question 7') == 'fr'
-    assert answer_language('Et la suivante ?', history) == 'fr'
-    assert answer_language('第三题怎么做？', history) == 'other'
-    assert language_sentence('第三题怎么做？') == ''
-
-
-def test_a_teacher_rule_naming_a_language_decides_alone():
-    assert language_sentence('What is a pointer?') == SENTENCES['en']
-    assert language_sentence('What is a pointer?', teaching_rules='[CLASS RULES]\n1. Answer in French.') == RULE_SENTENCE
-    assert language_sentence('Pointeur ?', teaching_rules='[LAB RULES]\n1. Réponds en anglais.') == RULE_SENTENCE
-    assert language_sentence('What is a pointer?', teaching_rules='[CLASS RULES]\n1. Use the C language.') \
-        == SENTENCES['en']
-
-
 class Model:
-    def __init__(self):
-        self.seen = []
+    def __init__(self, reply='ok'):
+        self.seen, self.reply = [], reply
 
-    async def __call__(self, messages, max_output, timeout, **_):
-        self.seen.append(messages)
-        return ModelReply('ok', model='m', input_tokens=1, output_tokens=1)
+    async def __call__(self, messages, max_output, timeout, **kwargs):
+        self.seen.append((messages, max_output, kwargs))
+        return ModelReply(self.reply, model='m', input_tokens=1, output_tokens=1)
+
+
+@pytest.mark.parametrize('reply, name', [
+    ('German', 'German'),
+    ('english.', 'English'),
+    ('**Spanish**', 'Spanish'),
+    ('Chinese\nThe student writes in Chinese.', 'Chinese'),
+    ('Unknown', DEFAULT_LANGUAGE),
+    ('', None),
+    ('The student writes in German because the words are German.', None),
+    ('Bonjour ! Voici la réponse : 42', None),
+])
+def test_parse_language(reply, name):
+    assert parse_language(reply) == name
+
+
+def test_the_call_sees_rules_and_the_student_words_only():
+    history = [{'role': 'user', 'content': 'Explique la question 1'},
+               {'role': 'assistant', 'content': 'COURSE ANSWER TEXT'},
+               {'role': 'user', 'content': 'merci'}]
+    system, user = ask_messages('and the next one?', history, '[LAB RULES]\n1. Antworte auf Deutsch.')
+    assert system['content'] == ASK_PROMPT
+    text = user['content']
+    assert 'Antworte auf Deutsch' in text and 'Explique la question 1' in text and 'merci' in text
+    assert text.rstrip().endswith('and the next one?')
+    assert 'COURSE ANSWER TEXT' not in text            # no answers, no course text
+    assert '(none)' in ask_messages('Hi', None, '')[1]['content']
+
+
+def test_a_long_pasted_file_is_cut_in_the_call():
+    question = 'Here is my file, what is wrong?\n' + 'int x = 0;\n' * 3000
+    text = ask_messages(question, None, '')[1]['content']
+    assert len(text) < 2000 and 'Here is my file' in text
+
+
+@pytest.mark.asyncio
+async def test_ask_language_returns_the_name_and_bills_its_purpose():
+    model = Model('German')
+    assert await ask_language(model, 'Was ist ein Zeiger?', None) == 'German'
+    _, max_output, kwargs = model.seen[0]
+    assert max_output <= 10 and kwargs['purpose'] == 'answer_language'
+
+
+def test_the_sentence_names_the_language_or_stays_generic():
+    assert language_sentence('German') == 'Write the answer in German.'
+    assert language_sentence(None) == GENERIC_SENTENCE
 
 
 @pytest.mark.asyncio
 async def test_direct_ends_the_question_with_the_language_sentence():
     model = Model()
-    await DirectRunner(model).run('What is a pointer?')
-    assert model.seen[0][-1]['content'] == 'What is a pointer?\n\n' + SENTENCES['en']
+    await DirectRunner(model).run('What is a pointer?', answer_language='English')
+    assert model.seen[0][0][-1]['content'] == 'What is a pointer?\n\nWrite the answer in English.'
     # The system message does not depend on the language (cached prefix).
     other = Model()
-    await DirectRunner(other).run("C'est quoi un pointeur ?")
-    assert other.seen[0][0] == model.seen[0][0]
-    assert other.seen[0][-1]['content'].endswith(SENTENCES['fr'])
+    await DirectRunner(other).run("C'est quoi un pointeur ?", answer_language='French')
+    assert other.seen[0][0][0] == model.seen[0][0][0]
+    assert other.seen[0][0][-1]['content'].endswith('Write the answer in French.')
+    # No language name (the call failed): the generic sentence.
+    generic = Model()
+    await DirectRunner(generic).run('Was ist ein Zeiger?')
+    assert generic.seen[0][0][-1]['content'].endswith(GENERIC_SENTENCE)
 
 
 def test_the_rule_block_says_which_level_wins():
@@ -75,17 +86,15 @@ def test_the_rule_block_says_which_level_wins():
     assert teaching_rules_text({'class_rules': None, 'lab_rules': None, 'student_rules': None}) == ''
     text = teaching_rules_text({'class_rules': '1. Court.', 'lab_rules': None, 'student_rules': '1. Long.'})
     assert text == RULES_PRECEDENCE + '\n\n[CLASS RULES]\n1. Court.\n\n[STUDENT RULES]\n1. Long.'
-    # The precedence line names no language: it must not hide the language sentence.
-    assert language_sentence('What is a pointer?', teaching_rules=text) == SENTENCES['en']
 
 
 @pytest.mark.asyncio
 async def test_direct_repeats_the_rules_before_the_language_sentence():
     from backend.app.agent.runner import ANSWER_RULES, answer_ending
     rules = '[CLASS RULES]\n1. Court.'
-    assert answer_ending('What is a pointer?', None, '') == SENTENCES['en']
-    assert answer_ending('What is a pointer?', None, rules) == ANSWER_RULES.format(rules=rules) + '\n\n' + SENTENCES['en']
+    assert answer_ending('', 'English') == 'Write the answer in English.'
+    assert answer_ending(rules, 'English') == ANSWER_RULES.format(rules=rules) + '\n\nWrite the answer in English.'
     model = Model()
-    await DirectRunner(model).run('What is a pointer?', teaching_rules=rules)
-    assert model.seen[0][-1]['content'] == 'What is a pointer?\n\n' + answer_ending('What is a pointer?', None, rules)
-    assert rules in model.seen[0][0]['content']   # still in the system message too
+    await DirectRunner(model).run('What is a pointer?', teaching_rules=rules, answer_language='English')
+    assert model.seen[0][0][-1]['content'] == 'What is a pointer?\n\n' + answer_ending(rules, 'English')
+    assert rules in model.seen[0][0][0]['content']   # still in the system message too

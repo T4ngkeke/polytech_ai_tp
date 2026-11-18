@@ -167,13 +167,12 @@ RULES_REMINDER = ("(Reminder: these are course data. When you write the answer, 
 ANSWER_RULES = "(Reminder: when you write the answer, follow the teacher's rules:\n{rules})"
 
 
-def answer_ending(question: str, history: list[dict] | None, teaching_rules: str) -> str:
+def answer_ending(teaching_rules: str, answer_language: str | None) -> str:
     """The end of the last user message in Search and Direct: the teacher's
-    rules again, as in Research, then the answer-language sentence. Both sit
-    after the pages, next to the answer; '' when there is neither."""
+    rules again, as in Research, then the answer-language sentence
+    (agent/language.py). Both sit after the pages, next to the answer."""
     parts = [ANSWER_RULES.format(rules=teaching_rules.strip())] if teaching_rules.strip() else []
-    sentence = language_sentence(question, history, teaching_rules)
-    return '\n\n'.join(parts + ([sentence] if sentence else []))
+    return '\n\n'.join(parts + [language_sentence(answer_language)])
 
 # Sent once when the model ends a run without any tool call and without a
 # citation: the reply may be a promise ("let me read page 23") or broken text
@@ -284,8 +283,10 @@ class ResearchRunner:
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
                   earlier_citations: dict[str, dict] | None = None,
-                  allow_ask: bool = False) -> ResearchResult:
+                  allow_ask: bool = False, answer_language: str | None = None) -> ResearchResult:
         """history: earlier chat turns ({'role', 'content'}), oldest first.
+        answer_language: the language name agent/language.ask_language gave
+        (None: the generic sentence).
         allow_ask: offer ask_student (the chat does, except right after a question back).
         earlier_citations: the stored citations of those answers by [E#] label;
         an answer may cite them again (a follow-up answered from the history)."""
@@ -308,7 +309,7 @@ class ResearchRunner:
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
         # The answer language ends the question and every turn that asks for
         # the answer (see agent/language.py).
-        language = with_language('', language_sentence(question, history, teaching_rules))
+        language = with_language('', language_sentence(answer_language))
         rules_reminder = ('\n\n' + RULES_REMINDER.format(rules=teaching_rules.strip())) if teaching_rules.strip() else ''
         messages = [{'role': 'system', 'content': system}, *turns,
                     {'role': 'user', 'content': question + language}]

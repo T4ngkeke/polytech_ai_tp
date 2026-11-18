@@ -157,7 +157,8 @@ class SearchRunner:
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
-                  earlier_citations: dict[str, dict] | None = None, **_ignored) -> ResearchResult:
+                  earlier_citations: dict[str, dict] | None = None,
+                  answer_language: str | None = None, **_ignored) -> ResearchResult:
         tools = self.course_tools
         usage: list[dict] = []
         trace: list[dict] = []
@@ -209,7 +210,7 @@ class SearchRunner:
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
         # Ends the answer turn: the rules again and the answer language
         # (runner.answer_ending, agent/language.py).
-        language = answer_ending(question, history, teaching_rules)
+        language = answer_ending(teaching_rules, answer_language)
         system = (SEARCH_PROMPT + ('\n' + CONCISE_NOTE if self.concise else '')
                   + '\n' + teaching_rules + '\n' + research_note)
         catalogue = await tools.catalogue()

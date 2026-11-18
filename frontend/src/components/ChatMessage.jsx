@@ -64,7 +64,7 @@ function sourceOf(citations, c, sessionId, focusLabels = null) {
     pages: groupCitations(sameFile)[0]?.pages || [], citations: sameFile, focusLabels };
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource, onPick, onResearch }) {
+export const MessageBubble = memo(function MessageBubble({ message, streaming, phase, canRate, sessionId, onOpenSource, onPick, onType, onResearch }) {
   const isUser = message.sender === 'user';
   const citations = message.citations;
   // [E#] in the text (one page's labels, "E21,E22"): open those passages, highlighted on their page.
@@ -127,7 +127,13 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, p
                 {option}
               </button>
             ))}
-            {onPick && <span className="self-center text-[11px] text-cream-muted">or type your answer</span>}
+            {/* The answer is typed in the message box: this takes the student there. */}
+            {onPick && (
+              <button type="button" onClick={onType}
+                className="self-center cursor-pointer text-[11px] text-cyan underline hover:brightness-110">
+                or type your answer
+              </button>
+            )}
           </div>
         )}
         {!isUser && message.citations?.length > 0 && (

@@ -13,6 +13,7 @@ from sqlalchemy import func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from backend.app.agent.history import estimate_length, history_start
 from backend.app.agent.result import LABEL_RE, ResearchResult, cited_ids
 from backend.app.agent.tools import ResearchScope, _live_session
 from backend.app.database import AsyncSessionLocal
@@ -296,6 +297,7 @@ class ResearchRuns:
             citations = await self._citation_payloads(db, [(run, c) for c in rows])
             return {'run_id': str(run.id), 'status': run.status,
                     'stop_reason': run.stop_reason, 'message_id': str(answer.id) if answer else None,
+                    'user_message_id': str(run.user_message_id) if run.user_message_id else None,
                     'answer': answer.content if answer else None, 'citations': citations,
                     'clarification': answer.clarification if answer else None,
                     'mode': answer.answer_mode if answer else None}
@@ -448,7 +450,20 @@ class ResearchRuns:
 
     async def load_safe_context(self, scope: ResearchScope, *,
                                 limit: int = 20) -> tuple[list[dict], dict[str, dict]]:
-        """The safe chat history, and the citations of the answers in it by label.
+        """The safe chat history (the last ``limit`` messages), and the
+        citations of the answers in it by label (load_context)."""
+        history, earlier, _ = await self.load_context(scope, limit=limit)
+        return history, earlier
+
+    async def load_context(self, scope: ResearchScope, *, limit: int = 20,
+                           max_tokens: int | None = None) -> tuple[list[dict], dict[str, dict], int]:
+        """The safe chat history, the citations of the answers in it by
+        label, and how many safe messages were left out by ``max_tokens``.
+
+        max_tokens: the size limit of the history (agent/history.history_start;
+        None: no limit). Only answers that are still sent give citations: a
+        label of an answer the model no longer sees must not pass as a
+        re-cited source.
 
         A session numbers evidence across its runs, so a label in an earlier
         answer names one stored source; a new answer may cite it again, and
@@ -461,6 +476,15 @@ class ResearchRuns:
                 Message.session_id == scope.session_id).order_by(
                 Message.created_at.desc()).limit(limit))).all())
             messages.reverse()
+            # The history may start only at fixed points counted from the
+            # session's first message: when older messages are not loaded,
+            # their size is the starting count.
+            offset = 0
+            if max_tokens is not None and len(messages) == limit:
+                offset = sum(estimate_length(n) for n in (await db.scalars(
+                    select(func.length(Message.content)).where(
+                        Message.session_id == scope.session_id,
+                        Message.created_at < messages[0].created_at))).all())
             answer_ids = [m.id for m in messages if m.sender != SenderType.user]
             runs = {run.assistant_message_id: run for run in (await db.scalars(select(AgentRun).where(
                 AgentRun.assistant_message_id.in_(answer_ids),
@@ -491,22 +515,28 @@ class ResearchRuns:
                     # left out is dropped with it: turns must alternate.
                     if history and history[-1]['role'] == 'user':
                         history.pop()
-                    history.append({'role': 'user', 'content': message.content})
+                    history.append({'role': 'user', 'content': message.content, 'id': str(message.id)})
                 # Legacy assistant text (no research run) may depend on revoked
                 # material. Do not put it into a new research prompt. A research
                 # answer with citations is kept only while every cited source
                 # is still available.
                 elif message.id in runs and message.id not in unavailable:
                     if history and history[-1]['role'] == 'user':
-                        history.append({'role': 'assistant', 'content': _with_options(message)})
+                        history.append({'role': 'assistant', 'content': _with_options(message),
+                                        'id': str(message.id)})
                 elif history and history[-1]['role'] == 'user':
                     history.pop()
             # The current question follows; an earlier one without an answer goes.
             if history and history[-1]['role'] == 'user':
                 history.pop()
+            hidden = 0
+            if max_tokens is not None:
+                hidden = history_start(history, max_tokens=max_tokens, offset=offset)
+                history = history[hidden:]
+            sent = {m['id'] for m in history}
             sources = {}
             for c in current:
-                if c.message_id in unavailable:
+                if c.message_id in unavailable or str(c.message_id) not in sent:
                     continue
                 sources.setdefault(c.label, []).append({
                     'evidence_id': c.label, 'document_id': str(c.document_id),
@@ -521,4 +551,4 @@ class ResearchRuns:
             # different sources is ambiguous.
             earlier = {label: found[0] for label, found in sources.items()
                        if all(x == found[0] for x in found)}
-            return history, earlier
+            return history, earlier, hidden

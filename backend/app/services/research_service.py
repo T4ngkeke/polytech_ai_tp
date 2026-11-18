@@ -20,13 +20,15 @@ from backend.app.agent import direct as direct_mode
 from backend.app.agent import search as search_mode
 from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.direct import DirectRunner
-from backend.app.agent.history import estimate_tokens
-from backend.app.agent.result import ResearchRunStopped
+from backend.app.agent.history import DEFAULT_CONTEXT, estimate_tokens
+from backend.app.agent.language import ask_language
+from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
 from backend.app.agent.runner import ResearchRunner
 from backend.app.agent.search import SearchRunner
 from backend.app.agent.tools import PerCallTools, ResearchScope
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import AgentRun
+from backend.app.services import failure_log
 from backend.app.services.research_runs import STALE_RUN_SECONDS, ResearchRuns
 from backend.app.services.research_usage import ResearchUsage
 
@@ -49,6 +51,9 @@ class ResearchLimits:
     # Share of the model's context the TP text may use in Search and Direct
     # (agent/tp_text.py). 30% of 128k is about 39k tokens; 0: no TP text.
     tp_context_percent: int = 30
+    # Share of the model's context the chat history may use (agent/history.py).
+    # In Research, input_tokens is the room for reading on top of it.
+    history_context_percent: int = 30
 
     @classmethod
     def from_config(cls, configs: Mapping[str, str]) -> ResearchLimits:
@@ -70,6 +75,7 @@ LIMIT_KEYS = {
     'AGENT_CALL_SECONDS': ('call_seconds', 5, 600),
     'AGENT_MAX_INPUT_TOKENS': ('input_tokens', 4000, 200000),
     'TP_CONTEXT_PERCENT': ('tp_context_percent', 0, 60),
+    'HISTORY_CONTEXT_PERCENT': ('history_context_percent', 0, 50),
 }
 DEFAULT_LIMITS = {f.name: f.default for f in fields(ResearchLimits)}
 
@@ -99,6 +105,19 @@ class _RunningTools(PerCallTools):
         return await super().execute(name, arguments)
 
 
+# Room kept under the model's context for the answer of a Research call and
+# the estimate's error (characters / 3 is low for Chinese).
+CONTEXT_RESERVE = 6000
+
+
+def research_input_tokens(input_tokens: int, history: list[dict] | None,
+                          context_tokens: int | None) -> int:
+    """The input ceiling of a Research call: the admin's reading room on top of
+    the history, never above the model's context minus CONTEXT_RESERVE."""
+    wanted = input_tokens + sum(estimate_tokens(m.get('content') or '') for m in history or [])
+    return min(wanted, (context_tokens or DEFAULT_CONTEXT) - CONTEXT_RESERVE)
+
+
 async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  client_request_id: str, model, model_name: str,
                                  token_alpha: float, token_beta: float,
@@ -113,8 +132,13 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  mode: str = 'research', exam_mode: bool = False,
                                  exam_files: bool = False,
                                  limits: ResearchLimits = ResearchLimits(),
-                                 tp_chars: int | None = None) -> dict:
+                                 tp_chars: int | None = None, language_model=None,
+                                 context_tokens: int | None = None) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call).
+    language_model: the model that names the answer language first
+    (agent/language.py, billed like the others); None: no such call, the
+    generic language sentence. context_tokens: the model server's context, a
+    ceiling for the Research input.
     mode: direct, search or research; exam_mode and exam_files (some files are
     allowed in the exam) only change the direct prompt. The chat endpoint has
     already limited the scope to the allowed files, or chosen direct with an
@@ -189,6 +213,18 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
     try:
         billed = usage.wrap_model(run_id=started.run_id, model=model_name,
                                   alpha=token_alpha, beta=token_beta, call=model)
+        answer_language = None
+        if language_model is not None:
+            try:
+                answer_language = await ask_language(
+                    usage.wrap_model(run_id=started.run_id, model=model_name, alpha=token_alpha,
+                                     beta=token_beta, call=language_model),
+                    question, history, teaching_rules)
+            except (ResearchQuotaExceeded, ResearchRunStopped):
+                raise
+            except Exception as exc:
+                # The answer still comes, with the generic language sentence.
+                failure_log.record('answer_language', type(exc).__name__)
         if mode == 'direct':
             # Direct reads only the TP files of the scope (agent/tp_text.py), no other tool.
             course_tools = CourseTools(tools, max_tool_calls=0, research_seconds=limits.total_seconds,
@@ -215,12 +251,12 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
             runner = ResearchRunner(course_tools, billed,
                 max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
                 total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
-                max_input_tokens=limits.input_tokens,
+                max_input_tokens=research_input_tokens(limits.input_tokens, history, context_tokens),
                 lead_min_score=search_mode.min_score_for(rerank_model),
                 on_phase=on_phase, on_draft=on_draft)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations,
-                                  allow_ask=allow_ask)
+                                  allow_ask=allow_ask, answer_language=answer_language)
         await runs.finish_run(started.run_id, result)
     except asyncio.CancelledError:
         # Both steps in one shielded task: a second cancellation (the server

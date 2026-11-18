@@ -140,7 +140,6 @@ class LLMConfigRequest(BaseModel):
     agent_api_key: str | None = None
     agent_model: str | None = None
     # estimated-token budget for chat history (OOM protection).
-    context_max_tokens: str | None = None
     # VLM slot — images the research agent views and figure descriptions.
     # Empty model = feature off (never falls back — vision is opt-in).
     vlm_base_url: str | None = None
@@ -160,6 +159,7 @@ class LLMConfigRequest(BaseModel):
     agent_call_seconds: str | None = None
     agent_max_input_tokens: str | None = None
     tp_context_percent: str | None = None
+    history_context_percent: str | None = None
     token_alpha: float | None = None
     token_beta: float | None = None
 
@@ -180,7 +180,6 @@ class LLMConfigResponse(BaseModel):
     agent_api_key: str = ""
     agent_model: str = ""
     # estimated-token budget for chat history (OOM protection).
-    context_max_tokens: str = ""
     # VLM slot — empty model = vision off.
     vlm_base_url: str = ""
     vlm_api_key: str = ""
@@ -200,6 +199,7 @@ class LLMConfigResponse(BaseModel):
     agent_call_seconds: str = ""
     agent_max_input_tokens: str = ""
     tp_context_percent: str = ""
+    history_context_percent: str = ""
     # Default and allowed range of each research limit field, for the form:
     # {"agent_max_tool_calls": {"default": 30, "min": 1, "max": 40}, …}.
     research_limits: dict[str, dict[str, int]] = Field(default_factory=dict)
@@ -528,9 +528,15 @@ class MessageResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# The longest question a student may send (a code file of a few hundred lines
+# fits): about 7k tokens, next to a history of 30% of the context
+# (agent/history.py). The chat page counts the characters and stops at it.
+MAX_MESSAGE_CHARS = 20000
+
+
 class ChatStreamRequest(BaseModel):
     session_id: uuid.UUID
-    message: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS)
     client_request_id: uuid.UUID | None = None
     # direct: no course material; search: one search; research: the agent.
     # A class in exam mode answers in direct mode whatever is asked.

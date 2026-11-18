@@ -760,6 +760,7 @@ const MAP_NODES = [
       { key: 'agent_call_seconds', label: 'One model call (s)', limit: true },
       { key: 'agent_max_input_tokens', label: 'Input tokens per model call', limit: true },
       { key: 'tp_context_percent', label: 'TP text, % of the model context (Search, Direct)', limit: true },
+      { key: 'history_context_percent', label: 'Chat history, % of the model context', limit: true },
     ],
   },
   {
@@ -789,7 +790,6 @@ const MAP_NODES = [
       { key: 'model', label: 'Model Name', placeholder: 'served model name' },
       { key: 'base_url', label: 'Base URL', placeholder: 'http://model-server:8000/v1' },
       { key: 'api_key', label: 'API Key', placeholder: "sk-… or 'local'", secret: true },
-      { key: 'context_max_tokens', label: 'Max history tokens sent to the model', placeholder: '8000' },
       { key: 'token_alpha', label: 'α — prefill weight', placeholder: '0.2', numeric: true },
       { key: 'token_beta', label: 'β — decode weight', placeholder: '1.0', numeric: true },
     ],

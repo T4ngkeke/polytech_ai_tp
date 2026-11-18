@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from backend.app.agent.course_tools import CourseTools
-from backend.app.agent.language import SENTENCES
+from backend.app.agent.language import GENERIC_SENTENCE
 from backend.app.agent.model import ModelReply
 from backend.app.agent.search import CHECK_TURN, NO_PAGES, SEARCH_PROMPT, SearchRunner, _queries
 from backend.app.services.retrieval_service import ChunkHit, apply_rerank
@@ -123,7 +123,7 @@ async def test_an_answer_without_citations_gets_one_check():
     model = Script('Le produit cartésien combine les tuples.', 'Le produit cartésien combine les tuples [E3].')
     result = await SearchRunner(CourseTools(tools), model).run('Produit cartésien ?')
     assert model.purposes == ['search_answer', 'search_check']
-    assert model.seen[1][-1]['content'] == CHECK_TURN + '\n\n' + SENTENCES['fr']
+    assert model.seen[1][-1]['content'] == CHECK_TURN + '\n\n' + GENERIC_SENTENCE
     assert result.answer.endswith('[E3].') and len(result.citations) == 1
 
 
@@ -141,7 +141,7 @@ async def test_a_weak_best_score_means_not_found_without_reading():
     model = Script("Le cours ne traite pas de Dijkstra ; essayez le mode Research.")
     result = await SearchRunner(CourseTools(tools), model, min_score=0.1).run('Dijkstra ?')
     assert reads(tools) == [] and result.stop_reason == 'not_found'
-    assert model.seen[0][-1]['content'] == 'Dijkstra ?\n\n' + NO_PAGES + '\n\n' + SENTENCES['fr']
+    assert model.seen[0][-1]['content'] == 'Dijkstra ?\n\n' + NO_PAGES + '\n\n' + GENERIC_SENTENCE
     # No check turn: no page was given.
     assert model.purposes == ['search_answer']
     found = next(e for e in result.trace if e['event'] == 'search_found')
@@ -306,7 +306,7 @@ async def test_a_weak_or_empty_course_search_still_answers_from_the_tp_text(file
     # Uncited first: the TP pages count as read, so the check turn asks for the IDs.
     model = Script('Le rendu se fait en binôme.', 'Le rendu se fait en binôme [E1].')
     result = await SearchRunner(CourseTools(files), model, min_score=0.5).run('On fait quoi ?')
-    assert model.seen[0][-1]['content'] == 'On fait quoi ?\n\n' + NO_CLASS_PAGES + '\n\n' + SENTENCES['fr']
+    assert model.seen[0][-1]['content'] == 'On fait quoi ?\n\n' + NO_CLASS_PAGES + '\n\n' + GENERIC_SENTENCE
     assert '[E1] TP1 : objectifs' in model.seen[0][0]['content']
     assert model.purposes == ['search_answer', 'search_check']
     assert result.stop_reason == 'finished' and [c['evidence_id'] for c in result.citations] == ['E1']

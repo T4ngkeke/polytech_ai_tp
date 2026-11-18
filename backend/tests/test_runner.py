@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from backend.app.agent.language import SENTENCES
+from backend.app.agent.language import GENERIC_SENTENCE
 from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchRunStopped
@@ -55,7 +55,7 @@ def test_research_limits_from_admin_values():
     assert (limits.research_seconds, limits.total_seconds) == (120, 120)
 
 
-FR = SENTENCES['fr']
+FR = GENERIC_SENTENCE   # no language name given: the generic sentence
 
 
 @pytest.mark.asyncio

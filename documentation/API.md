@@ -54,7 +54,8 @@ This area covers the chat itself and the thumbs up or down on an answer.
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
-| POST | `/api/chat/stream` | Any user | Answers one message of an own session, as server-sent events (see below). Needs `AGENTIC_SEARCH_ENABLED` (else `503 chat_not_enabled`) and a session in a lab (else `400 session_without_lab`). A locked or deleted lab, or a lab of a class the user has not joined, gets `403`. A reached limit gets `429` with `day_quota_reached` or `week_quota_reached`. Each of these refusals is stored in `chat_refusals` (for monitoring). The limits are checked only here: a question that starts always finishes, even over the limit, and the next one is refused. |
+| POST | `/api/chat/stream` | Any user | Answers one message of an own session, as server-sent events (see below). Needs `AGENTIC_SEARCH_ENABLED` (else `503 chat_not_enabled`) and a session in a lab (else `400 session_without_lab`). A locked or deleted lab, or a lab of a class the user has not joined, gets `403`. A message longer than 20,000 characters gets `422`. A reached limit gets `429` with `day_quota_reached` or `week_quota_reached`. Each of these refusals is stored in `chat_refusals` (for monitoring). The limits are checked only here: a question that starts always finishes, even over the limit, and the next one is refused. |
+| GET | `/api/chat/sessions/{session_id}/history-start?mode=` | Any user | Where the history of the next question in an own session would start: `{seen_from, hidden}`. `seen_from` is the first message still sent to the model (`null` when none is) and `hidden` the number of earlier messages that no longer are; `hidden` 0 means everything is sent. The chat page draws a line there. Same rule as `/stream`; `mode` (default `search`) matters because Search and Direct share the context with the TP text. |
 | POST | `/api/chat/messages/{message_id}/feedback` | Any user | Thumbs up or down on an answer. Body `{feedback: "up" \| "down"}`. A student can only rate a message of a session they own. |
 
 ### The chat stream
@@ -79,7 +80,7 @@ The events, in order:
 | (default) | The whole checked answer, as one JSON string. It replaces the draft. |
 | `clarification` | Only when the answer is a question back to the student: `{"question": ..., "options": [2 to 4 short answers]}`. The client shows the options as buttons. The picked option, or any typed answer, is the next message. The next run of the session cannot ask again. |
 | `citations` | The cited sources: `citation_id`, `label` (E1, ...), `document_id`, `revision_id`, `page_id`, `pdf_page_no`, `block_id`, `range`, `origin`, `available`, `href`, `filename`, `newer_revision`, `teacher_revised`, `asset_id`, `asset_mime`, and `box` (the region of the cited block as `[x0, y0, x1, y1]` fractions of the page, or `null`). |
-| `done` | `{"message_id": ...}` |
+| `done` | `{"message_id": ..., "user_message_id": ...}`: the saved answer and question |
 | `title` | Only after the first answer of a conversation that has no title: `{"session_id": ..., "title": ...}`. The answer model writes it from the first question and answer (at most 6 words, in the student's language; the first line of the question if the model fails). A title the student wrote is kept. Teacher test sessions get none. It is not charged to the quota. |
 | `error` | `{"detail": ...}`. For example when another research request of the session is still running. |
 | (comment) | `: keep-alive`, every 15 s without another event, so proxies keep the stream open. Clients ignore it. |
@@ -102,8 +103,9 @@ Limits of one research run. Values are whole numbers. An empty or invalid value 
 | `AGENT_RESEARCH_SECONDS` (`agent_research_seconds`) | 300 | 5-1800 | Time for research. After it the tools are withdrawn. At most the total time. |
 | `AGENT_TOTAL_SECONDS` (`agent_total_seconds`) | 420 | 10-1800 | Time for the whole run, answer included. |
 | `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 120 | 5-600 | Time for one model call, `view_image` included. |
-| `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 28000 | 4000-200000 | Estimated input tokens of one model call. The chat history may use a quarter of it. |
+| `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 28000 | 4000-200000 | Estimated input tokens of one Research model call, on top of the chat history (the total stays 6,000 tokens under the model's context). |
 | `TP_CONTEXT_PERCENT` (`tp_context_percent`) | 30 | 0-60 | Share of the model's context (its `max_model_len`) that the TP files' text may use in Search and Direct. Files go in whole, the shortest first; 0 puts no TP text in the prompt. |
+| `HISTORY_CONTEXT_PERCENT` (`history_context_percent`) | 30 | 0-50 | Share of the model's context that the chat history may use. With the TP text (Search, Direct), the two together use at most 75%. Past the limit the oldest turns go, several at once. |
 
 The system prompt states the tool and image limits. A long answer can take two minutes, so the total time should be at least one model call longer than the research time.
 
@@ -184,7 +186,7 @@ This area covers users, classes, the model settings, data pruning and global ana
 | GET | `/api/admin/analytics` | Admin | Platform-wide token use: totals, `active_users_7d` and a daily breakdown over 30 days. |
 | GET | `/api/admin/analytics/classes/{class_id}` | Admin | Token use of one class: class, then lab, then student. |
 | GET | `/api/admin/analytics/classes/{class_id}/details` | Admin | The same data as the teacher's `/details` endpoint, for any class (`?lab_id=` for one lab). No ownership check. `404` if the lab is not in the class. |
-| GET | `/api/admin/llm/config` | Admin | The model settings: the main model, and the embedding, rerank, agent and vision slots, the research limits, `context_max_tokens`, the token weights `token_alpha` and `token_beta`, and `mineru_server_url`. An empty value means the slot uses the main model (the vision slot is off instead). It also returns, read-only, `research_limits` (default, minimum and maximum of each limit), `features` (`research_agent`, `structured_documents`, `pdf_documents`: the deployment flags) and `mineru_default_url` (the `PDF_MINERU_SERVER_URL` of the backend). |
+| GET | `/api/admin/llm/config` | Admin | The model settings: the main model, and the embedding, rerank, agent and vision slots, the research limits (with `history_context_percent`), the token weights `token_alpha` and `token_beta`, and `mineru_server_url`. An empty value means the slot uses the main model (the vision slot is off instead). It also returns, read-only, `research_limits` (default, minimum and maximum of each limit), `features` (`research_agent`, `structured_documents`, `pdf_documents`: the deployment flags) and `mineru_default_url` (the `PDF_MINERU_SERVER_URL` of the backend). |
 | PUT | `/api/admin/llm/config` | Admin | Changes the model settings without a restart. Only the fields that are sent are written. `base_url`, `api_key` and `model` are required. A research limit out of range gets `422`. `mineru_server_url` switches the PDF worker to another MinerU server at its next tick (empty uses the worker's own `PDF_MINERU_SERVER_URL`). |
 | GET | `/api/admin/llm/servers` | Admin | What each model server serves. One row per slot (main, agent, vision, embeddings, reranker): `slot`, `label`, `model`, `server`, `status` (`ok`, `model_missing`, `unreachable` or `off`), `served` (model names the server lists) and `max_model_len` (the context length of the configured model, when the server reports it). The servers are asked with a 3-second timeout. |
 | DELETE | `/api/admin/sessions/{session_id}` | Admin | Deletes a session and its messages for good. |
