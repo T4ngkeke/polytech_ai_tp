@@ -56,19 +56,25 @@ async def get_llm_config(db: AsyncSession) -> dict:
 # Helper: query-embedding function for the agent's RAG node
 # ---------------------------------------------------------------------------
 
+async def embed_texts(client, model: str, texts: list[str]) -> list[list[float]]:
+    """The embeddings of ``texts``, in their order (the worker and the chat)."""
+    # encoding_format="float" is mandatory: the OpenAI SDK otherwise defaults
+    # to "base64", which some OpenAI-compatible servers (e.g. Albert) reject
+    # with a 500. Float is universally supported.
+    resp = await client.embeddings.create(model=model, input=texts, encoding_format="float")
+    items = sorted(resp.data, key=lambda item: item.index)
+    if [item.index for item in items] != list(range(len(texts))):
+        raise ValueError("Embedding response indices do not match the input batch.")
+    return [item.embedding for item in items]
+
+
 def make_embed_fn(llm_config: dict[str, str]):
     """Build an async embedder hitting the configured embedding model."""
     async def embed(texts: list[str]) -> list[list[float]]:
         # One shared client per endpoint: a client per call that is never
         # closed made the rerank connections hang (see shared_clients.py).
         client = openai_client(llm_config["embedding_base_url"], llm_config["embedding_api_key"])
-        # encoding_format="float" is mandatory: the OpenAI SDK otherwise defaults
-        # to "base64", which some OpenAI-compatible servers (e.g. Albert) reject
-        # with a 500. Float is universally supported.
-        resp = await client.embeddings.create(
-            model=llm_config["embedding_model"], input=texts, encoding_format="float"
-        )
-        return [item.embedding for item in resp.data]
+        return await embed_texts(client, llm_config["embedding_model"], texts)
     return embed
 
 

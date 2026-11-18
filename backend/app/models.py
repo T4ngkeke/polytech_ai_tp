@@ -38,7 +38,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
 from sqlalchemy.types import CHAR, Float, TypeDecorator
 from pgvector.sqlalchemy import Vector
 

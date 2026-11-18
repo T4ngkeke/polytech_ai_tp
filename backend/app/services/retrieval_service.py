@@ -336,12 +336,3 @@ async def hybrid_search(
         )
     return fused_hits[:top_k], False
 
-
-async def rag_search(
-    db: AsyncSession,
-    query_embedding: list[float],
-    lab_id: uuid.UUID,
-    k: int = 5,
-) -> list[ChunkHit]:
-    """Vector-only RAG search, scoped to a lab. (Kept for callers not yet on hybrid.)"""
-    return await vector_search(db, query_embedding, lab_id, k=k)

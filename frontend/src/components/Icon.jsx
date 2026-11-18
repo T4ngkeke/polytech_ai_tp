@@ -3,8 +3,10 @@
  * as the admin model map. Icons use currentColor and follow the theme.
  */
 import {
-  Archive, ArrowUpDown, Bot, Check, Compass, Copy, Download, Eye, FileText, KeyRound, Layers,
-  Lock, LockOpen, MessageSquare, Network, Pencil, Repeat, RotateCcw, ThumbsDown, ThumbsUp, Trash2, TriangleAlert, X,
+  Activity, Archive, ArrowRightLeft, ArrowUpDown, Bot, Check, ChevronRight, Compass, Copy, Cpu, Database,
+  Download, Ellipsis, Eye, EyeOff, FileText, KeyRound, Layers, LayoutGrid, Lock, LockOpen, LogOut, Menu,
+  MessageSquare, Network, Pencil, Plus, Repeat, RotateCcw, Search, Send, Settings, Square, ThumbsDown,
+  ThumbsUp, Trash2, TriangleAlert, Upload, Users, X,
 } from 'lucide-react';
 
 const ICONS = {
@@ -12,6 +14,9 @@ const ICONS = {
   pencil: Pencil, key: KeyRound, transfer: Repeat, archive: Archive, thumbsUp: ThumbsUp,
   thumbsDown: ThumbsDown, bot: Bot, eye: Eye, message: MessageSquare, network: Network,
   sort: ArrowUpDown, compass: Compass, download: Download, copy: Copy, check: Check, close: X, reset: RotateCcw,
+  menu: Menu, send: Send, stop: Square, plus: Plus, chevronRight: ChevronRight, ellipsis: Ellipsis,
+  logout: LogOut, settings: Settings, users: Users, grid: LayoutGrid, pulse: Activity, chip: Cpu,
+  database: Database, upload: Upload, search: Search, eyeOff: EyeOff, swap: ArrowRightLeft,
 };
 
 export default function Icon({ name, className = 'w-4 h-4', title }) {

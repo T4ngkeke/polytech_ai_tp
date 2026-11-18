@@ -31,13 +31,12 @@ import json
 import logging
 import re
 import time
-import uuid
 from typing import Callable
 
 from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.result import (
     CITATION_RE, LABEL_RE, ResearchQuotaExceeded, ResearchResult, ResearchRunStopped,
-    cited_ids, malformed_refs,
+    call_usage, cited_ids, cited_sources, malformed_refs,
 )
 from backend.app.agent.runner import DONE_RE, NO_DOCUMENTS_TURN, _LEADING_ID, _without_document_handles, answer_ending
 from backend.app.agent.tp_text import CLASS_COURSE, PAGE_CHARS, THIS_TP, page_header, page_text, tp_text
@@ -191,16 +190,10 @@ class SearchRunner:
                 reply = await asyncio.wait_for(self.model(
                     messages, max_output, remaining, purpose=purpose,
                     **({'on_text': draft} if streamed else {})), remaining)
-                usage.append({'purpose': purpose, 'model': reply.model,
-                              'input_tokens': reply.input_tokens, 'output_tokens': reply.output_tokens,
-                              'usage_source': 'actual' if reply.input_tokens is not None
-                              and reply.output_tokens is not None else 'unknown',
-                              'elapsed_seconds': self.clock() - tick, 'status': 'ok'})
+                usage.append(call_usage(purpose, reply, self.clock() - tick))
                 return reply
             except (Exception, asyncio.CancelledError) as exc:
-                usage.append({'purpose': purpose, 'model': '', 'input_tokens': None,
-                              'output_tokens': None, 'usage_source': 'unknown',
-                              'elapsed_seconds': self.clock() - tick, 'status': type(exc).__name__})
+                usage.append(call_usage(purpose, None, self.clock() - tick, type(exc).__name__))
                 raise
 
         def result(text, citations, reason, unresolved=()):
@@ -413,12 +406,8 @@ class SearchRunner:
             return failed('no_answer')
         cited = cited_ids(answer)
         self.on_phase('checking_sources')
-        try:
-            for document_id in {uuid.UUID(permitted[x]['document_id']) for x in cited}:
-                await tools._revision(document_id)
-            await tools._check_session()
-        except Exception:
+        citations = await cited_sources(tools, permitted, cited)
+        if citations is None:
             return result('Course access changed. Please retry.', [], 'access_revoked', ['access changed'])
-        citations = [permitted[x] for x in sorted(cited, key=lambda x: int(x[1:]))]
         note('finished', stop=stop, answer_chars=len(answer), cited=len(citations))
         return result(answer, citations, stop)

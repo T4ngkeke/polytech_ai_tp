@@ -14,7 +14,7 @@ Two rules are enforced here rather than left to each caller:
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 SCHEMA_VERSION = 'm2a-parsed-document-1'
 
@@ -335,13 +335,6 @@ class ParsedDocument:
     def asset_by_id(self, asset_id: str) -> ParsedAsset | None:
         return next((asset for asset in self.assets if asset.asset_id == asset_id), None)
 
-    def block_by_id(self, block_id: str) -> ParsedBlock | None:
-        return next((block for _, block in self.all_blocks() if block.block_id == block_id), None)
-
-    @property
-    def visible_slide_numbers(self) -> tuple[int, ...]:
-        return tuple(page.source_slide_no for page in self.pages)
-
     def parse_quality(self) -> str:
         """complete or partial. Never failed: a document that cannot be read at
         all raises before an IR exists."""
@@ -355,9 +348,6 @@ class ParsedDocument:
                 or any(block.source_completeness != 'complete' for _, block in self.all_blocks())):
             return 'partial'
         return 'complete'
-
-    def with_pages(self, pages: list[ParsedPage]) -> 'ParsedDocument':
-        return replace(self, pages=pages)
 
     def to_dict(self) -> dict:
         return {

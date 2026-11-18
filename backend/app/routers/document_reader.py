@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,44 +99,6 @@ async def teacher_page(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: 
         return await reader.page_view(db, rev, page_id, teacher=True)
     except reader.ReaderError:
         raise _not_found() from None
-
-
-@teacher_router.get('/{document_id}/revisions/{revision_id}/read')
-async def teacher_read(document_id: uuid.UUID, revision_id: uuid.UUID, page_id: uuid.UUID | None = None,
-                       block_id: uuid.UUID | None = None, start: int | None = Query(None, ge=0),
-                       end: int | None = Query(None, ge=0), cursor: str | None = None,
-                       budget: int = Query(reader.DEFAULT_BUDGET, ge=1, le=reader.MAX_BUDGET),
-                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function")):
-    rev = await _teacher_rev(db, document_id, revision_id, teacher)
-    try:
-        return await reader.read(db, rev, reader=f'teacher:{teacher.id}', teacher=True, page_id=page_id,
-                                 block_id=block_id, start=start, end=end, cursor=cursor, budget=budget)
-    except reader.ReaderError as exc:
-        raise _tool_error(exc) from None
-
-
-@teacher_router.get('/{document_id}/revisions/{revision_id}/navigate')
-async def teacher_navigate(document_id: uuid.UUID, revision_id: uuid.UUID, anchor_block_id: uuid.UUID,
-                           direction: str = 'next', unit: str = 'block', count: int = 1,
-                           teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function")):
-    rev = await _teacher_rev(db, document_id, revision_id, teacher)
-    try:
-        return await reader.navigate(db, rev, reader=f'teacher:{teacher.id}', anchor_block_id=anchor_block_id,
-                                     direction=direction, unit=unit, count=count)
-    except reader.ReaderError as exc:
-        raise _tool_error(exc) from None
-
-
-@teacher_router.get('/{document_id}/revisions/{revision_id}/grep')
-async def teacher_grep(document_id: uuid.UUID, revision_id: uuid.UUID, pattern: str,
-                       case_sensitive: bool = False, cursor: str | None = None,
-                       teacher: User = Depends(require_teacher), db: AsyncSession = Depends(get_db, scope="function")):
-    rev = await _teacher_rev(db, document_id, revision_id, teacher)
-    try:
-        return await reader.grep(db, rev, reader=f'teacher:{teacher.id}', pattern=pattern,
-                                 case_sensitive=case_sensitive, cursor=cursor)
-    except reader.ReaderError as exc:
-        raise _tool_error(exc) from None
 
 
 @teacher_router.get('/{document_id}/revisions/{revision_id}/assets/{asset_id}')

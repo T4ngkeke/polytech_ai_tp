@@ -383,28 +383,6 @@ class TestChatHistory:
         assert resp.json() == []
 
 
-class TestListStudents:
-    async def test_teacher_sees_active(self, teacher_client, seed_data):
-        resp = await teacher_client.get("/api/teacher/students")
-        assert resp.status_code == 200
-        usernames = [s["username"] for s in resp.json()]
-        assert "student_a" in usernames
-        assert "deleted_s" not in usernames
-
-    async def test_student_a_has_usage(self, teacher_client, seed_data):
-        resp = await teacher_client.get("/api/teacher/students")
-        a = next(s for s in resp.json() if s["username"] == "student_a")
-        assert a["tokens_used_today"] == 1234
-
-    async def test_student_rejected_403(self, student_client):
-        resp = await student_client.get("/api/teacher/students")
-        assert resp.status_code == 403
-
-
-# ===================================================================
-# New endpoints
-# ===================================================================
-
 class TestUnenrollStudent:
     async def test_unenroll_student(self, teacher_client, seed_data, db_session):
         cid = seed_data["class"].id

@@ -445,9 +445,6 @@ class ResearchRuns:
                 .where(AgentRun.session_id == session_id))).all()
         return 1 + max((int(label[1:]) for label in labels), default=0)
 
-    async def load_safe_history(self, scope: ResearchScope, *, limit: int = 20) -> list[dict]:
-        return (await self.load_safe_context(scope, limit=limit))[0]
-
     async def load_safe_context(self, scope: ResearchScope, *,
                                 limit: int = 20) -> tuple[list[dict], dict[str, dict]]:
         """The safe chat history (the last ``limit`` messages), and the

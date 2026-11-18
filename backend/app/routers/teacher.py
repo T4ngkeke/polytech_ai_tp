@@ -794,24 +794,6 @@ def _report_period(start: date | None, end: date | None) -> dict:
 
 
 # ===================================================================
-# GET /api/teacher/students
-# ===================================================================
-
-
-@router.get("/students", response_model=list[StudentSummaryResponse])
-async def list_students(
-    _teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> list[StudentSummaryResponse]:
-    """List active students with their current daily token consumption."""
-    result = await db.execute(
-        select(User).where(User.role == UserRole.student, User.is_deleted.is_(False))
-    )
-    students = result.scalars().all()
-    return await _build_student_summaries(db, students)
-
-
-# ===================================================================
 # GET /api/teacher/classes/{class_id}/students
 # ===================================================================
 
@@ -1166,9 +1148,7 @@ async def get_class_analytics_details(
     """Activity, students, quotas and answers that went wrong, for a class or one of its labs."""
     await _verify_class_ownership(db, class_id, teacher)
     if lab_id is not None:
-        lab = await lab_service.get_lab_by_id(db, lab_id)
-        if lab.class_id != class_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+        await lab_service.get_lab_in_class(db, lab_id, class_id)
     return await analytics_service.get_teaching_analytics(db, class_id, lab_id)
 
 

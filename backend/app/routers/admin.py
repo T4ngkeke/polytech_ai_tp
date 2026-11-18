@@ -45,7 +45,6 @@ from backend.app.config import settings
 from backend.app.auth import hash_password_async, require_admin
 from backend.app.database import get_db
 from backend.app.models import (
-    Class,
     Message,
     Session,
     SystemConfig,
@@ -706,9 +705,7 @@ async def get_class_analytics_details(
     """What the teacher Analytics tab shows, for any class or one of its labs."""
     await class_service.get_class_by_id(db, class_id)  # 404 if not found
     if lab_id is not None:
-        lab = await lab_service.get_lab_by_id(db, lab_id)
-        if lab.class_id != class_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+        await lab_service.get_lab_in_class(db, lab_id, class_id)
     return await analytics_service.get_teaching_analytics(db, class_id, lab_id)
 
 

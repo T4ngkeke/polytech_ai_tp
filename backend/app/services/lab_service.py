@@ -22,6 +22,14 @@ async def get_lab_by_id(db: AsyncSession, lab_id: uuid.UUID) -> Lab:
     return lab
 
 
+async def get_lab_in_class(db: AsyncSession, lab_id: uuid.UUID, class_id: uuid.UUID) -> Lab:
+    """Like get_lab_by_id, and 404 when the lab is not in that class."""
+    lab = await get_lab_by_id(db, lab_id)
+    if lab.class_id != class_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+    return lab
+
+
 async def verify_lab_ownership(db: AsyncSession, lab: Lab, teacher_id: uuid.UUID) -> None:
     """Verify that the lab's parent class is owned by teacher_id. Raises 403 if not."""
     cls_result = await db.execute(

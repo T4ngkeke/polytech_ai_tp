@@ -10,7 +10,12 @@ chars//3 — deliberately conservative (FR/EN run ~4 chars/token, so //3
 overestimates the count), because this is a safety line, not billing.
 """
 
-from backend.app.agent.history import estimate_tokens, trim_history
+from backend.app.agent.history import estimate_tokens, history_start
+
+
+def trim_history(history: list[dict], *, max_tokens: int) -> list[dict]:
+    """The part of the history that is sent (the current question is not part of it)."""
+    return history[history_start(history, max_tokens=max_tokens):]
 
 
 def _msg(role: str, content: str) -> dict:

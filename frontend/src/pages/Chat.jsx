@@ -540,14 +540,14 @@ export default function Chat() {
                   className="w-7 h-7 rounded flex items-center justify-center text-danger hover:text-danger-hover hover:bg-ink-hover transition-colors cursor-pointer"
                   title="Confirm delete"
                 >
-                  <CheckIcon className="w-3.5 h-3.5" />
+                  <Icon name="check" className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setConfirmingDeleteId(null)}
                   className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
                   title="Cancel"
                 >
-                  <XIcon className="w-3.5 h-3.5" />
+                  <Icon name="close" className="w-3.5 h-3.5" />
                 </button>
               </div>
             ) : (
@@ -572,14 +572,14 @@ export default function Chat() {
                     className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
                     title="Rename session"
                   >
-                    <PencilIcon className="w-3.5 h-3.5" />
+                    <Icon name="pencil" className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => setConfirmingDeleteId(s.id)}
                     className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-danger hover:bg-ink-hover transition-colors cursor-pointer"
                     title="Delete session"
                   >
-                    <TrashIcon className="w-3.5 h-3.5" />
+                    <Icon name="trash" className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </>
@@ -640,7 +640,7 @@ export default function Chat() {
           <div className="flex items-center gap-2 min-w-0">
             <button type="button" onClick={() => setNavOpen(true)} title="Classes and sessions" aria-label="Classes and sessions"
               className="md:hidden p-2 -ml-1 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
-              <MenuIcon className="w-5 h-5" />
+              <Icon name="menu" className="w-5 h-5" />
             </button>
             {activeSession ? (
               <h2 className="text-sm font-semibold text-cream truncate">{activeSession.title || 'New conversation'}</h2>
@@ -780,7 +780,7 @@ export default function Chat() {
                   : 'gradient-cyan text-on-accent hover:brightness-110 shadow-glow disabled:opacity-40 disabled:cursor-not-allowed'
               }`}
             >
-              {isStreaming ? <StopIcon className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
+              {isStreaming ? <Icon name="stop" className="w-4 h-4 fill-current" /> : <Icon name="send" className="w-4 h-4" />}
             </button>
           </div>
           {/* Transparency: students are told their teacher can see the chat.
@@ -872,28 +872,6 @@ function HistoryLine({ onNewSession }) {
       <span className="hidden sm:block flex-1 border-t border-dashed border-border-default" />
     </div>
   );
-}
-
-function MenuIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
-}
-function SendIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z" /><path d="M22 2 11 13" /></svg>;
-}
-function StopIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>;
-}
-function PencilIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
-}
-function TrashIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>;
-}
-function CheckIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
-}
-function XIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>;
 }
 
 

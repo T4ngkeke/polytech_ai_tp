@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from openai import AsyncOpenAI
 
 from backend.app.services import shared_clients
 from backend.app.services.model_routing import Endpoint
@@ -36,7 +35,7 @@ class ModelReply:
     output_tokens: int | None = None
 
 
-class ResearchModel:
+class ResearchModel(shared_clients.EndpointClient):
     """Sends the conversation, and the tools when given, to the configured endpoint.
 
     The caller passes the tool list on each call: without it the model can only
@@ -48,20 +47,6 @@ class ResearchModel:
             raise ValueError('model_unavailable')
         self.endpoint = endpoint
         self.sampling, self.extra_body = sampling_request(sampling)
-        self._client: AsyncOpenAI | None = None
-
-    @property
-    def client(self) -> AsyncOpenAI:
-        """The shared client of the endpoint for the running loop (see
-        services/shared_clients.py), unless one was set."""
-        if self._client is not None:
-            return self._client
-        return shared_clients.openai_client(self.endpoint.base_url, self.endpoint.api_key or 'local',
-                                            max_retries=0)
-
-    @client.setter
-    def client(self, client: AsyncOpenAI) -> None:
-        self._client = client
 
     async def __call__(self, messages: list[dict], max_output: int, timeout: float, *,
                        tools: list[dict] | None = None, purpose: str = '',

@@ -85,3 +85,20 @@ async def close_all() -> None:
             await (client.close() if isinstance(client, AsyncOpenAI) else client.aclose())
         except Exception:  # noqa: BLE001 - shutting down; nothing else to do
             pass
+
+
+class EndpointClient:
+    """For a class with an ``endpoint`` (model_routing.Endpoint): ``client`` is
+    the shared OpenAI client of that endpoint for the running loop, unless a
+    client was set (tests)."""
+    _client: AsyncOpenAI | None = None
+
+    @property
+    def client(self) -> AsyncOpenAI:
+        if self._client is not None:
+            return self._client
+        return openai_client(self.endpoint.base_url, self.endpoint.api_key or 'local', max_retries=0)
+
+    @client.setter
+    def client(self, client: AsyncOpenAI) -> None:
+        self._client = client

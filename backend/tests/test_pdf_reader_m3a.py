@@ -110,12 +110,9 @@ async def test_pdf_upload_and_worker_write_only_a_readable_draft(db_session,tmp_
         assert len(pages)==1 and pages[0].preview_page_no==1
         assert len(blocks)==5 and any(b.kind=='figure' and 'invented arrow' not in b.content for b in blocks)
         assert await db_session.scalar(select(func.count()).select_from(Document).where(Document.current_revision_id==rev.id))==0
-        client=await make_client(db_session,teacher)
-        async with client:
-            read=await client.get(f'/api/teacher/documents/{body["id"]}/revisions/{body["revision_id"]}/read',
-                                  params={'page_id':str(pages[0].page_id)})
-        assert read.status_code==200,read.text
-        result=read.json()
+        # The reader the model's tools use (services/document_reader.read).
+        from backend.app.services import document_reader as reader
+        result=await reader.read(db_session,rev,reader=f'teacher:{teacher.id}',teacher=True,page_id=pages[0].page_id)
         assert result['ok'] and len(result['items'])==5
         assert any(item['type']=='figure' and item['source']['format']=='pdf' for item in result['items'])
     finally:

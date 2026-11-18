@@ -22,7 +22,6 @@ import json
 import logging
 import re
 import time
-import uuid
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
@@ -31,7 +30,8 @@ from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseToo
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.language import language_sentence, with_language
 from backend.app.agent.result import (
-    ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, cited_ids, malformed_refs,
+    ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, call_usage, cited_ids, cited_sources,
+    malformed_refs,
 )
 
 logger = logging.getLogger(__name__)
@@ -357,16 +357,10 @@ class ResearchRunner:
                 reply = await asyncio.wait_for(self.model(
                     self._fit(messages), 2048, remaining, tools=offered if with_tools else None,
                     purpose=purpose, **({'on_text': draft} if streamed else {})), remaining)
-                usage.append({'purpose': purpose, 'model': reply.model,
-                              'input_tokens': reply.input_tokens, 'output_tokens': reply.output_tokens,
-                              'usage_source': 'actual' if reply.input_tokens is not None
-                              and reply.output_tokens is not None else 'unknown',
-                              'elapsed_seconds': self.clock() - tick, 'status': 'ok'})
+                usage.append(call_usage(purpose, reply, self.clock() - tick))
                 return reply
             except (Exception, asyncio.CancelledError) as exc:
-                usage.append({'purpose': purpose, 'model': '', 'input_tokens': None,
-                              'output_tokens': None, 'usage_source': 'unknown',
-                              'elapsed_seconds': self.clock() - tick, 'status': type(exc).__name__})
+                usage.append(call_usage(purpose, None, self.clock() - tick, type(exc).__name__))
                 raise
 
         def withdraw(reason, reminder=FINISH_TURN):
@@ -559,13 +553,9 @@ class ResearchRunner:
             # The listed pages are cited, so the student can open them.
             cited = cited_ids(answer)
         self.on_phase('checking_sources')
-        try:
-            for document_id in {uuid.UUID(permitted[x]['document_id']) for x in cited}:
-                await tools._revision(document_id)
-            await tools._check_session()
-        except Exception:
+        citations = await cited_sources(tools, permitted, cited)
+        if citations is None:
             return result('Course access changed. Please retry.', [], 'access_revoked', ['access changed'])
-        citations = [permitted[x] for x in sorted(cited, key=lambda x: int(x[1:]))]
         note('finished', stop=stop, answer_chars=len(answer), cited=len(citations))
         return result(answer, citations, stop, unresolved)
 

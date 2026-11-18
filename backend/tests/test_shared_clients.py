@@ -16,7 +16,7 @@ def test_embed_calls_share_one_client(monkeypatch):
     class Embeddings:
         async def create(self, **kwargs):
             class Item:
-                embedding = [0.0]
+                embedding, index = [0.0], 0
 
             class Reply:
                 data = [Item()]

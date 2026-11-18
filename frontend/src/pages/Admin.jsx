@@ -16,12 +16,12 @@ import { classesByTeacher, lastActive, lastDays, lastWeek, sortClasses } from '.
 import { displayStatus, statusGroup } from '../lib/documentProgress';
 
 const NAV = [
-  { key: 'users', label: 'Users', icon: UsersIcon },
-  { key: 'classes', label: 'Classes', icon: GridIcon },
-  { key: 'documents', label: 'Documents', icon: FileIcon },
-  { key: 'monitoring', label: 'Monitoring', icon: PulseIcon },
-  { key: 'llm', label: 'LLM Config', icon: ChipIcon },
-  { key: 'maintenance', label: 'Maintenance', icon: DatabaseIcon },
+  { key: 'users', label: 'Users', icon: 'users' },
+  { key: 'classes', label: 'Classes', icon: 'grid' },
+  { key: 'documents', label: 'Documents', icon: 'file' },
+  { key: 'monitoring', label: 'Monitoring', icon: 'pulse' },
+  { key: 'llm', label: 'LLM Config', icon: 'chip' },
+  { key: 'maintenance', label: 'Maintenance', icon: 'database' },
 ];
 
 export default function Admin() {
@@ -41,7 +41,7 @@ export default function Admin() {
       <div className="md:hidden shrink-0 h-12 px-2 flex items-center gap-2 border-b border-border-subtle bg-ink-base">
         <button type="button" onClick={() => setNavOpen(true)} title="Menu" aria-label="Menu"
           className="p-2 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
-          <MenuIcon className="w-5 h-5" />
+          <Icon name="menu" className="w-5 h-5" />
         </button>
         <span className="text-sm font-medium text-cream">{NAV.find((n) => n.key === active)?.label}</span>
       </div>
@@ -56,14 +56,14 @@ export default function Admin() {
           <p className="text-[11px] text-cream-muted mt-0.5">System administration</p>
         </div>
         <nav className="flex-1 px-3 space-y-1">
-          {NAV.map(({ key, label, icon: Icon }) => {
+          {NAV.map(({ key, label, icon }) => {
             const on = active === key;
             return (
               <button key={key} onClick={() => { setActive(key); setNavOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                   on ? 'bg-cyan-muted text-cyan' : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
                 }`}>
-                <Icon className="w-[18px] h-[18px] shrink-0" />
+                <Icon name={icon} className="w-[18px] h-[18px] shrink-0" />
                 {label}
               </button>
             );
@@ -78,7 +78,7 @@ export default function Admin() {
             <ThemeToggle className="!p-1.5 !bg-transparent !border-transparent" />
             <button onClick={handleSignOut} title="Sign out"
               className="p-1.5 rounded-lg text-cream-muted hover:text-danger hover:bg-danger-muted transition-colors cursor-pointer">
-              <LogoutIcon className="w-4 h-4" />
+              <Icon name="logout" className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -229,14 +229,14 @@ function UsersTab() {
         <PageHeader title="Users" subtitle={`${users.length} total accounts`}>
           <button onClick={() => setShowCsvModal(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-muted text-cyan border border-cyan/20 text-sm font-medium hover:bg-cyan/20 transition-colors cursor-pointer">
-            <UploadIcon className="w-4 h-4" /> Import CSV
+            <Icon name="upload" className="w-4 h-4" /> Import CSV
           </button>
         </PageHeader>
 
         {/* Toolbar: search + role filter */}
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="relative flex-1 min-w-[220px]">
-            <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cream-muted" />
+            <Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cream-muted" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search username…"
               className="w-full pl-9 pr-3 py-2 rounded-lg bg-ink-raised border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 transition-colors" />
           </div>
@@ -308,11 +308,11 @@ function UsersTab() {
                         <Icon name="reset" className="w-4 h-4" />
                       </IconButton>
                       <IconButton title={`Reset password to ${RESET_PASSWORD}`} onClick={() => setResetUser(u)}>
-                        <KeyIcon className="w-4 h-4" />
+                        <Icon name="key" className="w-4 h-4" />
                       </IconButton>
                       <IconButton danger disabled={u.id === myId} onClick={() => setDeleteUser(u)}
                         title={u.id === myId ? 'You cannot delete your own account' : 'Delete user'}>
-                        <TrashIcon className="w-4 h-4" />
+                        <Icon name="trash" className="w-4 h-4" />
                       </IconButton>
                     </div>
                   </td>
@@ -514,7 +514,7 @@ function ClassesTab() {
 
   const transferButton = (cls) => (
     <IconButton title="Transfer to another teacher" onClick={() => { setTransferClass(cls); setTransferTo(''); }}>
-      <TransferIcon className="w-4 h-4" />
+      <Icon name="swap" className="w-4 h-4" />
     </IconButton>
   );
 
@@ -540,7 +540,7 @@ function ClassesTab() {
             )}
 
             {loading ? <Spinner /> : classes.length === 0 ? (
-              <EmptyState icon={<GridIcon className="w-7 h-7" />} message="No classes on the platform yet." />
+              <EmptyState icon={<Icon name="grid" className="w-7 h-7" />} message="No classes on the platform yet." />
             ) : (
               <div className="rounded-xl border border-border-subtle bg-ink-raised overflow-x-auto">
                 <table className="w-full min-w-[680px] text-sm">
@@ -579,7 +579,7 @@ function ClassesTab() {
                             onClick={(e) => e.stopPropagation()}>
                             {transferButton(cls)}
                             <IconButton title="Force-delete class" danger onClick={() => setDeleteClass(cls)}>
-                              <TrashIcon className="w-4 h-4" />
+                              <Icon name="trash" className="w-4 h-4" />
                             </IconButton>
                           </div>
                         </td>
@@ -595,7 +595,7 @@ function ClassesTab() {
           <>
             <button onClick={() => setSelectedClassId(null)}
               className="inline-flex items-center gap-1 text-xs text-cream-muted hover:text-cyan transition-colors cursor-pointer mb-4">
-              <ChevronIcon className="w-3.5 h-3.5 rotate-180" /> Classes
+              <Icon name="chevronRight" className="w-3.5 h-3.5 rotate-180" /> Classes
             </button>
             <PageHeader title={selectedClass.name}
               subtitle={<>
@@ -605,12 +605,12 @@ function ClassesTab() {
               </>}>
               <button onClick={() => { setTransferClass(selectedClass); setTransferTo(''); }}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-default text-cream-secondary text-xs font-medium hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer">
-                <TransferIcon className="w-4 h-4" /> Transfer
+                <Icon name="swap" className="w-4 h-4" /> Transfer
               </button>
             </PageHeader>
             {!selectedClass.teacher_ok && (
               <div className="mb-6 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-muted px-3 py-2 text-xs text-danger">
-                <AlertIcon className="w-4 h-4 shrink-0" /> {NO_TEACHER}
+                <Icon name="warning" className="w-4 h-4 shrink-0" /> {NO_TEACHER}
               </div>
             )}
 
@@ -649,10 +649,10 @@ function ClassesTab() {
                       <span className="text-[10px] uppercase tracking-wider text-cream-muted">{locked ? 'Locked' : 'Active'}</span>
                       <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <IconButton title={lab.is_active ? 'Lock lab' : 'Unlock lab'} onClick={() => doToggleLab(lab)}>
-                          {lab.is_active ? <LockIcon className="w-4 h-4" /> : <UnlockIcon className="w-4 h-4" />}
+                          {lab.is_active ? <Icon name="lock" className="w-4 h-4" /> : <Icon name="unlock" className="w-4 h-4" />}
                         </IconButton>
                         <IconButton title="Force-delete lab" danger onClick={() => setDeleteLab(lab)}>
-                          <TrashIcon className="w-4 h-4" />
+                          <Icon name="trash" className="w-4 h-4" />
                         </IconButton>
                       </div>
                     </div>
@@ -718,7 +718,7 @@ function TeacherName({ cls }) {
   if (cls.teacher_ok) return <span className="text-cream-secondary">{cls.teacher_username}</span>;
   return (
     <span className="inline-flex items-center gap-1 text-danger" title={NO_TEACHER}>
-      <AlertIcon className="w-3.5 h-3.5" />
+      <Icon name="warning" className="w-3.5 h-3.5" />
       {cls.teacher_username || 'unknown'} · no teacher
     </span>
   );
@@ -1188,7 +1188,7 @@ function DocumentsTab() {
 
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="relative flex-1 min-w-[220px]">
-            <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cream-muted" />
+            <Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cream-muted" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search file, class, lab or teacher…"
               className="w-full pl-9 pr-3 py-2 rounded-lg bg-ink-raised border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 transition-colors" />
           </div>
@@ -1290,7 +1290,7 @@ function MaintenanceTab() {
         <PageHeader title="Database Maintenance" subtitle="Permanently remove old sessions to free disk space." />
         <div className="p-5 rounded-xl bg-danger-muted border border-danger/20 space-y-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-danger">
-            <AlertIcon className="w-4 h-4" /> Danger Zone — Irreversible
+            <Icon name="warning" className="w-4 h-4" /> Danger Zone — Irreversible
           </p>
           <div className="flex items-center gap-3">
             <span className="text-sm text-cream-secondary">Delete sessions older than</span>
@@ -1406,7 +1406,7 @@ function SecretField({ label, value, onChange, placeholder }) {
           className="w-full px-4 py-3 pr-10 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 font-mono transition-colors" />
         <button type="button" onClick={() => setShow(!show)} title={show ? 'Hide' : 'Reveal'}
           className="absolute right-3 top-1/2 -translate-y-1/2 text-cream-muted hover:text-cream cursor-pointer">
-          {show ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+          {show ? <Icon name="eyeOff" className="w-4 h-4" /> : <Icon name="eye" className="w-4 h-4" />}
         </button>
       </div>
     </div>
@@ -1449,33 +1449,6 @@ function ConfirmModal({ title, message, confirmLabel = 'Confirm', danger, busy, 
   );
 }
 
-/* ── Icons (inline SVG, currentColor) ── */
-function Svg({ children, className = 'w-4 h-4' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {children}
-    </svg>
-  );
-}
-function UsersIcon(p) { return <Svg {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Svg>; }
-function GridIcon(p) { return <Svg {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></Svg>; }
-function PulseIcon(p) { return <Svg {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></Svg>; }
-function ChipIcon(p) { return <Svg {...p}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" /></Svg>; }
-function DatabaseIcon(p) { return <Svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></Svg>; }
-function KeyIcon(p) { return <Svg {...p}><circle cx="7.5" cy="15.5" r="5.5" /><path d="m21 2-9.6 9.6" /><path d="m15.5 7.5 3 3L22 7l-3-3" /></Svg>; }
-function TrashIcon(p) { return <Svg {...p}><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></Svg>; }
-function FileIcon(p) { return <Svg {...p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8M16 13H8M16 17H8" /></Svg>; }
-function UploadIcon(p) { return <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></Svg>; }
-function SearchIcon(p) { return <Svg {...p}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></Svg>; }
-function EyeIcon(p) { return <Svg {...p}><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></Svg>; }
-function EyeOffIcon(p) { return <Svg {...p}><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><path d="m2 2 20 20" /></Svg>; }
-function ChevronIcon(p) { return <Svg {...p}><path d="m9 18 6-6-6-6" /></Svg>; }
-function LogoutIcon(p) { return <Svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></Svg>; }
-function AlertIcon(p) { return <Svg {...p}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></Svg>; }
-function TransferIcon(p) { return <Svg {...p}><path d="m16 3 5 5-5 5" /><path d="M21 8H9" /><path d="m8 21-5-5 5-5" /><path d="M3 16h12" /></Svg>; }
-function LockIcon(p) { return <Svg {...p}><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></Svg>; }
-function UnlockIcon(p) { return <Svg {...p}><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></Svg>; }
 function SortIcon({ className, dir }) {
   // dir: 'asc' → up emphasized, 'desc' → down emphasized, null → neutral both
   return (
@@ -1487,10 +1460,6 @@ function SortIcon({ className, dir }) {
       <path d="m21 16-4 4-4-4" opacity={dir === 'desc' ? 1 : 0.4} />
     </svg>
   );
-}
-
-function MenuIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
 }
 
 /** "1 lab", "3 labs"; many: the plural when it is not word + "s". */

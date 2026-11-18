@@ -74,7 +74,7 @@ export default function HierarchicalSidebar({
             onClick={onJoinClass}
             className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border-default text-xs font-medium text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
           >
-            <PlusIcon className="w-3.5 h-3.5" /> Join a Class
+            <Icon name="plus" className="w-3.5 h-3.5" /> Join a Class
           </button>
         )}
         {(role === 'teacher' || role === 'admin') && (
@@ -84,7 +84,7 @@ export default function HierarchicalSidebar({
             onClick={onCreateClass}
             className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border-default text-xs font-medium text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
           >
-            <PlusIcon className="w-3.5 h-3.5" /> New Class
+            <Icon name="plus" className="w-3.5 h-3.5" /> New Class
           </button>
         )}
       </div>
@@ -146,14 +146,14 @@ export default function HierarchicalSidebar({
               title="Account"
               className="p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 transition-all cursor-pointer"
             >
-              <SettingsIcon className="w-4 h-4" />
+              <Icon name="settings" className="w-4 h-4" />
             </button>
             <button
               onClick={handleSignOut}
               title="Sign Out"
               className="p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-danger hover:border-danger/30 hover:bg-danger-deep transition-all cursor-pointer"
             >
-              <LogOutIcon className="w-4 h-4" />
+              <Icon name="logout" className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -199,7 +199,7 @@ function ClassNode({
       >
         {/* Expand toggle */}
         <span className="shrink-0 w-4 h-4 flex items-center justify-center text-cream-muted group-hover:text-cream transition-colors">
-          <ChevronIcon className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+          <Icon name="chevronRight" className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
         </span>
 
         {/* Class name */}
@@ -222,7 +222,7 @@ function ClassNode({
               aria-label={`Actions for ${cls.name}`} title="Class actions"
               className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded transition-all cursor-pointer"
             >
-              <EllipsisIcon className="w-3.5 h-3.5" />
+              <Icon name="ellipsis" className="w-3.5 h-3.5" />
             </button>
             {showMenu && (
               <ClassMenu
@@ -299,7 +299,7 @@ function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
           isLocked ? 'bg-cream-muted' : isSelected ? 'bg-cyan' : 'bg-success'
         }`} />
         <span className="truncate">{lab.name}</span>
-        {isLocked && <LockIcon className="w-3 h-3 shrink-0 ml-auto" />}
+        {isLocked && <Icon name="lock" className="w-3 h-3 shrink-0 ml-auto" />}
       </button>
 
       {/* Actions (teacher/admin) */}
@@ -310,7 +310,7 @@ function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
             aria-label={`Actions for ${lab.name}`} title="Lab actions"
             className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded cursor-pointer transition-all"
           >
-            <EllipsisIcon className="w-3.5 h-3.5" />
+            <Icon name="ellipsis" className="w-3.5 h-3.5" />
           </button>
           {showMenu && (
             <LabMenu
@@ -378,58 +378,5 @@ function MenuItem({ icon, label, onClick, danger }) {
       {icon && <Icon name={icon} className="w-3.5 h-3.5 shrink-0" />}
       {label}
     </button>
-  );
-}
-
-/* ── Icons ── */
-
-function PlusIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m9 18 6-6-6-6" />
-    </svg>
-  );
-}
-
-function EllipsisIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
-    </svg>
-  );
-}
-
-function LockIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="18" height="11" x="3" y="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  );
-}
-
-function LogOutIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  );
-}
-
-function SettingsIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
   );
 }

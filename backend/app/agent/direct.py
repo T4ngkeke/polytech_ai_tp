@@ -17,7 +17,7 @@ import time
 from typing import Callable
 
 from backend.app.agent.language import with_language
-from backend.app.agent.result import ResearchQuotaExceeded, ResearchResult, ResearchRunStopped
+from backend.app.agent.result import ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, call_usage
 from backend.app.agent.runner import answer_ending
 from backend.app.agent.search import _without_unknown
 from backend.app.agent.tp_text import tp_text
@@ -123,19 +123,13 @@ class DirectRunner:
         except (ResearchQuotaExceeded, ResearchRunStopped):
             raise
         except (Exception, asyncio.CancelledError) as exc:
-            usage.append({'purpose': 'direct_answer', 'model': '', 'input_tokens': None,
-                          'output_tokens': None, 'usage_source': 'unknown',
-                          'elapsed_seconds': self.clock() - tick, 'status': type(exc).__name__})
+            usage.append(call_usage('direct_answer', None, self.clock() - tick, type(exc).__name__))
             if isinstance(exc, asyncio.CancelledError):
                 raise
             reason = 'deadline_exceeded' if isinstance(exc, TimeoutError) else 'model_unavailable'
             return result(f"La réponse n'a pas pu être écrite ({reason}). Réessayez.",
                           'partial_' + reason, ['answer_incomplete'])
-        usage.append({'purpose': 'direct_answer', 'model': reply.model,
-                      'input_tokens': reply.input_tokens, 'output_tokens': reply.output_tokens,
-                      'usage_source': 'actual' if reply.input_tokens is not None
-                      and reply.output_tokens is not None else 'unknown',
-                      'elapsed_seconds': self.clock() - tick, 'status': 'ok'})
+        usage.append(call_usage('direct_answer', reply, self.clock() - tick))
         answer = _without_unknown((reply.content or '').strip(), {})
         if not answer:
             return result("La réponse n'a pas pu être écrite (no_answer). Réessayez.",

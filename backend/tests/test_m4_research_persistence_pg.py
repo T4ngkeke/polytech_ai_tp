@@ -156,7 +156,7 @@ async def test_session_reload_queries_do_not_grow_with_citations(pg_session, tmp
                 event.remove(db.bind.sync_engine, 'before_cursor_execute', count)
             return result, len(statements)
         reload = lambda: runs.load_session_citations(session_id=chat.id, user_id=student.id)
-        history = lambda: runs.load_safe_history(scope)
+        history = lambda: runs.load_safe_context(scope)
         await answers(2)
         _, reload_small = await queries(reload)
         _, history_small = await queries(history)
@@ -164,7 +164,7 @@ async def test_session_reload_queries_do_not_grow_with_citations(pg_session, tmp
         restored, reload_large = await queries(reload)
         kept, history_large = await queries(history)
         assert len(restored) == 6 and all(len(v) == 3 and v[0]['available'] for v in restored.values())
-        assert sum(m['role'] == 'assistant' for m in kept) == 6
+        assert sum(m["role"] == "assistant" for m in kept[0]) == 6
         print('QUERIES', {'reload': (reload_small, reload_large), 'history': (history_small, history_large)})
         # Four more answers (12 citations of the same source) add no queries.
         assert reload_large == reload_small and history_large == history_small
@@ -370,7 +370,7 @@ async def test_atomic_answer_citations_reload_and_delete_tombstone(pg_session, t
         restored = await runs.load_session_citations(
             session_id=scope.session_id, user_id=student.id)
         assert restored[message_id][0]['citation_id'] == loaded['citations'][0]['citation_id']
-        assert any(m['role'] == 'assistant' for m in await runs.load_safe_history(scope))
+        assert any(m['role'] == 'assistant' for m in (await runs.load_safe_context(scope))[0])
         async with factory() as check:
             assert await check.scalar(select(func.count()).select_from(MessageCitation)) == 1
             assert await check.scalar(select(func.count()).select_from(Message)) == 2
@@ -385,7 +385,7 @@ async def test_atomic_answer_citations_reload_and_delete_tombstone(pg_session, t
         revoked_history = await runs.load_session_citations(
             session_id=scope.session_id, user_id=student.id)
         assert revoked_history[message_id][0]['href'] is None
-        assert all(m['role'] != 'assistant' for m in await runs.load_safe_history(scope))
+        assert all(m['role'] != 'assistant' for m in (await runs.load_safe_context(scope))[0])
     finally:
         app.dependency_overrides.pop(get_storage_root, None)
 

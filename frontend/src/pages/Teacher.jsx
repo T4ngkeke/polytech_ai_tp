@@ -294,7 +294,7 @@ export default function Teacher() {
         <div className="md:hidden shrink-0 h-12 px-2 flex items-center gap-2 border-b border-border-subtle bg-ink-base">
           <button type="button" onClick={() => setNavOpen(true)} title="Classes and labs" aria-label="Classes and labs"
             className="p-2 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
-            <MenuIcon className="w-5 h-5" />
+            <Icon name="menu" className="w-5 h-5" />
           </button>
           {selectedClass
             ? <Breadcrumb cls={selectedClass} lab={selectedLab} onClass={() => handleSelectClass(selectedClass)}
@@ -884,8 +884,4 @@ function SimpleModal({ title, value, setValue, placeholder, onConfirm, onClose, 
       </div>
     </div>
   );
-}
-
-function MenuIcon({ className }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
 }

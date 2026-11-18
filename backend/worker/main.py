@@ -160,17 +160,10 @@ async def run_forever(
 # ---------------------------------------------------------------------------
 
 def _make_real_embed_fn(client, model: str) -> EmbedFn:  # pragma: no cover
+    from backend.app.services.model_clients import embed_texts
+
     async def embed(texts: list[str]) -> list[list[float]]:
-        # encoding_format="float" is mandatory: the OpenAI SDK otherwise defaults
-        # to "base64", which some OpenAI-compatible servers (e.g. Albert) reject
-        # with a 500. Float is universally supported.
-        resp = await client.embeddings.create(
-            model=model, input=texts, encoding_format="float"
-        )
-        items = sorted(resp.data, key=lambda item: item.index)
-        if [item.index for item in items] != list(range(len(texts))):
-            raise ValueError("Embedding response indices do not match the input batch.")
-        return [item.embedding for item in items]
+        return await embed_texts(client, model, texts)
     return embed
 
 

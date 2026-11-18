@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass, field
 
 # An evidence ID: E1, E12.
@@ -58,3 +59,28 @@ class ResearchResult:
     clarification: dict | None = None
     # The answer mode that wrote it: direct, search or research.
     mode: str = 'research'
+
+
+def call_usage(purpose: str, reply, elapsed: float, status: str = 'ok') -> dict:
+    """One entry of a run's usage list: the tokens the reply reports, or none
+    when the call failed (reply None, status the exception's name)."""
+    if reply is None:
+        return {'purpose': purpose, 'model': '', 'input_tokens': None, 'output_tokens': None,
+                'usage_source': 'unknown', 'elapsed_seconds': elapsed, 'status': status}
+    reported = reply.input_tokens is not None and reply.output_tokens is not None
+    return {'purpose': purpose, 'model': reply.model, 'input_tokens': reply.input_tokens,
+            'output_tokens': reply.output_tokens, 'usage_source': 'actual' if reported else 'unknown',
+            'elapsed_seconds': elapsed, 'status': 'ok'}
+
+
+async def cited_sources(tools, permitted: dict[str, dict], cited: set[str]) -> list[dict] | None:
+    """The citations of the cited IDs, in ID order, once the session and every
+    cited document are checked to be still readable; None when access changed
+    during the run."""
+    try:
+        for document_id in {uuid.UUID(permitted[x]['document_id']) for x in cited}:
+            await tools._revision(document_id)
+        await tools._check_session()
+    except Exception:
+        return None
+    return [permitted[x] for x in sorted(cited, key=lambda x: int(x[1:]))]

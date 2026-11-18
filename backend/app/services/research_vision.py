@@ -9,7 +9,7 @@ import base64
 import json
 from dataclasses import dataclass
 
-from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from backend.app.services import shared_clients
 
@@ -56,7 +56,7 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - len(SHORTENED)].rstrip() + SHORTENED
 
 
-class ResearchVision:
+class ResearchVision(shared_clients.EndpointClient):
     def __init__(self, endpoint: Endpoint, *, timeout: float = 45.0, max_tokens: int = 1200,
                  sampling: dict | None = None):
         if not endpoint.base_url or not endpoint.model:
@@ -64,19 +64,6 @@ class ResearchVision:
         self.endpoint, self.timeout, self.max_tokens = endpoint, timeout, max_tokens
         # The same sampling as the research calls (QWEN_NON_THINKING when None).
         self.sampling, self.extra_body = sampling_request(sampling)
-        self._client: AsyncOpenAI | None = None
-
-    @property
-    def client(self) -> AsyncOpenAI:
-        """The shared client of the endpoint for the running loop, unless one was set."""
-        if self._client is not None:
-            return self._client
-        return shared_clients.openai_client(self.endpoint.base_url, self.endpoint.api_key or 'local',
-                                            max_retries=0)
-
-    @client.setter
-    def client(self, client: AsyncOpenAI) -> None:
-        self._client = client
 
     async def __call__(self, image: bytes, mime: str, question: str) -> VisualReply:
         if mime not in ('image/png', 'image/jpeg') or len(image) > 3_000_000:

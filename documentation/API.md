@@ -123,7 +123,6 @@ This area covers what a teacher does with their classes and labs: classes and st
 | PUT | `/api/teacher/classes/{class_id}/exam-mode` | Teacher | Body `{exam_mode: bool}`. On: students search and open only the files allowed in the exam; a lab without one answers in Direct mode only. Enforced by `POST /api/chat/stream` and the document routes. Returns the class. |
 | GET | `/api/teacher/classes/{class_id}/exam-files` | Teacher | The class's files (whole class and each lab): `id, filename, status, lab_id, lab_name, exam_allowed`. |
 | PUT | `/api/teacher/classes/{class_id}/exam-files` | Teacher | Body `{document_ids: [...]}`: these files are allowed in the exam, no others (ids outside the class are ignored). Returns the list above. Can be set while exam mode is off. |
-| GET | `/api/teacher/students` | Teacher | Every student of the teacher's classes. |
 | GET | `/api/teacher/classes/{class_id}/students` | Teacher | The students of one own class. |
 | DELETE | `/api/teacher/classes/{class_id}/students/{student_id}` | Teacher | Removes a student from the class. |
 | POST | `/api/teacher/classes/{class_id}/students/{student_id}/quota-refill` | Teacher | Gives the student a full day and a full week again. Usage is kept: the teacher grants what the student used beyond earlier grants (rows in `quota_grants`, kind `day` and `week`), and nothing for a limit that is still full. Answers the student's reset request of today. Returns `{used, limit, granted, week_used, week_limit}`. `404` when the student is not in the class. |
@@ -222,9 +221,6 @@ Teacher endpoints work on drafts and published revisions of an own document. Stu
 | PUT | `/api/teacher/documents/{document_id}/revisions/{revision_id}/reviews/{review_id}` | Teacher | Settles a review item: `status` is `confirmed` or `ignored`, optional `content`, with `review_revision` and `expected_generation`. |
 | GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/outline` | Teacher | The outline of a revision. Optional `page_id` and `cursor`. |
 | GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/pages/{page_id}` | Teacher | One page with its blocks. |
-| GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/read` | Teacher | Reads text by page, block or character range, within a `budget` (default 8000, at most 20000 characters). Optional `cursor`. |
-| GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/navigate` | Teacher | Moves from a block (`anchor_block_id`) to the next or previous block or page (`direction` = `next` or `previous`, `unit` = `block` or `page`, `count`). |
-| GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/grep` | Teacher | Searches the revision for a text pattern (`pattern`, `case_sensitive`, `cursor`). |
 | GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/assets/{asset_id}` | Teacher | A stored image or file of the revision. |
 | GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/preview` | Teacher | The PDF used to show the revision. |
 | GET | `/api/teacher/documents/{document_id}/revisions/{revision_id}/source` | Teacher | The file the teacher uploaded. |

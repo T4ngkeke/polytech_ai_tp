@@ -263,18 +263,6 @@ async def test_navigate_follows_reading_order(db_session, storage, tmp_path):
                               direction='next', count=4)
 
 
-@pytest.mark.asyncio
-async def test_tool_endpoints_return_the_envelope_and_error_codes(db_session, storage, tmp_path, deck_bytes):
-    teacher, _, _, ids = await parsed(db_session, storage, tmp_path, deck_bytes)
-    base = f"{T}/{ids['doc_id']}/revisions/{ids['rev_id']}"
-    ok = (await get(db_session, teacher, f'{base}/grep', pattern='Graphes')).json()
-    assert set(ok) >= {'ok', 'items', 'issues', 'truncated', 'next_cursor', 'usage', 'error'} and ok['error'] is None
-    bad = await get(db_session, teacher, f'{base}/grep', pattern='x', cursor='garbage')
-    assert bad.status_code == 400 and bad.json()['detail']['code'] == 'invalid_cursor'
-    missing = await get(db_session, teacher, f'{base}/read', block_id=uuid.uuid4())
-    assert missing.status_code == 404 and missing.json()['detail']['code'] == 'not_found'
-
-
 def test_a_box_outside_the_page_gives_no_region():
     box = lambda value: {'legacy_ref': {'mineru_bbox_per_mille': value}}  # noqa: E731
     assert reader.page_region(box([0, 0, 1000, 1000])) == [0, 0, 1000, 1000]

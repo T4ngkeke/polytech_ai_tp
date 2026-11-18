@@ -89,8 +89,3 @@ def history_start(history: list[dict], *, max_tokens: int, offset: int = 0) -> i
         start += 1
     return start
 
-
-def trim_history(history: list[dict], *, max_tokens: int) -> list[dict]:
-    """The part of ``history`` that is sent (``history_start``). The current
-    question is not part of history and is never trimmed."""
-    return history[history_start(history, max_tokens=max_tokens):]

@@ -22,7 +22,7 @@ from backend.app.models import (
     Lab,
     UserRole,
 )
-from backend.app.services.retrieval_service import hybrid_search, rag_search
+from backend.app.services.retrieval_service import hybrid_search, vector_search
 from backend.tests.conftest import make_user
 
 
@@ -57,7 +57,7 @@ async def _seed_class_with_lab(session):
 
 
 @pytest.mark.asyncio
-async def test_rag_search_returns_nearest_chunk_by_cosine(pg_session):
+async def test_vector_search_returns_nearest_chunk_by_cosine(pg_session):
     cls, lab, doc = await _seed_class_with_lab(pg_session)
     for i, body in enumerate(["about pointers", "about threads", "about sorting"]):
         pg_session.add(DocChunk(
@@ -67,7 +67,7 @@ async def test_rag_search_returns_nearest_chunk_by_cosine(pg_session):
     await pg_session.commit()
 
     # Query embedding aligned with the second chunk ("about threads").
-    hits = await rag_search(pg_session, query_embedding=_unit(1), lab_id=lab.id, k=2)
+    hits = await vector_search(pg_session, query_embedding=_unit(1), lab_id=lab.id, k=2)
 
     assert len(hits) == 2
     assert hits[0].content == "about threads"   # nearest first
@@ -75,7 +75,7 @@ async def test_rag_search_returns_nearest_chunk_by_cosine(pg_session):
 
 
 @pytest.mark.asyncio
-async def test_rag_search_does_not_leak_across_labs(pg_session):
+async def test_vector_search_does_not_leak_across_labs(pg_session):
     """Tenant isolation, in SQL. Previously covered on the exercise path; with
     exercises gone, chunks carry the whole boundary."""
     cls, lab_a, doc_a = await _seed_class_with_lab(pg_session)
@@ -97,7 +97,7 @@ async def test_rag_search_does_not_leak_across_labs(pg_session):
         chunk_index=0, content="lab B note", embedding=_unit(1), page_no=1))
     await pg_session.commit()
 
-    hits = await rag_search(pg_session, query_embedding=_unit(1), lab_id=lab_a.id, k=10)
+    hits = await vector_search(pg_session, query_embedding=_unit(1), lab_id=lab_a.id, k=10)
 
     assert [h.content for h in hits] == ["lab A note"]
 
