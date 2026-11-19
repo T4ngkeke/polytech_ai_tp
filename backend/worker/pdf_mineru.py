@@ -48,7 +48,7 @@ def extract_page(path: Path, page_no: int, output_dir: Path, *, server_url: str,
 
 
 def subprocess_extractor(*, python_executable: str, server_url: str, config_path: str,
-                         timeout_seconds: int = 240):
+                         timeout_seconds: int = 240, api_key: str = ''):
     """Use a separate interpreter so MinerU does not load into the main worker."""
     if not Path(python_executable).is_file():
         raise MinerUUnavailable('mineru_python_unavailable')
@@ -61,6 +61,9 @@ def subprocess_extractor(*, python_executable: str, server_url: str, config_path
                  '--config',config_path]
         try:
             child_env=dict(os.environ, HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
+            # MinerU's HTTP client sends this as its bearer key (mineru_vl_utils).
+            if api_key:
+                child_env['MINERU_VL_API_KEY']=api_key
             completed=subprocess.run(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                                      timeout=timeout_seconds,check=False,env=child_env)
         except subprocess.TimeoutExpired as exc:

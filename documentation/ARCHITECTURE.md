@@ -60,7 +60,7 @@ Search and Direct answers are short unless the teacher's rules ask for more deta
 
 ### The course tools of Research mode
 
-`agent/course_tools.py` defines the tools. `agent/tools.py` checks the scope and the access before each call.
+`agent/course_tools.py` defines the tools. `agent/tools.py` checks the scope and the access before each call: the session must still be open to the student, and each document must still be readable at the revision fixed for the run (`check_access`). A call that touches several documents (a search, the file list) checks the session once and then each document. Before an answer is saved, the documents it cites are checked again the same way (`result.cited_sources`); if access changed during the run, the student gets "Course access changed. Please retry." instead of the answer (stop reason `access_revoked`).
 
 | Tool | What it does |
 | --- | --- |
@@ -103,7 +103,7 @@ This section says how a PDF becomes searchable and how a change is published. Th
 - **Edits make new drafts.** A teacher edit, an exclusion of a block or a new reading never changes a revision. It makes a new draft. Each change names the document `generation`, a counter that rises with every change. A stale generation gets `409`.
 - **Reviews.** A picture description from the vision model, and a teacher edit that no longer fits after a new reading, wait as review items that the teacher confirms or ignores.
 - **Citations stay readable.** A citation points to a revision. If a newer revision exists, the student sees that. If the teacher changed the cited text, the citation says so. The endpoints are in the Documents section of [API.md](API.md).
-- **Deleting.** Deleting a document is quick for the teacher. The stored files and chunks are removed in the background.
+- **Deleting.** Deleting a document is quick for the teacher: students and the agent lose access at once. The stored files and chunks are removed in the background by the worker (see [Ingestion](#ingestion)).
 
 ## Ingestion
 
@@ -114,6 +114,7 @@ This section describes the worker. It is a loop that takes one job at a time and
 - **When to run.** The worker waits while students chat. It counts the messages of the last two minutes, with two bounds so that it does not switch on and off at one value. An optional check of GPU load (`pynvml`) does nothing on a machine without a local GPU.
 - **Progress.** While a PDF waits or is read, the teacher sees the jobs ahead of it, the pages read and the time left.
 - **Settings without restart.** The embedding address and the MinerU server come from `system_configs`.
+- **Housekeeping.** Between jobs the worker removes staged files that no upload finished, and runs the due cleanup jobs of deleted documents (`document_cleanup.run_due_cleanups`, up to 10 at a time, each in its own transaction). A cleanup that fails is tried again later, waiting longer each time. Until November 2026 nothing ran these jobs, so the files of deleted documents stayed on disk; the worker now removes them at its first round. `scripts/cleanup_document_snapshots.py` runs the same function by hand, for a stack without a worker.
 
 ## Quota and billing
 
@@ -127,29 +128,10 @@ This section lists the tools in the web pages and where their data comes from.
   - *Analytics* (`services/analytics_service.py`) shows counts, answers by mode, questions by day and hour, each student, the questions with a thumbs-down and the answers that failed. Teacher test sessions are left out.
   - *Audit* has three views: the conversations by student, the course use report (`services/citation_report.py`: which files, pages and passages the answers cite, and which files nobody cited) and AI reports (`services/teaching_reports.py`). An AI report is written in the background by the model, on request, from numbers that the system counted first. It is stored in `audit_reports`.
   - *Test drive* is a chat session of the teacher in a lab, shown as a student sees it.
-- **Admin page.** The tabs are Users, Classes, Monitoring, LLM Config and Maintenance. Classes shows every class with its teacher, its counts and its activity, and the platform totals. LLM Config shows the model map, the research limits and the state of each model server. Maintenance prunes old data.
+- **Admin page.** The tabs are Users, Classes, Documents, Monitoring, LLM Config and Maintenance. Classes shows every class with its teacher, its counts and its activity, and the platform totals. Documents lists every course file with its state. LLM Config shows the model map, the research limits and the state of each model server. Maintenance prunes old data.
+- **Shared routes.** For one class, the admin page uses the teacher routes (labs, students, analytics, rename or lock a lab, delete a class or a lab). They let the class owner and any admin through (`routers/teacher_access.py`); every other teacher route stays for the owner only. Until November 2026 the admin had its own copy of each of these routes.
 
-The shape of the token analytics of a class (`GET /api/teacher/analytics/classes/{class_id}`) is class, then lab, then student:
-
-```json
-{
-  "class_id": "uuid",
-  "class_name": "Algorithms 2024",
-  "total_tokens": 12000,
-  "total_requests": 340,
-  "labs": [
-    {
-      "lab_id": "uuid",
-      "lab_name": "Python Lab 1",
-      "tokens": 7000,
-      "requests": 200,
-      "students": [
-        { "user_id": "uuid", "username": "alice", "tokens_used": 3500, "request_count": 120 }
-      ]
-    }
-  ]
-}
-```
+The code of the three pages is split by tab: `pages/Teacher.jsx`, `pages/Admin.jsx` and `pages/Chat.jsx` hold the page frame and its state, and the panels are in `pages/teacher/`, `pages/admin/` and `pages/chat/`. On the server, the teacher routes are split the same way: `routers/teacher.py` (classes, labs, exam mode, analytics, test drive), `teacher_documents.py`, `teacher_rules.py`, `teacher_students.py` and `teacher_reports.py`, all under `/api/teacher`.
 
 ## Monitoring
 

@@ -230,10 +230,7 @@ class TwoFiles:
                 str(self.tp): {'filename': 'TP1.pdf', 'lab_name': 'TP1', 'pages': [
                     {'page_id': self.t1, 'pdf_page_no': 1}, {'page_id': self.t2, 'pdf_page_no': 2}]}}
 
-    async def _revision(self, document_id):
-        pass
-
-    async def _check_session(self):
+    async def check_access(self, document_ids=()):
         pass
 
     def _hit(self, document_id, page_id, score):

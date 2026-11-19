@@ -303,9 +303,9 @@ async def test_a_follow_up_may_cite_an_earlier_answer_without_new_research():
                       'page_id': str(uuid4()), 'pdf_page_no': 10, 'block_id': None, 'range': None,
                       'asset_id': None, 'origin': 'native'}}
     fixture = ViewFixture()
-    async def readable(document_id):
+    async def readable(document_ids=()):
         return None
-    fixture._revision = readable
+    fixture.check_access = readable
     model = Script('Comme expliqué [E2].')
     result = await ResearchRunner(CourseTools(fixture, first_evidence=3), model).run(
         'Et donc ?', history=[{'role': 'user', 'content': 'Q ?'},
@@ -396,9 +396,9 @@ async def test_revoked_access_wins_over_a_finished_answer():
     model = Script([('read', {'page': 'd1.p10'})], 'Réponse [E1].')
     runner = ResearchRunner(CourseTools(fixture), model)
 
-    async def revoked():
+    async def revoked(document_ids=()):
         raise LookupError('membership removed')
-    fixture._check_session = revoked
+    fixture.check_access = revoked
     result = await runner.run('Q ?')
     assert result.stop_reason == 'access_revoked' and result.citations == []
     assert '[E1]' not in result.answer

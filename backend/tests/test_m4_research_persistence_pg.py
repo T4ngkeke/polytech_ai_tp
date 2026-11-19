@@ -297,8 +297,6 @@ async def test_concurrent_reservations_idempotent_settlement_and_unknown(pg_sess
         async with db.begin():
             row = await db.get(UsageReservation, another)
             row.expires_at = _utcnow() - timedelta(seconds=1)
-    assert await usage.mark_expired_unknown(another)
-    assert not await usage.mark_expired_unknown(another)
     await usage.settle(call_id=another, input_tokens=20, output_tokens=0,
                        status='reconciled', elapsed_seconds=.2,
                        usage_source='estimated')
@@ -428,31 +426,6 @@ async def test_cancel_stops_calls_and_replay_never_reopens(pg_session):
 
 
 @pytest.mark.asyncio
-async def test_failed_run_with_unknown_call_reconciles_later(pg_session):
-    scope, factory = await _setup(pg_session)
-    runs, usage = ResearchRuns(factory), ResearchUsage(factory)
-    started = await runs.begin_run(scope=scope, question='Crash?',
-                                   client_request_id='crash-1')
-    call_id = await usage.reserve(run_id=started.run_id, purpose='agent', model='local',
-        input_tokens=20, max_output_tokens=40, alpha=1, beta=1)
-    async with factory() as db:
-        async with db.begin():
-            row = await db.get(UsageReservation, call_id)
-            row.expires_at = _utcnow() - timedelta(seconds=1)
-    assert await usage.mark_expired_unknown(call_id)
-    await runs.mark_terminal(started.run_id, status='failed',
-                             stop_reason='worker_lost')
-    async with factory() as db:
-        run = await db.get(AgentRun, started.run_id)
-        assert run.settlement_status == 'open'
-    await usage.settle(call_id=call_id, input_tokens=20, output_tokens=7,
-                       elapsed_seconds=1, status='reconciled', usage_source='actual')
-    async with factory() as db:
-        run = await db.get(AgentRun, started.run_id)
-        assert run.settlement_status == 'settled'
-
-
-@pytest.mark.asyncio
 async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_returns(pg_session):
     from backend.app.agent.tools import ResearchScope
     from backend.app.services.research_service import run_persisted_research
@@ -462,9 +435,7 @@ async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_retur
     class NoTools:
         def __init__(self, bound_scope):
             self.scope = bound_scope
-        async def _check_session(self):
-            pass
-        async def _revision(self, document_id):
+        async def check_access(self, document_ids=()):
             pass
         async def page_index(self):
             # One readable document: an empty lab would get no tools at all.

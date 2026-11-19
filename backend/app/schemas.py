@@ -147,6 +147,8 @@ class LLMConfigRequest(BaseModel):
     vlm_model: str | None = None
     # MinerU server of the PDF worker (hot-switched; empty = deployment setting).
     mineru_server_url: str | None = None
+    # Its key; empty = the main model key.
+    mineru_api_key: str | None = None
     # Picture captions at ingest: 'on'/'off', vLLM priority, seconds per document.
     picture_captions: str | None = None
     picture_caption_priority: str | None = None
@@ -185,6 +187,7 @@ class LLMConfigResponse(BaseModel):
     vlm_api_key: str = ""
     vlm_model: str = ""
     mineru_server_url: str = ""
+    mineru_api_key: str = ""
     picture_captions: str = ""
     picture_caption_priority: str = ""
     picture_caption_budget_seconds: str = ""
@@ -612,63 +615,6 @@ class AdminAnalyticsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Analytics — Hierarchical
 # ---------------------------------------------------------------------------
-
-
-class StudentUsageSummary(BaseModel):
-    user_id: uuid.UUID
-    username: str
-    tokens_used: int
-    request_count: int
-
-    @classmethod
-    def from_analytics(cls, s) -> "StudentUsageSummary":
-        """Build from an analytics_service.StudentUsage dataclass."""
-        return cls(
-            user_id=s.user_id,
-            username=s.username,
-            tokens_used=s.tokens_used,
-            request_count=s.request_count,
-        )
-
-
-class LabUsageSummary(BaseModel):
-    """Per-lab analytics with student-level breakdown."""
-    lab_id: uuid.UUID
-    lab_name: str
-    tokens: int
-    requests: int
-    students: list[StudentUsageSummary] = []
-
-    @classmethod
-    def from_analytics(cls, lab) -> "LabUsageSummary":
-        """Build from an analytics_service.LabUsage dataclass."""
-        return cls(
-            lab_id=lab.lab_id,
-            lab_name=lab.lab_name,
-            tokens=lab.tokens,
-            requests=lab.requests,
-            students=[StudentUsageSummary.from_analytics(s) for s in lab.students],
-        )
-
-
-class ClassAnalyticsResponse(BaseModel):
-    """Hierarchical class analytics: class → lab → student."""
-    class_id: uuid.UUID
-    class_name: str
-    total_tokens: int
-    total_requests: int
-    labs: list[LabUsageSummary] = []
-
-    @classmethod
-    def from_analytics(cls, result) -> "ClassAnalyticsResponse":
-        """Build from an analytics_service.ClassAnalytics dataclass."""
-        return cls(
-            class_id=result.class_id,
-            class_name=result.class_name,
-            total_tokens=result.total_tokens,
-            total_requests=result.total_requests,
-            labs=[LabUsageSummary.from_analytics(lab) for lab in result.labs],
-        )
 
 
 # ---------------------------------------------------------------------------

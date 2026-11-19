@@ -78,9 +78,7 @@ async def cited_sources(tools, permitted: dict[str, dict], cited: set[str]) -> l
     cited document are checked to be still readable; None when access changed
     during the run."""
     try:
-        for document_id in {uuid.UUID(permitted[x]['document_id']) for x in cited}:
-            await tools._revision(document_id)
-        await tools._check_session()
+        await tools.check_access({uuid.UUID(permitted[x]['document_id']) for x in cited})
     except Exception:
         return None
     return [permitted[x] for x in sorted(cited, key=lambda x: int(x[1:]))]

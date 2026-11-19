@@ -89,17 +89,21 @@ class WorkerFns:
     embed_fn: EmbedFn
     # MinerU server set in the admin map; empty = PDF_MINERU_SERVER_URL.
     mineru_server_url: str = ""
+    # Its key from the admin map (PDF_MINERU_API_KEY, else the main model key);
+    # empty = PDF_MINERU_API_KEY of the environment.
+    mineru_api_key: str = ""
     # Picture captions after reading (picture_captions.py); None = off.
     captions: object = None
 
 
-def with_mineru_server(structured, url: str):
-    """The structured settings of this tick: the admin's MinerU server when one
-    is set, so it can change without a worker restart."""
-    if structured is None or not url:
+def with_mineru_server(structured, url: str, api_key: str = ''):
+    """The structured settings of this tick: the admin's MinerU server and key
+    when they are set, so they can change without a worker restart."""
+    if structured is None or not (url or api_key):
         return structured
     from dataclasses import replace
-    return replace(structured, pdf_server_url=url)
+    return replace(structured, pdf_server_url=url or structured.pdf_server_url,
+                   pdf_api_key=api_key or structured.pdf_api_key)
 
 
 def with_captions(structured, captions):
@@ -151,7 +155,7 @@ async def run_forever(
         await run_tick(
             db, gate, embed_fn=fns.embed_fn,
             chat_gate=chat_gate, chat_load_fn=chat_load_fn,
-            structured=with_captions(with_mineru_server(structured, fns.mineru_server_url), fns.captions),
+            structured=with_captions(with_mineru_server(structured, fns.mineru_server_url, fns.mineru_api_key), fns.captions),
         )
 
 
@@ -213,6 +217,8 @@ async def _load_config(db: AsyncSession) -> dict:  # pragma: no cover
         "embedding_api_key": routing.embedding.api_key,
         "embedding_model": routing.embedding.model,
         "mineru_server_url": next((r.value.strip() for r in rows if r.key == "PDF_MINERU_SERVER_URL"), ""),
+        "mineru_api_key": next((r.value.strip() for r in rows if r.key == "PDF_MINERU_API_KEY" and r.value.strip()),
+                               routing.llm.api_key if routing.llm.api_key != "local" else ""),
         "vlm": (routing.vlm.base_url, routing.vlm.api_key, routing.vlm.model),
         "captions": {r.key: r.value for r in rows if r.key.startswith("PICTURE_CAPTION")},
     }
@@ -231,6 +237,7 @@ def _build_worker_fns(cfg: dict) -> WorkerFns:  # pragma: no cover
     return WorkerFns(
         embed_fn=_make_real_embed_fn(embed_client, cfg["embedding_model"]),
         mineru_server_url=cfg.get("mineru_server_url") or "",
+        mineru_api_key=cfg.get("mineru_api_key") or "",
         captions=settings_from_config(cfg.get("captions") or {}, Endpoint(*(cfg.get("vlm") or ("", "", "")))),
     )
 

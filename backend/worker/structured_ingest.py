@@ -49,7 +49,7 @@ from backend.app.models import (
 from backend.app.services import document_storage as storage
 from backend.app.services import document_versions as versions
 from backend.app.services import failure_log
-from backend.app.services.document_cleanup import aware, sweep_staged_objects
+from backend.app.services.document_cleanup import aware, run_due_cleanups, sweep_staged_objects
 from backend.app.services.document_edits import CAPTION_UNCHECKED, carry_forward
 from backend.worker import picture_captions
 from backend.worker.document_ir import ParsedDocument, ParseIssue
@@ -107,6 +107,8 @@ class StructuredSettings:
     max_attempts: int = 3
     pdf_python: str = ""
     pdf_server_url: str = ""
+    # Key of the MinerU server (model_servers/edullm_key_check.py); empty: none sent.
+    pdf_api_key: str = ""
     pdf_config_path: str = ""
     pdf_page_timeout_seconds: int = 240
     # The longest a PDF may take to read; the pages after it are kept as not
@@ -128,6 +130,7 @@ class StructuredSettings:
                    max_attempts=int(env.get('STRUCTURED_MAX_ATTEMPTS') or 3),
                    pdf_python=env.get('PDF_MINERU_PYTHON') or '',
                    pdf_server_url=env.get('PDF_MINERU_SERVER_URL') or '',
+                   pdf_api_key=env.get('PDF_MINERU_API_KEY') or '',
                    pdf_config_path=env.get('PDF_MINERU_CONFIG') or '',
                    pdf_page_timeout_seconds=int(env.get('PDF_MINERU_PAGE_TIMEOUT_SECONDS') or 240),
                    pdf_read_budget_seconds=int(env.get('PDF_READ_BUDGET_SECONDS') or 7200))
@@ -165,7 +168,8 @@ def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
         try:
             extractor = subprocess_extractor(
                 python_executable=settings.pdf_python, server_url=settings.pdf_server_url,
-                config_path=settings.pdf_config_path, timeout_seconds=settings.pdf_page_timeout_seconds)
+                config_path=settings.pdf_config_path, timeout_seconds=settings.pdf_page_timeout_seconds,
+                api_key=settings.pdf_api_key)
         except MinerUUnavailable as exc:
             raise JobFailed(str(exc)) from exc
     model_config_sha = (hashlib.sha256(Path(settings.pdf_config_path).read_bytes()).hexdigest()
@@ -656,10 +660,11 @@ async def process_structured_job(db, *, settings: StructuredSettings, extractor=
 
 
 async def sweep(db, settings: StructuredSettings, *, now_fn=_utcnow, limit=50) -> int:
-    """Housekeeping between jobs: staged files past their lease."""
+    """Housekeeping between jobs: staged files past their lease, then the files
+    and rows of deleted documents (document_cleanup.run_due_cleanups)."""
     handled = await sweep_staged_objects(db, storage_root=settings.storage_root, now=now_fn(), limit=limit)
     await db.commit()
-    return handled
+    return handled + await run_due_cleanups(db, storage_root=settings.storage_root, now=now_fn())
 
 
 def sweep_task_root(task_root: Path, *, older_than_seconds: int) -> int:

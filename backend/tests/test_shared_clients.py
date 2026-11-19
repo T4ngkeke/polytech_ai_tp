@@ -72,3 +72,26 @@ def test_research_model_asks_for_its_client_inside_the_loop():
     assert asyncio.run(client()) is not asyncio.run(client())
     model.client = 'fake'
     assert model.client == 'fake'
+
+
+async def test_the_rerank_call_sends_the_key(monkeypatch):
+    """The model servers refuse a call without the key (model_servers/edullm_key_check.py)."""
+    from backend.app.services import model_clients
+    sent = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'results': [{'index': 0, 'relevance_score': 0.9}]}
+
+    class Client:
+        async def post(self, url, json, headers):
+            sent.append(headers)
+            return Response()
+    monkeypatch.setattr(model_clients, 'http_client', lambda *a: Client())
+    config = {'rerank_url': 'http://r:8000/v1/rerank', 'rerank_model': 'm'}
+    assert await model_clients.make_rerank_fn({**config, 'rerank_api_key': 'k'})('q', ['d']) == [0.9]
+    await model_clients.make_rerank_fn({**config, 'rerank_api_key': ''})('q', ['d'])
+    assert sent == [{'Authorization': 'Bearer k'}, {}]

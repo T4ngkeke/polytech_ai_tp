@@ -118,12 +118,12 @@ This area covers what a teacher does with their classes and labs: classes and st
 | POST | `/api/teacher/classes` | Teacher | Creates a class with a 6-character `invite_code`. The class starts in exam mode when `NEW_CLASS_EXAM_MODE` is on (the default). |
 | GET | `/api/teacher/classes` | Teacher | The teacher's own classes: name, invite code, student count, exam mode. |
 | PUT | `/api/teacher/classes/{class_id}` | Teacher | Renames a class. |
-| DELETE | `/api/teacher/classes/{class_id}` | Teacher | Soft-deletes an own class. |
+| DELETE | `/api/teacher/classes/{class_id}` | Teacher, admin | Soft-deletes an own class (an admin: any class). |
 | POST | `/api/teacher/classes/{class_id}/reset-code` | Teacher | Makes a new invite code. The old one stops working. |
 | PUT | `/api/teacher/classes/{class_id}/exam-mode` | Teacher | Body `{exam_mode: bool}`. On: students search and open only the files allowed in the exam; a lab without one answers in Direct mode only. Enforced by `POST /api/chat/stream` and the document routes. Returns the class. |
 | GET | `/api/teacher/classes/{class_id}/exam-files` | Teacher | The class's files (whole class and each lab): `id, filename, status, lab_id, lab_name, exam_allowed`. |
 | PUT | `/api/teacher/classes/{class_id}/exam-files` | Teacher | Body `{document_ids: [...]}`: these files are allowed in the exam, no others (ids outside the class are ignored). Returns the list above. Can be set while exam mode is off. |
-| GET | `/api/teacher/classes/{class_id}/students` | Teacher | The students of one own class. |
+| GET | `/api/teacher/classes/{class_id}/students` | Teacher, admin | The students of one own class (an admin: any class), with today's usage. |
 | DELETE | `/api/teacher/classes/{class_id}/students/{student_id}` | Teacher | Removes a student from the class. |
 | POST | `/api/teacher/classes/{class_id}/students/{student_id}/quota-refill` | Teacher | Gives the student a full day and a full week again. Usage is kept: the teacher grants what the student used beyond earlier grants (rows in `quota_grants`, kind `day` and `week`), and nothing for a limit that is still full. Answers the student's reset request of today. Returns `{used, limit, granted, week_used, week_limit}`. `404` when the student is not in the class. |
 | POST | `/api/teacher/classes/{class_id}/quota-refill-all` | Teacher | The same for every student of the class. Returns `{students, refilled}`. |
@@ -131,9 +131,9 @@ This area covers what a teacher does with their classes and labs: classes and st
 | POST | `/api/teacher/quota-requests/{student_id}/ignore` | Teacher | Ignores the student's open request: the limits stay and the student cannot ask again today. `409 no_open_request` without one; `404` for a student outside the teacher's classes. |
 | POST | `/api/teacher/quota-requests/{student_id}/unignore` | Teacher | Undoes today's ignore: the request is open again. `409 nothing_to_undo`. |
 | POST | `/api/teacher/classes/{class_id}/labs` | Teacher | Creates a lab in an own class. |
-| GET | `/api/teacher/classes/{class_id}/labs` | Teacher | The labs of an own class. |
-| PUT | `/api/teacher/labs/{lab_id}` | Teacher | Renames a lab, or opens or locks it with `is_active`. A locked lab refuses chat. |
-| DELETE | `/api/teacher/labs/{lab_id}` | Teacher | Soft-deletes an own lab. |
+| GET | `/api/teacher/classes/{class_id}/labs` | Teacher, admin | The labs of an own class (an admin: any class). |
+| PUT | `/api/teacher/labs/{lab_id}` | Teacher, admin | Renames a lab, or opens or locks it with `is_active`. A locked lab refuses chat. An admin may change any lab. |
+| DELETE | `/api/teacher/labs/{lab_id}` | Teacher, admin | Soft-deletes an own lab (an admin: any lab). |
 | POST | `/api/teacher/labs/{lab_id}/test-session` | Teacher | Opens a test-drive session (`is_test`) in an own lab. The teacher chats as a preview, without being a member. The session is left out of analytics and of the citation report. |
 | GET | `/api/teacher/rule-items?level=&target_id=[&class_id=]` | Teacher | The rules of a class, a lab, or a student in one class (`class_id`, required for a student), in their order. `403` outside the teacher's classes. |
 | POST | `/api/teacher/rule-items` | Teacher | Adds a rule: `{level, target_id, class_id?, text, is_active, source?, position?}`. Text 1–1000 characters, not blank. `source` is `b:<key>` (a ready-made rule) or `m:<saved rule id>` (one of the teacher's saved rules), else `422 unknown_rule_source`. `position` puts it at that place in the list (an undone delete); default last. At most 30 rules per class, lab or student (`409 too_many_rules`). |
@@ -146,8 +146,7 @@ This area covers what a teacher does with their classes and labs: classes and st
 | PUT | `/api/teacher/skill-presets/{preset_id}` | Teacher | Updates an own saved rule. The rules added from it (`source: "m:<id>"`) whose text was not edited since follow the new text, in all the teacher's classes. |
 | DELETE | `/api/teacher/skill-presets/{preset_id}` | Teacher | Deletes an own saved rule. Rules already added from it are kept, with `source` set to null. |
 | GET | `/api/teacher/chat-history` | Teacher | Chat history. Filters `?class_id=`, `?lab_id=`, `?student_id=`, `?session_id=`. It includes the sessions that students deleted; each row has `is_deleted`. |
-| GET | `/api/teacher/analytics/classes/{class_id}` | Teacher | Token use of a class: class, then lab, then student. |
-| GET | `/api/teacher/analytics/classes/{class_id}/details` | Teacher | The Analytics tab, for the class or one lab (`?lab_id=`). It has an overview (members, active in 7 days, questions, conversations, thumbs, students at their limit today), answers by mode, questions per day and per weekday and hour over 30 days (Paris time), every student (questions, conversations, last active, today's usage and limit), the latest 20 thumbs-down questions and the latest 20 answers that failed or stopped early. Teacher test sessions are left out. |
+| GET | `/api/teacher/analytics/classes/{class_id}/details` | Teacher, admin | The Analytics tab, for the class or one lab (`?lab_id=`). It has an overview (members, active in 7 days, questions, conversations, thumbs, students at their limit today), answers by mode, questions per day and per weekday and hour over 30 days (Paris time), every student (questions, conversations, last active, today's usage and limit), the latest 20 thumbs-down questions and the latest 20 answers that failed or stopped early. Teacher test sessions are left out. An admin may read any class (the admin Classes page); `404` when the lab is not in the class. |
 | GET | `/api/teacher/labs/{lab_id}/citation-report` | Teacher | Which course files, pages and passages the research answers of the lab cite, with the students and their questions. It also lists the published files that no answer cited, the questions without a verified answer, and the answers a student marked down. `?start=YYYY-MM-DD&end=YYYY-MM-DD` (days included, UTC; `422` if the end is before the start). Test drives are left out. Sessions that students deleted are kept. The shape is in `backend/app/services/citation_report.py`. |
 | GET | `/api/teacher/classes/{class_id}/citation-report` | Teacher | The same report for all labs of the class together; a class-wide file counts once. `labs` lists the labs, and each question carries its `lab_id`. Same `start`/`end` and `422` as the lab report. |
 | POST | `/api/teacher/labs/{lab_id}/reports` | Teacher | Starts an AI report on the lab, or on one student of it (`{"student_id"}`). Returns `202` and writes the report in the background (about 30 s). While a report of the same lab and student is running, that one is returned. `404` when the student has no conversation in the lab. `503 agent_model_not_configured`. |
@@ -161,7 +160,7 @@ This area covers what a teacher does with their classes and labs: classes and st
 
 ## Admin
 
-This area covers users, classes, the model settings, data pruning and global analytics. Admin endpoints have no ownership check.
+This area covers users, classes, the model settings, data pruning and global analytics. Admin endpoints have no ownership check. For the labs, students and analytics of one class, to rename or lock a lab, and to delete a class or a lab, the admin page calls the teacher routes marked "Teacher, admin" in [Teacher](#teacher); the admin has no copy of them.
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
@@ -174,19 +173,12 @@ This area covers users, classes, the model settings, data pruning and global ana
 | PUT | `/api/admin/users/{user_id}/password` | Admin | No body. Resets the password to `RESET_PASSWORD` (default `123456`) and sets `must_change_password`: until the user chooses a new password, every other route answers `403 password_change_required`, except `/api/auth/me` and `/api/auth/change-password`. |
 | DELETE | `/api/admin/users/{user_id}` | Admin | Soft-deletes a user. An admin cannot delete their own account (`400 cannot_delete_self`), so one admin always stays. When no admin can sign in, `scripts/make_admin.py` gives an account the role again on the server. |
 | GET | `/api/admin/classes` | Admin | All classes (`?skip=`, `?limit=`, at most 500). Each class has its owner and counts: `teacher_username`, `teacher_ok` (false when the owner was deleted or is no longer a teacher or admin, so nobody can manage the class until it is transferred), `lab_count`, `student_count`, `questions_7d` and `last_active`. Teacher test sessions are not counted. |
-| GET | `/api/admin/classes/{class_id}/labs` | Admin | The labs of a class. |
-| GET | `/api/admin/classes/{class_id}/students` | Admin | The students of a class. |
 | PUT | `/api/admin/classes/{class_id}/transfer` | Admin | Gives the class to another teacher (`teacher_id`). |
-| DELETE | `/api/admin/classes/{class_id}` | Admin | Soft-deletes any class. |
 | GET | `/api/admin/documents` | Admin | Every course document of every class, newest upload first: class, lab, uploader, status and the newest revision's state and error code. |
 | GET | `/api/admin/labs` | Admin | All labs. |
-| PUT | `/api/admin/labs/{lab_id}` | Admin | Renames any lab, or opens or locks it with `is_active`. |
-| DELETE | `/api/admin/labs/{lab_id}` | Admin | Soft-deletes any lab. |
 | GET | `/api/admin/analytics` | Admin | Platform-wide token use: totals, `active_users_7d` and a daily breakdown over 30 days. |
-| GET | `/api/admin/analytics/classes/{class_id}` | Admin | Token use of one class: class, then lab, then student. |
-| GET | `/api/admin/analytics/classes/{class_id}/details` | Admin | The same data as the teacher's `/details` endpoint, for any class (`?lab_id=` for one lab). No ownership check. `404` if the lab is not in the class. |
-| GET | `/api/admin/llm/config` | Admin | The model settings: the main model, and the embedding, rerank, agent and vision slots, the research limits (with `history_context_percent`), the token weights `token_alpha` and `token_beta`, and `mineru_server_url`. An empty value means the slot uses the main model (the vision slot is off instead). It also returns, read-only, `research_limits` (default, minimum and maximum of each limit), `features` (`research_agent`, `structured_documents`, `pdf_documents`: the deployment flags) and `mineru_default_url` (the `PDF_MINERU_SERVER_URL` of the backend). |
-| PUT | `/api/admin/llm/config` | Admin | Changes the model settings without a restart. Only the fields that are sent are written. `base_url`, `api_key` and `model` are required. A research limit out of range gets `422`. `mineru_server_url` switches the PDF worker to another MinerU server at its next tick (empty uses the worker's own `PDF_MINERU_SERVER_URL`). |
+| GET | `/api/admin/llm/config` | Admin | The model settings: the main model, and the embedding, rerank, agent and vision slots, the research limits (with `history_context_percent`), the token weights `token_alpha` and `token_beta`, and `mineru_server_url` with `mineru_api_key`. The keys are the ones the model servers check (see [MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)); the reranker call sends `rerank_api_key` as a bearer key. An empty value means the slot uses the main model (the vision slot is off instead). It also returns, read-only, `research_limits` (default, minimum and maximum of each limit), `features` (`research_agent`, `structured_documents`, `pdf_documents`: the deployment flags) and `mineru_default_url` (the `PDF_MINERU_SERVER_URL` of the backend). |
+| PUT | `/api/admin/llm/config` | Admin | Changes the model settings without a restart. Only the fields that are sent are written. `base_url`, `api_key` and `model` are required. A research limit out of range gets `422`. `mineru_server_url` switches the PDF worker to another MinerU server at its next tick (empty uses the worker's own `PDF_MINERU_SERVER_URL`); `mineru_api_key` is its key (empty: the main model key). |
 | GET | `/api/admin/llm/servers` | Admin | What each model server serves. One row per slot (main, agent, vision, embeddings, reranker): `slot`, `label`, `model`, `server`, `status` (`ok`, `model_missing`, `unreachable` or `off`), `served` (model names the server lists) and `max_model_len` (the context length of the configured model, when the server reports it). The servers are asked with a 3-second timeout. |
 | DELETE | `/api/admin/sessions/{session_id}` | Admin | Deletes a session and its messages for good. |
 | POST | `/api/admin/maintenance/prune` | Admin | Deletes sessions and messages older than `older_than_days`. With `dry_run: true` it only counts them. |

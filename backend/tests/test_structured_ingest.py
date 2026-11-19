@@ -19,6 +19,7 @@ from sqlalchemy import func, select, text
 from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import (
+    DocumentCleanupJob,
     Class, Document, DocumentAsset, DocumentBlock, DocumentBlockAsset, DocumentPage,
     DocumentRevision, DocumentSource, DocumentStagedObject, IngestionJob, JobStatus, Lab, UserRole,
     _utcnow,
@@ -359,6 +360,26 @@ async def test_a_deletion_during_the_job_leaves_nothing_readable_or_stored(db_se
     job = await run_cleanup(db_session, document_id=doc_id, storage_root=storage)
     await db_session.commit()
     assert job.state == 'complete' and stored_files(storage) == []
+
+
+@pytest.mark.asyncio
+async def test_the_worker_sweep_cleans_a_deleted_document(db_session, storage, tmp_path, deck_bytes):
+    """Deleting marks the files for cleanup; the worker's housekeeping between
+    jobs removes them (before, only a script nobody scheduled did)."""
+    teacher, _, body = await uploaded(db_session, storage, deck_bytes)
+    doc_id = uuid.UUID(body['id'])
+    await run_job(db_session, storage, tmp_path)
+    assert stored_files(storage)
+    doc = await db_session.get(Document, doc_id)
+    await mark_deleted(db_session, document_id=doc_id, teacher_id=teacher.id, expected_generation=doc.generation)
+    await db_session.commit()
+    await si.sweep(db_session, worker_settings(storage, tmp_path))
+    job = await db_session.get(DocumentCleanupJob, doc_id)
+    await db_session.refresh(job)
+    assert job.state == 'complete' and stored_files(storage) == []
+    assert await count(db_session, DocumentPage) == 0
+    # Nothing is due any more: the next sweep does nothing.
+    assert await si.sweep(db_session, worker_settings(storage, tmp_path)) == 0
 
 
 @pytest.mark.asyncio

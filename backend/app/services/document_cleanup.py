@@ -1,7 +1,10 @@
 """Immediate structured revocation plus retryable cleanup of M1-owned artifacts.
 
 No caller-supplied absolute paths are accepted. Caller commits mark_deleted
-before running cleanup, so filesystem retries never delay revocation.
+before running cleanup, so filesystem retries never delay revocation. The
+worker runs the due cleanup jobs between its jobs (run_due_cleanups, called by
+worker/structured_ingest.sweep); until November 2026 only a script nobody
+scheduled ran them, so deleted files stayed on disk.
 """
 from datetime import timedelta
 from pathlib import Path
@@ -138,3 +141,30 @@ async def sweep_staged_objects(db, *, storage_root, now=None, limit=100):
         handled += 1
     await db.flush()
     return handled
+
+
+# A job whose document is no longer deleted (it cannot be cleaned) is looked at
+# again after this long.
+NOT_DELETED_RETRY = timedelta(hours=1)
+
+
+async def run_due_cleanups(db, *, storage_root, now=None, limit=10) -> int:
+    """Run the cleanup jobs that are due, each in its own commit. Returns the
+    number of jobs that ran (complete or failed again with a later retry)."""
+    now = now or _utcnow()
+    ids = list((await db.scalars(select(DocumentCleanupJob.document_id).where(
+        DocumentCleanupJob.state != 'complete', DocumentCleanupJob.next_attempt_at <= now)
+        .order_by(DocumentCleanupJob.next_attempt_at).limit(limit))).all())
+    await db.commit()
+    ran = 0
+    for document_id in ids:
+        try:
+            await run_cleanup(db, document_id=document_id, storage_root=storage_root)
+            ran += 1
+        except VersionConflict:
+            await db.rollback()
+            job = await db.get(DocumentCleanupJob, document_id)
+            if job is not None:
+                job.next_attempt_at = now + NOT_DELETED_RETRY
+        await db.commit()
+    return ran

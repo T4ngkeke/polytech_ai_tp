@@ -22,7 +22,11 @@ import { applyToMessage } from '../lib/streamMessage';
 import HierarchicalSidebar from '../components/HierarchicalSidebar';
 import { PdfPreviewModal } from '../components/PdfPreview';
 import { MessageBubble, loadMessageContent } from '../components/ChatMessage';
-import ModeSwitch from '../components/ModeSwitch';
+import SessionsPanel from './chat/SessionsPanel';
+import MessageInput from './chat/MessageInput';
+import JoinClassModal from './chat/JoinClassModal';
+import HistoryLine from './chat/HistoryLine';
+import QuotaBar from './chat/QuotaBar';
 import Icon from '../components/Icon';
 import Tour from '../components/Tour';
 import { TOURS } from '../lib/tours';
@@ -30,7 +34,7 @@ import useMediaQuery from '../lib/useMediaQuery';
 import { DEFAULT_MODE, offersResearch, saveMode, sessionMode, storedMode } from '../lib/answerModes';
 import { useChatScroll } from '../lib/chatScroll';
 import { historyLineIndex, messageLength } from '../lib/historyLine';
-import { blockedMessage, nearLimit, nearLimitMessage, percent, resetNotice } from '../lib/quota';
+import { blockedMessage, nearLimit, nearLimitMessage, resetNotice } from '../lib/quota';
 // The markdown/highlight/KaTeX stack is code-split (ChatMessage loads it
 // lazily). We warm that chunk on mount (see effect below) so the first
 // assistant message renders as real markdown instead of the raw-text
@@ -508,86 +512,14 @@ export default function Chat() {
 
   // Desktop: its own column next to the classes. Phones: inside the drawer.
   const sessionsPanel = (
-    <>
-      <div className="px-3 pt-4 pb-2 border-b border-border-subtle">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-cream-muted mb-2">Sessions</p>
-        <button
-          id="new-session-btn"
-          data-tour="new-session"
-          onClick={handleNewSession}
-          className="w-full text-xs py-1.5 px-2 rounded-lg border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
-        >
-          + New Session
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto py-1">
-        {sessions.map((s) => (
-          <div key={s.id} className="group relative">
-            {renamingSessionId === s.id ? (
-              <input
-                autoFocus
-                value={renameTitle}
-                onChange={(e) => setRenameTitle(e.target.value)}
-                onBlur={() => handleRenameSession(s.id)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSession(s.id); if (e.key === 'Escape') setRenamingSessionId(null); }}
-                className="w-full px-3 py-2 text-xs bg-ink-hover text-cream border-none outline-none"
-              />
-            ) : confirmingDeleteId === s.id ? (
-              <div className="flex items-center gap-2 px-3 py-2 text-xs bg-danger-deep">
-                <span className="flex-1 truncate text-danger">Delete this chat?</span>
-                <button
-                  onClick={() => handleDeleteSession(s.id)}
-                  className="w-7 h-7 rounded flex items-center justify-center text-danger hover:text-danger-hover hover:bg-ink-hover transition-colors cursor-pointer"
-                  title="Confirm delete"
-                >
-                  <Icon name="check" className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setConfirmingDeleteId(null)}
-                  className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
-                  title="Cancel"
-                >
-                  <Icon name="close" className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <button
-                  onClick={() => handleSelectSession(s.id)}
-                  className={`w-full text-left px-3 py-2 pr-16 text-xs transition-all cursor-pointer ${
-                    activeSessionId === s.id
-                      ? 'bg-cyan-muted text-cyan'
-                      : 'text-cream-secondary hover:bg-ink-hover hover:text-cream'
-                  }`}
-                >
-                  <span className="block truncate">{s.title || 'New conversation'}</span>
-                  <span className="block text-[9px] text-cream-muted mt-0.5">
-                    {new Date(s.created_at).toLocaleDateString()}
-                  </span>
-                </button>
-                {/* Hover actions: rename + soft-delete */}
-                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => { setRenamingSessionId(s.id); setRenameTitle(s.title || ''); }}
-                    className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer"
-                    title="Rename session"
-                  >
-                    <Icon name="pencil" className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setConfirmingDeleteId(s.id)}
-                    className="w-7 h-7 rounded flex items-center justify-center text-cream-muted hover:text-danger hover:bg-ink-hover transition-colors cursor-pointer"
-                    title="Delete session"
-                  >
-                    <Icon name="trash" className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </>
+    <SessionsPanel
+      sessions={sessions} activeSessionId={activeSessionId}
+      onNewSession={handleNewSession} onSelectSession={handleSelectSession}
+      renamingSessionId={renamingSessionId} setRenamingSessionId={setRenamingSessionId}
+      renameTitle={renameTitle} setRenameTitle={setRenameTitle} onRenameSession={handleRenameSession}
+      confirmingDeleteId={confirmingDeleteId} setConfirmingDeleteId={setConfirmingDeleteId}
+      onDeleteSession={handleDeleteSession}
+    />
   );
 
   return (
@@ -724,81 +656,14 @@ export default function Chat() {
         </div>
 
         {/* Input */}
-        <div className="shrink-0 px-3 py-3 md:px-6 md:py-4 border-t border-border-subtle bg-ink-base/80 backdrop-blur-sm">
-          {resetKey && !seenReset && (
-            <div role="status" className="mb-2 flex items-center gap-3 rounded-lg border border-success/40 bg-success-muted px-3 py-2 text-xs text-cream">
-              <span className="flex-1">Your teacher reset your limits. You can ask again.</span>
-              <button type="button" onClick={dismissReset} aria-label="Close" title="Close"
-                className="cursor-pointer rounded-md p-1 text-cream-muted hover:bg-ink-hover hover:text-cream">
-                <Icon name="close" className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-          {blockedText && (
-            <div role="status" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-gold/40 bg-gold-muted px-3 py-2 text-xs text-cream">
-              <span className="flex-1 min-w-[12rem]">{blockedText}</span>
-              {usage.reset_requested ? (
-                <span className="text-cream-muted">Request sent to your teacher.</span>
-              ) : usage.reset_state === 'ignored' ? null : (
-                <button type="button" onClick={askForReset} disabled={askingReset}
-                  className="cursor-pointer rounded-md border border-border-default bg-ink-base px-2.5 py-1 text-cream hover:bg-ink-hover disabled:opacity-50">
-                  Ask my teacher for a reset
-                </button>
-              )}
-            </div>
-          )}
-          {activeSessionId && (
-            <div className="mb-2" data-tour="modes">
-              <ModeSwitch mode={mode} onChange={chooseMode} examMode={examMode} examFiles={examFiles} disabled={isStreaming} />
-            </div>
-          )}
-          <div data-tour="input" className={`flex items-end gap-3 p-3 rounded-xl border transition-colors ${
-            !activeSessionId ? 'border-border-subtle opacity-50'
-              : length.over ? 'border-danger' : 'border-border-default focus-within:border-cyan/40'
-          } bg-ink-deep`}>
-            <textarea
-              ref={inputRef}
-              id="chat-input"
-              rows={1}
-              disabled={!activeSessionId || isStreaming}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={!activeSessionId ? 'Select a session first'
-                : awaitingAnswer ? 'Type your answer… (Enter to send)' : 'Type your message… (Enter to send)'}
-              aria-describedby="chat-input-note"
-              className="flex-1 bg-transparent text-cream text-sm resize-none outline-none placeholder:text-cream-muted max-h-32 min-h-[1.5rem] leading-relaxed"
-              style={{ height: 'auto' }}
-            />
-            <button
-              id="send-btn"
-              onClick={isStreaming ? () => abortRef.current?.abort() : handleSend}
-              disabled={!activeSessionId || (!isStreaming && length.over)}
-              className={`shrink-0 p-2 rounded-lg transition-all cursor-pointer ${
-                isStreaming
-                  ? 'bg-danger-muted text-danger hover:bg-danger/20'
-                  : 'gradient-cyan text-on-accent hover:brightness-110 shadow-glow disabled:opacity-40 disabled:cursor-not-allowed'
-              }`}
-            >
-              {isStreaming ? <Icon name="stop" className="w-4 h-4 fill-current" /> : <Icon name="send" className="w-4 h-4" />}
-            </button>
-          </div>
-          {/* Transparency: students are told their teacher can see the chat.
-              Near the length limit, the count; past it, what to do. */}
-          <div id="chat-input-note" className="mt-2 flex items-start justify-center gap-3 text-[11px] text-cream-muted">
-            {length.over ? (
-              <p className="flex-1 text-danger" role="alert">
-                Too long: {length.excess.toLocaleString('en')} characters over the limit. Shorten the message,
-                or send only the part of the code that matters.
-              </p>
-            ) : (
-              <p className={length.count ? 'flex-1' : 'text-center'}>Your teacher can see this conversation.</p>
-            )}
-            {length.count && (
-              <span className={`shrink-0 font-mono tabular-nums ${length.over ? 'text-danger' : 'text-gold'}`}>{length.count}</span>
-            )}
-          </div>
-        </div>
+        <MessageInput
+          resetKey={resetKey} seenReset={seenReset} dismissReset={dismissReset}
+          blockedText={blockedText} usage={usage} askForReset={askForReset} askingReset={askingReset}
+          activeSessionId={activeSessionId} mode={mode} chooseMode={chooseMode}
+          examMode={examMode} examFiles={examFiles} isStreaming={isStreaming}
+          length={length} inputRef={inputRef} input={input} setInput={setInput}
+          onKeyDown={handleKeyDown} awaitingAnswer={awaitingAnswer} abortRef={abortRef} onSend={handleSend}
+        />
       </div>
 
       {tourOpen && (
@@ -812,83 +677,14 @@ export default function Chat() {
 
       {/* ── Join Class Modal ── */}
       {showJoinModal && (
-        <div className="fixed inset-0 bg-ink-deep/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-ink-base rounded-2xl border border-border-default shadow-elevated max-w-sm w-full p-8 noise">
-            <h3 className="font-display text-2xl text-cream mb-1">Join a Class</h3>
-            <p className="text-sm text-cream-secondary mb-6">Enter the 6-character invite code from your teacher.</p>
-
-            <div className="flex gap-2 justify-center mb-6">
-              {joinCode.map((ch, i) => (
-                <input
-                  key={i}
-                  id={`jc-${i}`}
-                  type="text"
-                  maxLength={1}
-                  value={ch}
-                  onChange={(e) => handleJoinCodeChange(i, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Backspace' && !ch && i > 0) document.getElementById(`jc-${i - 1}`)?.focus();
-                  }}
-                  className="w-11 h-13 text-center text-lg font-mono font-bold text-cream bg-ink-deep border border-border-default rounded-lg focus:border-cyan focus:ring-1 focus:ring-cyan/30 outline-none transition-colors uppercase"
-                />
-              ))}
-            </div>
-
-            <div className="flex gap-3">
-              <button onClick={() => { setShowJoinModal(false); setJoinCode(['', '', '', '', '', '']); }}
-                className="flex-1 py-2.5 rounded-lg border border-border-default text-cream-secondary text-sm hover:bg-ink-hover transition-all cursor-pointer">
-                Cancel
-              </button>
-              <button
-                onClick={handleJoinSubmit}
-                disabled={isJoining || joinCode.join('').length !== 6}
-                className="flex-1 py-2.5 rounded-lg gradient-cyan text-on-accent text-sm font-semibold disabled:opacity-50 cursor-pointer hover:brightness-110 transition-all">
-                {isJoining ? 'Joining…' : 'Join Class'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <JoinClassModal
+          joinCode={joinCode}
+          isJoining={isJoining}
+          onCodeChange={handleJoinCodeChange}
+          onCancel={() => { setShowJoinModal(false); setJoinCode(['', '', '', '', '', '']); }}
+          onSubmit={handleJoinSubmit}
+        />
       )}
-    </div>
-  );
-}
-
-/* ── Icons ── */
-// The line above which the assistant no longer sees the messages (lib/historyLine.js).
-function HistoryLine({ onNewSession }) {
-  return (
-    // Phones: the text fills the width, so the dashed rule goes above it.
-    <div role="note" className="flex items-center justify-center gap-3 mb-5 pt-2 sm:pt-1 pb-1 text-xs text-cream-muted
-      border-t border-dashed border-border-default sm:border-t-0">
-      <span className="hidden sm:block flex-1 border-t border-dashed border-border-default" />
-      <p className="max-w-md text-center leading-relaxed">
-        <span className="font-semibold text-cream-secondary">The assistant no longer sees the messages above this line.</span>
-        <br />
-        Paste again what it still needs, or{' '}
-        <button type="button" onClick={onNewSession} className="cursor-pointer text-cyan underline hover:brightness-110">
-          start a new conversation
-        </button>.
-      </p>
-      <span className="hidden sm:block flex-1 border-t border-dashed border-border-default" />
-    </div>
-  );
-}
-
-
-function QuotaBar({ label, used, limit }) {
-  const pct = percent(used, limit);
-  return (
-    <div>
-      <div className="flex justify-between text-[10px] text-cream-muted mb-1">
-        <span>{label}</span>
-        <span className="font-mono">{pct}%</span>
-      </div>
-      <div className="h-1 bg-ink-surface rounded-full overflow-hidden"
-        role="meter" aria-label={`${label}: ${pct}% of the limit used`} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-        <div className={`h-full rounded-full transition-all duration-500 ${
-          pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-gold' : 'bg-cyan'}`}
-          style={{ width: `${pct}%` }} />
-      </div>
     </div>
   );
 }

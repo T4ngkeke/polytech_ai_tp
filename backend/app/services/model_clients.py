@@ -110,16 +110,20 @@ def make_rerank_fn(llm_config: dict[str, str]):
 
     import httpx
 
+    # The model servers check this key (model_servers/edullm_key_check.py).
+    key = llm_config.get("rerank_api_key") or ""
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+
     async def rerank(query: str, documents: list[str]) -> list[float]:  # pragma: no cover
         query, documents = rerank_inputs(llm_config["rerank_model"], query, documents)
         body = {"model": llm_config["rerank_model"], "query": query, "documents": documents}
         client = http_client("rerank", RERANK_TIMEOUT)
         try:
-            resp = await client.post(url, json=body)
+            resp = await client.post(url, json=body, headers=headers)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             # One retry: a lost connection should not cost the reranked order.
             failure_log.record('rerank', 'retried_' + type(exc).__name__)
-            resp = await client.post(url, json=body)
+            resp = await client.post(url, json=body, headers=headers)
         resp.raise_for_status()
         results = resp.json().get("results", [])
         scores = [0.0] * len(documents)

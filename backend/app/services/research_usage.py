@@ -212,24 +212,3 @@ class ResearchUsage:
                 and reply.output_tokens is not None else 'estimated')
             return reply
         return wrapped
-
-    async def mark_expired_unknown(self, call_id: uuid.UUID) -> bool:
-        """Conservative crash recovery; manual/provider reconciliation releases it.
-
-        Expiry is not proof that a model did not run. Unknown reservations still
-        count against quota and cannot be silently charged or released.
-        """
-        async with self.session_factory() as db:
-            async with db.begin():
-                identity = await db.get(UsageReservation, call_id)
-                if identity is None:
-                    return False
-                await db.scalar(select(User).where(User.id == identity.user_id)
-                                .with_for_update())
-                reservation = await db.scalar(select(UsageReservation).where(
-                    UsageReservation.call_id == call_id).with_for_update()
-                    .execution_options(populate_existing=True))
-                if reservation.state != 'active' or reservation.expires_at > _utcnow():
-                    return False
-                reservation.state = 'unknown'
-                return True

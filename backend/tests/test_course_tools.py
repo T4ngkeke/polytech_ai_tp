@@ -113,12 +113,9 @@ class ViewFixture:
         return {str(self.doc): {'filename': 'Algebre.pdf', 'pages': [
             {'page_id': str(self.p9), 'pdf_page_no': 9}, {'page_id': str(self.p10), 'pdf_page_no': 10}]}}
 
-    async def _revision(self, document_id):
-        if document_id != self.doc:
+    async def check_access(self, document_ids=()):
+        if any(document_id != self.doc for document_id in document_ids):
             raise DocumentNotFound('not_found')
-
-    async def _check_session(self):
-        pass
 
     def _ref(self, page_id, number):
         return {'page_id': str(page_id), 'order_index': number - 1, 'source_slide_no': number,

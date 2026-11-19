@@ -44,6 +44,7 @@ The keys below are the ones the code reads. An empty value means "use the defaul
 | `TOKEN_ALPHA`, `TOKEN_BETA` | `0.2`, `1.0` | Weights of the billed tokens: `prompt tokens * alpha + completion tokens * beta`. |
 | `HISTORY_CONTEXT_PERCENT` | `30` | Share of the model's context (0-50%) that the chat history sent with a message may use, in estimated tokens (characters divided by 3). The oldest turns are dropped first, several at once (see ARCHITECTURE.md). Replaces `CONTEXT_MAX_TOKENS` (8000 tokens), which is no longer read. |
 | `PDF_MINERU_SERVER_URL` | the `PDF_MINERU_SERVER_URL` of the worker's environment | The MinerU server. The worker reads it again at each tick. |
+| `PDF_MINERU_API_KEY` | `LLM_API_KEY`, else the `PDF_MINERU_API_KEY` of the worker's environment | The key of the MinerU server (see [MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)). The worker gives it to MinerU's client as `MINERU_VL_API_KEY`. |
 | `AGENT_MAX_TOOL_CALLS`, `AGENT_MAX_VISUAL_CALLS`, `AGENT_RESEARCH_SECONDS`, `AGENT_TOTAL_SECONDS`, `AGENT_CALL_SECONDS`, `AGENT_MAX_INPUT_TOKENS` | the defaults in [API.md](API.md) | The limits of one research run. |
 
 The keys `ROUTER_*`, `INGEST_*`, `INGEST_TOKEN_BUDGET`, `RAG_MAX_RETRIES` and `RERANK_SCORE_THRESHOLD` belonged to features that were removed. No code reads them. `seed.py` still writes some of them, and an older database may still hold them.
@@ -450,7 +451,7 @@ Items that wait for the teacher's check. Each is tied to a revision and a block,
 
 ### document_cleanup_jobs
 
-One row per deleted document, so that its files and chunks are removed in the background. Citations to a deleted document stay as rows and are marked unavailable.
+One row per deleted document, so that its files and chunks are removed in the background: the worker runs the due jobs when it has no other job (`document_cleanup.run_due_cleanups`; until November 2026 only `scripts/cleanup_document_snapshots.py` did, and nothing ran it). A failed attempt is tried again later, waiting longer each time. Citations to a deleted document stay as rows and are marked unavailable.
 
 | Column | Type | Notes |
 | --- | --- | --- |

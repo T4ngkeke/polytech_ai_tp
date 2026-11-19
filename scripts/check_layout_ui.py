@@ -108,7 +108,6 @@ MOCKS = {
                    '## How to prepare the next session\n1. Revoir `CoursInfoDeBase-2022_SQL.pdf` p.28.'}},
 }
 
-MOCKS['/api/admin/analytics/classes/class/details'] = MOCKS['/api/teacher/analytics/classes/class/details']
 MOCKS['/api/teacher/classes/class/citation-report'] = {
     'class_id': 'class', 'labs': [{'id': 'lab', 'name': 'TP agent'}],
     'period': {'start': None, 'end': None},
@@ -140,8 +139,9 @@ MOCKS.update({
          'teacher_ok': False, 'exam_mode': False, 'lab_count': 2, 'student_count': 14, 'questions_7d': 0,
          'last_active': None, 'invite_code': 'DEF456', 'is_deleted': False, 'created_at': '2026-09-01T09:00:00Z'},
     ],
-    '/api/admin/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True, 'is_deleted': False}],
-    '/api/admin/classes/class/students': [{'id': 's1', 'username': 'bob', 'role': 'student'}],
+    # The admin Classes page uses the teacher routes for a class's students.
+    '/api/teacher/classes/class/students': [{'id': 's1', 'username': 'bob', 'daily_token_quota': 5_000_000,
+                                             'tokens_used_today': 1200, 'request_count_today': 3}],
     '/api/admin/analytics': {'total_tokens': 1234567, 'total_requests': 812, 'active_users_7d': 9,
                              'daily_breakdown': [{'date': f'2026-10-{d:02d}', 'tokens': 1000 * d, 'requests': d}
                                                  for d in range(1, 19)]},

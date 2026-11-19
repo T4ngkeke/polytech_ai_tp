@@ -361,7 +361,7 @@ multi-page read was not added.
   call: the first 20 matches in file order, and which files have more.
 - read accepts `document` when it is the page's or block's own, and a block
   with its own page (`block="d4.p9.b3", page="d4.p9"`).
-- navigate is gone from the model's tools (the reader endpoint stays).
+- navigate is gone from the model's tools (the reader endpoint stayed until 2026-11-18).
 
 Benchmark v4, 17 questions x 2 rounds, Flash-Next, reranker on, against the
 reranker run of the same day (`m4-agent/2026-10-14-tools-grep-all`):
@@ -493,6 +493,40 @@ with no research (V24, no note). One loss comes from the note: V12 stopped
 before reading the parser page and said the course does not explain `p`.
 V15 and V21 now end in 60 to 136 s and say what the course lacks; V08 still
 reaches the limit.
+
+## Tool access checks merged, and an evaluator fix (2026-11-18)
+
+**Evaluator fix.** Since the shared model clients (ecf8358, 2026-11-17),
+`scripts/m4_evaluate.py` closed the shared vision client at the end of each
+trial, so about two trials in three of a run failed with "model unavailable".
+Benchmark results between 2026-11-17 and this fix are not valid. The script
+now closes only its own embedding client.
+
+**The change.** The research tools checked access in three places, each with
+its own code: every tool call, the search results, and the cited documents
+before the answer is saved (twice, in Research and Search). They now share one
+check, `tools.check_access`: the session once, then each document at its
+fixed revision. A search or the file list no longer checks the session once
+per document, and the file list is loaded once per run. What is checked did
+not change.
+
+**Same output.** 8 fixed tool calls, the file list and the final citation
+check, replayed on the same database with the old and the new code, gave
+the same bytes (11,283).
+
+**Benchmark, old and new code, back to back** (same evaluator fix in both):
+
+| Run | Facets | Complete questions | Precision | Pages read | Median s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| v4 old | 92/106 | 25/34 | 72% | 5.26 | 60 |
+| v4 new | 89/106 | 20/34 | 71% | 5.09 | 50 |
+| v3 old | 123/130 | 47/52 | 73% | 4.83 | 67 |
+| v3 new | 126/130 | 48/52 | 70% | 5.57 | 65 |
+
+The differences are within what two runs of the same code gave before
+(2026-11-02: v4 91 and 93, v3 127 and 123). v4 is 3 facets lower and v3 3
+higher. Since the tool output is the same, the change in quality is put down
+to sampling.
 
 ## Running the benchmark
 

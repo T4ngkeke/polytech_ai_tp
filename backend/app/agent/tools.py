@@ -178,12 +178,14 @@ class ResearchTools:
         self.vision_fn, self.storage_root = vision_fn, storage_root
 
     async def _check_session(self):
+        """The session is still live, in the scope's lab and class."""
         lab, cls = await _live_session(self.db, self.scope.user_id, self.scope.session_id)
         if lab.id != self.scope.lab_id or cls.id != self.scope.class_id:
             raise DocumentNotFound('not_found')
 
-    async def _revision(self, document_id: uuid.UUID):
-        await self._check_session()
+    async def _readable(self, document_id: uuid.UUID):
+        """The scope's revision of a document, if the student may still read it
+        (the session itself is checked by the caller)."""
         revision_id = self.scope.snapshot_revisions.get(document_id)
         if revision_id is None:
             raise DocumentNotFound('not_found')
@@ -191,6 +193,17 @@ class ResearchTools:
             self.db, document_id=document_id, revision_id=revision_id,
             user_id=self.scope.user_id, session_id=self.scope.session_id,
         )
+
+    async def _revision(self, document_id: uuid.UUID):
+        await self._check_session()
+        return await self._readable(document_id)
+
+    async def check_access(self, document_ids=()) -> None:
+        """The session is live and each document still readable (DocumentNotFound
+        otherwise): the last check before an answer's citations are kept."""
+        await self._check_session()
+        for document_id in dict.fromkeys(document_ids):
+            await self._readable(document_id)
 
     async def page_index(self) -> dict:
         """Readable documents of the scope: filename and pages in reading order.
@@ -200,9 +213,13 @@ class ResearchTools:
         """
         index = {}
         lab_name = None
+        try:
+            await self._check_session()
+        except DocumentNotFound:
+            return index
         for document_id, revision_id in self.scope.snapshot_revisions.items():
             try:
-                await self._revision(document_id)
+                await self._readable(document_id)
             except DocumentNotFound:
                 continue
             document = await self.db.get(Document, document_id)
@@ -282,9 +299,7 @@ class ResearchTools:
         )
         # A reranker may have awaited a model after the SQL query. Recheck live
         # permissions before any retrieved text leaves this tool.
-        await self._check_session()
-        for document_id in {h.document_id for h in hits}:
-            await self._revision(document_id)
+        await self.check_access({h.document_id for h in hits})
         if not hits:
             return reader.envelope([], issues=issues, all_filtered=all_filtered)
         pairs = {(h.revision_id, h.block_id) for h in hits}
@@ -457,10 +472,6 @@ class PerCallTools:
         async with self.session_factory() as db:
             return await self._tools(db).page_index()
 
-    async def _revision(self, document_id: uuid.UUID):
+    async def check_access(self, document_ids=()) -> None:
         async with self.session_factory() as db:
-            return await self._tools(db)._revision(document_id)
-
-    async def _check_session(self):
-        async with self.session_factory() as db:
-            return await self._tools(db)._check_session()
+            await self._tools(db).check_access(document_ids)

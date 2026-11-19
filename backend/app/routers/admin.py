@@ -55,12 +55,10 @@ from backend.app.schemas import (
     AdminAnalyticsResponse,
     AdminClassResponse,
     AdminDocumentResponse,
-    ClassAnalyticsResponse,
     ClassResponse,
     CSVImportPreviewResponse,
     DailyUsage,
     LabResponse,
-    LabUpdateRequest,
     LLMConfigRequest,
     LLMConfigResponse,
     PruneRequest,
@@ -290,6 +288,7 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "vlm_model": "VLM_MODEL",
     # MinerU server of the PDF worker; empty = the worker's PDF_MINERU_SERVER_URL.
     "mineru_server_url": "PDF_MINERU_SERVER_URL",
+    "mineru_api_key": "PDF_MINERU_API_KEY",  # empty = the main model key
     # Picture captions at ingest, by the VLM slot (documentation/PICTURE_CAPTIONS.md).
     "picture_captions": "PICTURE_CAPTIONS",
     "picture_caption_priority": "PICTURE_CAPTION_PRIORITY",
@@ -518,40 +517,6 @@ async def list_all_classes(
 
 
 # ===================================================================
-# GET /api/admin/classes/{class_id}/labs
-# ===================================================================
-
-
-@router.get("/classes/{class_id}/labs", response_model=list[LabResponse])
-async def list_class_labs(
-    class_id: uuid.UUID,
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> list[LabResponse]:
-    """List all labs in a class (no ownership check)."""
-    await class_service.get_class_by_id(db, class_id)  # 404 if not found
-    labs = await lab_service.list_labs_for_class(db, class_id=class_id)
-    return [LabResponse.model_validate(l) for l in labs]
-
-
-# ===================================================================
-# GET /api/admin/classes/{class_id}/students
-# ===================================================================
-
-
-@router.get("/classes/{class_id}/students", response_model=list[UserResponse])
-async def list_class_students(
-    class_id: uuid.UUID,
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> list[UserResponse]:
-    """List all students enrolled in a specific class."""
-    await class_service.get_class_by_id(db, class_id)  # 404 if not found
-    students = await class_service.list_students_in_class(db, class_id=class_id)
-    return [UserResponse.model_validate(s) for s in students]
-
-
-# ===================================================================
 # PUT /api/admin/classes/{class_id}/transfer
 # ===================================================================
 
@@ -567,23 +532,6 @@ async def transfer_class(
     cls = await class_service.get_class_by_id(db, class_id)
     cls = await class_service.transfer_class(db, cls, new_teacher_id=body.teacher_id)
     return ClassResponse.model_validate(cls)
-
-
-# ===================================================================
-# DELETE /api/admin/classes/{class_id}
-# ===================================================================
-
-
-@router.delete("/classes/{class_id}", status_code=204)
-async def force_delete_class(
-    class_id: uuid.UUID,
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> Response:
-    """Force soft-delete any class system-wide (no ownership check)."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    await class_service.soft_delete_class(db, cls)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ===================================================================
@@ -619,43 +567,6 @@ async def list_all_labs(
 
 
 # ===================================================================
-# DELETE /api/admin/labs/{lab_id}
-# ===================================================================
-
-
-@router.delete("/labs/{lab_id}", status_code=204)
-async def force_delete_lab(
-    lab_id: uuid.UUID,
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> Response:
-    """Force soft-delete any lab system-wide (no ownership check)."""
-    lab = await lab_service.get_lab_by_id(db, lab_id)
-    await lab_service.soft_delete_lab(db, lab)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-# ===================================================================
-# PUT /api/admin/labs/{lab_id}
-# ===================================================================
-
-
-@router.put("/labs/{lab_id}", response_model=LabResponse)
-async def force_update_lab(
-    lab_id: uuid.UUID,
-    body: LabUpdateRequest,
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> LabResponse:
-    """Admin lab update: lock/unlock (``is_active``) or rename any lab
-    system-wide, bypassing ownership. Mirrors the ``DELETE /api/admin/labs``
-    pattern — the teacher route still enforces ownership."""
-    lab = await lab_service.get_lab_by_id(db, lab_id)
-    lab = await lab_service.update_lab(db, lab, name=body.name, is_active=body.is_active)
-    return LabResponse.model_validate(lab)
-
-
-# ===================================================================
 # GET /api/admin/analytics
 # ===================================================================
 
@@ -676,37 +587,6 @@ async def get_global_analytics(
             for d in result.daily_breakdown
         ],
     )
-
-
-# ===================================================================
-# GET /api/admin/analytics/classes/{class_id}
-# ===================================================================
-
-
-@router.get("/analytics/classes/{class_id}", response_model=ClassAnalyticsResponse)
-async def get_class_analytics(
-    class_id: uuid.UUID,
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> ClassAnalyticsResponse:
-    """Per-class hierarchical analytics (class→lab→student). No ownership check."""
-    cls = await class_service.get_class_by_id(db, class_id)
-    result = await analytics_service.get_class_analytics(db, class_id=class_id, class_name=cls.name)
-    return ClassAnalyticsResponse.from_analytics(result)
-
-
-@router.get("/analytics/classes/{class_id}/details")
-async def get_class_analytics_details(
-    class_id: uuid.UUID,
-    lab_id: uuid.UUID | None = Query(None),
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> dict:
-    """What the teacher Analytics tab shows, for any class or one of its labs."""
-    await class_service.get_class_by_id(db, class_id)  # 404 if not found
-    if lab_id is not None:
-        await lab_service.get_lab_in_class(db, lab_id, class_id)
-    return await analytics_service.get_teaching_analytics(db, class_id, lab_id)
 
 
 # ===================================================================

@@ -46,10 +46,9 @@ docs/
 # Local presentations and their rendered assets.
 /documentation/presentation-*
 
-# Local planning and review notes, excluded from English/French commits.
+# Local planning and review notes, kept out of the public repository.
 /documentation/INGESTION_AGENT_ALIGNMENT.md
 /documentation/INGESTION_AGENT_ROADMAP.md
-/documentation/LOCAL_SETUP.md
 /documentation/M0_ODP_EXECUTION_PLAN.md
 /documentation/M2_EXECUTION_PLAN.md
 /documentation/M3_EXECUTION_PLAN.md
@@ -58,8 +57,6 @@ docs/
 /documentation/M4_PATCH_AND_E_PLAN.md
 /documentation/M4_DSH_MIGRATION_PLAN.md
 /documentation/V9_CHANGES.md
-/documentation/WORKER.md
-/backend/app/agent/README.md
 /backend/renderer/README.md
 
 # Local test/editor caches and temporary files.

@@ -17,7 +17,8 @@ Environment:
   M4_UPSTREAM      model server (OpenAI-compatible, native tool calls), default Flash-Next
   M4_MODEL_NAME    served model name (default: flash-next)
   M4_MODEL_LABEL   model name written to the manifest (default Flash-Next)
-  M4_API_KEY       key for M4_UPSTREAM (default: none, a local server); never written to the output
+  M4_API_KEY       key of the model servers (M4_UPSTREAM, M4_VISION_URL, M4_RERANK_URL; they share
+                   one key, see documentation/MODEL_SERVERS.md); default: none; never written to the output
   M4_RETRIES       retries of a failed model call, e.g. 429 from a rate-limited API (default 0,
                    as the product)
   M4_VISION_URL    vision model for view_image (default: M4_UPSTREAM, the same model), M4_VISION_LABEL
@@ -187,7 +188,8 @@ def make_tool_dependencies(config):
             from backend.app.services.model_clients import rerank_inputs
             query, documents = rerank_inputs(config['rerank_model'], query, documents)
             response = await embedding_client.post(config['rerank_url'], json={
-                'model': config['rerank_model'], 'query': query, 'documents': documents}, timeout=30)
+                'model': config['rerank_model'], 'query': query, 'documents': documents}, timeout=30,
+                headers=config['rerank_headers'])
             response.raise_for_status()
             scores = [0.0] * len(documents)
             for item in response.json().get('results', []):
@@ -217,8 +219,10 @@ def make_tool_dependencies(config):
             row['elapsed_seconds'] = time.monotonic() - started
 
     async def close():
+        # The vision client is the shared client of the model server
+        # (services/shared_clients.py), also used by the other trials: closing
+        # it here cut their calls (APIConnectionError) since 2026-11-17.
         await embedding_client.aclose()
-        await vision.client.close()
 
     return {'options': {'embed_fn': embed, 'vision_fn': observe,
                         'rerank_fn': rerank if config['rerank_url'] else None,
@@ -303,9 +307,10 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     tool_config = {'storage_root': str(storage_root), 'embedding_url': embedding_url,
                    'query_cache': str(query_cache), 'vision_url': vision_url,
                    'vision_model': vision_model,
-                   'vision_key': api_key if vision_url == upstream else 'local',
+                   'vision_key': api_key,
                    'model_name': model_name, 'call_seconds': call_seconds, 'sampling': sampling,
                    'rerank_url': os.getenv('M4_RERANK_URL', ''),
+                   'rerank_headers': {'Authorization': f'Bearer {api_key}'} if api_key != 'local' else {},
                    'rerank_model': os.getenv('M4_RERANK_MODEL', 'BAAI/bge-reranker-v2-m3')}
     concurrency = int(os.getenv('M4_CONCURRENCY', '1'))
     allow_ask = os.getenv('M4_ASK', '1') == '1'

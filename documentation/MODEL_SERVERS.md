@@ -2,7 +2,7 @@
 
 # Model servers
 
-This file says how the main model server runs: Qwen3.8 Flash-Next, served as `flash-next`. The release and dev stacks both use it. MinerU is in [PDF_INGESTION.md](PDF_INGESTION.md).
+This file says how the main model server runs: Qwen3.8 Flash-Next, served as `flash-next`. The release and dev stacks both use it. It also says how all model servers check their key ([The key](#the-key)). MinerU is in [PDF_INGESTION.md](PDF_INGESTION.md).
 
 ## What runs
 
@@ -13,7 +13,7 @@ This file says how the main model server runs: Qwen3.8 Flash-Next, served as `fl
 | Recipe | [salient-data/qwen38-next-dgx-recipe](https://github.com/salient-data/qwen38-next-dgx-recipe), commit `7432036`, cloned in `/home/spark-1/llm_inference/` |
 | Checkpoint | `nvidia/Qwen3.8-Flash-Next-NVFP4`, snapshot `fc694b54fb0174e0913e6adf86691ef85a4ead47` |
 | Reached at | network `edullm-models`, alias `m4-flashnext-v030`, port 8000; on the host `127.0.0.1:18301` |
-| Limits | 65,536 tokens per request, 4 requests at once, `--gpu-memory-utilization 0.77` |
+| Limits | 131,072 tokens per request (since 2026-11-18; 65,536 before), 4 requests at once, `--gpu-memory-utilization 0.72` (0.77 before 2026-11-19) |
 
 The admin page stores the address `http://m4-flashnext-v030:8000/v1` and the name `flash-next`. A new server must keep this alias, so that no setting changes. Since 2026-11-02 the server no longer answers to the old name `ornith`; a request with that name gets a 404.
 
@@ -21,12 +21,13 @@ The admin page stores the address `http://m4-flashnext-v030:8000/v1` and the nam
 
 The recipe's `launch.sh` writes the whole `docker run` command. We change these parts:
 
-- `--served-model-name flash-next --max-model-len 65536 --max-num-seqs 4 --gpu-memory-utilization 0.77 --tool-call-parser qwen3_coder`.
+- `--served-model-name flash-next --max-model-len 131072 --max-num-seqs 4 --gpu-memory-utilization 0.72 --tool-call-parser qwen3_coder`. With 0.77 the machine ran out of memory: the server takes 93.7 GiB, and with MinerU, embeddings, the reranker and the host processes the total was about 121 GiB of 121.7. There were two OOM kills on 2026-11-19, and after the reboot the server could not start, because less than 93.7 GiB was free. With 0.72 the KV cache is 8.5 GiB, 297k tokens (2026-11-19), and about 12 GiB of memory stays free.
 - `--kv-cache-dtype auto` (BF16) instead of the recipe's `fp8_e4m3`. On 2026-10-27, BF16 gave the same speed and better benchmark results (v3 coverage 126/130 and citation precision 76%, against 118–124/130 and 69–72% with FP8). The KV cache size depends on the memory that is free when the server starts: between 438k and 509k tokens at the starts from 2026-10-29 to 2026-11-02. This is enough for 4 × 65k (262k).
 - `--prefix-match-unit 8 --enable-mamba-shared-prefix-checkpoint`: a prefix-cache hit resumes at the end of the previous prompt. Without this, every agent step computes again about 2,000 tokens. The unit must divide every cacheable KV block size. With BF16 the block is 1088 tokens, so 8 works and 12 fails at start. With FP8 the block is 2112 tokens, so 12 works.
 - `--enable-prompt-tokens-details`: the answers report cached prompt tokens, which Grafana shows.
 - `--scheduling-policy priority`: requests with a lower `priority` value go first. Chat requests send none (0); picture captions send 10, so a student does not wait behind a document's captions. Speed is the same as without it (measured 2026-10-29, see [PICTURE_CAPTIONS.md](PICTURE_CAPTIONS.md)). vLLM's description of the `priority` field says that a server without priority scheduling returns an error for any priority other than 0. We have not tried this.
 - Name, network alias, port `127.0.0.1:18301:8000`, `--host 0.0.0.0`.
+- The key check: the mount, the key file and `--middleware` listed in [The key](#the-key).
 - The snapshot's files link into the shared Hugging Face store, so the whole hub folder `/home/spark-1/.cache/huggingface/hub` is mounted read-only at `/hub`. The model path is `/hub/models--nvidia--Qwen3.8-Flash-Next-NVFP4/snapshots/<snapshot>`.
 
 The recipe also loads the attention, linear-attention, shared-expert and output layers as FP8 at start (`QWEN38_FP8_DENSE`). We keep this.
@@ -38,16 +39,47 @@ The recipe also loads the attention, linear-attention, shared-expert and output 
    ```sh
    cd /home/spark-1/llm_inference/qwen38-next-dgx-recipe/recipe
    FORCE=1 ./launch.sh --prod --detach --print -- \
-     --served-model-name flash-next --max-model-len 65536 --max-num-seqs 4 \
-     --gpu-memory-utilization 0.77 --tool-call-parser qwen3_coder \
+     --served-model-name flash-next --max-model-len 131072 --max-num-seqs 4 \
+     --gpu-memory-utilization 0.72 --tool-call-parser qwen3_coder \
      --prefix-match-unit 8 --enable-mamba-shared-prefix-checkpoint \
      --enable-prompt-tokens-details --kv-cache-dtype auto \
      --scheduling-policy priority
    ```
 
 2. Stop the running server first. Two servers do not fit in memory, and they would share the alias. The release has no model until the new one is ready, about 4 minutes.
-3. Ready means `Application startup complete` in `docker logs`, and `curl http://127.0.0.1:18301/v1/models` answers.
+3. Ready means `Application startup complete` in `docker logs`, and `curl -H "Authorization: Bearer $KEY" http://127.0.0.1:18301/v1/models` answers (without the key: `401`).
 4. Set the restart policy: `docker update --restart unless-stopped <container>`.
+
+## The key
+
+All model servers check one shared key: `flash-next`, `edullm-embeddings`, `edullm-reranker` and `edullm-mineru-vlm`. Without it, any process on the host or container on the network `edullm-models` could use the models and fill the queue in front of the students.
+
+vLLM's own `--api-key` is not enough. It checks only paths that start with `/v1`, `/v2`, `/inference` or `/cohere`. Other paths stay open: `/invocations` runs a full chat or embedding request, and the reranker also answers on `/rerank`, `/score` and `/pooling` (checked on vLLM 0.24 and 0.32, 2026-11-19). So each server loads our own check, [`model_servers/edullm_key_check.py`](../model_servers/edullm_key_check.py). It refuses every request without `Authorization: Bearer <key>` with `401`, except `/health`, `/ping`, `/metrics` and `/version`. Prometheus reads `/metrics` without a key. A server started without the key stops at start, so it never runs open.
+
+**Where the key lives.** On the host, outside the repository, readable by its owner only:
+
+```sh
+mkdir -p ~/.local/share/edullm-models && cd ~/.local/share/edullm-models
+cp <repo>/model_servers/edullm_key_check.py .
+umask 077 && printf 'EDULLM_MODEL_API_KEY=%s\n' "$(openssl rand -hex 32)" > key.env
+```
+
+**Each server's `docker run`** gets three more parts (the file is mounted into the image's Python packages, so it can be imported):
+
+```sh
+docker run ... \
+  -v ~/.local/share/edullm-models/edullm_key_check.py:/usr/local/lib/python3.12/dist-packages/edullm_key_check.py:ro \
+  --env-file ~/.local/share/edullm-models/key.env \
+  <image> vllm serve ... --middleware edullm_key_check.KeyCheck
+```
+
+**Who sends it.**
+
+- The dev and release stacks: the admin page, LLM Config. The key goes in the API Key field of the main model. The embedding, reranker, agent, vision and MinerU nodes use the main key when their own field is empty. A field that holds an old value (for example `local`) must be emptied or set to the key. The worker passes the MinerU key to MinerU's client as `MINERU_VL_API_KEY`.
+- The benchmark (`scripts/m4_evaluate.py`): `M4_API_KEY`, for the model, the vision calls and the reranker.
+- Anything else that calls a model server, for example a test script: the same header.
+
+**Switching the key on, or changing it.** Set the new key in the admin pages of both stacks first: a server without the check ignores the header. Then start the servers again with the check. To change the key, write the new one in `key.env`, set it in both admin pages, and start the servers again. The stacks fail with `401` between the two steps, so do both at once.
 
 ## Fallback
 

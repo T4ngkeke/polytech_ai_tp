@@ -522,11 +522,15 @@ class CourseTools:
         self.visual_calls = 0
         self.view: ToolView | None = None
 
-    async def _revision(self, document_id):
-        return await self.tools._revision(document_id)
+    async def check_access(self, document_ids=()) -> None:
+        """The session is live and each document still readable (tools.check_access)."""
+        await self.tools.check_access(document_ids)
 
-    async def _check_session(self):
-        return await self.tools._check_session()
+    async def _load_view(self) -> 'ToolView':
+        """The run's files and handles, read once."""
+        if self.view is None:
+            self.view = ToolView(await self.tools.page_index())
+        return self.view
 
     def state(self):
         """The run's tool record: trace, evidence and handles (JSON-ready)."""
@@ -575,20 +579,15 @@ class CourseTools:
 
     async def document_count(self) -> int:
         """How many course documents this run can read."""
-        if self.view is None:
-            self.view = ToolView(await self.tools.page_index())
-        return len(self.view.documents)
+        return len((await self._load_view()).documents)
 
     async def catalogue(self) -> str:
         """The course documents of this run with their handles (ToolView.catalogue)."""
-        if self.view is None:
-            self.view = ToolView(await self.tools.page_index())
-        return self.view.catalogue()
+        return (await self._load_view()).catalogue()
 
     async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
         """One model call with handles: translate, execute, render compact text."""
-        if self.view is None:
-            self.view = ToolView(await self.tools.page_index())
+        await self._load_view()
         try:
             raw = self.view.translate(name, arguments)
         except HandleError as exc:

@@ -49,18 +49,23 @@ MinerU has three parts. All of them are outside the backend image.
      -e PYTHONPATH=/extra -e OMP_NUM_THREADS=1 \
      -v /home/spark-1/edullm-mineru/extra:/extra:ro \
      -v /home/spark-1/.cache/huggingface:/root/.cache/huggingface \
+     -v /home/spark-1/.local/share/edullm-models/edullm_key_check.py:/usr/local/lib/python3.12/dist-packages/edullm_key_check.py:ro \
+     --env-file /home/spark-1/.local/share/edullm-models/key.env \
      nvcr.io/nvidia/vllm:26.07-py3 \
      vllm serve opendatalab/MinerU2.5-Pro-2605-1.2B --host 0.0.0.0 --port 8000 \
      --served-model-name opendatalab/MinerU2.5-Pro-2605-1.2B \
      --gpu-memory-utilization 0.05 --kv-cache-memory-bytes 600000000 \
      --hf-overrides '{"tie_word_embeddings": true}' \
-     --logits-processors mineru_vl_utils:MinerULogitsProcessor
+     --logits-processors mineru_vl_utils:MinerULogitsProcessor \
+     --middleware edullm_key_check.KeyCheck
    ```
+
+   The mount, the key file and `--middleware` make the server refuse requests without the key ([MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)).
 
 2. **Client.** The worker image built with `--build-arg WITH_MINERU=1` has MinerU 3.4.5 at `/opt/mineru/bin/python`, with CPU torch for the local layout and OCR models. The worker calls MinerU in this separate interpreter. One page takes 15 to 20 seconds and at most 0.8 GB.
 3. **Models and config.** Run `mineru-models-download -s huggingface -m pipeline` once, with `HOME` and `HF_HOME` in `/home/spark-1/edullm-mineru/home` (2.5 GB). Then write `mineru.json` with the pipeline path as the worker sees it (`/opt/mineru-data/...`) and `"model-source": "local"`. The worker mounts the folder read-only at `/opt/mineru-data`.
 
-The MinerU server can change without a restart. The MinerU node of the admin model map stores `PDF_MINERU_SERVER_URL` in `system_configs`, and the worker uses it from its next loop. When it is empty, the worker uses the value of its environment. The client, its models and `mineru.json` are deployment settings.
+The MinerU server can change without a restart. The MinerU node of the admin model map stores `PDF_MINERU_SERVER_URL` and its key `PDF_MINERU_API_KEY` in `system_configs`, and the worker uses them from its next loop. The key goes to MinerU's client as `MINERU_VL_API_KEY`; when the field is empty, the main model key is used (see [MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)). When it is empty, the worker uses the value of its environment. The client, its models and `mineru.json` are deployment settings.
 
 ## Tests
 
