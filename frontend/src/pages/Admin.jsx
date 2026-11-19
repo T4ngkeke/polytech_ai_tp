@@ -3,7 +3,7 @@
  * Left nav rail: Users | Classes | Documents | Monitoring | LLM Config | Maintenance.
  * Each tab lives in admin/.
  */
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
 import ThemeToggle from '../components/ThemeToggle';
@@ -14,6 +14,7 @@ import ClassesTab from './admin/ClassesTab';
 import DocumentsTab from './admin/DocumentsTab';
 import LLMConfigTab from './admin/LlmConfigTab';
 import MaintenanceTab from './admin/MaintenanceTab';
+import { ConfirmModal } from './admin/shared';
 
 const NAV = [
   { key: 'users', label: 'Users', icon: 'users' },
@@ -28,6 +29,16 @@ export default function Admin() {
   const [active, setActive] = useState('users');
   // Phones: the navigation is a drawer opened from the top bar.
   const [navOpen, setNavOpen] = useState(false);
+  // LLM Config reports unsaved changes; leaving the tab then asks first.
+  const [llmDirty, setLlmDirty] = useState(false);
+  const [leaveTo, setLeaveTo] = useState(null);
+  const onLlmDirty = useCallback((dirty) => setLlmDirty(dirty), []);
+  const go = (key) => {
+    setNavOpen(false);
+    if (key === active) return;
+    if (active === 'llm' && llmDirty) setLeaveTo(key);
+    else setActive(key);
+  };
   const { username, logout } = useAuthStore();
   const navigate = useNavigate();
 
@@ -59,7 +70,7 @@ export default function Admin() {
           {NAV.map(({ key, label, icon }) => {
             const on = active === key;
             return (
-              <button key={key} onClick={() => { setActive(key); setNavOpen(false); }}
+              <button key={key} onClick={() => go(key)}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                   on ? 'bg-cyan-muted text-cyan' : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
                 }`}>
@@ -90,9 +101,15 @@ export default function Admin() {
         {active === 'classes' && <ClassesTab />}
         {active === 'documents' && <DocumentsTab />}
         {active === 'monitoring' && <MonitoringPanel />}
-        {active === 'llm' && <LLMConfigTab />}
+        {active === 'llm' && <LLMConfigTab onDirtyChange={onLlmDirty} />}
         {active === 'maintenance' && <MaintenanceTab />}
       </main>
+      {leaveTo && (
+        <ConfirmModal title="Leave without saving?" danger confirmLabel="Leave without saving"
+          message="The model settings have changes that are not saved. They will be lost."
+          onCancel={() => setLeaveTo(null)}
+          onConfirm={() => { setActive(leaveTo); setLeaveTo(null); setLlmDirty(false); }} />
+      )}
     </div>
   );
 }

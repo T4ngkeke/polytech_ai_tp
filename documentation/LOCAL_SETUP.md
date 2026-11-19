@@ -70,7 +70,7 @@ The system uses the same model for chat, for looking at images and for image cap
 
 Every model server checks one shared key; how it is made and loaded is in [MODEL_SERVERS.md](MODEL_SERVERS.md#the-key).
 
-After the first start, open the LLM Config page with the administrator account. Fill in the address and the name of each model, and the key in the API Key field of the main model (the other nodes use it when their own field is empty). Use the container name for the model address, for example `http://m4-flashnext-v030:8000/v1`. The page also shows the status of each model server. See [DATABASE.md](DATABASE.md) for the meaning of each setting.
+After the first start, open the LLM Config page with the administrator account. Under Model servers, set the shared key, then the address and the model name of each server, and press Test all. Use the container name for the model address, for example `http://m4-flashnext-v030:8000/v1`. The page also shows the status of each model server. See [DATABASE.md](DATABASE.md) for the meaning of each setting.
 
 The backend and the worker of the development environment must be able to reach this network. So create it first, then connect the model containers to it:
 

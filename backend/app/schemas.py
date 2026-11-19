@@ -121,10 +121,11 @@ class UpdateRoleRequest(BaseModel):
 
 
 class LLMConfigRequest(BaseModel):
-    # Main generation engine (required — always present).
-    base_url: str = Field(..., min_length=1)
-    api_key: str = Field(..., min_length=1)
-    model: str = Field(..., min_length=1)
+    # Main generation engine. Optional since 2026-11-19 (the page sends only
+    # what changed), but never empty when sent.
+    base_url: str | None = Field(None, min_length=1)
+    api_key: str | None = Field(None, min_length=1)
+    model: str | None = Field(None, min_length=1)
 
     # model-routing table. All optional: only provided (non-None) fields
     # are upserted, so a legacy 3-field PUT never wipes the routing config.
@@ -135,6 +136,8 @@ class LLMConfigRequest(BaseModel):
     rerank_url: str | None = None
     rerank_api_key: str | None = None
     rerank_model: str | None = None
+    # 'on' / 'off': the reranker switch; 'off' keeps rerank_url.
+    rerank_enabled: str | None = None
     # Agent slot (the research agent's model).
     agent_base_url: str | None = None
     agent_api_key: str | None = None
@@ -166,6 +169,13 @@ class LLMConfigRequest(BaseModel):
     token_beta: float | None = None
 
 
+class ServerCheckRequest(BaseModel):
+    # The values of one server on the admin page, saved or not.
+    url: str = Field(..., max_length=500)
+    model: str = Field('', max_length=200)
+    api_key: str = Field('', max_length=500)
+
+
 class LLMConfigResponse(BaseModel):
     base_url: str
     api_key: str
@@ -177,6 +187,7 @@ class LLMConfigResponse(BaseModel):
     rerank_url: str = ""
     rerank_api_key: str = ""
     rerank_model: str = ""
+    rerank_enabled: str = ""
     # Raw stored values — agent slot empty = inherits main LLM.
     agent_base_url: str = ""
     agent_api_key: str = ""

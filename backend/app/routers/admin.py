@@ -63,6 +63,7 @@ from backend.app.schemas import (
     LLMConfigResponse,
     PruneRequest,
     PruneResponse,
+    ServerCheckRequest,
     TransferClassRequest,
     UpdateQuotaRequest,
     UpdateRoleRequest,
@@ -278,6 +279,7 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "rerank_url": "RERANK_URL",
     "rerank_api_key": "RERANK_API_KEY",
     "rerank_model": "RERANK_MODEL",
+    "rerank_enabled": "RERANK_ENABLED",  # on / off; off keeps RERANK_URL
     # Agent slot.
     "agent_base_url": "AGENT_BASE_URL",
     "agent_api_key": "AGENT_API_KEY",
@@ -356,6 +358,16 @@ async def get_model_servers(
     return {"servers": await model_servers.server_status(resolve_model_routing(configs))}
 
 
+@router.post("/llm/servers/check")
+async def check_model_server(
+    body: ServerCheckRequest,
+    _admin: User = Depends(require_admin),
+) -> dict:
+    """Test one server with the values on the page, before they are saved:
+    does it answer, does it accept the key, does it serve the model."""
+    return await model_servers.check_server(body.url.strip(), body.model.strip(), body.api_key.strip())
+
+
 # ===================================================================
 # PUT /api/admin/llm/config
 # ===================================================================
@@ -363,8 +375,9 @@ async def get_model_servers(
 
 def _check_caption_fields(body) -> None:
     from backend.worker import picture_captions as pc
-    if (body.picture_captions or '') not in ('', 'on', 'off'):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "picture_captions must be on or off")
+    for field in ('picture_captions', 'rerank_enabled'):
+        if (getattr(body, field) or '') not in ('', 'on', 'off'):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{field} must be on or off")
     for field, (low, high) in (('picture_caption_priority', pc.PRIORITY_RANGE),
                                ('picture_caption_budget_seconds', pc.BUDGET_RANGE)):
         value = getattr(body, field)

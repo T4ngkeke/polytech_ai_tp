@@ -40,6 +40,7 @@ The keys below are the ones the code reads. An empty value means "use the defaul
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | The embedding model. It must give 1024 numbers (`EMBEDDING_DIM`) and must stay the same for indexing and searching. Changing it makes every stored vector wrong; recompute them with `scripts/reembed_documents.py`. |
 | `RERANK_URL` | none: empty means no reranking | A real rerank endpoint (the full path that accepts `{query, documents}`), not a chat `.../v1` address. If it is empty or fails, search uses the merged order without reranking. |
 | `RERANK_API_KEY` | the main model's key | Key for the reranker. |
+| `RERANK_ENABLED` | `on` | `off` turns reranking off and keeps `RERANK_URL` (the admin switch, since 2026-11-19). |
 | `RERANK_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | The reranker. A name that contains `qwen3-reranker` is treated as Qwen3-Reranker (the current deployment). |
 | `TOKEN_ALPHA`, `TOKEN_BETA` | `0.2`, `1.0` | Weights of the billed tokens: `prompt tokens * alpha + completion tokens * beta`. |
 | `HISTORY_CONTEXT_PERCENT` | `30` | Share of the model's context (0-50%) that the chat history sent with a message may use, in estimated tokens (characters divided by 3). The oldest turns are dropped first, several at once (see ARCHITECTURE.md). Replaces `CONTEXT_MAX_TOKENS` (8000 tokens), which is no longer read. |

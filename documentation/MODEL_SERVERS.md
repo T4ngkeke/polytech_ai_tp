@@ -76,7 +76,7 @@ docker run ... \
 
 **Who sends it.**
 
-- The dev and release stacks: the admin page, LLM Config. The key goes in the API Key field of the main model. The embedding, reranker, agent, vision and MinerU nodes use the main key when their own field is empty. A field that holds an old value (for example `local`) must be emptied or set to the key. The worker passes the MinerU key to MinerU's client as `MINERU_VL_API_KEY`.
+- The dev and release stacks: the admin page, LLM Config, "Shared key of the model servers" (stored as `LLM_API_KEY`). Every server uses it unless its row has "Use its own key" on. The Test button of each row shows "Key refused (401)" when a server does not accept the key. The worker passes the MinerU key to MinerU's client as `MINERU_VL_API_KEY`.
 - The benchmark (`scripts/m4_evaluate.py`): `M4_API_KEY`, for the model, the vision calls and the reranker.
 - Anything else that calls a model server, for example a test script: the same header.
 

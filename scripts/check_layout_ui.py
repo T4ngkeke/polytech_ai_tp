@@ -1,10 +1,10 @@
 """Browser check of the light/dark themes and the phone layout; all API traffic is mocked.
 
-Each main page (student chat, teacher lab, admin model map) is opened in both
+Each main page (student chat, teacher lab, admin model settings) is opened in both
 themes at desktop (1440 px) and phone (390 px) width. The check fails when the
 page scrolls sideways, the theme is not applied, the phone menu does not open
 the navigation drawer, the student drawer is not ordered classes, sessions,
-account, the token quota is pushed off screen, or the admin model map is missing.
+account, the token quota is pushed off screen, or the admin model servers are missing.
 In a teacher lab, the class name in the breadcrumb must open the class, and the
 Analytics tab must show its charts and reset a student's limits; Audit shows
 the latest AI report on the lab.
@@ -60,12 +60,13 @@ MOCKS = {
          'week_used': 6_200_000, 'week_limit': 25_000_000, 'blocked': 'day'}],
     '/api/teacher/classes': [{'id': 'class', 'name': 'Informatique'}],
     '/api/teacher/classes/class/labs': [{'id': 'lab', 'name': 'TP agent', 'is_active': True}],
-    '/api/admin/llm/config': {'llm_model': 'flash-next', 'features': {'research_agent': True, 'pdf_documents': True}},
-    '/api/admin/llm/servers': {'servers': [
-        {'slot': 'llm', 'label': 'Main model', 'model': 'flash-next', 'server': 'm4-flashnext-v030:8000', 'status': 'ok',
-         'served': ['flash-next'], 'max_model_len': 65536},
-        {'slot': 'agent', 'label': 'Research agent', 'model': 'qwen3.8-flash-next', 'server': 'm4-flashnext-v030:8000',
-         'status': 'model_missing', 'served': ['flash-next'], 'max_model_len': None}]},
+    '/api/admin/llm/config': {'base_url': 'http://m4-flashnext-v030:8000/v1', 'api_key': 'test-key', 'model': 'flash-next',
+                              'vlm_model': 'flash-next', 'embedding_url': 'http://edullm-embeddings:8000/v1',
+                              'embedding_model': 'BAAI/bge-m3', 'rerank_url': 'http://edullm-reranker:8000/rerank',
+                              'rerank_model': 'Qwen/Qwen3-Reranker-0.6B', 'picture_captions': 'on',
+                              'mineru_default_url': 'http://edullm-mineru-vlm:8000/v1', 'token_alpha': 0.2, 'token_beta': 1.0,
+                              'features': {'research_agent': True, 'pdf_documents': True}},
+    '/api/admin/llm/servers/check': {'status': 'ok', 'served': ['flash-next'], 'max_model_len': 131072},
     '/api/teacher/analytics/classes/class/details': {
         'class_id': 'class', 'lab_id': 'lab', 'period_days': 30,
         'overview': {'members': 3, 'active_7d': 2, 'active_ever': 2, 'questions': 41, 'questions_7d': 12,
@@ -151,7 +152,7 @@ MOCKS.update({
 PAGES = [
     ('student', '/chat/lab', 'Quelle différence entre WHERE et HAVING ?', [], 'Classes and sessions'),
     ('teacher', '/teacher', 'Lab Settings', [('tree', 'TP agent')], 'Classes and labs'),
-    ('admin', '/admin', 'Model Routing Map', [('nav', 'LLM Config')], 'Menu'),
+    ('admin', '/admin', 'Model settings', [('nav', 'LLM Config')], 'Menu'),
 ]
 
 
@@ -221,8 +222,9 @@ def check_view(browser, target, shots, role, path, ready, steps, menu, theme, si
         overflow = page.evaluate('document.documentElement.scrollWidth - innerWidth')
         assert overflow <= 0, f'{name}: page scrolls sideways by {overflow}px'
         if role == 'admin':
-            # The model map itself, with its sources, at every width.
-            expect(page.get_by_text('Students', exact=True)).to_be_visible()
+            # The servers with their test result, at every width.
+            expect(page.get_by_text('Main model', exact=True).first).to_be_visible()
+            expect(page.get_by_text('Works · 128k').first).to_be_visible()
 
         button = page.get_by_role('button', name=menu)
         if phone:

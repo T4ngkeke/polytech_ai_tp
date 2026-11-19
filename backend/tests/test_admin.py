@@ -407,6 +407,17 @@ class TestLLMConfig:
         assert resp.json()["mineru_api_key"] == "mk"
         assert resp.json()["mineru_server_url"] == "http://other-mineru:8000/v1"  # not sent: kept
 
+    async def test_a_save_sends_only_what_changed(self, admin_client):
+        """The page sends only changed fields (2026-11-19): the main model
+        need not be sent, but it may not be emptied."""
+        await admin_client.put("/api/admin/llm/config", json={"base_url": "http://main/v1", "api_key": "k", "model": "m"})
+        resp = await admin_client.put("/api/admin/llm/config", json={"rerank_enabled": "off", "tp_context_percent": "40"})
+        assert resp.status_code == 200, resp.text
+        got = resp.json()
+        assert (got["rerank_enabled"], got["tp_context_percent"], got["model"], got["api_key"]) == ("off", "40", "m", "k")
+        assert (await admin_client.put("/api/admin/llm/config", json={"model": ""})).status_code == 422
+        assert (await admin_client.put("/api/admin/llm/config", json={"rerank_enabled": "maybe"})).status_code == 422
+
     async def test_picture_caption_settings_roundtrip_and_check(self, admin_client):
         base = {"base_url": "http://main/v1", "api_key": "k", "model": "m"}
         resp = await admin_client.put("/api/admin/llm/config", json={

@@ -5,7 +5,7 @@
 import {
   Activity, Archive, ArrowRightLeft, ArrowUpDown, Bot, Check, ChevronRight, Compass, Copy, Cpu, Database,
   Download, Ellipsis, Eye, EyeOff, FileText, KeyRound, Layers, LayoutGrid, Lock, LockOpen, LogOut, Menu,
-  MessageSquare, Network, Pencil, Plus, Repeat, RotateCcw, Search, Send, Settings, Square, ThumbsDown,
+  MessageSquare, Network, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Search, Send, Server, Settings, Square, ThumbsDown,
   ThumbsUp, Trash2, TriangleAlert, Upload, Users, X,
 } from 'lucide-react';
 
@@ -17,6 +17,7 @@ const ICONS = {
   menu: Menu, send: Send, stop: Square, plus: Plus, chevronRight: ChevronRight, ellipsis: Ellipsis,
   logout: LogOut, settings: Settings, users: Users, grid: LayoutGrid, pulse: Activity, chip: Cpu,
   database: Database, upload: Upload, search: Search, eyeOff: EyeOff, swap: ArrowRightLeft,
+  server: Server, refresh: RefreshCw,
 };
 
 export default function Icon({ name, className = 'w-4 h-4', title }) {

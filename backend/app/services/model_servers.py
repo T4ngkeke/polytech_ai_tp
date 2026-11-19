@@ -85,6 +85,8 @@ async def server_status(routing: ModelRouting, fetch=None) -> list[dict]:
     async def one(url, key):
         try:
             return await fetch(url, key)
+        except httpx.HTTPStatusError as exc:
+            return 'refused' if exc.response.status_code in (401, 403) else None
         except (httpx.HTTPError, ValueError):
             return None
 
@@ -92,10 +94,33 @@ async def server_status(routing: ModelRouting, fetch=None) -> list[dict]:
     out = []
     for row in rows:
         url, key = row.pop('url'), row.pop('key')
+        answer = answers.get((url, key))
         if url is None:
             out.append({**row, 'status': 'off', 'served': [], 'max_model_len': None})
-        elif answers[(url, key)] is None:
-            out.append({**row, 'status': 'unreachable', 'served': [], 'max_model_len': None})
+        elif answer is None or answer == 'refused':
+            out.append({**row, 'status': answer or 'unreachable', 'served': [], 'max_model_len': None})
         else:
-            out.append({**row, **check(row['model'], answers[(url, key)])})
+            out.append({**row, **check(row['model'], answer)})
     return out
+
+
+async def check_server(url: str, model: str, api_key: str, fetch=None) -> dict:
+    """One server as the admin page has it, saved or not: status ok,
+    model_missing, refused (the key), unreachable or invalid_url; the models it
+    serves, and the context length of `model`. An empty model (the MinerU
+    server, whose name is not a setting) is ok when the server answers."""
+    target = models_url(url)
+    if target is None:
+        return {'status': 'invalid_url', 'served': [], 'max_model_len': None}
+    try:
+        payload = await (fetch or _fetch)(target, api_key)
+    except httpx.HTTPStatusError as exc:
+        status = 'refused' if exc.response.status_code in (401, 403) else 'unreachable'
+        return {'status': status, 'served': [], 'max_model_len': None}
+    except (httpx.HTTPError, ValueError):
+        return {'status': 'unreachable', 'served': [], 'max_model_len': None}
+    if not model:
+        served = [m.get('id') for m in payload.get('data', []) if isinstance(m, dict)]
+        first = next((m for m in payload.get('data', []) if isinstance(m, dict)), {})
+        return {'status': 'ok', 'served': served, 'max_model_len': first.get('max_model_len')}
+    return check(model, payload)

@@ -56,3 +56,60 @@ async def test_only_an_admin_reads_the_servers(db_session, monkeypatch):
         resp = await client.get('/api/admin/llm/servers')
     assert resp.status_code == 200, resp.text
     assert [r['slot'] for r in resp.json()['servers']] == ['llm', 'agent', 'vlm', 'embedding', 'rerank']
+
+
+def _refusal(url):
+    request = ms.httpx.Request('GET', url)
+    return ms.httpx.HTTPStatusError('401', request=request, response=ms.httpx.Response(401, request=request))
+
+
+@pytest.mark.asyncio
+async def test_a_refused_key_is_not_a_silent_server():
+    """The model servers answer 401 without the key (model_servers/edullm_key_check.py);
+    the page said "server does not answer" before 2026-11-19."""
+    async def fetch(url, key):
+        if key != 'good':
+            raise _refusal(url)
+        return {'data': [{'id': 'flash-next', 'max_model_len': 131072}]}
+
+    assert (await ms.check_server('http://llm:8000/v1', 'flash-next', 'bad', fetch=fetch))['status'] == 'refused'
+    ok = await ms.check_server('http://llm:8000/v1', 'flash-next', 'good', fetch=fetch)
+    assert (ok['status'], ok['max_model_len']) == ('ok', 131072)
+    assert (await ms.check_server('http://llm:8000/v1', 'other', 'good', fetch=fetch))['status'] == 'model_missing'
+    assert (await ms.check_server('not a url', 'x', 'good', fetch=fetch))['status'] == 'invalid_url'
+    # MinerU: no model name in the settings; a server that answers is ok.
+    mineru = await ms.check_server('http://mineru:8000/v1', '', 'good', fetch=fetch)
+    assert mineru['status'] == 'ok' and mineru['served'] == ['flash-next']
+    routing = resolve_model_routing({'LLM_BASE_URL': 'http://llm:8000/v1', 'LLM_MODEL': 'flash-next',
+                                     'LLM_API_KEY': 'bad'})
+    rows = {r['slot']: r for r in await ms.server_status(routing, fetch=fetch)}
+    assert rows['llm']['status'] == 'refused'
+
+
+@pytest.mark.asyncio
+async def test_only_an_admin_checks_a_server(db_session, monkeypatch):
+    from backend.app.models import UserRole
+    from backend.tests.conftest import make_client, make_user
+    seen = []
+
+    async def fetch(url, key):
+        seen.append((url, key))
+        return {'data': [{'id': 'flash-next', 'max_model_len': 131072}]}
+
+    monkeypatch.setattr(ms, '_fetch', fetch)
+    admin, teacher = make_user(role=UserRole.admin), make_user(role=UserRole.teacher)
+    db_session.add_all([admin, teacher])
+    await db_session.commit()
+    body = {'url': 'http://llm:8000/v1', 'model': 'flash-next', 'api_key': 'k'}
+    async with await make_client(db_session, teacher) as client:
+        assert (await client.post('/api/admin/llm/servers/check', json=body)).status_code == 403
+    async with await make_client(db_session, admin) as client:
+        resp = await client.post('/api/admin/llm/servers/check', json=body)
+    assert resp.status_code == 200 and resp.json()['status'] == 'ok'
+    assert seen == [('http://llm:8000/v1/models', 'k')]
+
+
+def test_the_reranker_switch_keeps_its_address():
+    on = resolve_model_routing({'RERANK_URL': 'http://r:8000/rerank'})
+    off = resolve_model_routing({'RERANK_URL': 'http://r:8000/rerank', 'RERANK_ENABLED': 'off'})
+    assert on.rerank.base_url == 'http://r:8000/rerank' and off.rerank.base_url == ''

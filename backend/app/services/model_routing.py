@@ -78,8 +78,10 @@ def resolve_model_routing(configs: Mapping[str, str]) -> ModelRouting:
 
     # Rerank URL has NO fallback: empty means "rerank disabled, degrade to
     # fusion-only ordering". Only the API key falls back to the main LLM key.
+    # RERANK_ENABLED "off" (the admin switch) disables it and keeps the URL.
+    rerank_on = _get(configs, "RERANK_ENABLED", "on") != "off"
     rerank = Endpoint(
-        base_url=_get(configs, "RERANK_URL", ""),
+        base_url=_get(configs, "RERANK_URL", "") if rerank_on else "",
         api_key=_get(configs, "RERANK_API_KEY", main_key),
         model=_get(configs, "RERANK_MODEL", _DEFAULT_RERANK_MODEL),
     )

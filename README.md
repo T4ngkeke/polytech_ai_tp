@@ -17,7 +17,7 @@ This file says what the project is, what it does today and how to run it. The de
 - **Conversation history.** Each answer sees the earlier messages of the session, within a share of the model's context. Past the limit the oldest turns go, several at once, and the chat page draws a line where the history the model sees begins. A question may have at most 20,000 characters.
 - **Quota.** Each user has a daily token quota. A teacher can give a student a full quota again for the day.
 - **Teacher tools.** Analytics for a class or a lab; a report on which course files and pages the answers cite; AI-written reports on a lab or on one student; a test drive that shows answers as students see them; chat history, with the sessions that students deleted.
-- **Admin tools.** Users (also CSV import and password reset), classes with their teacher and activity, every course document, a model map with the state of each model server, a Monitoring tab with Grafana, and data pruning.
+- **Admin tools.** Users (also CSV import and password reset), classes with their teacher and activity, every course document, model settings (servers with one shared key and a test button, what each feature uses, answer limits, billing) with the state of each model server, a Monitoring tab with Grafana, and data pruning.
 
 ## How it is built
 
@@ -165,8 +165,8 @@ The worker also reads these:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PDF_MINERU_PYTHON` | none | Python of the MinerU environment (`/opt/mineru/bin/python` in the worker image built with `WITH_MINERU=1`). |
-| `PDF_MINERU_SERVER_URL` | none | MinerU model server. The admin can switch it in the model map. |
-| `PDF_MINERU_API_KEY` | none | Key of the MinerU server. Used only when the model map has no key for MinerU and no main model key. |
+| `PDF_MINERU_SERVER_URL` | none | MinerU model server. The admin can switch it in the model settings. |
+| `PDF_MINERU_API_KEY` | none | Key of the MinerU server. Used only when the model settings have no key for MinerU and no main model key. |
 | `PDF_MINERU_CONFIG` | none | Absolute path of `mineru.json`. |
 | `PDF_MINERU_PAGE_TIMEOUT_SECONDS` | `240` | Time allowed for one page. |
 | `PDF_READ_BUDGET_SECONDS` | `7200` | Time allowed for reading one PDF. |
