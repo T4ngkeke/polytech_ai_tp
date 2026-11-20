@@ -40,6 +40,7 @@ from backend.app.models import (
     Lab,
     Message,
     MessageFeedback,
+    SenderType,
     Session,
     User,
 )
@@ -200,6 +201,25 @@ async def chat_stream(
             except chat_file_service.AttachmentError as exc:
                 await _refuse(db, current_user, lab_id, exc.code, exc.status, exc.code)
 
+    # A new version of the latest question replaces it and everything after it
+    # (its answer); those messages stay for the audit (research_runs.begin_run).
+    version = None
+    replaced: list[uuid.UUID] = []
+    if body.version_of is not None:
+        target = await db.get(Message, body.version_of)
+        if (target is None or target.session_id != session.id or target.sender != SenderType.user
+                or target.superseded_at is not None):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "message_not_found")
+        later_question = await db.scalar(select(Message.id).where(
+            Message.session_id == session.id, Message.sender == SenderType.user,
+            Message.superseded_at.is_(None), Message.created_at > target.created_at).limit(1))
+        if later_question is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "not_latest_question")
+        replaced = list((await db.scalars(select(Message.id).where(
+            Message.session_id == session.id, Message.superseded_at.is_(None),
+            Message.created_at >= target.created_at))).all())
+        version = (target.version_of or target.id, replaced)
+
     # The quota is checked here only: a question that starts always finishes,
     # even when it goes over; the next one is refused (quota_service).
     blocked = (await quota_service.usage(db, current_user)).blocked
@@ -244,9 +264,10 @@ async def chat_stream(
         # Only what fits the history limit is sent, with the citations of
         # those answers only.
         safe_history, earlier_citations, _ = await runs.load_context(
-            scope, limit=HISTORY_MESSAGES, max_tokens=_history_budget(context, limits, mode))
+            scope, limit=HISTORY_MESSAGES, max_tokens=_history_budget(context, limits, mode),
+            exclude_ids=replaced)
         # Right after a question back the model must answer, not ask again.
-        allow_ask = not await runs.last_answer_asked(scope.session_id)
+        allow_ask = not await runs.last_answer_asked(scope.session_id, exclude_ids=replaced)
     except DocumentNotFound:
         raise HTTPException(404, 'source_unavailable') from None
     teaching_rules = rule_service.teaching_rules_text(rule_texts)
@@ -276,7 +297,7 @@ async def chat_stream(
         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
         task = asyncio.create_task(run_persisted_research(
             scope=scope, question=body.message, client_request_id=request_id,
-            attachments=attachments, model=ResearchModel(agent), model_name=agent.model,
+            attachments=attachments, version=version, model=ResearchModel(agent), model_name=agent.model,
             token_alpha=float(llm_config['token_alpha']),
             token_beta=float(llm_config['token_beta']),
             history=safe_history, earlier_citations=earlier_citations,
@@ -328,8 +349,10 @@ async def chat_stream(
                 title = None
             if title:
                 yield f"event: title\ndata: {json.dumps({'session_id': str(scope.session_id), 'title': title})}\n\n"
-        except RunConflict:
-            yield f"event: error\ndata: {json.dumps({'detail': 'Another research request is already running'})}\n\n"
+        except RunConflict as exc:
+            detail = ('This question was already replaced by a newer version' if str(exc) == 'version_conflict'
+                      else 'Another research request is already running')
+            yield f"event: error\ndata: {json.dumps({'detail': detail})}\n\n"
         except ResearchQuotaExceeded:
             yield f"event: error\ndata: {json.dumps({'detail': 'Daily token quota exceeded'})}\n\n"
         except Exception:

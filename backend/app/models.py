@@ -735,6 +735,13 @@ class Message(Base):
     # What the student attached to this question: [{kind, id, name}], kind
     # 'file' (chat_files), 'document' (a course file) or 'session' (an earlier chat).
     attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Versions of the last turn (edit a question, regenerate an answer): a new
+    # question names the first question of its group; the replaced question
+    # and its answer get superseded_at. The model and the student's history
+    # see only current messages; the audit sees all.
+    version_of: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

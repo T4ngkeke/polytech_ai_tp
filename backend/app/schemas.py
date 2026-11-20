@@ -590,6 +590,9 @@ class MessageResponse(BaseModel):
     answer_mode: str | None = None
     # A student question's attachments: [{kind, id, name}].
     attachments: list[dict] | None = None
+    # Versions: the first question of the group, and when this one was replaced.
+    version_of: uuid.UUID | None = None
+    superseded_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +619,9 @@ class ChatStreamRequest(BaseModel):
     # What the student attaches to this question (checked by the chat):
     # an own uploaded file, a course file of this lab, or an own earlier chat.
     attachments: list["AttachmentRef"] = Field(default_factory=list, max_length=5)
+    # A new version of the session's latest question (edit, or regenerate with
+    # the same text): its id. The old question and answer stay for the audit.
+    version_of: uuid.UUID | None = None
 
 
 class AttachmentRef(BaseModel):

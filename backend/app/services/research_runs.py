@@ -78,6 +78,7 @@ class ResearchRuns:
     async def begin_run(self, *, scope: ResearchScope, question: str,
                         client_request_id: str, mode: str | None = None,
                         attachments: list[dict] | None = None,
+                        version: tuple[uuid.UUID, list[uuid.UUID]] | None = None,
                         stale_after: float = STALE_RUN_SECONDS) -> StartOutcome:
         if not question.strip() or not 1 <= len(client_request_id) <= 128:
             raise ValueError('invalid_request')
@@ -121,9 +122,21 @@ class ResearchRuns:
                     if existing.session_id != scope.session_id or existing.question != question:
                         raise RunConflict('request_id_payload_conflict')
                     return StartOutcome(existing.id, False, existing.status)
+                version_of = None
+                if version is not None:
+                    # A new version of the last turn: (first question of the
+                    # group, the question and answer it replaces). They must
+                    # still be current, else another version came first.
+                    version_of, replaced = version
+                    done = await db.execute(update(Message).where(
+                        Message.id.in_(replaced), Message.session_id == scope.session_id,
+                        Message.superseded_at.is_(None)).values(superseded_at=_utcnow())
+                        .execution_options(synchronize_session=False))
+                    if done.rowcount != len(replaced):
+                        raise RunConflict('version_conflict')
                 user_message = Message(session_id=scope.session_id,
                                        sender=SenderType.user, content=question,
-                                       attachments=attachments or None)
+                                       attachments=attachments or None, version_of=version_of)
                 db.add(user_message)
                 # An uploaded file belongs to the chat it is first sent in.
                 file_ids = [uuid.UUID(a['id']) for a in attachments or () if a['kind'] == 'file']
@@ -435,12 +448,14 @@ class ResearchRuns:
                 'box': block_box(block.source_ref) if available and block is not None else None})
         return payloads
 
-    async def last_answer_asked(self, session_id: uuid.UUID) -> bool:
+    async def last_answer_asked(self, session_id: uuid.UUID, exclude_ids=()) -> bool:
         """Whether the session's latest answer is a question back: the next run
-        must answer, so the chat does not offer ask_student twice in a row."""
+        must answer, so the chat does not offer ask_student twice in a row.
+        Replaced versions and ``exclude_ids`` do not count."""
         async with self.session_factory() as db:
             latest = await db.scalar(select(Message).where(
-                Message.session_id == session_id, Message.sender == SenderType.llm)
+                Message.session_id == session_id, Message.sender == SenderType.llm,
+                Message.superseded_at.is_(None), Message.id.not_in(list(exclude_ids)))
                 .order_by(Message.created_at.desc()).limit(1))
             return bool(latest is not None and latest.clarification)
 
@@ -461,7 +476,8 @@ class ResearchRuns:
         return history, earlier
 
     async def load_context(self, scope: ResearchScope, *, limit: int = 20,
-                           max_tokens: int | None = None) -> tuple[list[dict], dict[str, dict], int]:
+                           max_tokens: int | None = None,
+                           exclude_ids=()) -> tuple[list[dict], dict[str, dict], int]:
         """The safe chat history, the citations of the answers in it by
         label, and how many safe messages were left out by ``max_tokens``.
 
@@ -474,11 +490,15 @@ class ResearchRuns:
         answer names one stored source; a new answer may cite it again, and
         finish_run validates it like a new one. A label used for two different
         sources (sessions from before the numbering) is ambiguous and left out.
+
+        Replaced versions (superseded_at) are left out, and so are
+        ``exclude_ids``: the turn a new version is about to replace.
         """
+        current = (Message.session_id == scope.session_id, Message.superseded_at.is_(None),
+                   Message.id.not_in(list(exclude_ids)))
         async with self.session_factory() as db:
             await _live_session(db, scope.user_id, scope.session_id)
-            messages = list((await db.scalars(select(Message).where(
-                Message.session_id == scope.session_id).order_by(
+            messages = list((await db.scalars(select(Message).where(*current).order_by(
                 Message.created_at.desc()).limit(limit))).all())
             messages.reverse()
             # The history may start only at fixed points counted from the
@@ -488,8 +508,7 @@ class ResearchRuns:
             if max_tokens is not None and len(messages) == limit:
                 offset = sum(estimate_length(n) for n in (await db.scalars(
                     select(func.length(Message.content)).where(
-                        Message.session_id == scope.session_id,
-                        Message.created_at < messages[0].created_at))).all())
+                        *current, Message.created_at < messages[0].created_at))).all())
             answer_ids = [m.id for m in messages if m.sender != SenderType.user]
             runs = {run.assistant_message_id: run for run in (await db.scalars(select(AgentRun).where(
                 AgentRun.assistant_message_id.in_(answer_ids),

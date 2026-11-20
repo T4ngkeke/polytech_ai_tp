@@ -2,7 +2,8 @@
 
 Students keep a copy of their work, and may take their data with them (GDPR).
 Only the user's own visible conversations: not the ones they deleted, not
-teacher test sessions. Citation markers such as [E1] stay in the answer text.
+teacher test sessions, not the versions a newer one replaced. Citation
+markers such as [E1] stay in the answer text.
 """
 from __future__ import annotations
 
@@ -26,8 +27,9 @@ async def conversations(db, user_id: uuid.UUID) -> list[dict]:
     ids = [session.id for session, _, _ in sessions]
     messages: dict[uuid.UUID, list[Message]] = {i: [] for i in ids}
     if ids:
-        rows = (await db.scalars(select(Message).where(Message.session_id.in_(ids))
-                                 .order_by(Message.created_at))).all()
+        rows = (await db.scalars(select(Message).where(
+            Message.session_id.in_(ids), Message.superseded_at.is_(None))
+            .order_by(Message.created_at))).all()
         for message in rows:
             messages[message.session_id].append(message)
     return [{

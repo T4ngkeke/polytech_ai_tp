@@ -121,6 +121,7 @@ def research_input_tokens(input_tokens: int, history: list[dict] | None,
 async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  client_request_id: str, model, model_name: str,
                                  attachments: list[dict] | None = None,
+                                 version: tuple | None = None,
                                  token_alpha: float, token_beta: float,
                                  history: list[dict] | None = None,
                                  teaching_rules: str = '', research_note: str = '',
@@ -149,7 +150,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
     runs = ResearchRuns(session_factory)
     usage = ResearchUsage(session_factory)
     started = await runs.begin_run(scope=scope, question=question,
-        client_request_id=client_request_id, mode=mode, attachments=attachments,
+        client_request_id=client_request_id, mode=mode, attachments=attachments, version=version,
         stale_after=max(STALE_RUN_SECONDS, 2 * limits.total_seconds))
     if not started.created:
         # The same request again (a resend, a reconnect): wait for the run

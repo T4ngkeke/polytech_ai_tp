@@ -185,6 +185,8 @@ The messages of a session, with the tokens each one used.
 | clarification | JSON | Nullable. `{"question", "options"}` when the answer is a question back to the student. Added by migration `m4e_clarification_v1`. |
 | answer_mode | String(16) | Nullable. The mode that wrote an answer: `direct`, `search` or `research`. Null for answers written before the modes. Added by migration `m4f_answer_modes_v1`. |
 | attachments | JSON | Nullable. On a student question: what it attached, `[{kind, id, name}]` with kind `file` (`chat_files`), `document` (a course file) or `session` (an earlier chat). Added by `m4s_chat_files_v1`. |
+| version_of | UUID | Nullable. Foreign key to `messages.id`. On a new version of the last question (edit or new answer): the first question of its group. Added by `m4t_message_versions_v1`. |
+| superseded_at | Timestamp | Nullable. Set on a question and its answer when a newer version replaces them. The model's history and the export leave them out; the student's session and the audit show them. Analytics and quota count every version. Added by `m4t_message_versions_v1`. |
 | created_at | Timestamp | |
 
 ## Usage and quota
