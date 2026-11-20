@@ -164,12 +164,14 @@ async def update_settings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserResponse:
-    """The user's page language and "about me". Only the fields sent change;
-    ``null`` (or an empty "about me") clears one."""
+    """The user's page language, "about me" and memory switch. Only the fields
+    sent change; ``null`` (or an empty "about me") clears the first two."""
     if 'ui_language' in body.model_fields_set:
         current_user.ui_language = body.ui_language
     if 'about_me' in body.model_fields_set:
         current_user.about_me = (body.about_me or '').strip() or None
+    if body.memory_enabled is not None:
+        current_user.memory_enabled = body.memory_enabled
     await db.commit()
     await db.refresh(current_user)
     return UserResponse.model_validate(current_user)

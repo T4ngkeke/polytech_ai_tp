@@ -238,6 +238,8 @@ class User(Base):
     # (the teacher's rules win; wired in the agent work).
     ui_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     about_me: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The student may turn memory off: none is read or written (kept until deleted).
+    memory_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default='true')
     # Set when an admin resets the password to the default one: until the user
     # chooses a new password, only /api/auth/me and change-password answer.
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
@@ -596,6 +598,36 @@ class ChatFile(Base):
 
     __table_args__ = (
         Index("ix_chat_files_user_created", "user_id", "created_at"),
+    )
+
+
+class StudentMemory(Base):
+    """One thing the assistant remembers about a student, in one class
+    (services/memory_service.py). Learning preferences and progress only,
+    one sentence each. The student sees, deletes (for good) or turns off
+    their memories; the class teacher sees them; exam mode uses none.
+    Written later by the agent's background review.
+    """
+    __tablename__ = "student_memories"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    class_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # A short group name, e.g. "préférences" or "récursivité".
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(EmbeddingVector(EMBEDDING_DIM), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_student_memories_user_class", "user_id", "class_id"),
     )
 
 

@@ -99,6 +99,7 @@ class UserResponse(UserBase):
     must_change_password: bool = False
     ui_language: str | None = None
     about_me: str | None = None
+    memory_enabled: bool = True
 
 
 ABOUT_ME_MAX_CHARS = 500
@@ -111,6 +112,8 @@ class UserSettingsRequest(BaseModel):
 
     ui_language: Literal['zh', 'fr', 'en'] | None = None
     about_me: str | None = Field(None, max_length=ABOUT_ME_MAX_CHARS)
+    # Off: no memory is read or written (the stored ones stay until deleted).
+    memory_enabled: bool | None = None
 
 
 class UserCreateRequest(BaseModel):

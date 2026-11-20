@@ -68,6 +68,7 @@ The accounts of all three roles.
 | must_change_password | Boolean | Default false. Set by an admin password reset (the password becomes `RESET_PASSWORD`, `123456` by default); until the user chooses a new password, only `/api/auth/me` and `/api/auth/change-password` answer. Added by `m4o_must_change_password_v1`. |
 | ui_language | String(8) | Nullable. The page language the user chose: `zh`, `fr` or `en`; none follows the browser. Added by `m4r_user_settings_v1`. |
 | about_me | Text | Nullable, up to 500 characters. What the user wants the assistant to know ("explain simply, I am a beginner"). For the agent; the teacher's rules win. Added by `m4r_user_settings_v1`. |
+| memory_enabled | Boolean | Default true. Off: the assistant reads and writes no memory for this user (the stored ones stay until deleted). Added by `m4u_student_memories_v1`. |
 | is_deleted | Boolean | Default false. A deleted user cannot log in. |
 
 ### classes
@@ -274,6 +275,21 @@ Files students upload in the chat (`services/chat_file_service.py`). Not course 
 | has_text | Boolean | False for an image or a PDF without a text layer (a scan). |
 | created_at | Timestamp | Indexed with `user_id`. |
 | deleted_at | Timestamp | Nullable. Set when the student hides it; the teacher still sees it. |
+
+### student_memories
+
+What the assistant remembers about a student, per class (`services/memory_service.py`). One sentence each (200 characters at most), learning preferences and progress only, at most 50 per student and class. The student sees and deletes them (for good) or turns memory off (`users.memory_enabled`); the class teacher sees them; exam mode will use none. The agent's background review will write them. Added by `m4u_student_memories_v1`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| user_id | UUID | Foreign key to `users.id`. |
+| class_id | UUID | Foreign key to `classes.id`. A memory is used only in its class. |
+| content | Text | One sentence. |
+| category | String(64) | Nullable. A short group name ("préférences", "récursivité"). |
+| source_message_id | UUID | Nullable. Foreign key to `messages.id`. The message it came from. |
+| embedding | vector(1024) | Nullable. For finding the memories that fit a question. |
+| created_at, updated_at | Timestamp | Indexed with `user_id` and `class_id`. |
 
 ### notifications
 

@@ -19,6 +19,7 @@ DELETE /api/student/sessions/{session_id}      →  Soft-delete (hide) own sessi
 GET    /api/student/usage                      →  Day and week token usage, limits, resets.
 POST   /api/student/usage/reset-request        →  Ask the teacher for a reset (at the limit).
 GET    /api/student/search?q=                  →  Search own conversations (titles and messages).
+GET    /api/student/memories                   →  What the assistant remembers (DELETE: one or all, for good).
 GET    /api/student/export?format=json|md      →  Download all own visible conversations.
 """
 
@@ -44,8 +45,8 @@ from backend.app.schemas import (
     SessionUpdateRequest,
     SessionWithMessagesResponse,
 )
-from backend.app.services import (export_service, feature_service, notification_service, quota_service,
-                                  search_service, session_service)
+from backend.app.services import (export_service, feature_service, memory_service, notification_service,
+                                  quota_service, search_service, session_service)
 from backend.app.agent.tools import readable_files
 from backend.app.services.research_runs import ResearchRuns
 
@@ -358,6 +359,48 @@ async def search_conversations(
     ``{session_id, title, lab_id, lab_name, class_name, pinned, message_id,
     role, snippet, matched_at}``. A title-only match has no message."""
     return await search_service.student_search(db, current_user.id, q.strip())
+
+
+# ===================================================================
+# GET/DELETE /api/student/memories
+# ===================================================================
+
+
+@router.get("/memories")
+async def list_memories(
+    class_id: uuid.UUID | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """What the assistant remembers about the user, per class, newest first:
+    ``{enabled, items: [{id, class_id, class_name, content, category, ...}]}``."""
+    return {"enabled": current_user.memory_enabled,
+            "items": await memory_service.listing(db, current_user.id, class_id)}
+
+
+@router.delete("/memories/{memory_id}", status_code=204)
+async def delete_memory(
+    memory_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    """Delete one own memory for good."""
+    if not await memory_service.remove(db, current_user.id, memory_id=memory_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "memory_not_found")
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/memories")
+async def delete_memories(
+    class_id: uuid.UUID | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Delete all own memories for good (or those of one class)."""
+    count = await memory_service.remove(db, current_user.id, class_id=class_id)
+    await db.commit()
+    return {"deleted": count}
 
 
 # ===================================================================

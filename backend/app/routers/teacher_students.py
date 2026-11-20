@@ -12,7 +12,7 @@ from backend.app.database import get_db
 from backend.app.models import Class, ClassStudent, Lab, Session, UsageStat, User, UserRole
 from backend.app.routers.teacher_access import _class_access, _lab_access, _verify_class_ownership
 from backend.app.schemas import SessionWithMessagesResponse, StudentSummaryResponse
-from backend.app.services import class_service, quota_service, search_service
+from backend.app.services import class_service, memory_service, quota_service, search_service
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 
@@ -38,6 +38,29 @@ async def _build_student_summaries(
             )
         )
     return summaries
+
+
+# ===================================================================
+# GET /api/teacher/classes/{class_id}/students/{student_id}/memories
+# ===================================================================
+
+
+@router.get("/classes/{class_id}/students/{student_id}/memories")
+async def student_memories(
+    class_id: uuid.UUID,
+    student_id: uuid.UUID,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """What the assistant remembers about a student of this class (this class
+    only), and whether the student turned memory off. Its teacher, or an admin."""
+    await _class_access(db, class_id, teacher)
+    student = await db.scalar(select(User).join(ClassStudent, ClassStudent.student_id == User.id).where(
+        ClassStudent.class_id == class_id, User.id == student_id))
+    if student is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not in this class")
+    return {"enabled": student.memory_enabled,
+            "items": await memory_service.listing(db, student_id, class_id)}
 
 
 # ===================================================================
