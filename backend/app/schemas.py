@@ -588,6 +588,8 @@ class MessageResponse(BaseModel):
     clarification: dict | None = None
     # direct, search or research; None for answers written before the modes.
     answer_mode: str | None = None
+    # A student question's attachments: [{kind, id, name}].
+    attachments: list[dict] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +613,14 @@ class ChatStreamRequest(BaseModel):
     # Tools the student turned on for this question; each must be allowed in
     # this lab (services/feature_service.py), else the question is refused.
     tools: list[Literal['web', 'code', 'deep']] = Field(default_factory=list, max_length=3)
+    # What the student attaches to this question (checked by the chat):
+    # an own uploaded file, a course file of this lab, or an own earlier chat.
+    attachments: list["AttachmentRef"] = Field(default_factory=list, max_length=5)
+
+
+class AttachmentRef(BaseModel):
+    kind: Literal['file', 'document', 'session']
+    id: uuid.UUID
 
 
 # ---------------------------------------------------------------------------

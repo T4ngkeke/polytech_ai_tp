@@ -564,6 +564,41 @@ class QuotaResetRequest(Base):
     )
 
 
+class ChatFile(Base):
+    """A file a student uploaded in the chat (services/chat_file_service.py).
+
+    Not a course file: no MinerU, no index. An image is kept as it is; a PDF or
+    a text file keeps the text read at upload (``text``; ``has_text`` false for
+    a scanned PDF). A student's delete hides it (``deleted_at``); the class
+    teacher still sees it in the audit, like a deleted conversation.
+    """
+    __tablename__ = "chat_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("labs.id", ondelete="SET NULL"), nullable=True)
+    # The conversation it was first sent in (None until then).
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)          # image, pdf, text
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    text_chars: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    has_text: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_chat_files_user_created", "user_id", "created_at"),
+    )
+
+
 class Notification(Base):
     """A message for one user's bell (services/notification_service.py).
 
@@ -697,6 +732,9 @@ class Message(Base):
     clarification: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # The answer mode of an assistant answer: direct, search or research (NULL: older answers).
     answer_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # What the student attached to this question: [{kind, id, name}], kind
+    # 'file' (chat_files), 'document' (a course file) or 'session' (an earlier chat).
+    attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

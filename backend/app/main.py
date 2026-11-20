@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.database import Base, engine
-from backend.app.routers import admin, auth, chat, monitoring, notifications, student, teacher, document_versions, document_reader
+from backend.app.routers import admin, auth, chat, chat_files, monitoring, notifications, student, teacher, document_versions, document_reader
 from backend.app.routers import teacher_documents, teacher_reports, teacher_rules, teacher_students
 
 # The research agent logs one INFO line per tool call (agent/runner.py), so a
@@ -148,6 +148,7 @@ app.include_router(document_reader.student_router)
 app.include_router(student.router)
 app.include_router(chat.router)
 app.include_router(notifications.router)
+app.include_router(chat_files.router)
 
 
 # ---------------------------------------------------------------------------

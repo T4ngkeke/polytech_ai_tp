@@ -44,7 +44,7 @@ from backend.app.models import (
     User,
 )
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
-from backend.app.services import feature_service, quota_service, rule_service
+from backend.app.services import chat_file_service, feature_service, quota_service, rule_service
 from backend.app.services.model_routing import Endpoint
 from backend.app.services.model_servers import context_tokens
 from backend.app.services.document_access import DocumentNotFound
@@ -143,6 +143,7 @@ async def chat_stream(
     # Resolve lab → class for rule injection and membership check
     class_id = None
     lab_id = session.lab_id
+    attachments: list[dict] = []
 
     if lab_id:
         # The lab must exist, be active, and not be soft-deleted. A locked
@@ -182,15 +183,22 @@ async def chat_stream(
                               "You are not a member of the class that owns this lab")
 
         # The tools turned on for this question must be allowed in this lab
-        # (class switches, the lab's own choices, exam mode: feature_service).
-        if body.tools:
-            class_features, exam_mode = (await db.execute(
+        # (class switches, the lab's own choices, exam mode: feature_service),
+        # and so must what it attaches (chat_file_service.resolve_attachments).
+        if body.tools or body.attachments:
+            class_features, class_exam = (await db.execute(
                 select(Class.features, Class.exam_mode).where(Class.id == class_id))).one()
             allowed = feature_service.effective(class_features, lab.feature_overrides,
-                                                exam_mode=bool(exam_mode))
+                                                exam_mode=bool(class_exam))
             if not all(allowed[tool] for tool in body.tools):
                 await _refuse(db, current_user, lab_id, 'feature_off', status.HTTP_403_FORBIDDEN,
                               'feature_off')
+            try:
+                attachments = await chat_file_service.resolve_attachments(
+                    db, body.attachments, user_id=current_user.id, session_id=session.id,
+                    lab_id=lab_id, class_id=class_id, exam_mode=bool(class_exam), allowed=allowed)
+            except chat_file_service.AttachmentError as exc:
+                await _refuse(db, current_user, lab_id, exc.code, exc.status, exc.code)
 
     # The quota is checked here only: a question that starts always finishes,
     # even when it goes over; the next one is refused (quota_service).
@@ -268,7 +276,7 @@ async def chat_stream(
         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
         task = asyncio.create_task(run_persisted_research(
             scope=scope, question=body.message, client_request_id=request_id,
-            model=ResearchModel(agent), model_name=agent.model,
+            attachments=attachments, model=ResearchModel(agent), model_name=agent.model,
             token_alpha=float(llm_config['token_alpha']),
             token_beta=float(llm_config['token_beta']),
             history=safe_history, earlier_citations=earlier_citations,

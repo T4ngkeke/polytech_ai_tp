@@ -184,6 +184,7 @@ The messages of a session, with the tokens each one used.
 | feedback | Enum | Nullable. `up` or `down`, set by the student on an answer. |
 | clarification | JSON | Nullable. `{"question", "options"}` when the answer is a question back to the student. Added by migration `m4e_clarification_v1`. |
 | answer_mode | String(16) | Nullable. The mode that wrote an answer: `direct`, `search` or `research`. Null for answers written before the modes. Added by migration `m4f_answer_modes_v1`. |
+| attachments | JSON | Nullable. On a student question: what it attached, `[{kind, id, name}]` with kind `file` (`chat_files`), `document` (a course file) or `session` (an earlier chat). Added by `m4s_chat_files_v1`. |
 | created_at | Timestamp | |
 
 ## Usage and quota
@@ -250,6 +251,27 @@ A failure the user does not see: a service failed and the code went on without i
 | component | String(32) | `rerank`, `embedding`, `vision`, `tool_<name>`, `tp_text`, `title`, `report`, `report_embedding`, `captions` or `worker`. |
 | kind | String(64) | The error name (`ConnectTimeout`, `vision_timeout`...). `retried_...` for a rerank call whose second try was made. No question or course text. |
 | created_at | Timestamp | Indexed. |
+
+### chat_files
+
+Files students upload in the chat (`services/chat_file_service.py`). Not course files: no MinerU, no index. The bytes are stored under `DOCUMENTS_STORAGE_ROOT/chat_files/<user id>/`. Added by `m4s_chat_files_v1`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| user_id | UUID | Foreign key to `users.id`. Who uploaded it. |
+| lab_id | UUID | Nullable. Foreign key to `labs.id`. The lab it was uploaded to; it can be attached only there. |
+| session_id | UUID | Nullable. Foreign key to `sessions.id`. The chat it was first sent in. |
+| filename | String(255) | The last part of the name the browser sent. |
+| mime | String(100) | `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf` or `text/plain`. |
+| size | Integer | Bytes. 10 MB at most. |
+| kind | String(8) | `image`, `pdf` or `text`. |
+| storage_key | String(512) | Path under the storage root. |
+| text | Text | Nullable. The text read at upload (a PDF's text layer, page by page; a text file's content), up to 200 000 characters. |
+| text_chars | Integer | Length of the whole text read. |
+| has_text | Boolean | False for an image or a PDF without a text layer (a scan). |
+| created_at | Timestamp | Indexed with `user_id`. |
+| deleted_at | Timestamp | Nullable. Set when the student hides it; the teacher still sees it. |
 
 ### notifications
 

@@ -25,6 +25,7 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm4p_features_v1',
     'm4q_notifications_v1',
     'm4r_user_settings_v1',
+    'm4s_chat_files_v1',
 )
 
 # Structured ingestion alone needs the versions before the research ones.

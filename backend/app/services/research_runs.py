@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -18,7 +18,7 @@ from backend.app.agent.result import LABEL_RE, ResearchResult, cited_ids
 from backend.app.agent.tools import ResearchScope, _live_session
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import (
-    AgentRun, Document, DocumentAsset, DocumentBlock, DocumentBlockAsset, DocumentPage, Message, MessageCitation,
+    AgentRun, ChatFile, Document, DocumentAsset, DocumentBlock, DocumentBlockAsset, DocumentPage, Message, MessageCitation,
     ModelCallUsage, SenderType, Session, UsageReservation,
     UsageStat, User, _utcnow,
 )
@@ -77,6 +77,7 @@ class ResearchRuns:
 
     async def begin_run(self, *, scope: ResearchScope, question: str,
                         client_request_id: str, mode: str | None = None,
+                        attachments: list[dict] | None = None,
                         stale_after: float = STALE_RUN_SECONDS) -> StartOutcome:
         if not question.strip() or not 1 <= len(client_request_id) <= 128:
             raise ValueError('invalid_request')
@@ -121,8 +122,15 @@ class ResearchRuns:
                         raise RunConflict('request_id_payload_conflict')
                     return StartOutcome(existing.id, False, existing.status)
                 user_message = Message(session_id=scope.session_id,
-                                       sender=SenderType.user, content=question)
+                                       sender=SenderType.user, content=question,
+                                       attachments=attachments or None)
                 db.add(user_message)
+                # An uploaded file belongs to the chat it is first sent in.
+                file_ids = [uuid.UUID(a['id']) for a in attachments or () if a['kind'] == 'file']
+                if file_ids:
+                    await db.execute(update(ChatFile).where(
+                        ChatFile.id.in_(file_ids), ChatFile.session_id.is_(None))
+                        .values(session_id=scope.session_id).execution_options(synchronize_session=False))
                 await db.flush()
                 run = await db.get(AgentRun, inserted)
                 run.user_message_id = user_message.id

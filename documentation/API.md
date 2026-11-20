@@ -66,6 +66,7 @@ This area covers the chat itself and the thumbs up or down on an answer.
 The request body has `session_id` and `message`, and two optional fields:
 
 - `client_request_id` (UUID): the same ID returns the saved run again, with no second model call and no second charge.
+- `attachments` (list, at most 5, default empty): `{kind, id}` items. `file`: an own uploaded file of this lab, not hidden, needs the lab's `upload` feature. `document`: a course file this lab can read now (in exam mode, an allowed one). `session`: an own earlier chat of this lab, not this one, not in exam mode. A refused attachment refuses the question: `404 attachment_unavailable`, `403 feature_off` or `403 exam_mode`. They are saved on the student's message (`attachments: [{kind, id, name}]` in the session's messages); the agent does not read them yet.
 - `tools` (list, default empty): the tools the student turned on for this question, among `web`, `code` and `deep`. Each one must be allowed in the lab (the lab's `features`), else the question is refused with `403 feature_off`. The tools themselves come with the agent work; for now the server only checks them.
 - `mode` (default `research`):
   - `research`: the research agent (`backend/app/agent/runner.py`) searches and reads several times, and may ask the student a question back.
@@ -190,6 +191,17 @@ This area covers users, classes, the model settings, data pruning and global ana
 | POST | `/api/admin/llm/servers/check` | Admin | Tests one server with the values on the page, saved or not: `{url, model, api_key}`. Returns `{status, served, max_model_len}`; `status` is `ok`, `model_missing`, `refused` (the key), `unreachable` or `invalid_url`. An empty `model` (the MinerU server) is `ok` when the server answers. 3-second timeout. |
 | DELETE | `/api/admin/sessions/{session_id}` | Admin | Deletes a session and its messages for good. |
 | POST | `/api/admin/maintenance/prune` | Admin | Deletes sessions and messages older than `older_than_days`. With `dry_run: true` it only counts them. |
+
+## Files students upload in the chat
+
+Not course files: no MinerU and no index (see `backend/app/services/chat_file_service.py`). An image (PNG, JPEG, GIF, WebP) is kept as it is. A PDF keeps the text of its text layer; a scanned PDF has `has_text: false`. A text file (code, notes, data: `.py`, `.c`, `.java`, `.txt`, `.md`, `.csv`, `.json`...) keeps its text. 10 MB at most. The type is read from the first bytes, not from the name.
+
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| POST | `/api/student/files` | Any user | Multipart `file` and `lab_id`. The user must be in the lab's class (or own it: the test drive), the lab open, and its `upload` feature on (`403 feature_off`; exam mode turns it off). Returns `{id, lab_id, session_id, filename, mime, size, kind, has_text, text_chars, created_at}` with `201`. Errors: `413 file_too_large`, `415 unsupported_type`, `422 empty_file` or `unreadable_pdf`. |
+| GET | `/api/student/files` | Any user | The user's own files, not hidden, newest first (100 at most). Optional `?lab_id=`. |
+| DELETE | `/api/student/files/{file_id}` | Any user | Hides an own file: it leaves the list and cannot be attached again. The class teacher still sees it, like a deleted conversation. Returns `204`. |
+| GET | `/api/files/{file_id}/content` | Owner, class teacher, admin | The file itself (`inline`). The owner loses access once it is hidden; others get `404`. |
 
 ## Notifications
 
