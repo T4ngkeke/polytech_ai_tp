@@ -135,3 +135,23 @@ def test_a_dns_answer_that_changes_after_the_check_is_stopped_at_connect(monkeyp
     with pytest.raises(Exception) as err:
         wt.fetch_page('http://rebinding.example/')
     assert 'invalid' in str(err.value).lower() and connected == []
+
+
+@pytest.mark.asyncio
+async def test_a_lab_without_course_files_keeps_web_search():
+    from backend.app.agent.runner import COURSE_TOOL_NAMES, NO_DOCUMENTS_WEB_TURN
+
+    class EmptyLab(ViewFixture):
+        async def page_index(self):
+            return {}
+    offered = []
+
+    class Recording(Script):
+        async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
+            offered.append({t['function']['name'] for t in tools or []})
+            return await super().__call__(messages, max_output, timeout, tools=tools, purpose=purpose)
+    model = Recording([('search_web', {'query': 'dernière version Python'})], 'Python 3.14 [W1].')
+    result = await ResearchRunner(CourseTools(EmptyLab()), model, web_tools=fake_tools()).run('Version ?')
+    assert 'search_web' in offered[0] and not COURSE_TOOL_NAMES & offered[0]
+    assert NO_DOCUMENTS_WEB_TURN in model.seen[0][-1]['content']
+    assert [s['id'] for s in result.web_sources] == ['W1'] and result.answer == 'Python 3.14 [W1].'

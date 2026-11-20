@@ -84,6 +84,7 @@ def system_prompt(tool_calls: int, visual_calls: int) -> str:
 COURSE_TOOLS = [{'type': 'function', 'function': {'name': name, 'description': DESCRIPTIONS[name],
                                                   'parameters': VIEW_SCHEMAS[name].model_json_schema()}}
                 for name in sorted(VIEW_SCHEMAS)]
+COURSE_TOOL_NAMES = set(VIEW_SCHEMAS)
 
 
 # Handles mean nothing to the student: "(d1/d7)", "d2", "d6.p23".
@@ -176,6 +177,11 @@ NO_DOCUMENTS_TURN = ('This lab has no course documents yet, so there is nothing 
                      'no tools are available. Answer briefly from general knowledge if the question '
                      'allows it, and say clearly that the teacher has not published course files for '
                      'this TP yet (students cannot add them). Cite nothing.')
+# The same, when the student turned web search on: the web tools stay.
+NO_DOCUMENTS_WEB_TURN = ('This lab has no course documents yet, so the course tools are not available. '
+                         'Web search is on: use search_web and fetch_url when the question needs current '
+                         'or external information, and cite those sources as [W1], [W2]. Say that the '
+                         'teacher has not published course files for this TP yet.')
 # Added after the tool results of each turn when the teacher set rules, with
 # the rules themselves. Measured 2026-11-17 without it: a class rule "Always
 # answer in English" was ignored in 2 of 2 Research runs (followed in Search and
@@ -406,7 +412,12 @@ class ResearchRunner:
         # A lab without readable course files: searching would only fail,
         # call after call, until the budget runs out.
         no_documents = not await tools.document_count()
-        if no_documents:
+        if no_documents and self.web_tools:
+            # Only the course tools go: the web stays open for this question.
+            offered = [t for t in offered if t['function']['name'] not in COURSE_TOOL_NAMES]
+            messages.append({'role': 'user', 'content': NO_DOCUMENTS_WEB_TURN + language})
+            note('course_tools_withdrawn', reason='no_documents')
+        elif no_documents:
             withdraw('no_documents', NO_DOCUMENTS_TURN)
 
         while True:
@@ -521,7 +532,8 @@ class ResearchRunner:
                 continue
             answer = reply.content.strip()
             # finished: the model stopped calling tools by itself.
-            stop = 'finished' if tools_open else 'no_documents' if no_documents else 'budget_exhausted'
+            stop = ('no_documents' if no_documents and (not tools_open or self.web_tools)
+                    else 'finished' if tools_open else 'budget_exhausted')
             break
 
         if clarification is not None:
