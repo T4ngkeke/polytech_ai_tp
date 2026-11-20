@@ -780,6 +780,8 @@ class Message(Base):
     course_use: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # The task checklist the model kept while answering: [{id, content, status}].
     tasks: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The web sources an answer cites ([W#]): [{id, url, title}].
+    web_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

@@ -146,6 +146,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
                                  tool_factory=None, on_phase=None, on_draft=None, on_tasks=None,
+                                 web_tools=None,
                                  vision_fn=None,
                                  allow_ask: bool = False,
                                  vision_model: str = '',
@@ -273,7 +274,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                 total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
                 max_input_tokens=research_input_tokens(limits.input_tokens, history, context_tokens),
                 lead_min_score=search_mode.min_score_for(rerank_model),
-                on_phase=on_phase, on_draft=on_draft, on_tasks=on_tasks)
+                on_phase=on_phase, on_draft=on_draft, on_tasks=on_tasks, web_tools=web_tools)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations,
                                   allow_ask=allow_ask, answer_language=answer_language)

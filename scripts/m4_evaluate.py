@@ -31,6 +31,8 @@ Environment:
   M4_TOOL_CALLS    overrides the budget's tool call limit
   M4_TASKS         0: do not offer the task checklist tools (create_tasks, update_task); default 1,
                    as the student chat
+  M4_WEB           1: offer the web search tools, as when the student turns web search on;
+                   needs M4_SEARXNG_URL (a SearXNG instance with the JSON format on)
   M4_DEEP          1: deep research as the student chat runs it (more tool calls, visual calls
                    and time: research_service.deep_limits; the DEEP_NOTE added to the note)
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
@@ -272,6 +274,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.agent.result import ResearchResult
     from backend.app.agent.runner import NO_LEAD_CALLS, ResearchRunner
+    from backend.app.agent.web_tools import WebTools
     from backend.app.agent.search import SearchRunner, min_score_for
     from backend.app.agent.tools import PerCallTools, create_scope
     from backend.app.models import Document, Session, User, UserRole
@@ -423,7 +426,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                                              final_reserve=limits['final_reserve'],
                                              lead_min_score=min_score_for(tool_config['rerank_model']),
                                              no_lead_calls=no_lead_calls,
-                                             offer_tasks=os.getenv('M4_TASKS', '1') == '1')
+                                             offer_tasks=os.getenv('M4_TASKS', '1') == '1',
+                                             web_tools=(WebTools(os.environ['M4_SEARXNG_URL'])
+                                                        if os.getenv('M4_WEB') == '1' else None))
             course_tools, research = runner()
             # The clarify questions are asked as in the student chat, without the
             # benchmark note that asks for course support.

@@ -14,3 +14,5 @@ openai>=1.30.0          # AsyncOpenAI, used for every OpenAI-compatible model se
 python-dotenv>=1.0.0
 python-multipart>=0.0.9 # Required for UploadFile (CSV import)
 httpx>=0.27.0           # async HTTP (model server checks, tests)
+requests>=2.32.0        # web search tool: fetch_url with connect-time address checks (agent/web_tools.py)
+beautifulsoup4>=4.12.0  # web search tool: page text (agent/web_tools.py)

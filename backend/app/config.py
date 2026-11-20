@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # M2-C: model descriptions of pictures, on a teacher's request only. Turn on
     # only after the configured VLM_MODEL was checked to really read images.
     STRUCTURED_VISION_ENABLED: bool = False
+    # The SearXNG instance of the web search tool (agent/web_tools.py), e.g.
+    # http://searxng:8080 on the compose network. Empty: no web search; a
+    # question that asks for it is refused (503 web_search_not_configured).
+    WEB_SEARCH_URL: str = ""
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/edudb"

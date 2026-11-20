@@ -30,6 +30,7 @@ from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseToo
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.language import language_sentence, with_language
 from backend.app.agent.task_tools import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
+from backend.app.agent.web_tools import WEB_NOTE, WEB_TOOL_NAMES, WEB_TOOLS, WebTools
 from backend.app.agent.result import (
     ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, call_usage, cited_ids, cited_sources,
     malformed_refs,
@@ -133,6 +134,24 @@ ASK_ALONE = 'error: call ask_student alone, after the other tools have returned'
 # "(d1/d7)", "(d6.p19)", and "d1 – " written before a file name.
 _HANDLE_GROUP = re.compile(r'\s*\(\s*d\d+(?:\.[pox]\d+)?(?:\s*[/,;]\s*d\d+(?:\.[pox]\d+)?)*\s*\)')
 _HANDLE_BEFORE_FILE = re.compile(r'\bd\d+\s*[–—:-]\s*(?=[`*_]*[\w.-]+\.pdf)')
+
+
+# [W1] or [W1, W2]: web sources (web_tools.py).
+_WEB_GROUP = re.compile(r'\[(W[1-9]\d*(?:\s*[,;]\s*W[1-9]\d*)*)\]')
+
+
+def web_citations(text: str, web_tools: WebTools | None) -> tuple[str, list[dict] | None]:
+    """The answer with only web IDs the run returned, and those sources (None: none)."""
+    if web_tools is None:
+        return text, None
+    used = set()
+
+    def keep(match):
+        ids = [i for i in re.split(r'\s*[,;]\s*', match.group(1)) if i in web_tools.sources]
+        used.update(ids)
+        return f"[{', '.join(ids)}]" if ids else ''
+    text = _WEB_GROUP.sub(keep, text)
+    return text, web_tools.cited(used) or None
 
 
 def _without_document_handles(text: str) -> str:
@@ -267,6 +286,7 @@ class ResearchRunner:
                  on_draft: Callable[[str | None], None] | None = None,
                  on_tasks: Callable[[list[dict]], None] | None = None,
                  offer_tasks: bool = True,
+                 web_tools: WebTools | None = None,
                  clock: Callable[[], float] = time.monotonic):
         # model: model.ResearchModel, or a wrapper with the same call (billing, tests).
         self.course_tools, self.model = course_tools, model
@@ -285,6 +305,9 @@ class ResearchRunner:
         # The task checklist (task_tools.py, from Open WebUI): offered with the
         # course tools; each change goes to on_tasks(list).
         self.on_tasks, self.offer_tasks = on_tasks, offer_tasks
+        # Web search (web_tools.py, from Open WebUI): only when the student turned
+        # it on and the lab allows it; None otherwise.
+        self.web_tools = web_tools
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
@@ -307,6 +330,7 @@ class ResearchRunner:
         catalogue = await tools.catalogue()
         system = (system_prompt(self.max_tool_calls, tools.max_visual_calls)
                   + (('\n' + CATALOGUE_NOTE + '\n' + catalogue) if catalogue else '')
+                  + ('\n' + WEB_NOTE if self.web_tools else '')
                   + '\n' + teaching_rules + '\n' + research_note)
         # Earlier answers are real turns and keep their [E#] IDs, so the model
         # sees how to cite. The session numbers evidence across runs
@@ -324,7 +348,8 @@ class ResearchRunner:
         unchecked = None  # the reply that got CHECK_TURN, until the model replies to it
         read_turn_sent = False
         drafted = False  # draft text was sent and not withdrawn
-        offered = COURSE_TOOLS + ([ASK_STUDENT] if allow_ask else []) + (TASK_TOOLS if self.offer_tasks else [])
+        offered = (COURSE_TOOLS + ([ASK_STUDENT] if allow_ask else []) + (TASK_TOOLS if self.offer_tasks else [])
+                   + (WEB_TOOLS if self.web_tools else []))
         checklist = TaskList(self.on_tasks)
         clarification = None
         seen_pages: set = set()  # pages any search or grep of this run returned
@@ -447,6 +472,10 @@ class ResearchRunner:
                     elif self.offer_tasks and c['name'] in TASK_TOOL_NAMES:
                         # Not a course tool: no budget, no evidence.
                         text = checklist.call(c['name'], c['arguments'])
+                    elif self.web_tools and c['name'] in WEB_TOOL_NAMES:
+                        # Its own budget; its sources are W#, not course evidence.
+                        self.on_phase('searching_web')
+                        text = await self.web_tools.call(c['name'], c['arguments'])
                     else:
                         text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
@@ -552,8 +581,10 @@ class ResearchRunner:
             cited = cited_ids(answer)
 
         def result(text, citations, reason, unresolved):
+            text, web_sources = web_citations(text, self.web_tools)
             return ResearchResult(text, citations, reason, unresolved, len(tools.trace), model_calls,
-                                  tools.trace + trace, usage, tasks=checklist.tasks or None)
+                                  tools.trace + trace, usage, tasks=checklist.tasks or None,
+                                  web_sources=web_sources)
 
         unresolved = []
         if not answer or _has_tool_markup(answer):

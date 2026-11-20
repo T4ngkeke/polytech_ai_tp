@@ -190,6 +190,7 @@ The messages of a session, with the tokens each one used.
 | superseded_at | Timestamp | Nullable. Set on a question and its answer when a newer version replaces them. The model's history and the export leave them out; the student's session and the audit show them. Analytics and quota count every version. Added by `m4t_message_versions_v1`. |
 | course_use | String(16) | Nullable. On an answer: `cited` (it cites course pages), `not_found` (course tools were called, it cites nothing) or `none` (no course tool call). Null for a question back and for older answers. Added by `m4v_course_use_v1`. |
 | tasks | JSON | Nullable. On an answer: the task checklist the model kept while answering, `[{id, content, status}]`. Added by `m4w_task_checklist_v1`. |
+| web_sources | JSON | Nullable. On an answer: the web sources it cites as `[W#]`, `[{id, url, title}]` (web search, `agent/web_tools.py`). Added by `m4x_web_sources_v1`. |
 | created_at | Timestamp | |
 
 ## Usage and quota

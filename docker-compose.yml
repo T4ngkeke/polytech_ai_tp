@@ -63,6 +63,19 @@ services:
       - backend
     restart: unless-stopped
 
+  # Web search of the research agent (backend/app/agent/web_tools.py). Only the
+  # backend reaches it, on this network: no published port. The secret key is
+  # SEARXNG_SECRET in .env (the settings file in the repo holds none).
+  searxng:
+    image: searxng/searxng:2026.11.15-2d500cb6b
+    container_name: edullm-searxng
+    environment:
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    mem_limit: 512m
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   documents_data:

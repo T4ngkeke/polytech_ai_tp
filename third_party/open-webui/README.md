@@ -10,4 +10,5 @@ branding.
 
 | File here | Ported from |
 | --- | --- |
+| `backend/app/agent/web_tools.py` | `backend/open_webui/tools/builtin.py`: `search_web`, `fetch_url`; `backend/open_webui/retrieval/web/utils.py`: `resolve_hostname`, `_embedded_ipv4`, `_assert_addresses_allowed`, `assert_identity_encoding`, `validate_url`, `_ssrf_safe_new_conn`, `_SSRFSafeAdapter`, `get_ssrf_safe_requests_session`, `SafeWebBaseLoader._document_from_html`. The SearXNG request is written here, against SearXNG's JSON API: Open WebUI's sends its own bot name, which its license protects. |
 | `backend/app/agent/task_tools.py` | `backend/open_webui/tools/builtin.py`: `TaskItem`, `VALID_TASK_STATUSES`, `_task_summary`, `create_tasks`, `update_task` |

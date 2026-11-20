@@ -47,6 +47,8 @@ services:
       STRUCTURED_VISION_ENABLED: "true"
       NEW_CLASS_EXAM_MODE: "true"
       PDF_MINERU_SERVER_URL: http://edullm-mineru-vlm:8000/v1
+      # Web search (agent/web_tools.py): release-searxng below.
+      WEB_SEARCH_URL: http://edullm-release-searxng:8080
     volumes:
       - release_documents:/data/documents
     depends_on:
@@ -80,6 +82,17 @@ services:
       release-db:
         condition: service_healthy
     networks: [default, models]
+    restart: unless-stopped
+
+  # Web search of the research agent: only the backend reaches it (no port).
+  release-searxng:
+    image: searxng/searxng:2026.11.15-2d500cb6b
+    container_name: edullm-release-searxng
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    mem_limit: 512m
     restart: unless-stopped
 
   release-frontend:

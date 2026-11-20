@@ -600,6 +600,8 @@ class MessageResponse(BaseModel):
     course_use: str | None = None
     # The model's task checklist for this answer: [{id, content, status}].
     tasks: list[dict] | None = None
+    # The web sources the answer cites ([W#]): [{id, url, title}].
+    web_sources: list[dict] | None = None
 
 
 # ---------------------------------------------------------------------------

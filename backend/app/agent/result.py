@@ -59,6 +59,8 @@ class ResearchResult:
     clarification: dict | None = None
     # The task checklist the model kept (task_tools.py), if any.
     tasks: list[dict] | None = None
+    # The web sources the answer cites ([W#], web_tools.py): [{id, url, title}].
+    web_sources: list[dict] | None = None
     # The answer mode that wrote it: direct, search or research.
     mode: str = 'research'
 

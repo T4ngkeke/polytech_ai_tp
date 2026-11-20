@@ -12,13 +12,14 @@ New classes start in exam mode: answers are written directly, without the course
 
 ## What runs
 
-The stack is the Compose project `edullm-release`. The private settings are in `~/.local/share/polytech-release/.env` (mode 0600): `RELEASE_DB_PASSWORD`, `RELEASE_JWT_SECRET`, `RELEASE_TLS_DIR`, `RELEASE_LAN_IP`, `RELEASE_TAILSCALE_IP`.
+The stack is the Compose project `edullm-release`. The private settings are in `~/.local/share/polytech-release/.env` (mode 0600): `RELEASE_DB_PASSWORD`, `RELEASE_JWT_SECRET`, `RELEASE_TLS_DIR`, `RELEASE_LAN_IP`, `RELEASE_TAILSCALE_IP`, and `SEARXNG_SECRET` (optional: the secret key of the search server).
 
 | Container | What |
 | --- | --- |
 | `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`. HTTPS on `<LAN_IP>` and `<TAILSCALE_IP>`, on ports 443 and 18443. Port 80 redirects to HTTPS. Plain HTTP is on 127.0.0.1:18080 only. It also passes `/grafana/` to Grafana for admins (see [MONITORING.md](MONITORING.md)). |
 | `edullm-release-backend`, `edullm-release-worker` | The same code as the dev stack, with the feature flags on and `NEW_CLASS_EXAM_MODE` on. The worker is built with MinerU. |
 | `edullm-release-db` | PostgreSQL with `pgvector`, in the volume `edullm-release_release_postgres_data`. |
+| `edullm-release-searxng` | SearXNG for the web search tool of the agent (`WEB_SEARCH_URL`). Only the backend reaches it; no port. Settings in `searxng/settings.yml`. Students' search queries go from it to public search engines. |
 | `edullm-release-backup` | A checked `pg_dump` every 24 hours in the volume `edullm-release_release_backups`. Dumps are kept for 14 days. |
 
 The backend and the worker use the model servers on the network `edullm-models`: Qwen3.8 Flash-Next (served as `flash-next`), the reranker, the embeddings and MinerU. How to start those servers is in [MODEL_SERVERS.md](MODEL_SERVERS.md), [PDF_INGESTION.md](PDF_INGESTION.md) and the README. The model settings are in the release database (`system_configs`) and are changed in the admin page.
@@ -34,7 +35,7 @@ The release does not follow the dev stack by itself. To ship a newer commit:
 
    ```sh
    docker compose -f docker-compose.release.yml --env-file ~/.local/share/polytech-release/.env \
-     up -d --build release-backend release-worker release-frontend
+     up -d --build release-backend release-worker release-frontend release-searxng
    ```
 
 After a change of the embedding server, `scripts/reembed_documents.py` computes every document vector again (see the header of the script).

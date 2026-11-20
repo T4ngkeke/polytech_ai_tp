@@ -286,7 +286,8 @@ class ResearchRuns:
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     billed_tokens=billed_tokens, clarification=result.clarification,
-                    answer_mode=result.mode, course_use=course_use(result), tasks=result.tasks)
+                    answer_mode=result.mode, course_use=course_use(result), tasks=result.tasks,
+                    web_sources=result.web_sources)
                 db.add(assistant)
                 await db.flush()
                 citations = [MessageCitation(message_id=assistant.id,
@@ -323,7 +324,8 @@ class ResearchRuns:
                     'clarification': answer.clarification if answer else None,
                     'mode': answer.answer_mode if answer else None,
                     'course_use': answer.course_use if answer else None,
-                    'tasks': answer.tasks if answer else None}
+                    'tasks': answer.tasks if answer else None,
+                    'web_sources': answer.web_sources if answer else None}
 
     async def load_session_citations(self, *, session_id: uuid.UUID,
                                      user_id: uuid.UUID) -> dict[uuid.UUID, list[dict]]:

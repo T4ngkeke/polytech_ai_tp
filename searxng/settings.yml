@@ -1,0 +1,14 @@
+# SearXNG for the web search tool of the research agent (backend/app/agent/web_tools.py).
+# Reached only by the backend on the compose network: no published port.
+# The secret key comes from the SEARXNG_SECRET environment variable (.env), not from this file.
+use_default_settings: true
+server:
+  secret_key: "set-by-SEARXNG_SECRET"
+  limiter: false
+  image_proxy: false
+  public_instance: false
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json

@@ -51,6 +51,7 @@ from backend.app.services.model_servers import context_tokens
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
 from backend.app.services.research_service import DEEP_NOTE, deep_limits, run_persisted_research
+from backend.app.agent.web_tools import WebTools
 from backend.app.services.model_clients import (  # noqa: F401  (tests import _get_llm_config from here)
     get_llm_config as _get_llm_config, make_embed_fn as _make_embed_fn, make_rerank_fn as _make_rerank_fn,
 )
@@ -244,6 +245,8 @@ async def chat_stream(
     # The research agent answers every chat (direct, search or research mode).
     if not settings.AGENTIC_SEARCH_ENABLED:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "chat_not_enabled")
+    if 'web' in body.tools and not settings.WEB_SEARCH_URL:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "web_search_not_configured")
     if lab_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "session_without_lab")
     # All source scope and focus IDs are resolved from the authenticated
@@ -271,6 +274,10 @@ async def chat_stream(
         deep = 'deep' in body.tools and mode != 'direct'
         if deep:
             mode, limits = 'research', deep_limits(limits)
+        # Web search: the research loop gets search_web and fetch_url (agent/web_tools.py).
+        web = 'web' in body.tools and mode != 'direct'
+        if web:
+            mode = 'research'
         research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
         runs = ResearchRuns(research_factory)
         # Only what fits the history limit is sent, with the citations of
@@ -317,6 +324,7 @@ async def chat_stream(
             token_beta=float(llm_config['token_beta']),
             history=safe_history, earlier_citations=earlier_citations,
             teaching_rules=teaching_rules, research_note=DEEP_NOTE if deep else '',
+            web_tools=WebTools(settings.WEB_SEARCH_URL) if web else None,
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
@@ -353,7 +361,7 @@ async def chat_stream(
                 yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
             yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
             # The question's id too: the page shows it under a temporary id.
-            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id'], 'user_message_id': result.get('user_message_id'), 'course_use': result.get('course_use')})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id'], 'user_message_id': result.get('user_message_id'), 'course_use': result.get('course_use'), 'web_sources': result.get('web_sources')}, ensure_ascii=False)}\n\n"
             # After the answer is final: a new conversation gets its title.
             # A failure here must not turn a delivered answer into an error.
             try:
