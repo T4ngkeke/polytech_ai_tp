@@ -59,6 +59,8 @@ M4T_VERSION = 'm4t_message_versions_v1'
 M4T_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4t.sql')
 M4U_VERSION = 'm4u_student_memories_v1'
 M4U_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4u.sql')
+M4V_VERSION = 'm4v_course_use_v1'
+M4V_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4v.sql')
 MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_SQL_PATH),
               (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH),
               (M4C_VERSION, M4C_SQL_PATH), (M4E_VERSION, M4E_SQL_PATH),
@@ -75,7 +77,8 @@ MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_
               (M4R_VERSION, M4R_SQL_PATH),
               (M4S_VERSION, M4S_SQL_PATH),
               (M4T_VERSION, M4T_SQL_PATH),
-              (M4U_VERSION, M4U_SQL_PATH))
+              (M4U_VERSION, M4U_SQL_PATH),
+              (M4V_VERSION, M4V_SQL_PATH))
 
 
 async def _apply_one(conn, version, path):

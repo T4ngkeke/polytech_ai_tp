@@ -82,3 +82,14 @@ async def cited_sources(tools, permitted: dict[str, dict], cited: set[str]) -> l
     except Exception:
         return None
     return [permitted[x] for x in sorted(cited, key=lambda x: int(x[1:]))]
+
+
+def course_use(result: 'ResearchResult') -> str | None:
+    """How an answer used the course: 'cited', 'not_found' (course tools were
+    called, nothing is cited) or 'none' (no course tool call). None for a
+    question back to the student."""
+    if result.clarification:
+        return None
+    if result.citations:
+        return 'cited'
+    return 'not_found' if result.tool_calls else 'none'

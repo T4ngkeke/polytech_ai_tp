@@ -1,6 +1,6 @@
 # The chat agent
 
-This folder holds the code that answers every student chat. There is one path. The student picks one of three modes. A class in exam mode answers in Direct mode only, unless the teacher allowed files for the exam.
+This folder holds the code that answers every student chat. There is one path. The new interface has one entry: the research loop, where the model decides by itself whether to search the course (a greeting needs no tool; a course question gets searched). The student may turn on deep research, which gives the loop more room. Each answer records how it used the course (`result.course_use`: `cited`, `not_found` or `none`). The three modes below stay for the current pages. A class in exam mode answers in Direct mode only, unless the teacher allowed files for the exam.
 
 | Mode | What happens | File |
 | --- | --- | --- |

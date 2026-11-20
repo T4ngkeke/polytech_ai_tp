@@ -774,6 +774,10 @@ class Message(Base):
     version_of: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # How an answer used the course: 'cited' (it cites course pages), 'not_found'
+    # (it searched but cites nothing), 'none' (it did not search). None for a
+    # question back and for older answers. The page labels the last two.
+    course_use: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

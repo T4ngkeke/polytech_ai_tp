@@ -596,6 +596,8 @@ class MessageResponse(BaseModel):
     # Versions: the first question of the group, and when this one was replaced.
     version_of: uuid.UUID | None = None
     superseded_at: datetime | None = None
+    # An answer's use of the course: cited, not_found, none (None: a question back, or older).
+    course_use: str | None = None
 
 
 # ---------------------------------------------------------------------------

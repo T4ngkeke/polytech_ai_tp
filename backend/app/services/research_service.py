@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 from sqlalchemy import select
 
@@ -78,6 +78,23 @@ LIMIT_KEYS = {
     'HISTORY_CONTEXT_PERCENT': ('history_context_percent', 0, 50),
 }
 DEFAULT_LIMITS = {f.name: f.default for f in fields(ResearchLimits)}
+
+
+# Deep research (the student's "deep" switch): more tool calls (up to the
+# admin maximum of 40) and twice the time, and a note asking for thoroughness.
+# The normal limits stay as they are: speed comes from the model server.
+DEEP_EXTRA_TOOL_CALLS = 10
+DEEP_NOTE = ('The student asked for deep research. Check every part of the question in the '
+             'course, read the pages around the ones you use and the examples they point to, '
+             'and prefer a complete answer over a fast one.')
+
+
+def deep_limits(limits: ResearchLimits) -> ResearchLimits:
+    """The limits of a deep research run."""
+    total = min(1800, limits.total_seconds * 2)
+    return replace(limits, tool_calls=min(40, limits.tool_calls + DEEP_EXTRA_TOOL_CALLS),
+                   visual_calls=min(10, limits.visual_calls * 2),
+                   research_seconds=min(total, limits.research_seconds * 2), total_seconds=total)
 
 
 def limit_value(key: str, raw: str | None) -> int | None:

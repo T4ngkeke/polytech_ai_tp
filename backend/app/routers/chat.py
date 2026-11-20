@@ -50,7 +50,7 @@ from backend.app.services.model_routing import Endpoint
 from backend.app.services.model_servers import context_tokens
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
-from backend.app.services.research_service import run_persisted_research
+from backend.app.services.research_service import DEEP_NOTE, deep_limits, run_persisted_research
 from backend.app.services.model_clients import (  # noqa: F401  (tests import _get_llm_config from here)
     get_llm_config as _get_llm_config, make_embed_fn as _make_embed_fn, make_rerank_fn as _make_rerank_fn,
 )
@@ -259,6 +259,11 @@ async def chat_stream(
                                    session_id=body.session_id, exam_only=exam_mode)
         exam_files = exam_mode and bool(scope.snapshot_revisions)
         mode = 'direct' if exam_mode and not exam_files else body.mode
+        # Deep research: the research loop with more room (research_service.deep_limits).
+        # The gate above has checked that the lab allows it.
+        deep = 'deep' in body.tools and mode != 'direct'
+        if deep:
+            mode, limits = 'research', deep_limits(limits)
         research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
         runs = ResearchRuns(research_factory)
         # Only what fits the history limit is sent, with the citations of
@@ -301,7 +306,7 @@ async def chat_stream(
             token_alpha=float(llm_config['token_alpha']),
             token_beta=float(llm_config['token_beta']),
             history=safe_history, earlier_citations=earlier_citations,
-            teaching_rules=teaching_rules,
+            teaching_rules=teaching_rules, research_note=DEEP_NOTE if deep else '',
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
@@ -338,7 +343,7 @@ async def chat_stream(
                 yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
             yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
             # The question's id too: the page shows it under a temporary id.
-            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id'], 'user_message_id': result.get('user_message_id')})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id'], 'user_message_id': result.get('user_message_id'), 'course_use': result.get('course_use')})}\n\n"
             # After the answer is final: a new conversation gets its title.
             # A failure here must not turn a delivered answer into an error.
             try:

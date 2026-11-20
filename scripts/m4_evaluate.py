@@ -29,6 +29,8 @@ Environment:
   M4_TEMPERATURE   overrides the temperature of M4_SAMPLING (top_p and top_k stay)
   M4_BUDGET        standard | relaxed | relaxed_slow | product (see BUDGETS)
   M4_TOOL_CALLS    overrides the budget's tool call limit
+  M4_DEEP          1: deep research as the student chat runs it (more tool calls, visual calls
+                   and time: research_service.deep_limits; the DEEP_NOTE added to the note)
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
   M4_QUESTIONS     comma-separated question IDs to keep
   M4_CONCURRENCY   trials of one variant and round running at once (default 1)
@@ -284,6 +286,14 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     limits = dict(BUDGETS[budget])
     if os.getenv('M4_TOOL_CALLS'):          # one limit changed, the rest of the budget kept
         limits['tool_calls'] = int(os.environ['M4_TOOL_CALLS'])
+    # Deep research as the student chat runs it (research_service.deep_limits, DEEP_NOTE).
+    deep = os.getenv('M4_DEEP') == '1'
+    if deep:
+        from backend.app.services.research_service import DEEP_NOTE, ResearchLimits, deep_limits
+        grown = deep_limits(ResearchLimits(**{k: limits[k] for k in (
+            'tool_calls', 'visual_calls', 'research_seconds', 'total_seconds')}))
+        limits.update(tool_calls=grown.tool_calls, visual_calls=grown.visual_calls,
+                      research_seconds=grown.research_seconds, total_seconds=grown.total_seconds)
     chat = await db.scalar(select(Session).join(User, User.id == Session.user_id)
                            .where(User.role == UserRole.student))
     scope = await create_scope(db, user_id=chat.user_id, session_id=chat.id)
@@ -415,6 +425,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             # The clarify questions are asked as in the student chat, without the
             # benchmark note that asks for course support.
             note = '' if benchmark == 'clarify' else BENCHMARK_NOTE
+            if deep:
+                note = (note + '\n' + DEEP_NOTE).strip()
             result = await research.run(q['question'], research_note=note, allow_ask=allow_ask)
             answered = time.monotonic()
             tool_state, visual = course_tools.state(), deps['visual_usage']

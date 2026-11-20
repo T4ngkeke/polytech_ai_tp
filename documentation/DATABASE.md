@@ -188,6 +188,7 @@ The messages of a session, with the tokens each one used.
 | attachments | JSON | Nullable. On a student question: what it attached, `[{kind, id, name}]` with kind `file` (`chat_files`), `document` (a course file) or `session` (an earlier chat). Added by `m4s_chat_files_v1`. |
 | version_of | UUID | Nullable. Foreign key to `messages.id`. On a new version of the last question (edit or new answer): the first question of its group. Added by `m4t_message_versions_v1`. |
 | superseded_at | Timestamp | Nullable. Set on a question and its answer when a newer version replaces them. The model's history and the export leave them out; the student's session and the audit show them. Analytics and quota count every version. Added by `m4t_message_versions_v1`. |
+| course_use | String(16) | Nullable. On an answer: `cited` (it cites course pages), `not_found` (course tools were called, it cites nothing) or `none` (no course tool call). Null for a question back and for older answers. Added by `m4v_course_use_v1`. |
 | created_at | Timestamp | |
 
 ## Usage and quota
