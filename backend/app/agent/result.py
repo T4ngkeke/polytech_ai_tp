@@ -57,6 +57,8 @@ class ResearchResult:
     usage: list[dict] = field(default_factory=list)
     # A question back to the student (ask_student): {'question', 'options'}.
     clarification: dict | None = None
+    # The task checklist the model kept (task_tools.py), if any.
+    tasks: list[dict] | None = None
     # The answer mode that wrote it: direct, search or research.
     mode: str = 'research'
 

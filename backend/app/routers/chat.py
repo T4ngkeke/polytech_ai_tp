@@ -82,10 +82,17 @@ def _history_budget(context: int | None, limits, mode: str) -> int:
 
 def _research_frames(items):
     """SSE frames for queued research events: a phase name is a status event;
-    ('draft', text) adds draft text, ('draft', None) withdraws the draft.
+    ('draft', text) adds draft text, ('draft', None) withdraws the draft;
+    ('tasks', list) is the model's task checklist as it is now.
     Consecutive draft text goes out as one frame."""
     frames, text = [], ''
     for item in [*items, None]:
+        if isinstance(item, tuple) and item[0] == 'tasks':
+            if text:
+                frames.append(f"event: draft\ndata: {json.dumps(text)}\n\n")
+                text = ''
+            frames.append(f"event: tasks\ndata: {json.dumps(item[1], ensure_ascii=False)}\n\n")
+            continue
         if isinstance(item, tuple) and item[1] is not None:
             text += item[1]
             continue
@@ -299,6 +306,9 @@ async def chat_stream(
         def draft(text):
             # None withdraws the draft shown so far.
             queue.put_nowait(('draft', text))
+
+        def tasks(items):
+            queue.put_nowait(('tasks', items))
         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
         task = asyncio.create_task(run_persisted_research(
             scope=scope, question=body.message, client_request_id=request_id,
@@ -310,7 +320,7 @@ async def chat_stream(
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
-            rerank_model=llm_config['rerank_model'], on_phase=phase,
+            rerank_model=llm_config['rerank_model'], on_phase=phase, on_tasks=tasks,
             vision_fn=vision, vision_model=vlm.model, limits=limits, tp_chars=tp_chars,
             language_model=language_model(agent), context_tokens=context,
             on_draft=draft, allow_ask=allow_ask and mode == 'research',

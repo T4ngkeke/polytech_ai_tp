@@ -598,6 +598,8 @@ class MessageResponse(BaseModel):
     superseded_at: datetime | None = None
     # An answer's use of the course: cited, not_found, none (None: a question back, or older).
     course_use: str | None = None
+    # The model's task checklist for this answer: [{id, content, status}].
+    tasks: list[dict] | None = None
 
 
 # ---------------------------------------------------------------------------

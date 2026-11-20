@@ -778,6 +778,8 @@ class Message(Base):
     # (it searched but cites nothing), 'none' (it did not search). None for a
     # question back and for older answers. The page labels the last two.
     course_use: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # The task checklist the model kept while answering: [{id, content, status}].
+    tasks: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

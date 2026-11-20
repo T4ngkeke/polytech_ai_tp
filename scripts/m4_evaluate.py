@@ -29,6 +29,8 @@ Environment:
   M4_TEMPERATURE   overrides the temperature of M4_SAMPLING (top_p and top_k stay)
   M4_BUDGET        standard | relaxed | relaxed_slow | product (see BUDGETS)
   M4_TOOL_CALLS    overrides the budget's tool call limit
+  M4_TASKS         0: do not offer the task checklist tools (create_tasks, update_task); default 1,
+                   as the student chat
   M4_DEEP          1: deep research as the student chat runs it (more tool calls, visual calls
                    and time: research_service.deep_limits; the DEEP_NOTE added to the note)
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
@@ -420,7 +422,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                                              max_input_tokens=limits['input_tokens'],
                                              final_reserve=limits['final_reserve'],
                                              lead_min_score=min_score_for(tool_config['rerank_model']),
-                                             no_lead_calls=no_lead_calls)
+                                             no_lead_calls=no_lead_calls,
+                                             offer_tasks=os.getenv('M4_TASKS', '1') == '1')
             course_tools, research = runner()
             # The clarify questions are asked as in the student chat, without the
             # benchmark note that asks for course support.

@@ -22,7 +22,8 @@ class Script:
 
     async def __call__(self, messages, max_output, timeout, *, tools=None, purpose=''):
         self.seen.append(json.loads(json.dumps(messages)))
-        self.with_tools.append(tools == COURSE_TOOLS)
+        # The course tools, then ask_student and the task tools when offered.
+        self.with_tools.append(tools is not None and tools[:len(COURSE_TOOLS)] == COURSE_TOOLS)
         self.purposes.append(purpose)
         step = self.steps.pop(0)
         if isinstance(step, str):

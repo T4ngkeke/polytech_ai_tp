@@ -22,6 +22,7 @@ How each mode works, and why, is in [documentation/ARCHITECTURE.md](../../../doc
 | `tp_text.py` | The text of the TP files, read in full for Search and Direct within `TP_CONTEXT_PERCENT` of the model's context. |
 | `language.py` | One small model call that names the language of the answer, from the teacher's rules and the student's last messages. |
 | `history.py` | Which earlier messages are sent: a share of the model's context (`HISTORY_CONTEXT_PERCENT`), with fixed start points so that the model server can reuse its cache. |
+| `task_tools.py` | The task checklist the model may keep during a research run: `create_tasks` and `update_task`, ported from Open WebUI (see `third_party/open-webui/`). They do not use the course tool budget; each change is sent to the page and the final list is saved with the answer. |
 | `evidence.py` | Evidence IDs (`E1`, `E2`, ...) and their sources. Only pages that were read count as evidence. Search results are leads. |
 | `result.py` | The run result, the citation patterns, the stop exceptions, the usage entry of a model call (`call_usage`) and the final check of the cited documents (`cited_sources`). |
 | `model.py` | The model client: one OpenAI-compatible chat call with native tools, and the sampling settings. |

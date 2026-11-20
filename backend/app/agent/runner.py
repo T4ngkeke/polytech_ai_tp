@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, f
 from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.language import language_sentence, with_language
+from backend.app.agent.task_tools import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
 from backend.app.agent.result import (
     ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, call_usage, cited_ids, cited_sources,
     malformed_refs,
@@ -264,6 +265,8 @@ class ResearchRunner:
                  lead_min_score: float | None = None, no_lead_calls: int = NO_LEAD_CALLS,
                  on_phase: Callable[[str], None] | None = None,
                  on_draft: Callable[[str | None], None] | None = None,
+                 on_tasks: Callable[[list[dict]], None] | None = None,
+                 offer_tasks: bool = True,
                  clock: Callable[[], float] = time.monotonic):
         # model: model.ResearchModel, or a wrapper with the same call (billing, tests).
         self.course_tools, self.model = course_tools, model
@@ -279,6 +282,9 @@ class ResearchRunner:
         # on_draft(None) when that draft is withdrawn. A draft is not checked;
         # the student sees the checked answer once the run ends.
         self.on_draft = on_draft
+        # The task checklist (task_tools.py, from Open WebUI): offered with the
+        # course tools; each change goes to on_tasks(list).
+        self.on_tasks, self.offer_tasks = on_tasks, offer_tasks
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
@@ -318,7 +324,8 @@ class ResearchRunner:
         unchecked = None  # the reply that got CHECK_TURN, until the model replies to it
         read_turn_sent = False
         drafted = False  # draft text was sent and not withdrawn
-        offered = COURSE_TOOLS + [ASK_STUDENT] if allow_ask else COURSE_TOOLS
+        offered = COURSE_TOOLS + ([ASK_STUDENT] if allow_ask else []) + (TASK_TOOLS if self.offer_tasks else [])
+        checklist = TaskList(self.on_tasks)
         clarification = None
         seen_pages: set = set()  # pages any search or grep of this run returned
         no_lead = 0  # searches and greps in a row without a new page
@@ -437,6 +444,9 @@ class ResearchRunner:
                 for c in reply.tool_calls:
                     if c in asks:
                         text = ASK_ALONE if len(reply.tool_calls) > 1 else f'error: invalid_arguments ({problem})'
+                    elif self.offer_tasks and c['name'] in TASK_TOOL_NAMES:
+                        # Not a course tool: no budget, no evidence.
+                        text = checklist.call(c['name'], c['arguments'])
                     else:
                         text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
@@ -488,7 +498,8 @@ class ResearchRunner:
         if clarification is not None:
             note('finished', stop=stop, answer_chars=len(answer), cited=0)
             return ResearchResult(answer, [], stop, [], len(tools.trace), model_calls,
-                                  tools.trace + trace, usage, clarification=clarification)
+                                  tools.trace + trace, usage, clarification=clarification,
+                                  tasks=checklist.tasks or None)
 
         # Evidence read in this run, then earlier answers' sources (their IDs
         # never repeat within a session, see CourseTools first_evidence).
@@ -542,7 +553,7 @@ class ResearchRunner:
 
         def result(text, citations, reason, unresolved):
             return ResearchResult(text, citations, reason, unresolved, len(tools.trace), model_calls,
-                                  tools.trace + trace, usage)
+                                  tools.trace + trace, usage, tasks=checklist.tasks or None)
 
         unresolved = []
         if not answer or _has_tool_markup(answer):
