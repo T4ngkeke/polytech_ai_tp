@@ -10,9 +10,9 @@ from sqlalchemy.orm import selectinload
 from backend.app.auth import require_teacher
 from backend.app.database import get_db
 from backend.app.models import Class, ClassStudent, Lab, Session, UsageStat, User, UserRole
-from backend.app.routers.teacher_access import _class_access, _verify_class_ownership
+from backend.app.routers.teacher_access import _class_access, _lab_access, _verify_class_ownership
 from backend.app.schemas import SessionWithMessagesResponse, StudentSummaryResponse
-from backend.app.services import class_service, quota_service
+from backend.app.services import class_service, quota_service, search_service
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 
@@ -38,6 +38,27 @@ async def _build_student_summaries(
             )
         )
     return summaries
+
+
+# ===================================================================
+# GET /api/teacher/labs/{lab_id}/search
+# ===================================================================
+
+
+@router.get("/labs/{lab_id}/search")
+async def search_lab_questions(
+    lab_id: uuid.UUID,
+    q: str = Query(..., min_length=2, max_length=100),
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """The students' questions in this lab that contain ``q`` (case-insensitive),
+    newest first: ``{total, students, items}``. Each item has the student, the
+    session (``session_deleted`` when the student deleted it; the audit still
+    shows it), the answer mode and whether the answer cites the course.
+    Teacher test sessions are left out. Its teacher, or an admin."""
+    await _lab_access(db, lab_id, teacher)
+    return await search_service.lab_question_search(db, lab_id, q.strip())
 
 
 # ===================================================================

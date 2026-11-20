@@ -18,6 +18,7 @@ PUT    /api/student/sessions/{session_id}      →  Rename a session and/or pin 
 DELETE /api/student/sessions/{session_id}      →  Soft-delete (hide) own session; retained for audit.
 GET    /api/student/usage                      →  Day and week token usage, limits, resets.
 POST   /api/student/usage/reset-request        →  Ask the teacher for a reset (at the limit).
+GET    /api/student/search?q=                  →  Search own conversations (titles and messages).
 GET    /api/student/export?format=json|md      →  Download all own visible conversations.
 """
 
@@ -44,7 +45,7 @@ from backend.app.schemas import (
     SessionWithMessagesResponse,
 )
 from backend.app.services import (export_service, feature_service, notification_service, quota_service,
-                                  session_service)
+                                  search_service, session_service)
 from backend.app.agent.tools import readable_files
 from backend.app.services.research_runs import ResearchRuns
 
@@ -339,6 +340,24 @@ async def request_quota_reset(
             student_id=current_user.id, student_name=current_user.username)
     await db.commit()
     return {**await _usage_payload(db, current_user), "sent": sent}
+
+
+# ===================================================================
+# GET /api/student/search
+# ===================================================================
+
+
+@router.get("/search")
+async def search_conversations(
+    q: str = Query(..., min_length=2, max_length=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[dict]:
+    """The user's conversations whose title or messages contain ``q``
+    (case-insensitive), newest match first, one per conversation:
+    ``{session_id, title, lab_id, lab_name, class_name, pinned, message_id,
+    role, snippet, matched_at}``. A title-only match has no message."""
+    return await search_service.student_search(db, current_user.id, q.strip())
 
 
 # ===================================================================
