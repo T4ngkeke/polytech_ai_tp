@@ -14,6 +14,7 @@ from backend.app.models import (
     DocumentPage, DocumentBlock, DocumentBlockAsset, DocumentBlockLink,
     DocChunk, DocumentAsset, DocumentStatus, _utcnow,
 )
+from backend.app.services import notification_service
 from backend.app.services.document_access import owned_document, DocumentNotFound
 
 
@@ -246,6 +247,7 @@ async def publish_revision(db, *, document_id, revision_id, teacher_id,
     doc, rev = await lock_draft(db, document_id=doc.id, revision_id=revision_id,
                                expected_generation=expected_generation)
     await validate_publishable(db, rev, acknowledge_issues=acknowledge_issues)
+    updated = doc.current_revision_id is not None
     if doc.current_revision_id:
         old = await db.get(DocumentRevision, doc.current_revision_id)
         old.publication_state = 'superseded'
@@ -260,6 +262,7 @@ async def publish_revision(db, *, document_id, revision_id, teacher_id,
     doc.ingest_report = copy.deepcopy(rev.report)
     doc.page_count = await db.scalar(select(func.count()).select_from(DocumentPage).where(DocumentPage.revision_id == rev.id))
     await db.flush()
+    await notification_service.notify_document_students(db, doc.id, updated=updated)
     return rev
 
 
@@ -278,6 +281,8 @@ async def set_processing_result(db, *, document_id, revision_id, expected_genera
                                expected_generation=expected_generation)
     rev.processing_state, rev.report, rev.index_ready = state, copy.deepcopy(report), index_ready
     await db.flush()
+    if state == 'failed':
+        await notification_service.notify_document_teacher(db, doc.id, 'document_failed')
     if state == 'ready':
         return await publish_revision(db, document_id=doc.id, revision_id=rev.id,
             teacher_id=rev.created_by, expected_generation=doc.generation)

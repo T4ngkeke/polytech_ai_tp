@@ -21,6 +21,7 @@ from backend.app.models import (
     IngestionJob, JobStatus, EMBEDDING_DIM, _utcnow,
 )
 from backend.app.services import document_versions as versions
+from backend.app.services import notification_service
 from backend.app.services.document_cleanup import aware
 from backend.app.services.retrieval_service import detect_language
 from backend.worker.queue import claim_structured_job
@@ -221,6 +222,9 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
             report['next_step'] = 'teacher_review_and_publish'
             rev.report = copy.deepcopy(report)
             rev.processing_state = 'partial'
+    # partial: some pages were not read, or publishing failed; the teacher reviews it.
+    await notification_service.notify_document_teacher(
+        db, doc.id, 'document_ready', partial=rev.processing_state == 'partial')
     await db.commit()
     return len(prepared)
 
@@ -232,6 +236,8 @@ async def _retry(db, claim, *, max_attempts, code):
         job.status = JobStatus.failed if claim.attempts >= max_attempts else JobStatus.queued
         job.error_message = code
         job.lease_expires_at = None
+        if job.status == JobStatus.failed:
+            await notification_service.notify_document_teacher(db, claim.document_id, 'document_failed')
     await db.commit()
 
 

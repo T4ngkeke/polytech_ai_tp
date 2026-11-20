@@ -19,6 +19,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import QuotaGrant, QuotaResetRequest, UsageStat, User
+from backend.app.services import notification_service
 
 PARIS = ZoneInfo("Europe/Paris")
 
@@ -166,9 +167,13 @@ async def refill(db: AsyncSession, *, student: User, by: uuid.UUID) -> Usage:
         if tokens > 0:
             db.add(QuotaGrant(user_id=student.id, date=current.day, tokens=tokens,
                               kind=kind, granted_by=by, created_at=stamp))
-    await db.execute(update(QuotaResetRequest).where(
+    answered = await db.execute(update(QuotaResetRequest).where(
         QuotaResetRequest.user_id == student.id, QuotaResetRequest.date == current.day,
         QuotaResetRequest.resolved_at.is_(None)).values(resolved_at=stamp, resolved_by=by, outcome="reset"))
+    # Told when it answers a request or unblocks; a refill of the whole class
+    # does not notify students who could still ask.
+    if answered.rowcount or current.blocked:
+        notification_service.notify(db, [student.id], 'quota_reset')
     await db.flush()
     return await usage(db, student)
 
@@ -187,6 +192,12 @@ async def ignore_request(db: AsyncSession, *, student_id: uuid.UUID, by: uuid.UU
             QuotaResetRequest.resolved_at.is_(None)).values(
             resolved_at=datetime.now(timezone.utc), resolved_by=by, outcome="ignored")
     result = await db.execute(query.execution_options(synchronize_session=False))
+    if result.rowcount:
+        if undo:
+            await notification_service.withdraw_unread(
+                db, student_id, 'quota_ignored', since=datetime.now(timezone.utc) - timedelta(days=1))
+        else:
+            notification_service.notify(db, [student_id], 'quota_ignored')
     await db.flush()
     return result.rowcount > 0
 

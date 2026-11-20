@@ -40,7 +40,7 @@ from backend.app.schemas import (
     SessionUpdateRequest,
     SessionWithMessagesResponse,
 )
-from backend.app.services import feature_service, quota_service, session_service
+from backend.app.services import feature_service, notification_service, quota_service, session_service
 from backend.app.agent.tools import readable_files
 from backend.app.services.research_runs import ResearchRuns
 
@@ -329,6 +329,10 @@ async def request_quota_reset(
     if usage.blocked is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="not_at_limit")
     sent = await quota_service.request_reset(db, current_user)
+    if sent:
+        notification_service.notify(
+            db, await notification_service.student_teachers(db, current_user.id), 'quota_request',
+            student_id=current_user.id, student_name=current_user.username)
     await db.commit()
     return {**await _usage_payload(db, current_user), "sent": sent}
 

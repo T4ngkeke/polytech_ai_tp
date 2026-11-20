@@ -49,6 +49,8 @@ M4O_VERSION = 'm4o_must_change_password_v1'
 M4O_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4o.sql')
 M4P_VERSION = 'm4p_features_v1'
 M4P_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4p.sql')
+M4Q_VERSION = 'm4q_notifications_v1'
+M4Q_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4q.sql')
 MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_SQL_PATH),
               (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH),
               (M4C_VERSION, M4C_SQL_PATH), (M4E_VERSION, M4E_SQL_PATH),
@@ -60,7 +62,8 @@ MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_
               (M4M_VERSION, M4M_SQL_PATH),
               (M4N_VERSION, M4N_SQL_PATH),
               (M4O_VERSION, M4O_SQL_PATH),
-              (M4P_VERSION, M4P_SQL_PATH))
+              (M4P_VERSION, M4P_SQL_PATH),
+              (M4Q_VERSION, M4Q_SQL_PATH))
 
 
 async def _apply_one(conn, version, path):

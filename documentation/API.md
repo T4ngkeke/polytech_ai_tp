@@ -187,6 +187,15 @@ This area covers users, classes, the model settings, data pruning and global ana
 | DELETE | `/api/admin/sessions/{session_id}` | Admin | Deletes a session and its messages for good. |
 | POST | `/api/admin/maintenance/prune` | Admin | Deletes sessions and messages older than `older_than_days`. With `dry_run: true` it only counts them. |
 
+## Notifications
+
+The bell, for every role. A notification is written where its event happens; the list holds `kind` and `payload`, and the page writes the text in the user's language. Which events write which kinds is in [DATABASE.md](DATABASE.md) (`notifications`).
+
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/notifications` | Any user | The latest 50, newest first: `{items: [{id, kind, payload, created_at, read}], unread}`. |
+| POST | `/api/notifications/read` | Any user | Body `{ids: [...]}` marks those as read (only the user's own); with no `ids`, all. Returns `{marked}`. |
+
 ## Monitoring
 
 This area covers the access check for Grafana, which the admin Monitoring tab shows under `/grafana/`. How the dashboards run is in [MONITORING.md](MONITORING.md).

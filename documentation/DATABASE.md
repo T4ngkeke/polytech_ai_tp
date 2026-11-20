@@ -234,7 +234,7 @@ A question the chat refused before it started, so it has no run. For monitoring.
 | id | UUID | Primary key. |
 | user_id | UUID | Foreign key to `users.id`. |
 | lab_id | UUID | Nullable. Foreign key to `labs.id`. |
-| reason | String(32) | `day_quota`, `week_quota`, `lab_locked` or `not_member`. |
+| reason | String(32) | `day_quota`, `week_quota`, `lab_locked`, `not_member` or `feature_off` (a tool the lab does not allow). |
 | created_at | Timestamp | Indexed. |
 
 ### service_failures
@@ -247,6 +247,19 @@ A failure the user does not see: a service failed and the code went on without i
 | component | String(32) | `rerank`, `embedding`, `vision`, `tool_<name>`, `tp_text`, `title`, `report`, `report_embedding`, `captions` or `worker`. |
 | kind | String(64) | The error name (`ConnectTimeout`, `vision_timeout`...). `retried_...` for a rerank call whose second try was made. No question or course text. |
 | created_at | Timestamp | Indexed. |
+
+### notifications
+
+The notification bell: one row per message for one user. Written by `services/notification_service.py`, in the same transaction as the event. Added by `m4q_notifications_v1`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| user_id | UUID | Foreign key to `users.id`. Who sees it. |
+| kind | String(32) | `exam_mode`, `lab_locked`, `new_document` (to the students of the class); `document_ready`, `document_failed` (to the class teacher); `quota_request` (to the student's teachers); `quota_reset`, `quota_ignored` (to the student). |
+| payload | JSON | What the page needs to write the text: names and ids (`class_name`, `lab_name`, `filename`, `student_name`...), and `on`, `locked`, `updated` or `partial`. |
+| created_at | Timestamp | Indexed with `user_id`. |
+| read_at | Timestamp | Nullable. Set when the user marks it read. |
 
 ## Reports
 

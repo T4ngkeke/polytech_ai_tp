@@ -559,6 +559,28 @@ class QuotaResetRequest(Base):
     )
 
 
+class Notification(Base):
+    """A message for one user's bell (services/notification_service.py).
+
+    ``kind`` names the event; ``payload`` holds what the page needs to write the
+    text in the user's language (names, ids). ``read_at`` is set once read.
+    """
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default='{}')
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_notifications_user_created", "user_id", "created_at"),
+    )
+
+
 class ChatRefusal(Base):
     """A question the chat refused before it started (no agent run exists).
 

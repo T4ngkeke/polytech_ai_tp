@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.auth import require_teacher
 from backend.app.database import get_db
-from backend.app.models import Document, Lab, User
+from backend.app.models import Class, Document, Lab, User
 from backend.app.routers.teacher_access import (
     _class_access, _lab_access, _verify_class_ownership,
 )
@@ -43,7 +43,8 @@ from backend.app.schemas import (
     LabUpdateRequest,
     TestSessionResponse,
 )
-from backend.app.services import analytics_service, class_service, feature_service, lab_service, session_service
+from backend.app.services import (analytics_service, class_service, feature_service, lab_service,
+                                  notification_service, session_service)
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 
@@ -160,6 +161,9 @@ async def set_exam_mode(
     allowed in the exam (PUT .../exam-files); with none, every lab answers in
     direct mode only. The chat endpoint enforces it."""
     cls = await _verify_class_ownership(db, class_id, teacher)
+    if cls.exam_mode != body.exam_mode:
+        await notification_service.notify_class_students(
+            db, cls.id, 'exam_mode', class_id=cls.id, class_name=cls.name, on=body.exam_mode)
     cls.exam_mode = body.exam_mode
     await db.commit()
     await db.refresh(cls)
@@ -263,7 +267,13 @@ async def update_lab(
 ) -> LabResponse:
     """Update a lab's name and/or toggle its is_active status (its teacher, or an admin)."""
     lab = await _lab_access(db, lab_id, teacher)
+    was_active = lab.is_active
     lab = await lab_service.update_lab(db, lab, name=body.name, is_active=body.is_active)
+    if lab.is_active != was_active:
+        cls = await db.get(Class, lab.class_id)
+        await notification_service.notify_class_students(
+            db, lab.class_id, 'lab_locked', lab_id=lab.id, lab_name=lab.name,
+            class_id=lab.class_id, class_name=cls.name if cls else None, locked=not lab.is_active)
     return (await feature_service.fill_effective(db, [LabResponse.model_validate(lab)]))[0]
 
 
