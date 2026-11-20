@@ -233,6 +233,11 @@ class User(Base):
     weekly_token_quota: Mapped[int] = mapped_column(Integer, nullable=False, default=25_000_000)
     # When the user finished or skipped the guided tour; None: show it at sign-in.
     tour_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The user's settings: the page language ('zh', 'fr', 'en'; none: the
+    # browser's) and "about me", for the agent to send with each question
+    # (the teacher's rules win; wired in the agent work).
+    ui_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    about_me: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Set when an admin resets the password to the default one: until the user
     # chooses a new password, only /api/auth/me and change-password answer.
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
@@ -639,6 +644,8 @@ class Session(Base):
     # to preview the tutor. Excluded from analytics and the citation report.
     is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Pinned by the student: shown first in the list.
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

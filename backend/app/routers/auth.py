@@ -28,6 +28,7 @@ from backend.app.schemas import (
     SignupRequest,
     TokenResponse,
     UserResponse,
+    UserSettingsRequest,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -149,6 +150,28 @@ async def tour_seen(
         current_user.tour_seen_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(current_user)
+    return UserResponse.model_validate(current_user)
+
+
+# ===================================================================
+# PUT /api/auth/settings
+# ===================================================================
+
+
+@router.put("/settings", response_model=UserResponse)
+async def update_settings(
+    body: UserSettingsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> UserResponse:
+    """The user's page language and "about me". Only the fields sent change;
+    ``null`` (or an empty "about me") clears one."""
+    if 'ui_language' in body.model_fields_set:
+        current_user.ui_language = body.ui_language
+    if 'about_me' in body.model_fields_set:
+        current_user.about_me = (body.about_me or '').strip() or None
+    await db.commit()
+    await db.refresh(current_user)
     return UserResponse.model_validate(current_user)
 
 

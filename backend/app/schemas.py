@@ -97,6 +97,20 @@ class UserResponse(UserBase):
     is_deleted: bool
     tour_seen_at: datetime | None = None
     must_change_password: bool = False
+    ui_language: str | None = None
+    about_me: str | None = None
+
+
+ABOUT_ME_MAX_CHARS = 500
+
+
+class UserSettingsRequest(BaseModel):
+    """The user's own settings; the fields left out keep their value.
+    ``null`` clears one (the page language then follows the browser)."""
+    model_config = ConfigDict(extra="forbid")
+
+    ui_language: Literal['zh', 'fr', 'en'] | None = None
+    about_me: str | None = Field(None, max_length=ABOUT_ME_MAX_CHARS)
 
 
 class UserCreateRequest(BaseModel):
@@ -537,6 +551,7 @@ class SessionResponse(BaseModel):
     title: str | None
     is_deleted: bool
     created_at: datetime
+    pinned: bool = False
 
 
 class SessionWithMessagesResponse(BaseModel):
@@ -675,7 +690,9 @@ class AdminAnalyticsResponse(BaseModel):
 
 
 class SessionUpdateRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255)
+    """Rename a session, pin or unpin it, or both."""
+    title: str | None = Field(None, min_length=1, max_length=255)
+    pinned: bool | None = None
 
 
 class StudentUsageResponse(BaseModel):

@@ -66,6 +66,8 @@ The accounts of all three roles.
 | weekly_token_quota | Integer | Weekly limit of billed tokens (a week starts on Monday). Default 25 000 000. Set by the admin. |
 | tour_seen_at | Timestamp | Nullable. When the user finished or skipped the guided tour; until then it starts at sign-in. Added by `m4l_tour_v1`. |
 | must_change_password | Boolean | Default false. Set by an admin password reset (the password becomes `RESET_PASSWORD`, `123456` by default); until the user chooses a new password, only `/api/auth/me` and `/api/auth/change-password` answer. Added by `m4o_must_change_password_v1`. |
+| ui_language | String(8) | Nullable. The page language the user chose: `zh`, `fr` or `en`; none follows the browser. Added by `m4r_user_settings_v1`. |
+| about_me | Text | Nullable, up to 500 characters. What the user wants the assistant to know ("explain simply, I am a beginner"). For the agent; the teacher's rules win. Added by `m4r_user_settings_v1`. |
 | is_deleted | Boolean | Default false. A deleted user cannot log in. |
 
 ### classes
@@ -164,6 +166,7 @@ A conversation of one user in one lab.
 | title | String(255) | Nullable. Written from the first question and answer, or by the student. |
 | is_test | Boolean | Default false. A teacher test drive. It is left out of analytics and of the citation report. |
 | is_deleted | Boolean | Default false. A student's delete sets it. The session stays visible to teachers and admins. |
+| pinned | Boolean | Default false. Pinned by the student: shown first. Added by `m4r_user_settings_v1`. |
 | created_at | Timestamp | |
 
 ### messages

@@ -14,13 +14,16 @@ DELETE /api/student/classes/{class_id}/leave   →  Voluntarily leave a class.
 POST   /api/student/labs/{lab_id}/sessions     →  Create a session scoped to a lab.
 GET    /api/student/sessions                   →  List own active sessions (optional lab filter).
 GET    /api/student/sessions/{session_id}      →  Fetch message history (IDOR check required).
-PUT    /api/student/sessions/{session_id}      →  Rename session title (cosmetic, no audit impact).
+PUT    /api/student/sessions/{session_id}      →  Rename a session and/or pin it (no audit impact).
 DELETE /api/student/sessions/{session_id}      →  Soft-delete (hide) own session; retained for audit.
 GET    /api/student/usage                      →  Day and week token usage, limits, resets.
 POST   /api/student/usage/reset-request        →  Ask the teacher for a reset (at the limit).
+GET    /api/student/export?format=json|md      →  Download all own visible conversations.
 """
 
 import uuid
+from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
@@ -40,7 +43,8 @@ from backend.app.schemas import (
     SessionUpdateRequest,
     SessionWithMessagesResponse,
 )
-from backend.app.services import feature_service, notification_service, quota_service, session_service
+from backend.app.services import (export_service, feature_service, notification_service, quota_service,
+                                  session_service)
 from backend.app.agent.tools import readable_files
 from backend.app.services.research_runs import ResearchRuns
 
@@ -338,6 +342,30 @@ async def request_quota_reset(
 
 
 # ===================================================================
+# GET /api/student/export
+# ===================================================================
+
+
+@router.get("/export")
+async def export_conversations(
+    format: Literal["json", "md"] = Query("json"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    """All the user's visible conversations as one file to download (JSON or
+    Markdown). Deleted conversations and teacher test sessions are left out."""
+    now = datetime.now(timezone.utc)
+    convs = await export_service.conversations(db, current_user.id)
+    if format == "md":
+        body, media = export_service.as_markdown(current_user.username, convs, now), "text/markdown"
+    else:
+        body, media = export_service.as_json(current_user.username, convs, now), "application/json"
+    filename = f"edu-llm-{now:%Y%m%d}.{format}"
+    return Response(content=body, media_type=f"{media}; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+# ===================================================================
 # DELETE /api/student/classes/{class_id}/leave
 # ===================================================================
 
@@ -379,7 +407,7 @@ async def update_session_title(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
-    """Update the title of a session owned by the authenticated user."""
+    """Rename a session of the authenticated user, pin or unpin it, or both."""
     session = await session_service.get_session_by_id(db, session_id)
     if session.user_id != current_user.id:
         raise HTTPException(
@@ -392,7 +420,13 @@ async def update_session_title(
             detail="Session not found",
         )
 
-    session = await session_service.rename_session(db, session, body.title)
+    if body.title is None and body.pinned is None:
+        raise HTTPException(status_code=422, detail="nothing_to_change")
+    if body.title is not None:
+        session = await session_service.rename_session(db, session, body.title)
+    if body.pinned is not None:
+        session.pinned = body.pinned
+        await db.flush()
     return SessionResponse.model_validate(session)
 
 

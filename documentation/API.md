@@ -26,8 +26,9 @@ This area covers sign-up, login and the user's own profile and password.
 | --- | --- | --- | --- |
 | POST | `/api/auth/signup` | none | Student self-registration. The role is always `student`. Fails if the username exists. Returns a token. |
 | POST | `/api/auth/login` | none | Checks the credentials. Returns a token that holds only `user_id`. A deleted user cannot log in. |
-| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily and weekly quota, `is_deleted`, `tour_seen_at` and `must_change_password`. The app calls it after login. |
+| GET | `/api/auth/me` | Any user | The signed-in user: id, username, role, daily and weekly quota, `is_deleted`, `tour_seen_at`, `must_change_password`, `ui_language` and `about_me`. The app calls it after login. |
 | POST | `/api/auth/tour-seen` | Any user | The guided tour was finished or skipped: it no longer starts by itself at sign-in (the ? button still opens it). Sets `tour_seen_at` once. |
+| PUT | `/api/auth/settings` | Any user | The user's own settings: `ui_language` (`zh`, `fr`, `en`, or `null` to follow the browser) and `about_me` (up to 500 characters; empty or `null` clears it). Only the fields sent change. Returns the user as `/me` does. "About me" is for the agent to send with each question, below the teacher's rules (not used yet). |
 | POST | `/api/auth/change-password` | Any user | Changes the user's own password. Needs `old_password` (checked) and `new_password` (6 characters or more). After an admin reset (`must_change_password`) the old password is not asked, and the new one may not be the reset password (`400 choose_another_password`). |
 
 ## Student
@@ -43,7 +44,8 @@ This area covers joining classes, labs and chat sessions, and the daily usage. A
 | POST | `/api/student/labs/{lab_id}/sessions` | Any user | Creates a chat session in a lab. `title` is optional. The app sends none, and the first answer gives the title (the `title` event). |
 | GET | `/api/student/sessions` | Any user | The user's own sessions. Optional filter `?lab_id=`. |
 | GET | `/api/student/sessions/{session_id}` | Any user | The messages of one own session. Each answer has its citations (with `available` and `href` checked again against current access), `clarification` for a question back, and `answer_mode` (`direct`, `search`, `research`; `null` for answers written before the modes). |
-| PUT | `/api/student/sessions/{session_id}` | Any user | Renames an own session. |
+| PUT | `/api/student/sessions/{session_id}` | Any user | Renames an own session (`title`), pins or unpins it (`pinned`), or both. `422 nothing_to_change` when neither is sent. Sessions have `pinned`. |
+| GET | `/api/student/export` | Any user | All the user's visible conversations as one file to download: `?format=json` (default) or `md`. Deleted conversations and teacher test sessions are left out. Citation markers such as `[E1]` stay in the text. |
 | DELETE | `/api/student/sessions/{session_id}` | Any user | Soft-deletes an own session (see above). |
 | GET | `/api/student/usage` | Any user | `{used, limit, week_used, week_limit, blocked, resets_at, week_resets_at, reset_requested}`. A day starts at midnight Paris time, a week on Monday. A limit is the quota plus the grants of that day or week. `blocked` is `day`, `week` or `null`: whether a new question is refused now. `reset_state` is today's request: `asked` (open), `reset`, `ignored`, or `null`; `reset_state_at` when it was asked or answered. |
 | POST | `/api/student/usage/reset-request` | Any user | Asks the teachers of the user's classes for a reset. One open request at a time (`sent` is false while one is open, and for the rest of the day after a teacher ignored one); after a reset the student can ask again. `409 not_at_limit` when no limit is reached. Returns the usage above plus `sent`. |
