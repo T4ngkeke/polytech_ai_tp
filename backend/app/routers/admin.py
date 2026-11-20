@@ -70,7 +70,7 @@ from backend.app.schemas import (
     UserCreateRequest,
     UserResponse,
 )
-from backend.app.services import class_service, document_service, lab_service, analytics_service, model_servers, quota_service
+from backend.app.services import class_service, document_service, feature_service, lab_service, analytics_service, model_servers, quota_service
 from backend.app.services.model_routing import resolve_model_routing
 from backend.app.services.research_service import DEFAULT_LIMITS, LIMIT_KEYS, limit_value
 
@@ -576,7 +576,7 @@ async def list_all_labs(
 ) -> list[LabResponse]:
     """List all non-deleted labs system-wide."""
     labs = await lab_service.list_all_labs(db, skip=skip, limit=limit)
-    return [LabResponse.model_validate(l) for l in labs]
+    return await feature_service.fill_effective(db, [LabResponse.model_validate(l) for l in labs])
 
 
 # ===================================================================

@@ -40,7 +40,7 @@ from backend.app.schemas import (
     SessionUpdateRequest,
     SessionWithMessagesResponse,
 )
-from backend.app.services import quota_service, session_service
+from backend.app.services import feature_service, quota_service, session_service
 from backend.app.agent.tools import readable_files
 from backend.app.services.research_runs import ResearchRuns
 
@@ -159,7 +159,7 @@ async def list_labs_for_class(
         .order_by(Lab.created_at.desc())
     )
     labs = result.scalars().all()
-    out = [LabResponse.model_validate(l) for l in labs]
+    out = await feature_service.fill_effective(db, [LabResponse.model_validate(l) for l in labs])
     # Exam mode: how many files each lab can still search (0: Direct only).
     if await db.scalar(select(Class.exam_mode).where(Class.id == class_id)):
         for lab in out:

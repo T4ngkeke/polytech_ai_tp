@@ -2,7 +2,7 @@
 routers/chat.py — the streaming chat endpoint.
 
 1. Gate checks: session ownership, class membership (or the owning teacher's
-   test drive), an open lab, the daily quota.
+   test drive), an open lab, the tools allowed in the lab, the daily quota.
 2. The teacher's rules (class, lab, student) become part of the system prompt.
 3. The research agent answers in the requested mode — direct, search or
    research (services/research_service.py). A class in exam mode searches only
@@ -44,7 +44,7 @@ from backend.app.models import (
     User,
 )
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
-from backend.app.services import quota_service, rule_service
+from backend.app.services import feature_service, quota_service, rule_service
 from backend.app.services.model_routing import Endpoint
 from backend.app.services.model_servers import context_tokens
 from backend.app.services.document_access import DocumentNotFound
@@ -180,6 +180,17 @@ async def chat_stream(
             if membership.scalar_one_or_none() is None:
                 await _refuse(db, current_user, lab_id, 'not_member', status.HTTP_403_FORBIDDEN,
                               "You are not a member of the class that owns this lab")
+
+        # The tools turned on for this question must be allowed in this lab
+        # (class switches, the lab's own choices, exam mode: feature_service).
+        if body.tools:
+            class_features, exam_mode = (await db.execute(
+                select(Class.features, Class.exam_mode).where(Class.id == class_id))).one()
+            allowed = feature_service.effective(class_features, lab.feature_overrides,
+                                                exam_mode=bool(exam_mode))
+            if not all(allowed[tool] for tool in body.tools):
+                await _refuse(db, current_user, lab_id, 'feature_off', status.HTTP_403_FORBIDDEN,
+                              'feature_off')
 
     # The quota is checked here only: a question that starts always finishes,
     # even when it goes over; the next one is refused (quota_service).

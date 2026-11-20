@@ -38,7 +38,7 @@ This area covers joining classes, labs and chat sessions, and the daily usage. A
 | --- | --- | --- | --- |
 | POST | `/api/student/classes/join` | Student | Joins a class with its 6-character `invite_code`. Teachers and admins get `403`, so their questions never count in a class's analytics. |
 | GET | `/api/student/classes` | Any user | The joined classes, with their labs. Each class has `exam_mode`. |
-| GET | `/api/student/classes/{class_id}/labs` | Any user | The active labs of a joined class. In exam mode each lab has `exam_files`: how many files it can still search (0: Direct only). |
+| GET | `/api/student/classes/{class_id}/labs` | Any user | The active labs of a joined class. In exam mode each lab has `exam_files`: how many files it can still search (0: Direct only). Each lab has `features`: what students may use there now, `{upload, web, code, deep}` as true or false (see the teacher feature routes). |
 | DELETE | `/api/student/classes/{class_id}/leave` | Any user | Leaves a joined class. |
 | POST | `/api/student/labs/{lab_id}/sessions` | Any user | Creates a chat session in a lab. `title` is optional. The app sends none, and the first answer gives the title (the `title` event). |
 | GET | `/api/student/sessions` | Any user | The user's own sessions. Optional filter `?lab_id=`. |
@@ -63,6 +63,7 @@ This area covers the chat itself and the thumbs up or down on an answer.
 The request body has `session_id` and `message`, and two optional fields:
 
 - `client_request_id` (UUID): the same ID returns the saved run again, with no second model call and no second charge.
+- `tools` (list, default empty): the tools the student turned on for this question, among `web`, `code` and `deep`. Each one must be allowed in the lab (the lab's `features`), else the question is refused with `403 feature_off`. The tools themselves come with the agent work; for now the server only checks them.
 - `mode` (default `research`):
   - `research`: the research agent (`backend/app/agent/runner.py`) searches and reads several times, and may ask the student a question back.
   - `search`: one search, the found pages and their neighbours, and one answer (`backend/app/agent/search.py`). It has the same citations.
@@ -121,6 +122,7 @@ This area covers what a teacher does with their classes and labs: classes and st
 | DELETE | `/api/teacher/classes/{class_id}` | Teacher, admin | Soft-deletes an own class (an admin: any class). |
 | POST | `/api/teacher/classes/{class_id}/reset-code` | Teacher | Makes a new invite code. The old one stops working. |
 | PUT | `/api/teacher/classes/{class_id}/exam-mode` | Teacher | Body `{exam_mode: bool}`. On: students search and open only the files allowed in the exam; a lab without one answers in Direct mode only. Enforced by `POST /api/chat/stream` and the document routes. Returns the class. |
+| PUT | `/api/teacher/classes/{class_id}/features` | Teacher | Body: some of `{upload, web, code, deep}` as true or false (upload: files and screenshots; web: web search; code: the code interpreter; deep: deep research). The ones left out keep their value; a new class has all four on. Returns the class with `features`. A lab may choose otherwise, and exam mode turns all four off. |
 | GET | `/api/teacher/classes/{class_id}/exam-files` | Teacher | The class's files (whole class and each lab): `id, filename, status, lab_id, lab_name, exam_allowed`. |
 | PUT | `/api/teacher/classes/{class_id}/exam-files` | Teacher | Body `{document_ids: [...]}`: these files are allowed in the exam, no others (ids outside the class are ignored). Returns the list above. Can be set while exam mode is off. |
 | GET | `/api/teacher/classes/{class_id}/students` | Teacher, admin | The students of one own class (an admin: any class), with today's usage. |
@@ -133,6 +135,7 @@ This area covers what a teacher does with their classes and labs: classes and st
 | POST | `/api/teacher/classes/{class_id}/labs` | Teacher | Creates a lab in an own class. |
 | GET | `/api/teacher/classes/{class_id}/labs` | Teacher, admin | The labs of an own class (an admin: any class). |
 | PUT | `/api/teacher/labs/{lab_id}` | Teacher, admin | Renames a lab, or opens or locks it with `is_active`. A locked lab refuses chat. An admin may change any lab. |
+| PUT | `/api/teacher/labs/{lab_id}/features` | Teacher, admin | Body: some of `{upload, web, code, deep}` as `on`, `off` or `inherit` (follow the class). The ones left out keep their choice. Returns the lab with `feature_overrides` (its own choices) and `features` (what students may use there now). |
 | DELETE | `/api/teacher/labs/{lab_id}` | Teacher, admin | Soft-deletes an own lab (an admin: any lab). |
 | POST | `/api/teacher/labs/{lab_id}/test-session` | Teacher | Opens a test-drive session (`is_test`) in an own lab. The teacher chats as a preview, without being a member. The session is left out of analytics and of the citation report. |
 | GET | `/api/teacher/rule-items?level=&target_id=[&class_id=]` | Teacher | The rules of a class, a lab, or a student in one class (`class_id`, required for a student), in their order. `403` outside the teacher's classes. |

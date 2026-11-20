@@ -32,16 +32,18 @@ from backend.app.routers.teacher_access import get_storage_root  # noqa: F401  p
 from backend.app.schemas import (
     ClassCreate,
     ClassResponse,
+    ClassFeaturesRequest,
     ClassUpdateRequest,
     ExamFilesRequest,
     ExamModeRequest,
     InviteCodeResponse,
     LabCreate,
+    LabFeaturesRequest,
     LabResponse,
     LabUpdateRequest,
     TestSessionResponse,
 )
-from backend.app.services import analytics_service, class_service, lab_service, session_service
+from backend.app.services import analytics_service, class_service, feature_service, lab_service, session_service
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 
@@ -92,7 +94,7 @@ async def create_lab(
     """Create a new lab within a class the teacher owns."""
     await _verify_class_ownership(db, class_id, teacher)
     lab = await lab_service.create_lab(db, class_id=class_id, name=body.name)
-    return LabResponse.model_validate(lab)
+    return (await feature_service.fill_effective(db, [LabResponse.model_validate(lab)]))[0]
 
 
 # ===================================================================
@@ -109,7 +111,7 @@ async def list_labs(
     """List all labs of a class (its teacher, or an admin)."""
     await _class_access(db, class_id, teacher)
     labs = await lab_service.list_labs_for_class(db, class_id=class_id)
-    return [LabResponse.model_validate(l) for l in labs]
+    return await feature_service.fill_effective(db, [LabResponse.model_validate(l) for l in labs])
 
 
 # ===================================================================
@@ -159,6 +161,23 @@ async def set_exam_mode(
     direct mode only. The chat endpoint enforces it."""
     cls = await _verify_class_ownership(db, class_id, teacher)
     cls.exam_mode = body.exam_mode
+    await db.commit()
+    await db.refresh(cls)
+    return ClassResponse.model_validate(cls)
+
+
+@router.put("/classes/{class_id}/features", response_model=ClassResponse)
+async def set_class_features(
+    class_id: uuid.UUID,
+    body: ClassFeaturesRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> ClassResponse:
+    """Switch some features of a class on or off (upload, web, code, deep);
+    the ones left out keep their value. Labs may choose otherwise
+    (PUT /labs/{id}/features); exam mode turns them all off."""
+    cls = await _verify_class_ownership(db, class_id, teacher)
+    cls.features = feature_service.updated_class(cls.features, body.model_dump(exclude_none=True))
     await db.commit()
     await db.refresh(cls)
     return ClassResponse.model_validate(cls)
@@ -245,7 +264,29 @@ async def update_lab(
     """Update a lab's name and/or toggle its is_active status (its teacher, or an admin)."""
     lab = await _lab_access(db, lab_id, teacher)
     lab = await lab_service.update_lab(db, lab, name=body.name, is_active=body.is_active)
-    return LabResponse.model_validate(lab)
+    return (await feature_service.fill_effective(db, [LabResponse.model_validate(lab)]))[0]
+
+
+# ===================================================================
+# PUT /api/teacher/labs/{lab_id}/features
+# ===================================================================
+
+
+@router.put("/labs/{lab_id}/features", response_model=LabResponse)
+async def set_lab_features(
+    lab_id: uuid.UUID,
+    body: LabFeaturesRequest,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> LabResponse:
+    """This lab's own choice for some features ('on', 'off', or 'inherit' to
+    follow the class); the features left out keep their choice."""
+    lab = await _lab_access(db, lab_id, teacher)
+    lab.feature_overrides = feature_service.updated_lab(
+        lab.feature_overrides, body.model_dump(exclude_none=True))
+    await db.commit()
+    await db.refresh(lab)
+    return (await feature_service.fill_effective(db, [LabResponse.model_validate(lab)]))[0]
 
 
 # ===================================================================

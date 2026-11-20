@@ -80,6 +80,7 @@ A class is owned by one teacher and joined by students with an invite code.
 | invite_code | String(6) | Unique. Students join with it. |
 | is_deleted | Boolean | Default false. Soft delete. |
 | exam_mode | Boolean | Default false. When true, every lab of the class answers in Direct mode only, without course search. New classes get the value of `NEW_CLASS_EXAM_MODE`. Added by migration `m4f_answer_modes_v1`. |
+| features | JSON | Default `{}`. What students may use in the class: `upload`, `web`, `code`, `deep`, each true or false. A missing key means on. Added by `m4p_features_v1`. |
 | created_at | Timestamp | |
 
 ### class_students
@@ -102,6 +103,7 @@ A lab is one activity inside a class. Chat sessions and lab documents belong to 
 | class_id | UUID | Foreign key to `classes.id`. |
 | name | String(255) | |
 | is_active | Boolean | Default true. False locks the lab: chat is refused. |
+| feature_overrides | JSON | Default `{}`. This lab's own choice per feature (`upload`, `web`, `code`, `deep`): `on` or `off`. A missing key follows the class. Exam mode turns every feature off. Added by `m4p_features_v1`. |
 | is_deleted | Boolean | Default false. Soft delete. |
 | created_at | Timestamp | |
 

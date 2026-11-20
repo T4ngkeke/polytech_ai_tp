@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .services.feature_service import Override, class_features, lab_overrides
+
 # ---------------------------------------------------------------------------
 # Shared enums (mirrors SQLAlchemy enums)
 # ---------------------------------------------------------------------------
@@ -240,6 +242,13 @@ class ClassResponse(BaseModel):
     is_deleted: bool
     created_at: datetime
     exam_mode: bool = False
+    # What students may use (services/feature_service.py), every feature present.
+    features: dict[str, bool] = Field(default_factory=lambda: class_features(None))
+
+    @field_validator("features", mode="before")
+    @classmethod
+    def _all_features(cls, value):
+        return class_features(value)
 
 
 class AdminClassResponse(ClassResponse):
@@ -264,6 +273,26 @@ class ExamModeRequest(BaseModel):
     exam_mode: bool
 
 
+class ClassFeaturesRequest(BaseModel):
+    """Switch some features of a class; the ones left out keep their value."""
+    model_config = ConfigDict(extra="forbid")
+
+    upload: bool | None = None
+    web: bool | None = None
+    code: bool | None = None
+    deep: bool | None = None
+
+
+class LabFeaturesRequest(BaseModel):
+    """This lab's own choice for some features: 'on', 'off', or 'inherit' (follow the class)."""
+    model_config = ConfigDict(extra="forbid")
+
+    upload: Override | None = None
+    web: Override | None = None
+    code: Override | None = None
+    deep: Override | None = None
+
+
 # ---------------------------------------------------------------------------
 # Lab
 # ---------------------------------------------------------------------------
@@ -284,6 +313,15 @@ class LabResponse(BaseModel):
     created_at: datetime
     # For students, in a class in exam mode: files they may still search (0: Direct only).
     exam_files: int = 0
+    # This lab's own choices ('on', 'off', 'inherit'), and what students may
+    # use here now (class switches, these choices and exam mode together).
+    feature_overrides: dict[str, str] = Field(default_factory=lambda: lab_overrides(None))
+    features: dict[str, bool] = Field(default_factory=dict)
+
+    @field_validator("feature_overrides", mode="before")
+    @classmethod
+    def _all_overrides(cls, value):
+        return lab_overrides(value)
 
 
 class DocumentResponse(BaseModel):
@@ -555,6 +593,9 @@ class ChatStreamRequest(BaseModel):
     # direct: no course material; search: one search; research: the agent.
     # A class in exam mode answers in direct mode whatever is asked.
     mode: Literal['direct', 'search', 'research'] = 'research'
+    # Tools the student turned on for this question; each must be allowed in
+    # this lab (services/feature_service.py), else the question is refused.
+    tools: list[Literal['web', 'code', 'deep']] = Field(default_factory=list, max_length=3)
 
 
 # ---------------------------------------------------------------------------

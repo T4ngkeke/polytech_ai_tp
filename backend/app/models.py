@@ -278,6 +278,9 @@ class Class(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Exam mode: every lab of the class answers in Direct mode only (no course search).
     exam_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
+    # What students may use (services/feature_service.py): upload, web, code, deep.
+    # A missing key means on.
+    features: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default='{}')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
@@ -338,6 +341,8 @@ class Lab(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # This lab's own choice per feature: 'on' or 'off'; a missing key follows the class.
+    feature_overrides: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default='{}')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
