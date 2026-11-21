@@ -64,6 +64,17 @@ def test_page_text_drops_scripts_and_keeps_lines():
     assert title == 'Récursivité' and text == 'Récursivité\nCas de base\nIl arrête la récursion.'
 
 
+@pytest.mark.parametrize('body,content_type', [
+    ('<meta charset="utf-8"><p>récursivité</p>'.encode(), 'text/html'),           # charset only in the page
+    ('<p>récursivité</p>'.encode(), 'text/html'),                                  # no charset at all
+    ('<p>récursivité</p>'.encode('latin-1'), 'text/html; charset=ISO-8859-1'),
+    ('<meta charset="iso-8859-1"><p>récursivité</p>'.encode('latin-1'), 'text/html'),
+    ('<p>récursivité</p>'.encode(), 'text/html; charset=no-such-charset'),
+])
+def test_a_page_is_decoded_with_the_charset_it_declares(body, content_type):
+    assert 'récursivité' in wt._decode(body, content_type)
+
+
 def test_searxng_results_best_first():
     def handler(request):
         assert request.url.path == '/search' and request.url.params['format'] == 'json'

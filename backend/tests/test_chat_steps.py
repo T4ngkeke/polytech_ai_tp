@@ -55,6 +55,17 @@ async def test_the_lab_course_files_for_the_attachment_menu(pg_session, tmp_path
         await pg_session.commit()
         assert (await client.get(f'/api/student/labs/{lab.id}/documents')).json() == []
         assert (await client.get(f'/api/student/labs/{uuid.uuid4()}/documents')).status_code == 404
+    # The class's teacher sees the same menu in the test drive; another user does not.
+    from backend.app.models import User, UserRole
+    from backend.tests.conftest import make_user
+    teacher = await pg_session.get(User, cls.teacher_id)
+    stranger = make_user(role=UserRole.teacher, username='stranger')
+    pg_session.add(stranger)
+    await pg_session.commit()
+    async with await make_client(pg_session, teacher) as client:
+        assert (await client.get(f'/api/student/labs/{lab.id}/documents')).status_code == 200
+    async with await make_client(pg_session, stranger) as client:
+        assert (await client.get(f'/api/student/labs/{lab.id}/documents')).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -80,3 +91,41 @@ async def test_the_audit_gets_the_citations_of_an_opened_conversation(pg_session
         return next(m for m in row['messages'] if m['sender'] == 'llm')
     assert answer(listed)['citations'] == []                    # the list stays light
     assert [c['label'] for c in answer(opened)['citations']] == ['E1']
+
+
+@pytest.mark.asyncio
+async def test_the_saved_question_id_comes_before_the_answer(pg_session, tmp_path, monkeypatch):
+    """The page needs the question's id for a new version even when the answer
+    never finishes (an error, the Stop button)."""
+    from backend.app.models import Message, SenderType
+    steps = []
+    rev, student, chat, _ = await _chat(pg_session, monkeypatch, tmp_path, steps)
+    steps.append(ModelReply('Bonjour !', [], 'fixture', 50, 20))
+    async with await make_client(pg_session, student) as client:
+        ok = await client.post('/api/chat/stream', json={
+            'session_id': str(chat.id), 'message': 'Bonjour', 'client_request_id': str(uuid.uuid4())})
+    names = [name for name, _ in events(ok.text)]
+    question = next(p for n, p in events(ok.text) if n == 'question')
+    done = next(p for n, p in events(ok.text) if n == 'done')
+    # Sent as soon as the run starts: before any step, draft or answer.
+    assert names.index('question') < min(names.index(n) for n in ('draft', 'done') if n in names)
+    assert question['user_message_id'] == done['user_message_id']
+    pg_session.expire_all()
+    saved = await pg_session.get(Message, uuid.UUID(question['user_message_id']))
+    assert saved.content == 'Bonjour' and saved.sender == SenderType.user
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_failure_does_not_follow_the_answer_with_an_error(pg_session, tmp_path, monkeypatch):
+    import backend.app.routers.chat as chat_api
+    steps = [ModelReply('Bonjour !', [], 'fixture', 50, 20)]
+    rev, student, chat, _ = await _chat(pg_session, monkeypatch, tmp_path, steps)
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError('database gone')
+    monkeypatch.setattr(chat_api.agent_follow_ups, 'generate', broken)
+    async with await make_client(pg_session, student) as client:
+        response = await client.post('/api/chat/stream', json={
+            'session_id': str(chat.id), 'message': 'Bonjour', 'client_request_id': str(uuid.uuid4())})
+    names = [name for name, _ in events(response.text)]
+    assert 'done' in names and 'error' not in names and 'follow_ups' not in names

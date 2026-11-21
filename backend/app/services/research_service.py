@@ -146,7 +146,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
                                  tool_factory=None, on_phase=None, on_draft=None, on_tasks=None,
-                                 on_step=None,
+                                 on_step=None, on_started=None,
                                  web_tools=None, code_tools=None, memory_context: str = '',
                                  attachment_context: str = '', images: list[str] | None = None,
                                  vision_fn=None,
@@ -173,6 +173,10 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
     started = await runs.begin_run(scope=scope, question=question,
         client_request_id=client_request_id, mode=mode, attachments=attachments, version=version,
         stale_after=max(STALE_RUN_SECONDS, 2 * limits.total_seconds))
+    # The question is saved: the page can use its id (a new version of it)
+    # even if the answer never finishes.
+    if on_started is not None and started.user_message_id is not None:
+        on_started(str(started.user_message_id))
     if not started.created:
         # The same request again (a resend, a reconnect): wait for the run
         # that is still working on it rather than report it unfinished.

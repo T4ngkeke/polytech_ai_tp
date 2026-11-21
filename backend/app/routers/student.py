@@ -234,15 +234,18 @@ async def lab_documents(
 ) -> list[dict]:
     """The course files a question of this lab can use now, for the chat's
     attachment menu: [{id, filename, scope: 'lab' | 'class'}]. In exam mode,
-    only the files the teacher allowed (the same rule as the research tools)."""
+    only the files the teacher allowed (the same rule as the research tools).
+    The class's teacher may ask too (the test drive uses the same menu)."""
     lab = await db.get(Lab, lab_id)
     if lab is None or lab.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Lab not found")
-    member = await db.scalar(select(ClassStudent.student_id).where(
-        ClassStudent.class_id == lab.class_id, ClassStudent.student_id == current_user.id))
-    if member is None:
+    cls = await db.get(Class, lab.class_id)
+    member = cls is not None and (cls.teacher_id == current_user.id or await db.scalar(
+        select(ClassStudent.student_id).where(
+            ClassStudent.class_id == lab.class_id, ClassStudent.student_id == current_user.id)))
+    if not member:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You are not a member of the class that owns this lab")
-    exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == lab.class_id)))
+    exam_mode = bool(cls.exam_mode)
     readable = readable_files(lab.class_id, lab_id, exam_only=exam_mode).subquery()
     rows = (await db.execute(select(Document.id, Document.filename, Document.lab_id)
                              .where(Document.id.in_(select(readable.c[0])))

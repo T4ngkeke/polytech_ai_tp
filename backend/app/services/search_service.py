@@ -46,7 +46,8 @@ async def student_search(db, user_id: uuid.UUID, query: str, limit: int = 20) ->
     hits = (await db.execute(
         select(Message.id, Message.session_id, Message.content, Message.sender, Message.created_at)
         .join(Session, Session.id == Message.session_id)
-        .where(*visible, Message.content.ilike(pattern, escape='\\'))
+        .where(*visible, Message.superseded_at.is_(None),          # not a replaced version
+               Message.content.ilike(pattern, escape='\\'))
         .order_by(Message.created_at.desc()).limit(MESSAGE_SCAN_LIMIT))).all()
     best: dict[uuid.UUID, tuple] = {}
     for hit in hits:                       # newest first: keep the first per session

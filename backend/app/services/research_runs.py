@@ -71,6 +71,7 @@ class StartOutcome:
     run_id: uuid.UUID
     created: bool
     status: str
+    user_message_id: uuid.UUID | None = None
 
 
 class ResearchRuns:
@@ -123,7 +124,7 @@ class ResearchRuns:
                         raise RunConflict('active_session_run')
                     if existing.session_id != scope.session_id or existing.question != question:
                         raise RunConflict('request_id_payload_conflict')
-                    return StartOutcome(existing.id, False, existing.status)
+                    return StartOutcome(existing.id, False, existing.status, existing.user_message_id)
                 version_of = None
                 if version is not None:
                     # A new version of the last turn: (first question of the
@@ -158,7 +159,7 @@ class ResearchRuns:
                                      tokens_used=0, request_count=1))
                 else:
                     daily.request_count += 1
-                return StartOutcome(run.id, True, run.status)
+                return StartOutcome(run.id, True, run.status, user_message.id)
 
     async def get_status(self, run_id: uuid.UUID) -> str | None:
         async with self.session_factory() as db:

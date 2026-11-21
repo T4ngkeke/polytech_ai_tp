@@ -97,11 +97,12 @@ def _research_frames(items):
     ('draft', text) adds draft text, ('draft', None) withdraws the draft;
     ('tasks', list) is the model's task checklist as it is now; ('code', {id, code})
     asks the browser to run Python (agent/code_tools.py); ('step', {...}) is
-    what one tool call did (runner.step_of), for the process line.
+    what one tool call did (runner.step_of), for the process line;
+    ('question', {user_message_id}) is the saved question's id.
     Consecutive draft text goes out as one frame."""
     frames, text = [], ''
     for item in [*items, None]:
-        if isinstance(item, tuple) and item[0] in ('tasks', 'code', 'step'):
+        if isinstance(item, tuple) and item[0] in ('tasks', 'code', 'step', 'question'):
             if text:
                 frames.append(f"event: draft\ndata: {json.dumps(text)}\n\n")
                 text = ''
@@ -297,16 +298,24 @@ async def chat_stream(
             mode = 'research'
         # Attachments (agent/attachments.py) go to the research loop; an attached
         # course file limits this question's course search to it.
+        full_scope = scope
         if attachments and mode != 'direct':
             mode = 'research'
             attached_docs = {a['id'] for a in attachments if a['kind'] == 'document'}
             if attached_docs:
                 scope = replace(scope, snapshot_revisions=MappingProxyType({
                     d: r for d, r in scope.snapshot_revisions.items() if str(d) in attached_docs}))
-        attachment_block, images, _ = await agent_attachments.build(
-            db, attachments if mode == 'research' else None, storage_root=get_storage_root())
         research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
         runs = ResearchRuns(research_factory)
+
+        async def earlier_chat(session_id):
+            # An attached chat of this lab: its safe history, as for this chat.
+            history, _, _ = await runs.load_context(replace(full_scope, session_id=session_id),
+                                                    limit=HISTORY_MESSAGES)
+            return history
+        attachment_block, images, _ = await agent_attachments.build(
+            db, attachments if mode == 'research' else None, storage_root=get_storage_root(),
+            earlier_chat=earlier_chat)
         # Only what fits the history limit is sent, with the citations of
         # those answers only.
         # Past the limit, a summary of the older part goes in front of the
@@ -314,15 +323,11 @@ async def chat_stream(
         # course file narrows the course files (the summary belongs to all of them).
         narrowed = any(a['kind'] == 'document' for a in attachments or ())
         compact = settings.CONTEXT_COMPACTION_ENABLED and not exam_mode and not narrowed
+        # The summary itself is written inside the stream (prepare below): it is
+        # a model call, and the stream's keep-alives must cover it.
         loaded, earlier_citations, _ = await runs.load_context(
             scope, limit=HISTORY_MESSAGES, max_tokens=_history_budget(context, limits, mode),
             exclude_ids=replaced, compact=compact)
-        if compact:
-            safe_history, _ = await agent_compaction.apply(
-                research_factory, loaded, ResearchModel(agent) if loaded.dropped else None,
-                {str(k): str(v) for k, v in scope.snapshot_revisions.items()})
-        else:
-            safe_history = loaded
         # Right after a question back the model must answer, not ask again.
         allow_ask = not await runs.last_answer_asked(scope.session_id, exclude_ids=replaced)
     except DocumentNotFound:
@@ -338,22 +343,33 @@ async def chat_stream(
     # never in exam mode, in a test drive, or when the student turned memory off.
     memory_on = (current_user.memory_enabled and current_user.role == UserRole.student
                  and not exam_mode and not session.is_test and mode == 'research')
-    memory_block = ''
-    if memory_on:
-        try:
-            notes = await memory_service.for_recall(db, current_user.id, class_id)
-            vector = None
-            if sum(len(n['content']) + 4 for n in notes) > agent_memory.CONTEXT_CHAR_LIMIT:
-                vector = await embed_query(agent_memory.recall_query(safe_history, body.message))
-            memory_block = agent_memory.memory_context(notes, vector)
-        except Exception as exc:                  # a question never fails for its notes
-            logger.warning('Memory recall failed (%s)', type(exc).__name__)
     # "About me" (the student's settings): with the notes, under the same
     # conditions except the memory switch, which is about the notes only.
-    if (current_user.role == UserRole.student and not exam_mode and not session.is_test
-            and mode == 'research'):
-        about = agent_memory.about_context(current_user.about_me)
-        memory_block = '\n\n'.join(b for b in (about, memory_block) if b)
+    about = (agent_memory.about_context(current_user.about_me)
+             if (current_user.role == UserRole.student and not exam_mode and not session.is_test
+                 and mode == 'research') else '')
+    user_id = current_user.id
+    snapshot = {str(k): str(v) for k, v in scope.snapshot_revisions.items()}
+
+    async def prepare() -> tuple[list[dict], str]:
+        """The history to send (with the summary of its older part) and the
+        student's notes. Both may call a model, so they run inside the stream."""
+        history = loaded
+        if compact:
+            history, _ = await agent_compaction.apply(
+                research_factory, loaded, ResearchModel(agent) if loaded.dropped else None, snapshot)
+        notes_block = ''
+        if memory_on:
+            try:
+                async with research_factory() as notes_db:
+                    notes = await memory_service.for_recall(notes_db, user_id, class_id)
+                vector = None
+                if sum(len(n['content']) + 4 for n in notes) > agent_memory.CONTEXT_CHAR_LIMIT:
+                    vector = await embed_query(agent_memory.recall_query(history, body.message))
+                notes_block = agent_memory.memory_context(notes, vector)
+            except Exception as exc:              # a question never fails for its notes
+                logger.warning('Memory recall failed (%s)', type(exc).__name__)
+        return history, '\n\n'.join(b for b in (about, notes_block) if b)
     vlm = Endpoint(llm_config['vlm_base_url'],
                    llm_config['vlm_api_key'], llm_config['vlm_model'])
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
@@ -379,6 +395,9 @@ async def chat_stream(
         def step(item):
             queue.put_nowait(('step', item))
 
+        def started(question_id):
+            queue.put_nowait(('question', {'user_message_id': question_id}))
+
         async def save_code_image(data: bytes, n: int) -> str | None:
             # An image a Python run printed: a chat file of this conversation.
             try:
@@ -395,6 +414,22 @@ async def chat_stream(
         code_tools = (agent_code.CodeTools(current_user.id, lambda event: queue.put_nowait(('code', event)),
                                            save_image=save_code_image) if run_code else None)
         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
+        preparing = asyncio.create_task(prepare())
+        try:
+            while not preparing.done():
+                done, _ = await asyncio.wait({preparing}, timeout=KEEPALIVE_SECONDS)
+                if not done:
+                    if await request.is_disconnected():
+                        return
+                    yield ": keep-alive\n\n"
+            safe_history, memory_block = preparing.result()
+        except Exception:
+            logger.exception('Research request failed')
+            yield f"event: error\ndata: {json.dumps({'detail': 'Research failed'})}\n\n"
+            return
+        finally:
+            if not preparing.done():
+                preparing.cancel()
         task = asyncio.create_task(run_persisted_research(
             scope=scope, question=body.message, client_request_id=request_id,
             attachments=attachments, version=version, model=ResearchModel(agent), model_name=agent.model,
@@ -407,7 +442,7 @@ async def chat_stream(
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
-            rerank_model=llm_config['rerank_model'], on_phase=phase, on_tasks=tasks, on_step=step,
+            rerank_model=llm_config['rerank_model'], on_phase=phase, on_tasks=tasks, on_step=step, on_started=started,
             vision_fn=vision, vision_model=vlm.model, limits=limits, tp_chars=tp_chars,
             language_model=language_model(agent), context_tokens=context,
             on_draft=draft, allow_ask=allow_ask and mode == 'research',
@@ -462,17 +497,24 @@ async def chat_stream(
                     _memory_reviews.add(review)
                     review.add_done_callback(_memory_reviews.discard)
             # Suggested next questions (agent/follow_ups.py): the last thing sent.
+            # Like the title, a failure here must not follow a delivered answer.
+            suggestions = None
             if not exam_mode and not result.get('clarification') and result.get('message_id'):
-                suggestions = await agent_follow_ups.generate(
-                    title_model, [*safe_history, {'role': 'user', 'content': body.message},
-                                  {'role': 'assistant', 'content': result['answer']}],
-                    teaching_rules=teaching_rules)
-                if suggestions:
-                    async with research_factory() as fdb:
-                        await fdb.execute(update(Message).where(Message.id == uuid.UUID(str(result['message_id'])))
-                                          .values(follow_ups=suggestions))
-                        await fdb.commit()
-                    yield (f"event: follow_ups\ndata: {json.dumps({'message_id': str(result['message_id']), 'follow_ups': suggestions}, ensure_ascii=False)}\n\n")
+                try:
+                    suggestions = await agent_follow_ups.generate(
+                        title_model, [*safe_history, {'role': 'user', 'content': body.message},
+                                      {'role': 'assistant', 'content': result['answer']}],
+                        teaching_rules=teaching_rules)
+                    if suggestions:
+                        async with research_factory() as fdb:
+                            await fdb.execute(update(Message).where(Message.id == uuid.UUID(str(result['message_id'])))
+                                              .values(follow_ups=suggestions))
+                            await fdb.commit()
+                except Exception:
+                    logger.exception('Follow-up suggestions failed')
+                    suggestions = None
+            if suggestions:
+                yield (f"event: follow_ups\ndata: {json.dumps({'message_id': str(result['message_id']), 'follow_ups': suggestions}, ensure_ascii=False)}\n\n")
         except RunConflict as exc:
             detail = ('This question was already replaced by a newer version' if str(exc) == 'version_conflict'
                       else 'Another research request is already running')

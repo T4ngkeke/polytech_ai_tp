@@ -147,6 +147,7 @@ const S = {
   'use.notFound': { zh: '课件里没找到', fr: 'Pas trouvé dans le cours', en: 'Not found in the course' },
   'use.deep': { zh: '深入研究这个问题', fr: 'Approfondir cette question', en: 'Research this question' },
   'ask.searchCourse': { zh: '请在课程文件里查找这个问题的答案，并给出引用。', fr: 'Cherche la réponse dans les fichiers du cours, avec les citations.', en: 'Look for the answer in the course files, with citations.' },
+  'ask.attachmentOnly': { zh: '请看附件。', fr: 'Peux-tu regarder la pièce jointe ?', en: 'Please look at the attachment.' },
   followups: { zh: '追问', fr: 'Pour continuer', en: 'Follow-ups' },
   'version.prev': { zh: '上一个版本', fr: 'Version précédente', en: 'Previous version' },
   'version.next': { zh: '下一个版本', fr: 'Version suivante', en: 'Next version' },

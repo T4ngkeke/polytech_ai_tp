@@ -60,6 +60,10 @@ export function interpretStreamEvent(ev) {
       return parsed && typeof parsed.id === 'string' && typeof parsed.code === 'string'
         ? { type: 'code', id: parsed.id, code: parsed.code } : { type: 'ignore' };
     }
+    case 'question': {
+      const parsed = safeParse(ev.data);
+      return parsed?.user_message_id ? { type: 'question', userMessageId: parsed.user_message_id } : { type: 'ignore' };
+    }
     case 'follow_ups': {
       const parsed = safeParse(ev.data);
       const list = Array.isArray(parsed?.follow_ups) ? parsed.follow_ups.filter((x) => typeof x === 'string') : [];

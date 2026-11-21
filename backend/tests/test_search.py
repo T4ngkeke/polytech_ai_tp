@@ -14,8 +14,9 @@ from tests.conftest import make_client, make_user
 T0 = datetime(2026, 11, 20, 9, 0, tzinfo=timezone.utc)
 
 
-def msg(session, sender, content, minutes):
-    return Message(session_id=session.id, sender=sender, content=content, created_at=T0 + timedelta(minutes=minutes))
+def msg(session, sender, content, minutes, **extra):
+    return Message(session_id=session.id, sender=sender, content=content, created_at=T0 + timedelta(minutes=minutes),
+                   **extra)
 
 
 @pytest_asyncio.fixture
@@ -46,6 +47,7 @@ async def seed(db_session: AsyncSession) -> dict:
         msg(s1, SenderType.user, 'Pourquoi factorielle(0) vaut 1 ?', 1),
         msg(s1, SenderType.llm, 'Le cas de base arrête la Récursion : 0! = 1.', 2),
         msg(s2, SenderType.user, 'Python optimise-t-il ?', 3),
+        msg(s2, SenderType.user, 'une version remplacée', 4, superseded_at=T0),
         msg(gone, SenderType.user, 'récursion secrète', 10),
         msg(test, SenderType.user, 'récursion du prof', 20),
         q3, a3,
@@ -77,6 +79,7 @@ async def test_a_student_finds_only_their_visible_chats(db_session, seed):
         titled = (await c.get('/api/student/search', params={'q': 'terminale'})).json()
         assert [(h['title'], h['message_id']) for h in titled] == [('Récursivité terminale', None)]
         assert (await c.get('/api/student/search', params={'q': '100%'})).json() == []
+        assert (await c.get('/api/student/search', params={'q': 'remplacée'})).json() == []   # a replaced version
         assert (await c.get('/api/student/search', params={'q': 'x'})).status_code == 422
 
 

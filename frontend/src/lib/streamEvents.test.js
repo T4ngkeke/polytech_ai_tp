@@ -115,4 +115,7 @@ test('steps, tasks, code, follow-ups and the done fields are read', () => {
   assert.deepEqual(follow.followUps, ['a']);
   const done = interpretStreamEvent({ event: 'done', data: '{"message_id":"m","course_use":"cited","web_sources":[{"id":"W1"}],"code_runs":null}' });
   assert.deepEqual([done.courseUse, done.webSources, done.codeRuns], ['cited', [{ id: 'W1' }], null]);
+  assert.deepEqual(interpretStreamEvent({ event: 'question', data: '{"user_message_id":"q1"}' }),
+    { type: 'question', userMessageId: 'q1' });
+  assert.equal(interpretStreamEvent({ event: 'question', data: '{}' }).type, 'ignore');
 });

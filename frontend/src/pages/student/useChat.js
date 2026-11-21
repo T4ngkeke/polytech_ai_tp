@@ -19,6 +19,8 @@ import { interpretStreamEvent, openStream } from '../../lib/streamEvents';
 import { applyToMessage } from '../../lib/streamMessage';
 import { runForAgent } from '../../lib/python';
 
+const isLocalId = (id) => typeof id === 'string' && id.startsWith('local-');
+
 export default function useChat({ getSessionId, tools = [], onDone, onTitle, onStatus, onRefusal, follow }) {
   const token = useAuthStore((s) => s.token);
   const [messages, setMessages] = useState([]);
@@ -43,12 +45,24 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
     setMessages(list);
   }, []);
 
-  const send = useCallback(async (text, attachments = [], { versionOf = null, toolsOverride = null } = {}) => {
-    const message = (text || '').trim();
-    if ((!message && !attachments.length) || streaming) return;
+  const send = useCallback(async (text, attachments = [], { versionOf: asked = null, toolsOverride = null } = {}) => {
+    // Only a file, no words: a short question goes with it (the server needs one).
+    const message = (text || '').trim() || (attachments.length ? translate('ask.attachmentOnly') : '');
+    if (!message || streaming) return;
     const cb = callbacks.current;
     const sessionId = await cb.getSessionId();
     if (!sessionId) return;
+    // A question the server never saved (it failed before it started) has no
+    // versions: it is taken off the screen and asked again as a new question.
+    let versionOf = asked;
+    if (isLocalId(versionOf)) {
+      const unsaved = versionOf;
+      setMessages((prev) => {
+        const at = prev.findIndex((m) => m.id === unsaved);
+        return at >= 0 ? prev.slice(0, at) : prev;
+      });
+      versionOf = null;
+    }
     const userId = createMessageId();
     const answerId = createMessageId();
     streamedIds.current.add(answerId);
@@ -114,6 +128,10 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
               }));
               setStreaming(false);
               callbacks.current.onDone?.();
+              return;
+            case 'question':
+              // The question is saved: its real id, for a new version of it.
+              setMessages((prev) => prev.map((m) => (m.id === userId ? { ...m, id: action.userMessageId } : m)));
               return;
             case 'title':
               callbacks.current.onTitle?.(action.sessionId || sessionId, action.title);

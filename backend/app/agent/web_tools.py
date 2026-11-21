@@ -31,6 +31,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+import re
 import socket
 import urllib.parse
 from typing import Optional, Sequence
@@ -233,8 +234,22 @@ def fetch_page(url: str) -> tuple[str, str]:
         return final_url, _pdf_text(body)
     if not _is_text_content_type(content_type):
         raise ValueError(f'Unsupported content type: {content_type}')
-    encoding = requests.utils.get_encoding_from_headers({'content-type': content_type}) or 'utf-8'
-    return _page_text(body.decode(encoding, errors='replace'), final_url)
+    return _page_text(_decode(body, content_type), final_url)
+
+
+def _decode(body: bytes, content_type: str) -> str:
+    """The page text: the charset of the header if it names one; else the one
+    the page declares (<meta charset>), else UTF-8. (requests would take
+    ISO-8859-1 for any text/* without a charset, which garbles UTF-8 pages.)"""
+    match = re.search(r'charset\s*=\s*["\']?([\w.:-]+)', content_type or '', re.IGNORECASE)
+    if match:
+        try:
+            return body.decode(match.group(1), errors='replace')
+        except LookupError:
+            pass
+    from bs4 import UnicodeDammit
+    found = UnicodeDammit(body, is_html=True)
+    return found.unicode_markup if found.unicode_markup is not None else body.decode('utf-8', errors='replace')
 
 
 # ---------------------------------------------------------------------------
