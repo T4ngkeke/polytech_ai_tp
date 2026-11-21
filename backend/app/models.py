@@ -785,6 +785,8 @@ class Message(Base):
     # The Python runs in the student's browser while answering:
     # [{id, code, stdout, stderr, result, images: [chat file id], status}].
     code_runs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Suggested next questions under an answer (agent/follow_ups.py): [str].
+    follow_ups: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

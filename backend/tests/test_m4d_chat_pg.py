@@ -75,6 +75,8 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='',
                                on_text=None):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 if purpose == 'memory_review':      # the background review after 4 questions
                     return ModelReply('{"operations": []}', [], 'fixture', 10, 5)
                 model_messages.append(messages)
@@ -227,6 +229,8 @@ async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch
             def __init__(self, endpoint):
                 endpoints.append(endpoint.model)
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 # A reply without research gets one check; DONE keeps it.
                 return ModelReply('DONE' if purpose == 'answer_check' else 'Bonjour !', [], 'flash-next', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
@@ -275,11 +279,15 @@ async def test_the_answer_language_is_named_first_and_billed(pg_session, tmp_pat
             def __init__(self, endpoint, **_):
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 seen.append((purpose, messages))
                 return ModelReply('DONE' if purpose == 'answer_check' else 'Hallo!', [], 'flash-next', 25, 8)
         class LanguageModel:
             fail = False
             async def __call__(self, messages, max_output, timeout, *, purpose='', **_):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 if LanguageModel.fail:
                     raise TimeoutError()
                 seen.append((purpose, messages))
@@ -346,6 +354,8 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
             def __init__(self, endpoint):
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 model_messages.append(messages)
                 return ModelReply('Bonjour !', [], 'flash-next', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
@@ -424,6 +434,8 @@ async def test_silent_research_sends_keep_alive_comments(pg_session, tmp_path, m
             def __init__(self, endpoint):
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 await asyncio.sleep(1.2)
                 return ModelReply('Bonjour !', [], 'flash-next', 25, 8)
         monkeypatch.setattr(chat_api, 'ResearchModel', SlowModel)
@@ -501,6 +513,8 @@ async def test_real_local_model_student_research_http(pg_session, tmp_path, monk
         real_model = chat_api.ResearchModel
         class LoggedModel(real_model):
             async def __call__(self, messages, max_output, timeout, **kwargs):
+                if kwargs.get('purpose') == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 try:
                     reply = await super().__call__(messages, max_output, timeout, **kwargs)
                 except Exception as exc:
@@ -574,6 +588,8 @@ async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monke
             def __init__(self, endpoint):
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 if steps:
                     return steps.pop(0)
                 # Cite only the visual observation just returned.
@@ -622,6 +638,8 @@ async def test_a_question_back_is_saved_shown_and_answered_in_the_next_turn(pg_s
             def __init__(self, endpoint):
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+                if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                    return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
                 if purpose == 'title':          # the new conversation's title
                     return ModelReply('Définition de θ', [], 'fixture', 5, 3)
                 offered.append([t['function']['name'] for t in tools or []])
@@ -665,6 +683,8 @@ async def _mode_chat(db, tmp_path, monkeypatch, replies):
         def __init__(self, endpoint):
             pass
         async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='', on_text=None):
+            if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
+                return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
             calls.append({'purpose': purpose, 'tools': tools, 'messages': messages})
             return ModelReply(replies.pop(0), [], 'flash-next', 40, 10)
     monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)

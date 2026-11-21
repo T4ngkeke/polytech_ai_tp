@@ -604,6 +604,8 @@ class MessageResponse(BaseModel):
     web_sources: list[dict] | None = None
     # The Python runs in the student's browser: [{id, code, stdout, stderr, result, images, status}].
     code_runs: list[dict] | None = None
+    # Suggested next questions under the answer: [str].
+    follow_ups: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------

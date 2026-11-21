@@ -24,7 +24,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.agent.history import history_budget
@@ -51,6 +51,7 @@ from backend.app.schemas import ChatStreamRequest, CodeResultRequest, MessageFee
 from backend.app.services import chat_file_service, feature_service, memory_service, quota_service, rule_service
 from backend.app.agent import attachments as agent_attachments
 from backend.app.agent import memory as agent_memory
+from backend.app.agent import follow_ups as agent_follow_ups
 from backend.app.routers.teacher_access import get_storage_root
 from backend.app.services.model_routing import Endpoint
 from backend.app.services.model_servers import context_tokens
@@ -334,6 +335,12 @@ async def chat_stream(
             memory_block = agent_memory.memory_context(notes, vector)
         except Exception as exc:                  # a question never fails for its notes
             logger.warning('Memory recall failed (%s)', type(exc).__name__)
+    # "About me" (the student's settings): with the notes, under the same
+    # conditions except the memory switch, which is about the notes only.
+    if (current_user.role == UserRole.student and not exam_mode and not session.is_test
+            and mode == 'research'):
+        about = agent_memory.about_context(current_user.about_me)
+        memory_block = '\n\n'.join(b for b in (about, memory_block) if b)
     vlm = Endpoint(llm_config['vlm_base_url'],
                    llm_config['vlm_api_key'], llm_config['vlm_model'])
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
@@ -438,6 +445,18 @@ async def chat_stream(
                                   {'role': 'assistant', 'content': result['answer']}]))
                     _memory_reviews.add(review)
                     review.add_done_callback(_memory_reviews.discard)
+            # Suggested next questions (agent/follow_ups.py): the last thing sent.
+            if not exam_mode and not result.get('clarification') and result.get('message_id'):
+                suggestions = await agent_follow_ups.generate(
+                    title_model, [*safe_history, {'role': 'user', 'content': body.message},
+                                  {'role': 'assistant', 'content': result['answer']}],
+                    teaching_rules=teaching_rules)
+                if suggestions:
+                    async with research_factory() as fdb:
+                        await fdb.execute(update(Message).where(Message.id == uuid.UUID(str(result['message_id'])))
+                                          .values(follow_ups=suggestions))
+                        await fdb.commit()
+                    yield (f"event: follow_ups\ndata: {json.dumps({'message_id': str(result['message_id']), 'follow_ups': suggestions}, ensure_ascii=False)}\n\n")
         except RunConflict as exc:
             detail = ('This question was already replaced by a newer version' if str(exc) == 'version_conflict'
                       else 'Another research request is already running')
