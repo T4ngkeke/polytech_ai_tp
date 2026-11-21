@@ -107,10 +107,6 @@ const S = {
   'p.docs.sharedTitle': { zh: '班级共用的文件：请到班级的文件页管理', fr: 'Partagé par la classe : gérez-le dans l’onglet Documents de la classe', en: 'Shared by the class: open the class Documents tab to manage it' },
   'p.docs.legacyTitle': { zh: '在 PDF 流程之前上传的文件：只能删除', fr: 'Envoyé avant la lecture des PDF : il ne peut qu’être supprimé', en: 'Uploaded before the PDF path: it can only be deleted' },
   'p.docs.scopeLab': { zh: '实验', fr: 'TP', en: 'Lab' },
-  'p.docs.inFull': { zh: '完整阅读', fr: 'Lu en entier', en: 'Read in full' },
-  'p.docs.inFullTitle': { zh: '每个问题都会把它完整交给助手（搜索和直接回答）', fr: 'Donné en entier à l’assistant à chaque question (Recherche et Direct)', en: 'Given whole to the tutor with every question (Search and Direct)' },
-  'p.docs.searchedOnly': { zh: '只搜索', fr: 'Recherche seule', en: 'Searched only' },
-  'p.docs.searchedOnlyTitle': { zh: '太长，超过了上限：助手只能搜索它', fr: 'Trop long pour la limite : l’assistant ne fait que le consulter par recherche', en: 'Too long for the limit: the tutor only searches it' },
   'p.docs.processing': { zh: '处理中', fr: 'Traitement', en: 'Processing' },
   'p.docs.pages': { zh: '页数', fr: 'pages', en: 'pages' },
   'p.docs.chunks': { zh: '片段数', fr: 'extraits', en: 'chunks' },
@@ -138,11 +134,6 @@ const S = {
   'p.docs.lessMinute': { zh: '不到 1 分钟', fr: 'moins d’une minute', en: 'less than a minute left' },
   'p.docs.minutesLeft': { zh: '还需约 {n} 分钟', fr: 'environ {n} min restantes', en: 'about {n} min left' },
   'p.docs.indexing': { zh: '正在建立索引…', fr: 'Indexation…', en: 'Indexing…' },
-  'p.docs.tp.title': { zh: '这个实验的文字太多，无法全部读入', fr: 'Trop de texte dans ce TP pour tout lire', en: 'Too much text in this TP to read it all' },
-  'p.docs.tp.body': { zh: '每个问题，助手都会完整阅读实验文件，上限约 {limit} 个字符。这些文件大约有 {total} 个字符。{all} 个文件里它完整阅读 {full} 个（{pages} 页），其余 {out} 个只能搜索：{names}。', fr: 'À chaque question, l’assistant lit les fichiers du TP en entier, jusqu’à environ {limit} caractères. Ces fichiers en ont environ {total}. Il lit {full} fichier(s) sur {all} en entier ({pages} pages) et ne fait que chercher dans les {out} autres : {names}.', en: 'The tutor reads the TP files in full for every question, up to about {limit} characters. These files have about {total}. It reads {full} of {all} files in full ({pages} pages) and only searches the other {out}: {names}.' },
-  'p.docs.tp.advice': { zh: '请把课件放进班级的文件页，这里只留实验题目。', fr: 'Mettez les supports de cours dans l’onglet Documents de la classe et gardez ici seulement l’énoncé du TP.', en: 'Put course slides in the class Documents tab and keep only the TP statement here.' },
-  'p.docs.tp.advice2': { zh: '这样助手会读完整个题目，同时仍然可以搜索课件。', fr: 'L’assistant lit alors tout l’énoncé et continue de chercher dans les supports.', en: 'The tutor then reads the whole statement, and still searches the slides.' },
-  'p.docs.tp.open': { zh: '打开班级文件页', fr: 'Ouvrir l’onglet Documents de la classe', en: 'Open the class Documents tab' },
 
   // Document pages editor (teacher)
   'p.block.back': { zh: '返回文件列表', fr: 'Retour aux documents', en: 'Back to documents' },

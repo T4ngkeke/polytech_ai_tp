@@ -91,7 +91,7 @@ function readingLineT(status, latest, t) {
   return null;
 }
 
-export default function DocumentManager({ labId, classId, examMode = false, onOpenClassSettings, onOpenClassDocuments }) {
+export default function DocumentManager({ labId, classId, examMode = false, onOpenClassSettings }) {
   const t = useT();
   const base = classId ? `/api/teacher/classes/${classId}/documents` : labId ? `/api/teacher/labs/${labId}/documents` : null;
   const [documents, setDocuments] = useState([]);
@@ -103,22 +103,12 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   const fileRef = useRef(null);
   const [confirming, setConfirming] = useState(null); // document whose deletion waits for Confirm
 
-  // A lab: which of its files the tutor reads in full (GET /api/teacher/labs/{id}/tp-text).
-  const [tpText, setTpText] = useState(null);
   const loadDocuments = useCallback(async () => {
     if (!base) return [];
     const rows = await api.get(base);
     setDocuments(rows);
-    // A reply without a file list (an older backend, a proxy page) shows no notice
-    // instead of breaking the tab.
-    if (labId && !classId) {
-      api.get(`/api/teacher/labs/${labId}/tp-text`)
-        .then((tp) => setTpText(Array.isArray(tp?.files) ? tp : null))
-        .catch(() => setTpText(null));
-    }
     return rows;
-  }, [base, labId, classId]);
-  const inFull = (doc) => tpText?.files.find((f) => f.document_id === doc.id)?.in_full;
+  }, [base]);
 
   // Initial load when the class or lab changes.
   useEffect(() => {
@@ -279,7 +269,6 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
       {documents.some((d) => IN_PROGRESS.has(displayStatus(d))) && (
         <p className="text-[13px] text-cream-muted">{t('p.docs.slowNote')}</p>
       )}
-      {!classId && <TpTextNotice tp={tpText} onOpenClassDocuments={onOpenClassDocuments} />}
       {loading ? (
         <p className="text-[14px] text-cream-muted">{t('p.docs.loading')}</p>
       ) : documents.length === 0 ? (
@@ -301,13 +290,6 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
                 <span className="flex min-w-0 max-w-full items-center gap-2">
                   {!classId && <ScopeBadge scope={doc.scope} />}
                   <span className="truncate text-[14px] font-medium text-cream">{doc.filename}</span>
-                  {!classId && doc.scope === 'lab' && inFull(doc) !== undefined && (inFull(doc) ? (
-                    <span title={t('p.docs.inFullTitle')}
-                      className="shrink-0 whitespace-nowrap rounded-full border border-border-default px-2 text-[12px] text-cream-secondary">{t('p.docs.inFull')}</span>
-                  ) : (
-                    <span title={t('p.docs.searchedOnlyTitle')}
-                      className="shrink-0 whitespace-nowrap rounded-full border border-gold/50 px-2 text-[12px] text-gold">{t('p.docs.searchedOnly')}</span>
-                  ))}
                   {WARNING_HINT[status] && (
                     <span title={doc.error_message || t(WARNING_HINT[status])} className="text-gold"><Icon name="warning" className="w-4 h-4" /></span>
                   )}
@@ -440,38 +422,3 @@ function SummaryChips({ doc }) {
   );
 }
 
-
-// The lab's files are too long for the tutor to read them all with every
-// question: say which are only searched, and that slides belong in the class.
-// Agreed on a prototype first (2026-11-17).
-function TpTextNotice({ tp, onOpenClassDocuments }) {
-  const t = useT();
-  if (!tp || !tp.left_out) return null;
-  const total = tp.files.reduce((sum, f) => sum + f.chars, 0);
-  const full = tp.files.filter((f) => f.in_full);
-  const out = tp.files.filter((f) => !f.in_full);
-  const pages = full.reduce((sum, f) => sum + f.pages, 0);
-  const fmt = (n) => n.toLocaleString('en-US');
-  return (
-    <div className="space-y-2 rounded-2xl border border-gold/40 bg-warn-soft px-4 py-3" role="status">
-      <p className="flex items-center gap-1.5 text-[14px] font-semibold text-gold">
-        <Icon name="warning" className="h-4 w-4" />{t('p.docs.tp.title')}
-      </p>
-      <p className="text-[14px] text-cream-secondary">
-        {t('p.docs.tp.body', { limit: fmt(tp.limit_chars), total: fmt(total), full: full.length, all: tp.files.length,
-          pages, out: out.length, names: out.map((f) => f.filename).join(', ') })}
-      </p>
-      <div className="h-1.5 overflow-hidden rounded-full bg-ink-hover" aria-hidden="true">
-        <div className="h-full bg-gold" style={{ width: `${Math.min(100, Math.round((100 * tp.limit_chars) / total))}%` }} />
-      </div>
-      <p className="text-[14px] text-cream-secondary">
-        <span className="font-semibold text-cream">{t('p.docs.tp.advice')}</span>{' '}
-        {t('p.docs.tp.advice2')}
-      </p>
-      {onOpenClassDocuments && (
-        <button type="button" onClick={onOpenClassDocuments}
-          className="cursor-pointer text-[14px] text-cream-secondary underline hover:text-cream">{t('p.docs.tp.open')}</button>
-      )}
-    </div>
-  );
-}

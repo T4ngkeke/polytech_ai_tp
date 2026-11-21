@@ -376,8 +376,7 @@ export default function Teacher() {
               {level === 'lab' && activeTab === 3 && <AuditPanel lab={selectedLab} sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
               {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} classId={selectedClass?.id} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id}
-                examMode={!!selectedClass?.exam_mode} onOpenClassSettings={() => handleSelectClass(selectedClass)}
-                onOpenClassDocuments={() => { handleSelectClass(selectedClass); setActiveTab(3); }} />}
+                examMode={!!selectedClass?.exam_mode} onOpenClassSettings={() => handleSelectClass(selectedClass)} />}
               {level === 'lab' && activeTab === 6 && <TestDrivePanel lab={selectedLab} labName={selectedLab.name} examMode={!!selectedClass?.exam_mode} />}
             </div>
           </>
