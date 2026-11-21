@@ -12,9 +12,10 @@ import useAuthStore from '../store/authStore';
 import CORE from './i18n.strings.js';
 import TEACHER from './i18n.teacher.js';
 import PAGES from './i18n.pages.js';
+import ADMIN from './i18n.admin.js';
 
 // Student chat and shared text, the teacher's pages, the other pages (login, files…).
-const STRINGS = { ...PAGES, ...TEACHER, ...CORE };
+const STRINGS = { ...ADMIN, ...PAGES, ...TEACHER, ...CORE };
 
 export const LANGUAGES = [
   { code: 'zh', label: '中文' },

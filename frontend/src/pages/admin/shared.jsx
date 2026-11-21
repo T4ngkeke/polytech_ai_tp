@@ -3,25 +3,40 @@
  */
 import { useState } from 'react';
 import Icon from '../../components/Icon';
+import { useT } from '../../lib/i18n';
+import { Modal as UiModal } from '../student/ui';
+
+export const inputClass = 'rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream placeholder:text-cream-muted focus:border-cream-muted focus:outline-none';
+export const primaryButton = 'rounded-full bg-ink px-3.5 py-1.5 text-[13px] text-on-ink hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
+export const secondaryButton = 'rounded-full px-3.5 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover hover:text-cream disabled:cursor-not-allowed disabled:opacity-40';
+export const outlineButton = 'inline-flex items-center gap-1.5 rounded-full border border-border-default px-3.5 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover hover:text-cream disabled:cursor-not-allowed disabled:opacity-40';
+export const cardClass = 'rounded-2xl border border-border-subtle bg-ink-raised p-5';
+
+/** "3 classes": noun is class, teacher, lab, student, day, session or message. */
+export function useCount() {
+  const t = useT();
+  return (noun, n) => t(`a.${noun}.${n === 1 ? 'one' : 'many'}`, { n });
+}
 
 export function PageHeader({ title, subtitle, children }) {
   return (
-    <div className="flex items-start justify-between gap-4 mb-6">
-      <div>
-        <h2 className="text-xl font-display text-cream">{title}</h2>
-        {subtitle && <p className="text-xs text-cream-muted mt-1">{subtitle}</p>}
+    <div className="mb-5 flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-[18px] font-semibold text-cream">{title}</h2>
+        {subtitle && <p className="mt-1 text-[13px] text-cream-muted">{subtitle}</p>}
       </div>
-      {children && <div className="flex items-center gap-2 shrink-0">{children}</div>}
+      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
     </div>
   );
 }
 
 export function SortableTh({ label, active, dir, onClick }) {
   return (
-    <th className="text-left font-medium px-4 py-3">
-      <button onClick={onClick} className="inline-flex items-center gap-1 uppercase tracking-widest hover:text-cream transition-colors cursor-pointer">
+    <th className="px-4 py-2.5 text-left font-normal">
+      <button type="button" onClick={onClick}
+        className={`inline-flex cursor-pointer items-center gap-1 hover:text-cream ${active ? 'text-cream' : ''}`}>
         {label}
-        <SortIcon className={`w-3 h-3 transition-colors ${active ? 'text-cyan' : 'text-cream-faint'}`} dir={active ? dir : null} />
+        <SortIcon className={`h-3 w-3 ${active ? 'text-cream' : 'text-cream-muted'}`} dir={active ? dir : null} />
       </button>
     </th>
   );
@@ -30,8 +45,8 @@ export function SortableTh({ label, active, dir, onClick }) {
 export function IconButton({ onClick, title, danger, disabled = false, children }) {
   return (
     <button type="button" onClick={onClick} title={title} aria-label={title} disabled={disabled}
-      className={`p-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-30 ${
-        danger ? 'text-cream-muted enabled:hover:text-danger enabled:hover:bg-danger-muted' : 'text-cream-muted enabled:hover:text-cyan enabled:hover:bg-cyan-muted'
+      className={`cursor-pointer rounded-lg p-2 disabled:cursor-not-allowed disabled:opacity-30 ${
+        danger ? 'text-cream-muted enabled:hover:bg-ink-hover enabled:hover:text-danger' : 'text-cream-muted enabled:hover:bg-ink-hover enabled:hover:text-cream'
       }`}>
       {children}
     </button>
@@ -40,22 +55,22 @@ export function IconButton({ onClick, title, danger, disabled = false, children 
 
 export function EmptyState({ icon, message }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center gap-3 text-cream-muted">
-      <div className="text-cream-faint">{icon}</div>
-      <p className="text-sm">{message}</p>
+    <div className="flex h-full flex-col items-center justify-center gap-3 py-10 text-center text-cream-muted">
+      <div>{icon}</div>
+      <p className="text-[14px]">{message}</p>
     </div>
   );
 }
 
 export function Spinner() {
-  return <div className="flex items-center justify-center h-full"><div className="w-6 h-6 rounded-full border-2 border-cyan border-t-transparent animate-[spin_0.8s_linear_infinite]" /></div>;
+  return <div className="flex h-full items-center justify-center"><div className="h-6 w-6 animate-[spin_0.8s_linear_infinite] rounded-full border-2 border-cream-muted border-t-transparent" /></div>;
 }
 
 export function StatCard({ label, value }) {
   return (
-    <div className="bg-ink-raised rounded-xl border border-border-subtle p-4">
-      <p className="text-[10px] uppercase tracking-widest text-cream-muted mb-1">{label}</p>
-      <p className="text-2xl font-display text-cream">{value ?? '—'}</p>
+    <div className={cardClass}>
+      <p className="mb-1 text-[13px] text-cream-muted">{label}</p>
+      <p className="text-[22px] font-semibold text-cream">{value ?? '—'}</p>
     </div>
   );
 }
@@ -63,9 +78,9 @@ export function StatCard({ label, value }) {
 export function Field({ label, value, onChange, placeholder }) {
   return (
     <div className="space-y-1.5">
-      <label className="mono-label">{label}</label>
+      <label className="text-[13px] text-cream-muted">{label}</label>
       <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm font-mono placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 transition-colors" />
+        className={`w-full ${inputClass}`} />
     </div>
   );
 }
@@ -73,17 +88,17 @@ export function Field({ label, value, onChange, placeholder }) {
 // Masked input for secrets (API keys). Hidden by default; each field owns its
 // own reveal toggle so showing one key never exposes the others.
 export function SecretField({ label, value, onChange, placeholder }) {
+  const t = useT();
   const [show, setShow] = useState(false);
   return (
     <div className="space-y-1.5">
-      <label className="mono-label">{label}</label>
+      <label className="text-[13px] text-cream-muted">{label}</label>
       <div className="relative">
         <input type={show ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder} autoComplete="off"
-          className="w-full px-4 py-3 pr-10 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 font-mono transition-colors" />
-        <button type="button" onClick={() => setShow(!show)} title={show ? 'Hide' : 'Reveal'}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-cream-muted hover:text-cream cursor-pointer">
-          {show ? <Icon name="eyeOff" className="w-4 h-4" /> : <Icon name="eye" className="w-4 h-4" />}
+          placeholder={placeholder} autoComplete="off" className={`w-full pr-10 ${inputClass}`} />
+        <button type="button" onClick={() => setShow(!show)} title={show ? t('a.hide') : t('a.reveal')}
+          className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-cream-muted hover:text-cream">
+          {show ? <Icon name="eyeOff" className="h-4 w-4" /> : <Icon name="eye" className="h-4 w-4" />}
         </button>
       </div>
     </div>
@@ -92,33 +107,25 @@ export function SecretField({ label, value, onChange, placeholder }) {
 
 export function Modal({ title, children, onClose }) {
   return (
-    <div className="fixed inset-0 bg-ink-deep/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-ink-base rounded-2xl border border-border-default shadow-elevated w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display text-xl text-cream">{title}</h3>
-          <button onClick={onClose} className="text-cream-muted hover:text-cream cursor-pointer text-lg leading-none">×</button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <UiModal title={title} onClose={onClose} width="max-w-md">
+      <div className="overflow-y-auto px-5 pb-5 pt-2">{children}</div>
+    </UiModal>
   );
 }
 
-export function ConfirmModal({ title, message, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
+export function ConfirmModal({ title, message, confirmLabel, danger, busy, onConfirm, onCancel }) {
+  const t = useT();
   return (
     <Modal title={title} onClose={onCancel}>
       <div className="space-y-5">
-        <p className="text-sm text-cream-secondary leading-relaxed">{message}</p>
-        <div className="flex gap-3">
-          <button onClick={onCancel} disabled={busy}
-            className="flex-1 py-2.5 rounded-lg bg-ink-surface border border-border-default text-cream-secondary text-sm font-medium hover:text-cream hover:bg-ink-hover transition-colors cursor-pointer disabled:opacity-40">
-            Cancel
-          </button>
-          <button onClick={onConfirm} disabled={busy}
-            className={`flex-1 py-2.5 rounded-lg text-on-accent text-sm font-semibold transition-all cursor-pointer disabled:opacity-40 ${
-              danger ? 'bg-danger hover:bg-danger-hover' : 'gradient-cyan hover:brightness-110'
-            }`}>
-            {busy ? 'Working…' : confirmLabel}
+        <p className="text-[14px] leading-relaxed text-cream-secondary">{message}</p>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onCancel} disabled={busy} className={secondaryButton}>{t('cancel')}</button>
+          <button type="button" onClick={onConfirm} disabled={busy}
+            className={danger
+              ? 'cursor-pointer rounded-full bg-danger px-3.5 py-1.5 text-[13px] text-white hover:opacity-90 disabled:opacity-40'
+              : `cursor-pointer ${primaryButton}`}>
+            {busy ? t('a.working') : (confirmLabel || t('p.confirm'))}
           </button>
         </div>
       </div>

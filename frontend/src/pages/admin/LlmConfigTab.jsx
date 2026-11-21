@@ -12,7 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../lib/api';
 import { changes, fromConfig, payload, serverKey, serverUrl } from '../../lib/llmSettings';
-import { PageHeader, Spinner } from './shared';
+import { useT } from '../../lib/i18n';
+import { PageHeader, Spinner, primaryButton, outlineButton } from './shared';
 import ServersSection from './llm/ServersSection';
 import UsesSection from './llm/UsesSection';
 import { AnswersSection, BillingSection, PdfSection } from './llm/SettingsSections';
@@ -21,6 +22,7 @@ const FALLBACK_CONTEXT = 65536;  // as the chat when the server does not say
 const signature = (st, s) => `${serverUrl(s)}|${s.kind === 'pdf' ? '' : s.model}|${serverKey(st, s)}`;
 
 export default function LLMConfigTab({ onDirtyChange }) {
+  const t = useT();
   const [config, setConfig] = useState(null);
   const [st, setSt] = useState(null);
   const [loadError, setLoadError] = useState('');
@@ -29,6 +31,8 @@ export default function LLMConfigTab({ onDirtyChange }) {
   const [results, setResults] = useState({});  // id -> { ...check result, sig } or { status: 'testing', sig }
   const stRef = useRef(null);
   const rootRef = useRef(null);
+  const tRef = useRef(t);  // the language changing must not reload the page
+  tRef.current = t;
   stRef.current = st;
 
   const test = useCallback(async (id) => {
@@ -55,7 +59,7 @@ export default function LLMConfigTab({ onDirtyChange }) {
       setConfig(c); setSt(next); stRef.current = next; setResults({});
       next.servers.forEach((s) => test(s.id));
     } catch (err) {
-      setLoadError(err.message || 'Could not load the model settings.');
+      setLoadError(err.message || tRef.current('a.llm.loadFail'));
     }
   }, [test]);
   useEffect(() => { load(); }, [load]);
@@ -75,7 +79,7 @@ export default function LLMConfigTab({ onDirtyChange }) {
   if (loadError) return (
     <div className="p-4 md:p-8" role="alert">
       <p className="text-danger">{loadError}</p>
-      <button type="button" onClick={load} className="mt-3 text-cyan hover:underline cursor-pointer">Try again</button>
+      <button type="button" onClick={load} className={`mt-3 cursor-pointer ${outlineButton}`}>{t('a.llm.tryAgain')}</button>
     </div>
   );
   if (!st) return <Spinner />;
@@ -91,7 +95,7 @@ export default function LLMConfigTab({ onDirtyChange }) {
 
   const save = async () => {
     const invalid = rootRef.current?.querySelector('[aria-invalid="true"]');
-    if (invalid) { invalid.focus(); toast.error('A field in red is not valid. Fix it first.'); return; }
+    if (invalid) { invalid.focus(); toast.error(t('a.llm.invalid')); return; }
     const failing = st.servers.filter((s) => ['refused', 'model_missing', 'unreachable', 'invalid_url'].includes(shown[s.id]?.status));
     setSaving(true);
     try {
@@ -100,8 +104,8 @@ export default function LLMConfigTab({ onDirtyChange }) {
       setConfig(updated); setSt(next); stRef.current = next; setShowList(false); setResults({});
       next.servers.forEach((s) => test(s.id));
       toast.success(failing.length
-        ? `Saved. ${failing.map((s) => s.name).join(', ')} failed its last test.`
-        : 'Saved. The changes apply to the next question.');
+        ? t('a.llm.savedFailing', { names: failing.map((s) => s.name).join(', ') })
+        : t('a.llm.saved'));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -112,7 +116,7 @@ export default function LLMConfigTab({ onDirtyChange }) {
   return (
     <div className="h-full overflow-y-auto" ref={rootRef}>
       <div className="mx-auto flex max-w-4xl flex-col gap-5 p-4 md:p-8">
-        <PageHeader title="Model settings" subtitle="Saved changes apply to the next question. Nothing restarts." />
+        <PageHeader title={t('a.llm.title')} subtitle={t('a.llm.subtitle')} />
         <ServersSection st={st} set={setSt} results={shown} test={test} />
         <UsesSection st={st} set={setSt} />
         <AnswersSection st={st} set={setSt} config={config} contextTokens={contextTokens} />
@@ -121,21 +125,21 @@ export default function LLMConfigTab({ onDirtyChange }) {
       </div>
       {dirty && (
         <div className="sticky bottom-0 z-10 flex justify-center px-4 pb-3 pt-2 md:px-8">
-          <div role="region" aria-label="Unsaved changes"
-            className="flex w-full max-w-4xl flex-wrap items-center gap-2 rounded-2xl border border-cyan/40 bg-ink-raised px-4 py-2.5 shadow-elevated">
-            <span className="flex-1 text-sm text-cream">
-              <b>{list.length}</b> unsaved change{list.length > 1 ? 's' : ''}
-              <button type="button" onClick={() => setShowList(!showList)} className="ml-2 text-xs text-cyan hover:underline cursor-pointer">
-                {showList ? 'Hide' : 'Show'}</button>
+          <div role="region" aria-label={t('a.llm.unsaved')}
+            className="flex w-full max-w-4xl flex-wrap items-center gap-2 rounded-2xl border border-border-default bg-ink-raised px-4 py-2.5 shadow-elevated">
+            <span className="flex-1 text-[14px] text-cream">
+              {t(list.length === 1 ? 'a.llm.unsavedOne' : 'a.llm.unsavedMany', { n: list.length })}
+              <button type="button" onClick={() => setShowList(!showList)} className="ml-2 text-[13px] text-cream-secondary underline hover:text-cream cursor-pointer">
+                {showList ? t('a.hide') : t('a.show')}</button>
             </span>
             <button type="button" disabled={saving} onClick={() => { setSt(saved); setShowList(false); }}
-              className="rounded-lg border border-border-default px-3 py-1.5 text-sm font-medium text-cream-secondary hover:bg-ink-hover cursor-pointer disabled:opacity-40">
-              Discard</button>
+              className={`cursor-pointer ${outlineButton}`}>
+              {t('a.llm.discard')}</button>
             <button type="button" disabled={saving} onClick={save}
-              className="rounded-lg gradient-cyan px-4 py-1.5 text-sm font-semibold text-on-accent hover:brightness-110 cursor-pointer disabled:opacity-40">
-              {saving ? 'Saving…' : 'Save'}</button>
+              className={`cursor-pointer ${primaryButton}`}>
+              {saving ? t('a.saving') : t('save')}</button>
             {showList && (
-              <ul className="w-full list-disc pl-5 pt-1 text-xs text-cream-secondary">
+              <ul className="w-full list-disc pl-5 pt-1 text-[13px] text-cream-secondary">
                 {list.map((c) => <li key={c}>{c}</li>)}
               </ul>
             )}
