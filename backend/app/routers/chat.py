@@ -18,6 +18,8 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import replace
+from types import MappingProxyType
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -43,9 +45,13 @@ from backend.app.models import (
     SenderType,
     Session,
     User,
+    UserRole,
 )
 from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
-from backend.app.services import chat_file_service, feature_service, quota_service, rule_service
+from backend.app.services import chat_file_service, feature_service, memory_service, quota_service, rule_service
+from backend.app.agent import attachments as agent_attachments
+from backend.app.agent import memory as agent_memory
+from backend.app.routers.teacher_access import get_storage_root
 from backend.app.services.model_routing import Endpoint
 from backend.app.services.model_servers import context_tokens
 from backend.app.services.document_access import DocumentNotFound
@@ -59,6 +65,8 @@ from backend.app.services.research_vision import ResearchVision
 from backend.app.services.session_titles import title_first_exchange
 
 logger = logging.getLogger(__name__)
+# Background memory reviews still running (a reference keeps each task alive).
+_memory_reviews: set[asyncio.Task] = set()
 
 # Seconds without an event before the research stream sends an SSE comment
 # (proxies such as nginx close a stream after 60 s of silence by default).
@@ -278,6 +286,16 @@ async def chat_stream(
         web = 'web' in body.tools and mode != 'direct'
         if web:
             mode = 'research'
+        # Attachments (agent/attachments.py) go to the research loop; an attached
+        # course file limits this question's course search to it.
+        if attachments and mode != 'direct':
+            mode = 'research'
+            attached_docs = {a['id'] for a in attachments if a['kind'] == 'document'}
+            if attached_docs:
+                scope = replace(scope, snapshot_revisions=MappingProxyType({
+                    d: r for d, r in scope.snapshot_revisions.items() if str(d) in attached_docs}))
+        attachment_block, images, _ = await agent_attachments.build(
+            db, attachments if mode == 'research' else None, storage_root=get_storage_root())
         research_factory = async_sessionmaker(db.bind, expire_on_commit=False)
         runs = ResearchRuns(research_factory)
         # Only what fits the history limit is sent, with the citations of
@@ -296,6 +314,20 @@ async def chat_stream(
     embedder = _make_embed_fn(llm_config)
     async def embed_query(query: str):
         return (await embedder([query]))[0]
+    # The student's notes of this class (agent/memory.py): research mode only,
+    # never in exam mode, in a test drive, or when the student turned memory off.
+    memory_on = (current_user.memory_enabled and current_user.role == UserRole.student
+                 and not exam_mode and not session.is_test and mode == 'research')
+    memory_block = ''
+    if memory_on:
+        try:
+            notes = await memory_service.for_recall(db, current_user.id, class_id)
+            vector = None
+            if sum(len(n['content']) + 4 for n in notes) > agent_memory.CONTEXT_CHAR_LIMIT:
+                vector = await embed_query(agent_memory.recall_query(safe_history, body.message))
+            memory_block = agent_memory.memory_context(notes, vector)
+        except Exception as exc:                  # a question never fails for its notes
+            logger.warning('Memory recall failed (%s)', type(exc).__name__)
     vlm = Endpoint(llm_config['vlm_base_url'],
                    llm_config['vlm_api_key'], llm_config['vlm_model'])
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
@@ -324,6 +356,7 @@ async def chat_stream(
             token_beta=float(llm_config['token_beta']),
             history=safe_history, earlier_citations=earlier_citations,
             teaching_rules=teaching_rules, research_note=DEEP_NOTE if deep else '',
+            memory_context=memory_block, attachment_context=attachment_block, images=images,
             web_tools=WebTools(settings.WEB_SEARCH_URL) if web else None,
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
@@ -372,6 +405,16 @@ async def chat_stream(
                 title = None
             if title:
                 yield f"event: title\ndata: {json.dumps({'session_id': str(scope.session_id), 'title': title})}\n\n"
+            if memory_on and result.get('answer'):
+                turns = 1 + sum(1 for m in safe_history if m['role'] == 'user')
+                if agent_memory.due(turns):
+                    review = asyncio.create_task(agent_memory.review(
+                        research_factory, user_id=current_user.id, class_id=class_id,
+                        session_id=scope.session_id, model=title_model, embed=embedder,
+                        messages=[*safe_history, {'role': 'user', 'content': body.message},
+                                  {'role': 'assistant', 'content': result['answer']}]))
+                    _memory_reviews.add(review)
+                    review.add_done_callback(_memory_reviews.discard)
         except RunConflict as exc:
             detail = ('This question was already replaced by a newer version' if str(exc) == 'version_conflict'
                       else 'Another research request is already running')

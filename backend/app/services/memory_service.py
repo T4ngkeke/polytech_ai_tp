@@ -7,8 +7,8 @@ Rules agreed on 2026-11-20:
 - The student sees them, deletes them for good, or turns memory off
   (``users.memory_enabled``); the class teacher sees them; exam mode uses none.
 
-This module stores and lists them. Writing them (a strict background review
-after some turns) and reading them into a question come with the agent work.
+This module stores and lists them. agent/memory.py reads them into a research
+question and writes them in a background review every few turns.
 """
 from __future__ import annotations
 
@@ -72,3 +72,26 @@ async def add(db, *, user_id: uuid.UUID, class_id: uuid.UUID, content: str,
     db.add(memory)
     await db.flush()
     return memory
+
+
+async def replace(db, *, user_id: uuid.UUID, memory_id: uuid.UUID, content: str,
+                  category: str | None = None, embedding: list[float] | None = None) -> StudentMemory:
+    """Rewrite one memory of this student (for the agent's review)."""
+    text = ' '.join((content or '').split())
+    if not text or len(text) > CONTENT_MAX_CHARS:
+        raise ValueError('memory_length')
+    memory = await db.get(StudentMemory, memory_id)
+    if memory is None or memory.user_id != user_id:
+        raise ValueError('memory_not_found')
+    memory.content, memory.category = text, (category or None) and category[:64]
+    memory.embedding, memory.updated_at = embedding, datetime.now(timezone.utc)
+    await db.flush()
+    return memory
+
+
+async def for_recall(db, user_id: uuid.UUID, class_id: uuid.UUID) -> list[dict]:
+    """A student's memories of one class with their vectors, for the question context."""
+    rows = (await db.scalars(select(StudentMemory).where(
+        StudentMemory.user_id == user_id, StudentMemory.class_id == class_id))).all()
+    return [{'content': m.content, 'category': m.category,
+             'embedding': list(m.embedding) if m.embedding is not None else None} for m in rows]

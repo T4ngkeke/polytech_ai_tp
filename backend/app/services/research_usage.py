@@ -28,10 +28,21 @@ class ResearchCallConflict(ValueError):
     pass
 
 
+IMAGE_TOKENS = 1000   # one image part (agent/attachments.py), as Open WebUI estimates it
+
+
+def _content_tokens(content) -> int:
+    if isinstance(content, str):
+        return estimate_tokens(content)
+    if isinstance(content, list):          # text and image parts: an image's base64 is not text
+        return sum(estimate_tokens(part.get('text') or '') if part.get('type') == 'text' else IMAGE_TOKENS
+                   for part in content)
+    return estimate_tokens(json.dumps(content, ensure_ascii=False))
+
+
 def estimated_input(messages: list[dict], tools: list[dict] | None = None) -> int:
     """Conservative input estimate: message text, tool calls and tool definitions."""
-    total = sum(estimate_tokens(m['content'] if isinstance(m.get('content'), str)
-                                else json.dumps(m.get('content'), ensure_ascii=False))
+    total = sum(_content_tokens(m.get('content'))
                 + estimate_tokens(json.dumps(m.get('tool_calls') or '', ensure_ascii=False))
                 for m in messages)
     return total + (estimate_tokens(json.dumps(tools, ensure_ascii=False)) if tools else 0)

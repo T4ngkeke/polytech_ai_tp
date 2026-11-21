@@ -318,13 +318,19 @@ class ResearchRunner:
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
                   earlier_citations: dict[str, dict] | None = None,
-                  allow_ask: bool = False, answer_language: str | None = None) -> ResearchResult:
+                  allow_ask: bool = False, answer_language: str | None = None,
+                  memory_context: str = '', attachment_context: str = '',
+                  images: list[str] | None = None) -> ResearchResult:
         """history: earlier chat turns ({'role', 'content'}), oldest first.
         answer_language: the language name agent/language.ask_language gave
         (None: the generic sentence).
         allow_ask: offer ask_student (the chat does, except right after a question back).
         earlier_citations: the stored citations of those answers by [E#] label;
-        an answer may cite them again (a follow-up answered from the history)."""
+        an answer may cite them again (a follow-up answered from the history).
+        memory_context: the student's notes for this question (agent/memory.py),
+        added at the end of the question; not stored with it.
+        attachment_context, images: what the question attaches (agent/attachments.py):
+        text after the question, images as image parts of the question."""
         tools = self.course_tools
         usage: list[dict] = []
         trace: list[dict] = []
@@ -347,8 +353,12 @@ class ResearchRunner:
         # the answer (see agent/language.py).
         language = with_language('', language_sentence(answer_language))
         rules_reminder = ('\n\n' + RULES_REMINDER.format(rules=teaching_rules.strip())) if teaching_rules.strip() else ''
-        messages = [{'role': 'system', 'content': system}, *turns,
-                    {'role': 'user', 'content': question + language}]
+        text = (question + (('\n\n' + attachment_context) if attachment_context else '')
+                + (('\n\n' + memory_context) if memory_context else '') + language)
+        content = ([{'type': 'text', 'text': text},
+                    *({'type': 'image_url', 'image_url': {'url': url}} for url in images)]
+                   if images else text)
+        messages = [{'role': 'system', 'content': system}, *turns, {'role': 'user', 'content': content}]
         tools_open, answer, stop = True, '', 'budget_exhausted'
         retried = False
         unchecked = None  # the reply that got CHECK_TURN, until the model replies to it
@@ -636,7 +646,12 @@ class ResearchRunner:
 
     @staticmethod
     def _tokens(messages: list[dict]) -> int:
-        return sum(estimate_tokens(m.get('content') or '') + sum(
+        def content_tokens(content):
+            if isinstance(content, list):           # text and image parts: an image as 1000 (Open WebUI)
+                return sum(estimate_tokens(p.get('text') or '') if p.get('type') == 'text' else 1000
+                           for p in content)
+            return estimate_tokens(content or '')
+        return sum(content_tokens(m.get('content')) + sum(
             len(c['function']['arguments']) // 4 for c in m.get('tool_calls', [])) for m in messages)
 
     def _fit(self, messages: list[dict]) -> list[dict]:

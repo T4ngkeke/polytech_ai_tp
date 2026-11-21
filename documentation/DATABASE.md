@@ -281,7 +281,7 @@ Files students upload in the chat (`services/chat_file_service.py`). Not course 
 
 ### student_memories
 
-What the assistant remembers about a student, per class (`services/memory_service.py`). One sentence each (200 characters at most), learning preferences and progress only, at most 50 per student and class. The student sees and deletes them (for good) or turns memory off (`users.memory_enabled`); the class teacher sees them; exam mode will use none. The agent's background review will write them. Added by `m4u_student_memories_v1`.
+What the assistant remembers about a student, per class (`services/memory_service.py`). One sentence each (200 characters at most), learning preferences and progress only, at most 50 per student and class. The student sees and deletes them (for good) or turns memory off (`users.memory_enabled`); the class teacher sees them; exam mode will use none. Written by the agent's background review every 4 student turns and read into each research question (`agent/memory.py`, ported from Open WebUI). Added by `m4u_student_memories_v1`.
 
 | Column | Type | Notes |
 | --- | --- | --- |

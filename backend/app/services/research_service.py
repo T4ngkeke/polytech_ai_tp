@@ -146,7 +146,8 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  rerank_fn=None, embed_model: str = '',
                                  rerank_model: str = '', session_factory=AsyncSessionLocal,
                                  tool_factory=None, on_phase=None, on_draft=None, on_tasks=None,
-                                 web_tools=None,
+                                 web_tools=None, memory_context: str = '',
+                                 attachment_context: str = '', images: list[str] | None = None,
                                  vision_fn=None,
                                  allow_ask: bool = False,
                                  vision_model: str = '',
@@ -277,7 +278,9 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                 on_phase=on_phase, on_draft=on_draft, on_tasks=on_tasks, web_tools=web_tools)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations,
-                                  allow_ask=allow_ask, answer_language=answer_language)
+                                  allow_ask=allow_ask, answer_language=answer_language,
+                                  **({'memory_context': memory_context, 'attachment_context': attachment_context,
+                                      'images': images} if isinstance(runner, ResearchRunner) else {}))
         await runs.finish_run(started.run_id, result)
     except asyncio.CancelledError:
         # Both steps in one shielded task: a second cancellation (the server

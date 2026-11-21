@@ -75,6 +75,8 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
                 pass
             async def __call__(self, messages, max_output, timeout, *, tools=None, purpose='',
                                on_text=None):
+                if purpose == 'memory_review':      # the background review after 4 questions
+                    return ModelReply('{"operations": []}', [], 'fixture', 10, 5)
                 model_messages.append(messages)
                 reply = steps.pop(0)
                 # A streamed call sends its text as it is written.
