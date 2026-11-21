@@ -31,8 +31,6 @@ from backend.app.agent.history import estimate_tokens
 from backend.app.agent.language import language_sentence, with_language
 from backend.app.agent.code_tools import CODE_NOTE, CODE_TOOL_NAMES, CODE_TOOLS, CodeTools
 from backend.app.agent.visuals import VISUAL_NOTE
-from backend.app.agent.tp_text import tp_text
-from backend.app.services import failure_log
 from backend.app.agent.task_tools import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
 from backend.app.agent.web_tools import WEB_NOTE, WEB_TOOL_NAMES, WEB_TOOLS, WebTools
 from backend.app.agent.result import (
@@ -289,13 +287,6 @@ def partial_answer(state: dict, stop: str, *, max_pages: int = 6) -> str | None:
     return '\n'.join(lines)
 
 
-# Before the TP text in the system message (RESEARCH_TP_TEXT on).
-RESEARCH_TP_NOTE = ('Below is the full text of this TP (the lab the student works on): its pages are '
-                    'already read, cite their lines by their [E#] IDs. For a question about the TP itself '
-                    '(what to do, a numbered question or exercise, what to hand in), answer from these '
-                    'pages; for a concept, search and read the class course files with the tools.')
-
-
 def step_of(name: str, arguments: str | None, result: str) -> dict | None:
     """What one tool call did, in a few fields the page words itself:
     {tool, query?, file?, page?, count?, url?, ok}. None for the checklist."""
@@ -341,7 +332,6 @@ class ResearchRunner:
                  lead_min_score: float | None = None, no_lead_calls: int = NO_LEAD_CALLS,
                  on_phase: Callable[[str], None] | None = None,
                  on_step: Callable[[dict], None] | None = None,
-                 tp_chars: int | None = None,
                  on_draft: Callable[[str | None], None] | None = None,
                  on_tasks: Callable[[list[dict]], None] | None = None,
                  offer_tasks: bool = True,
@@ -361,9 +351,6 @@ class ResearchRunner:
         # on_step(step): what one tool call did, for the page's process line
         # (step_of below); not stored.
         self.on_step = on_step or (lambda _step: None)
-        # The TP text (tp_text.py) in the system message, as Search has it;
-        # None: the TP files are searched like the others.
-        self.tp_chars = tp_chars
         # on_draft(text) receives the reply text as the model writes it, and
         # on_draft(None) when that draft is withdrawn. A draft is not checked;
         # the student sees the checked answer once the run ends.
@@ -403,24 +390,8 @@ class ResearchRunner:
         # a page needs no guess (the same text for every run of the lab, so the
         # model server can reuse the cached prefix).
         catalogue = await tools.catalogue()
-        tp_block, free_reads = '', 0
-        if self.tp_chars:
-            try:
-                tp = await tp_text(tools, cite=True, earlier_citations=earlier_citations, max_chars=self.tp_chars)
-            except Exception as exc:          # the run goes on and searches the TP files
-                tp = None
-                trace.append({'event': 'tp_text_failed', 'type': type(exc).__name__})
-                failure_log.record('tp_text', type(exc).__name__)
-            # The TP pages read here do not use the research tool budget.
-            free_reads = len(tools.trace)
-            if tp and tp.text:
-                tp_block = '\n' + RESEARCH_TP_NOTE + '\n\n' + tp.text
-            if tp:
-                trace.append({'event': 'tp_text', 'pages': tp.pages, 'chars': tp.chars,
-                              'in_prompt': bool(tp.text), 'left_out': len(tp.left_out)})
         system = (system_prompt(self.max_tool_calls, tools.max_visual_calls)
                   + (('\n' + CATALOGUE_NOTE + '\n' + catalogue) if catalogue else '')
-                  + tp_block
                   + ('\n' + WEB_NOTE if self.web_tools else '')
                   + ('\n' + CODE_NOTE if self.code_tools else '')
                   + '\n' + VISUAL_NOTE
@@ -514,7 +485,7 @@ class ResearchRunner:
 
         while True:
             if tools_open:
-                if len(tools.trace) - free_reads >= self.max_tool_calls:
+                if len(tools.trace) >= self.max_tool_calls:
                     withdraw('tool_budget')
                 elif self.clock() >= start + self.research_timeout:
                     withdraw('research_time')
@@ -624,7 +595,7 @@ class ResearchRunner:
                     ids=', '.join(sorted(unknown, key=lambda x: int(x[1:])))) + language})
                 note('unknown_ids_read_turn', ids=sorted(unknown))
                 continue
-            if (tools_open and not checking and not read_turn_sent and len(tools.trace) <= free_reads
+            if (tools_open and not checking and not read_turn_sent and not tools.trace
                     and not cited_ids(reply.content) and not malformed_refs(reply.content)):
                 # No research and no citation: ask once whether this is really the answer.
                 unchecked = reply.content.strip()
@@ -640,7 +611,7 @@ class ResearchRunner:
 
         if clarification is not None:
             note('finished', stop=stop, answer_chars=len(answer), cited=0)
-            return ResearchResult(answer, [], stop, [], len(tools.trace) - free_reads, model_calls,
+            return ResearchResult(answer, [], stop, [], len(tools.trace), model_calls,
                                   tools.trace + trace, usage, clarification=clarification,
                                   tasks=checklist.tasks or None,
                                   code_runs=self.code_tools.runs if self.code_tools and self.code_tools.runs else None)
@@ -697,7 +668,7 @@ class ResearchRunner:
 
         def result(text, citations, reason, unresolved):
             text, web_sources = web_citations(text, self.web_tools)
-            return ResearchResult(text, citations, reason, unresolved, len(tools.trace) - free_reads, model_calls,
+            return ResearchResult(text, citations, reason, unresolved, len(tools.trace), model_calls,
                                   tools.trace + trace, usage, tasks=checklist.tasks or None,
                                   web_sources=web_sources,
                                   code_runs=self.code_tools.runs if self.code_tools and self.code_tools.runs else None)

@@ -359,9 +359,7 @@ async def chat_stream(
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
               if vlm.model and vlm.base_url else None)
     request_id = str(body.client_request_id or uuid.uuid4())
-    # The TP text: in Search and Direct; in Research only when the admin turned it on.
-    tp_chars = (tp_char_budget(context, limits.tp_context_percent)
-                if mode != 'research' or limits.research_tp_text else None)
+    tp_chars = tp_char_budget(context, limits.tp_context_percent) if mode != 'research' else None
     title_model = ResearchModel(agent)
 
     async def research_events():

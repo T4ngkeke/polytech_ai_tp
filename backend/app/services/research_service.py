@@ -54,9 +54,6 @@ class ResearchLimits:
     # Share of the model's context the chat history may use (agent/history.py).
     # In Research, input_tokens is the room for reading on top of it.
     history_context_percent: int = 30
-    # 1: Research (the one entry of the chat) also gets the TP text, as Search
-    # and Direct do (being measured, 2026-11-21); 0: it searches the TP files.
-    research_tp_text: int = 0
 
     @classmethod
     def from_config(cls, configs: Mapping[str, str]) -> ResearchLimits:
@@ -79,7 +76,6 @@ LIMIT_KEYS = {
     'AGENT_MAX_INPUT_TOKENS': ('input_tokens', 4000, 200000),
     'TP_CONTEXT_PERCENT': ('tp_context_percent', 0, 60),
     'HISTORY_CONTEXT_PERCENT': ('history_context_percent', 0, 50),
-    'RESEARCH_TP_TEXT': ('research_tp_text', 0, 1),
 }
 DEFAULT_LIMITS = {f.name: f.default for f in fields(ResearchLimits)}
 
@@ -281,7 +277,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                 max_input_tokens=research_input_tokens(limits.input_tokens, history, context_tokens),
                 lead_min_score=search_mode.min_score_for(rerank_model),
                 on_phase=on_phase, on_draft=on_draft, on_tasks=on_tasks, web_tools=web_tools,
-                code_tools=code_tools, on_step=on_step, tp_chars=tp_chars)
+                code_tools=code_tools, on_step=on_step)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations,
                                   allow_ask=allow_ask, answer_language=answer_language,
