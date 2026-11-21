@@ -4,8 +4,10 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/api';
 import RuleList from '../../components/RuleList';
+import { useT } from '../../lib/i18n';
 
 export default function RulesPanel({ level, targetId, classId, context }) {
+  const t = useT();
   // A lab shows the class rules it inherits above its own.
   const [inherited, setInherited] = useState([]);
   useEffect(() => {
@@ -17,14 +19,13 @@ export default function RulesPanel({ level, targetId, classId, context }) {
   return (
     <div className="max-w-2xl space-y-4">
       <div>
-        <h3 className="text-sm font-semibold text-cream mb-1">Rules for the tutor</h3>
-        <p className="text-xs text-cream-muted">
-          {level === 'class' ? 'For every TP of ' : 'For this TP only: '}
-          <span className="text-cyan font-mono">{context}</span>. The tutor follows the rules that are on.
+        <h3 className="mb-1 text-[15px] font-semibold text-cream">{t('t.rules.title')}</h3>
+        <p className="text-[13px] text-cream-muted">
+          {t(level === 'class' ? 't.rules.forClass' : 't.rules.forLab', { name: context })}
         </p>
       </div>
       <RuleList key={`${level}-${targetId}`} level={level} targetId={targetId} classId={classId}
-        inherited={inherited} inheritedLabel="From the class (change them in the class Rules tab)" />
+        inherited={inherited} inheritedLabel={t('t.rules.inherited')} />
     </div>
   );
 }

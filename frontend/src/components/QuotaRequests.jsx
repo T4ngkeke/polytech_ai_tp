@@ -14,10 +14,12 @@ import toast from 'react-hot-toast';
 
 import api from '../lib/api';
 import { percent } from '../lib/quota';
+import { useT } from '../lib/i18n';
 
 const REFRESH_MS = 60_000;
 
 export default function QuotaRequests({ onReset }) {
+  const t = useT();
   const [requests, setRequests] = useState([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(null);  // a user id, or 'all'
@@ -49,7 +51,7 @@ export default function QuotaRequests({ onReset }) {
       for (const r of list) {
         await api.post(`/api/teacher/classes/${r.classes[0].id}/students/${r.user_id}/quota-refill`);
       }
-      toast.success(list.length === 1 ? `${list[0].username} can ask again` : `${list.length} students can ask again`);
+      toast.success(list.length === 1 ? t('t.quota.canAskOne', { name: list[0].username }) : t('t.quota.canAskMany', { n: list.length }));
       await load();
       onReset?.();
     } catch (err) {
@@ -65,15 +67,15 @@ export default function QuotaRequests({ onReset }) {
     try {
       await api.post(`/api/teacher/quota-requests/${r.user_id}/ignore`);
       await load();
-      toast((t) => (
+      toast((tst) => (
         <span className="flex items-center gap-3">
-          <span>Ignored {r.username}’s request</span>
-          <button type="button" className="cursor-pointer font-semibold text-cyan hover:underline"
+          <span>{t('t.quota.ignored', { name: r.username })}</span>
+          <button type="button" className="cursor-pointer font-semibold text-cream underline underline-offset-2"
             onClick={async () => {
-              toast.dismiss(t.id);
+              toast.dismiss(tst.id);
               try { await api.post(`/api/teacher/quota-requests/${r.user_id}/unignore`); } catch (err) { toast.error(err.message); }
               load();
-            }}>Undo</button>
+            }}>{t('t.undo')}</button>
         </span>
       ), { duration: 6000 });
     } catch (err) {
@@ -88,23 +90,22 @@ export default function QuotaRequests({ onReset }) {
   const n = requests.length;
   const shown = n <= 3 || open;
   return (
-    <div className="shrink-0 border-b border-gold/40 bg-gold-muted px-4 py-2 md:px-8 text-xs text-cream">
+    <div className="shrink-0 border-b border-gold/40 bg-gold-muted px-4 py-2 md:px-8 text-[13px] text-cream">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <span className="flex-1 min-w-[12rem]">
-          {n === 1 ? `${requests[0].username} reached a limit and asks for a reset.`
-            : `${n} students reached a limit and ask for a reset.`}
+          {n === 1 ? t('t.quota.askOne', { name: requests[0].username }) : t('t.quota.askMany', { n })}
         </span>
         {n > 3 && (
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
             className="cursor-pointer rounded-md px-2 py-1 text-cream-secondary hover:text-cream hover:bg-ink-hover">
-            {open ? 'Hide' : 'Show'}
+            {open ? t('t.hide') : t('t.show')}
           </button>
         )}
         {n > 1 && (
           <button type="button" onClick={() => reset(requests)} disabled={busy !== null}
-            title="A full day and week again for each of them; usage is kept"
+            title={t('t.quota.resetAllHint')}
             className="cursor-pointer rounded-md border border-border-default bg-ink-base px-2.5 py-1 hover:bg-ink-hover disabled:opacity-50">
-            Reset all {n}
+            {t('t.quota.resetAll', { n })}
           </button>
         )}
       </div>
@@ -114,25 +115,25 @@ export default function QuotaRequests({ onReset }) {
             <li key={r.user_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-ink-base/60 px-2 py-1.5">
               <span className="font-medium">{r.username}</span>
               <span className="text-cream-muted">{r.classes.map((c) => c.name).join(', ')}</span>
-              <span className={`font-mono ${r.blocked === 'day' ? 'text-danger' : 'text-cream-secondary'}`}>
-                Today {percent(r.used, r.limit)}%
+              <span className={`${r.blocked === 'day' ? 'text-danger' : 'text-cream-secondary'}`}>
+                {t('quota.today')} {percent(r.used, r.limit)}%
               </span>
-              <span className={`font-mono ${r.blocked === 'week' ? 'text-danger' : 'text-cream-secondary'}`}>
-                Week {percent(r.week_used, r.week_limit)}%
+              <span className={`${r.blocked === 'week' ? 'text-danger' : 'text-cream-secondary'}`}>
+                {t('quota.week')} {percent(r.week_used, r.week_limit)}%
               </span>
               <span className="text-cream-muted">
-                asked {new Date(r.asked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {t('t.quota.askedAt', { time: new Date(r.asked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
               </span>
               <span className="ml-auto flex gap-1.5">
                 <button type="button" onClick={() => ignore(r)} disabled={busy !== null}
-                  title="Keep the limit; the student can ask again tomorrow"
+                  title={t('t.quota.ignoreHint')}
                   className="cursor-pointer rounded-md px-2 py-0.5 text-cream-secondary hover:bg-ink-hover hover:text-cream disabled:opacity-50">
-                  Ignore
+                  {t('t.ignore')}
                 </button>
                 <button type="button" onClick={() => reset([r])} disabled={busy !== null}
-                  title="A full day and week again; usage is kept"
+                  title={t('t.quota.resetHint')}
                   className="cursor-pointer rounded-md border border-border-default bg-ink-base px-2 py-0.5 hover:bg-ink-hover disabled:opacity-50">
-                  Reset
+                  {t('t.reset')}
                 </button>
               </span>
             </li>

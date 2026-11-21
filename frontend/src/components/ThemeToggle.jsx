@@ -3,14 +3,16 @@
  */
 
 import { toggleTheme, useTheme } from '../lib/theme';
+import { useT } from '../lib/i18n';
 
 export default function ThemeToggle({ className = '' }) {
+  const t = useT();
   const theme = useTheme();
-  const label = theme === 'dark' ? 'Light theme' : 'Dark theme';
+  const label = theme === 'dark' ? t('theme.light') : t('theme.dark');
   return (
     <button type="button" onClick={toggleTheme} title={label} aria-label={label}
-      className={`p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 transition-all cursor-pointer ${className}`}>
-      {theme === 'dark' ? <SunIcon className="w-4 h-4" /> : <MoonIcon className="w-4 h-4" />}
+      className={`cursor-pointer rounded-full p-2 text-cream-secondary transition-colors hover:bg-ink-hover ${className}`}>
+      {theme === 'dark' ? <SunIcon className="h-4 w-4" /> : <MoonIcon className="h-4 w-4" />}
     </button>
   );
 }

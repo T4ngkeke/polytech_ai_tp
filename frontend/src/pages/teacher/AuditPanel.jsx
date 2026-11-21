@@ -4,12 +4,12 @@
 import { lazy, Suspense, useState, useCallback } from 'react';
 import TeachingReport from '../../components/TeachingReport';
 import CitationReport from '../../components/CitationReport';
-import { modeLabel } from '../../lib/answerModes';
 import { useT } from '../../lib/i18n';
 import QuestionSearch from './QuestionSearch';
 
 // Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
 // it in when a test-drive is actually opened.
+const MODE_KEYS = { direct: 'p.chat.mode.direct', search: 'p.chat.mode.search', research: 'p.chat.mode.research' };
 const MessageContent = lazy(() => import('../../components/MessageContent'));
 
 export default function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStudentId, expandedSession, setExpandedSession }) {
@@ -24,11 +24,11 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
     setExpandedSession(sessionId);
   }, [setExpandedStudentId, setExpandedSession]);
   const views = (
-    <div className="flex gap-1 mb-4" role="tablist" aria-label="Audit view">
+    <div className="flex gap-1 mb-4" role="tablist" aria-label={t('t.audit.view')}>
       {[['students', t('audit.byStudent')], ['search', t('audit.search')], ['course', t('audit.courseUse')], ['report', t('audit.report')]].map(([key, label]) => (
         <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setView(key)}
-          className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
-            view === key ? 'bg-cyan-muted text-cream border border-cyan/20' : 'text-cream-muted hover:bg-ink-hover'}`}>
+          className={`px-3 py-1.5 rounded-lg text-[13px] cursor-pointer transition-colors ${
+            view === key ? 'bg-ink-hover text-cream' : 'text-cream-muted hover:bg-ink-hover'}`}>
           {label}
         </button>
       ))}
@@ -37,7 +37,7 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
   if (view === 'report') {
     return (
       <div className="max-w-3xl">
-        <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+        <h3 className="text-[15px] font-semibold text-cream mb-4">{t('t.audit.title')}</h3>
         {views}
         <TeachingReport labId={lab.id} labName={lab.name} />
       </div>
@@ -46,7 +46,7 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
   if (view === 'search') {
     return (
       <div>
-        <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+        <h3 className="text-[15px] font-semibold text-cream mb-4">{t('t.audit.title')}</h3>
         {views}
         <QuestionSearch labId={lab.id} onOpenConversation={openConversation} />
       </div>
@@ -55,7 +55,7 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
   if (view === 'course') {
     return (
       <div>
-        <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+        <h3 className="text-[15px] font-semibold text-cream mb-4">{t('t.audit.title')}</h3>
         {views}
         <CitationReport labId={lab.id} name={lab.name} onOpenConversation={openConversation} />
       </div>
@@ -63,9 +63,9 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
   }
   return (
     <div className="space-y-3 max-w-3xl">
-      <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+      <h3 className="text-[15px] font-semibold text-cream mb-4">{t('t.audit.title')}</h3>
       {views}
-      {(!students || students.length === 0) && <p className="text-cream-muted text-sm">No students in this class yet.</p>}
+      {(!students || students.length === 0) && <p className="text-cream-muted text-[14px]">{t('students.none')}</p>}
       {(students || []).map((student) => {
         const studentSessions = sessions.filter(s => s.user_id === student.id);
         const isStudentExpanded = expandedStudentId === student.id;
@@ -77,8 +77,8 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
               className="w-full flex items-center justify-between px-4 py-3 text-left cursor-pointer hover:bg-ink-hover transition-colors"
             >
               <div>
-                <p className="text-sm font-medium text-cream">{student.username}</p>
-                <p className="text-xs text-cream-muted font-mono">{studentSessions.length} session{studentSessions.length === 1 ? '' : 's'}</p>
+                <p className="text-[14px] font-medium text-cream">{student.username}</p>
+                <p className="text-[12.5px] text-cream-muted">{t('t.audit.sessions', { n: studentSessions.length })}</p>
               </div>
               <span className={`text-cream-muted transition-transform ${isStudentExpanded ? 'rotate-90' : ''}`}>›</span>
             </button>
@@ -91,7 +91,7 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
                   </div>
                 )}
                 {studentSessions.length === 0 ? (
-                  <p className="text-xs text-cream-muted p-4 italic">No chat history for this student.</p>
+                  <p className="text-[13px] text-cream-muted p-4">{t('t.audit.noHistory')}</p>
                 ) : (
                   studentSessions.map((s) => (
                     <div key={s.id} className="border-b border-border-subtle last:border-0">
@@ -100,18 +100,18 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
                         className="w-full flex items-center justify-between px-4 py-2 text-left cursor-pointer hover:bg-ink-hover transition-colors bg-ink-deep"
                       >
                         <div>
-                          <p className="text-xs font-medium text-cream">
-                            <span className={s.is_deleted ? 'line-through opacity-70' : ''}>{s.title || 'New conversation'}</span>
+                          <p className="text-[13px] font-medium text-cream">
+                            <span className={s.is_deleted ? 'line-through opacity-70' : ''}>{s.title || t('session.untitled')}</span>
                             {s.is_deleted && (
-                              <span className="ml-2 align-middle rounded bg-danger-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-danger">
-                                deleted by student
+                              <span className="ml-2 align-middle rounded bg-danger-muted px-1.5 py-0.5 text-[11px] font-medium text-danger">
+                                {t('audit.deleted')}
                               </span>
                             )}
                           </p>
-                          <p className="text-[10px] text-cream-muted font-mono">{new Date(s.created_at).toLocaleString()}</p>
+                          <p className="text-[12px] text-cream-muted">{new Date(s.created_at).toLocaleString()}</p>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="text-[10px] text-cream-muted">{s.messages?.length || 0} msgs</span>
+                          <span className="text-[12px] text-cream-muted">{t('t.audit.msgs', { n: s.messages?.length || 0 })}</span>
                           <span className={`text-cream-muted transition-transform ${expandedSession === s.id ? 'rotate-90' : ''}`}>›</span>
                         </div>
                       </button>
@@ -119,11 +119,11 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
                         <div className="px-4 py-3 space-y-3 bg-ink-surface max-h-80 overflow-y-auto">
                           {s.messages?.map((m) => (
                             <div key={m.id} className={`flex gap-2 ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`max-w-[80%] px-3 py-2 rounded-xl text-xs ${
-                                m.sender === 'user' ? 'bg-cyan-muted text-cream' : 'bg-ink-base border border-border-default text-cream-secondary'
+                              <div className={`max-w-[80%] px-3 py-2 rounded-xl text-[13px] ${
+                                m.sender === 'user' ? 'bg-ink-hover text-cream' : 'bg-ink-base border border-border-default text-cream-secondary'
                               }`}>
-                                <p className="text-[9px] text-cream-muted mb-1 font-mono uppercase">
-                                  {m.sender}{m.sender !== 'user' && modeLabel(m.answer_mode) ? ` · ${modeLabel(m.answer_mode)}` : ''}
+                                <p className="text-[12px] text-cream-muted mb-1">
+                                  {t(m.sender === 'user' ? 't.audit.student' : 't.audit.assistant')}{m.sender !== 'user' && MODE_KEYS[m.answer_mode] ? ` · ${t(MODE_KEYS[m.answer_mode])}` : ''}
                                 </p>
                                 {/* Answers are Markdown (tables, code, formulas), as the student saw them. */}
                                 {m.sender === 'user'

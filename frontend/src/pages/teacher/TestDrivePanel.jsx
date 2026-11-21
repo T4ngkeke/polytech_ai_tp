@@ -11,9 +11,9 @@ import { applyToMessage } from '../../lib/streamMessage';
 import { MessageBubble } from '../../components/ChatMessage';
 import { PdfPreviewModal } from '../../components/PdfPreview';
 import useAuthStore from '../../store/authStore';
-import ModeSwitch from '../../components/ModeSwitch';
-import { DEFAULT_MODE, offersResearch } from '../../lib/answerModes';
+import { offersResearch } from '../../lib/answerModes';
 import { useChatScroll } from '../../lib/chatScroll';
+import { useT } from '../../lib/i18n';
 
 // Teacher test-drive — opens an is_test session on the lab and chats through
 // the real agent as a preview. The server excludes these writes from analytics,
@@ -22,6 +22,7 @@ export default function TestDrivePanel({ labId, labName, classId, examMode = fal
   // The same agent, stream and message bubbles as the student chat: research
   // phases, the answer draft, a question back with clickable options, and
   // cited pages that open in the source preview.
+  const t = useT();
   const { token } = useAuthStore();
   const [sessionId, setSessionId] = useState(null);
   const [starting, setStarting] = useState(false);
@@ -30,7 +31,6 @@ export default function TestDrivePanel({ labId, labName, classId, examMode = fal
   const [isStreaming, setIsStreaming] = useState(false);
   const [phase, setPhase] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [mode, setMode] = useState(DEFAULT_MODE);
   // Exam mode: the files of this lab the class keeps open (0: Direct only).
   const [examFiles, setExamFiles] = useState(0);
   useEffect(() => {
@@ -66,15 +66,15 @@ export default function TestDrivePanel({ labId, labName, classId, examMode = fal
       setSessionId(session_id);
       setMessages([]);
     } catch {
-      toast.error('Could not start test drive');
+      toast.error(t('t.test.startFailed'));
     } finally {
       setStarting(false);
     }
-  }, [labId]);
+  }, [labId, t]);
 
   // picked: an option clicked under a question back, or a question sent again
-  // (modeOverride: Research again after an uncited Search); otherwise the input box.
-  const send = useCallback(async (picked, modeOverride) => {
+  // (again after an uncited answer); otherwise the input box.
+  const send = useCallback(async (picked) => {
     const text = (typeof picked === 'string' ? picked : input).trim();
     if (!text || isStreaming || !sessionId) return;
 
@@ -97,7 +97,8 @@ export default function TestDrivePanel({ labId, labName, classId, examMode = fal
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: sessionId, message: text, client_request_id: createRequestId(),
-          mode: directOnly ? 'direct' : (typeof modeOverride === 'string' ? modeOverride : mode) }),
+          // One entry, as for students: the agent decides whether to search (exam mode is applied by the server).
+          mode: directOnly ? 'direct' : 'research' }),
         signal: ctrl.signal,
         openWhenHidden: true,
         onopen: openStream,
@@ -127,43 +128,42 @@ export default function TestDrivePanel({ labId, labName, classId, examMode = fal
       });
     } catch (err) {
       if (err?.refusal) toast.error(err.refusal.message, { duration: 8000 });
-      else if (!ctrl.signal.aborted) toast.error('Stream interrupted');
+      else if (!ctrl.signal.aborted) toast.error(t('t.test.interrupted'));
     } finally {
       // An unchecked draft never stays on screen once the stream ends.
       setMessages((prev) => prev.map((m) => (m.id === assistantMsgId && m.draft ? { ...m, draft: '' } : m)));
       setPhase(null);
       setIsStreaming(false);
     }
-  }, [input, isStreaming, sessionId, token, mode, directOnly, follow]);
+  }, [input, isStreaming, sessionId, token, directOnly, follow, t]);
 
   if (!sessionId) {
     return (
-      <div className="p-5 rounded-xl bg-ink-raised border border-border-subtle">
-        <p className="text-sm font-semibold text-cream">Test drive</p>
-        <p className="mt-1 text-xs text-cream-muted">
-          Chat through the real tutor as a preview of <span className="text-cream-secondary">{labName}</span>.
-          These messages are excluded from analytics and student profiles.
+      <div className="max-w-2xl rounded-2xl border border-border-subtle bg-ink-raised p-5">
+        <h3 className="text-[15px] font-semibold text-cream">{t('tab.testDrive')}</h3>
+        <p className="mt-1 text-[13px] text-cream-muted">
+          {t('t.test.intro', { name: labName })}
         </p>
         <button
           onClick={start}
           disabled={starting}
-          className="mt-4 px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-medium disabled:opacity-50"
+          className="mt-4 rounded-full bg-ink px-3.5 py-1.5 text-[13px] text-on-ink disabled:opacity-50 cursor-pointer"
         >
-          {starting ? 'Starting…' : 'Start test drive'}
+          {starting ? t('t.test.starting') : t('t.test.start')}
         </button>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full min-h-[24rem] rounded-xl bg-ink-raised border border-border-subtle overflow-hidden">
+    <div className="flex flex-col h-full min-h-[24rem] rounded-2xl bg-ink-raised border border-border-subtle overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
-        <span className="text-sm font-semibold text-cream">Test drive · {labName}</span>
-        <button onClick={start} className="text-xs text-cream-muted hover:text-cyan">Restart</button>
+        <span className="min-w-0 truncate text-[14px] font-semibold text-cream">{t('tab.testDrive')} · {labName}</span>
+        <button onClick={start} className="rounded-lg px-2.5 py-1 text-[13px] text-cream-secondary hover:bg-ink-hover hover:text-cream cursor-pointer">{t('t.test.restart')}</button>
       </div>
       <div ref={scrollRef} onScroll={onScroll} className="relative flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <p className="text-sm text-cream-muted">Ask as if you were a student — e.g. “comment faire l’exercice 3 ?”.</p>
+          <p className="text-[14px] text-cream-muted">{t('t.test.hint')}</p>
         )}
         {messages.map((m, i) => {
           const last = i === messages.length - 1;
@@ -176,29 +176,26 @@ export default function TestDrivePanel({ labId, labName, classId, examMode = fal
               onPick={!isStreaming && last && m.clarification ? send : null}
               onResearch={!isStreaming && !directOnly && last && offersResearch(m) ? () => {
                 const question = messages.slice(0, i).reverse().find((x) => x.sender === 'user');
-                if (question) send(question.content, 'research');
+                if (question) send(question.content);
               } : null} />
             </div>
           );
         })}
-      </div>
-      <div className="px-3 pt-3 border-t border-border-subtle">
-        <ModeSwitch mode={mode} onChange={setMode} examMode={examMode} examFiles={examFiles} disabled={isStreaming} />
       </div>
       <div className="flex gap-2 p-3">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Message the tutor…"
-          className="flex-1 px-3 py-2 rounded-lg bg-ink-deep border border-border-subtle text-sm text-cream placeholder:text-cream-muted focus:outline-none focus:border-cyan"
+          placeholder={t('t.test.placeholder')} aria-label={t('t.test.placeholder')}
+          className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-ink-deep border border-border-subtle text-[14px] text-cream placeholder:text-cream-muted focus:outline-none focus:border-cream-muted"
         />
         <button
           onClick={send}
           disabled={isStreaming || !input.trim()}
-          className="px-4 py-2 rounded-lg gradient-cyan text-on-accent text-sm font-medium disabled:opacity-50"
+          className="rounded-full bg-ink px-4 py-2 text-[13px] text-on-ink disabled:opacity-50 cursor-pointer"
         >
-          Send
+          {t('send')}
         </button>
       </div>
       {preview && <PdfPreviewModal source={preview} onClose={() => setPreview(null)} />}

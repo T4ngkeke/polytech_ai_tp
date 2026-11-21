@@ -11,8 +11,10 @@ import toast from 'react-hot-toast';
 
 import api from '../lib/api';
 import useAuthStore from '../store/authStore';
+import { useT } from '../lib/i18n';
 
 export default function Account() {
+  const t = useT();
   const navigate = useNavigate();
   const { username, userRole } = useAuthStore();
 
@@ -35,50 +37,50 @@ export default function Account() {
         old_password: oldPassword,
         new_password: newPassword,
       });
-      toast.success('Password changed');
+      toast.success(t('password.changed'));
       setOldPassword('');
       setNewPassword('');
       setConfirm('');
     } catch (err) {
-      toast.error(err.message || 'Could not change password');
+      toast.error(err.message || t('p.account.failed'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-ink-deep overflow-y-auto">
-      <div className="max-w-md w-full mx-auto p-8 space-y-6">
+    <div className="flex h-full flex-col overflow-y-auto bg-ink-deep">
+      <div className="mx-auto w-full max-w-md space-y-5 p-5 sm:p-8">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-cream">Account</h1>
+          <h1 className="text-[18px] font-semibold text-cream">{t('settings.tab.account')}</h1>
           <button
             onClick={() => navigate(-1)}
-            className="text-xs text-cream-muted hover:text-cream cursor-pointer"
+            className="cursor-pointer rounded-full px-3 py-1 text-[13px] text-cream-secondary hover:bg-ink-hover"
           >
-            ← Back
+            ← {t('back')}
           </button>
         </div>
 
-        <div className="rounded-xl border border-border-default bg-ink-base p-4">
-          <p className="text-sm font-semibold text-cream truncate">{username || 'User'}</p>
-          <p className="text-[10px] uppercase tracking-wider text-cyan">{userRole}</p>
+        <div className="rounded-2xl border border-border-subtle bg-ink-raised p-5">
+          <p className="truncate text-[15px] font-semibold text-cream">{username || t('p.account.user')}</p>
+          <p className="text-[13px] text-cream-muted">{userRole}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <h2 className="text-sm font-semibold text-cream">Change password</h2>
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-border-subtle bg-ink-raised p-5">
+          <h2 className="text-[15px] font-semibold text-cream">{t('password.change')}</h2>
 
-          <PasswordField label="Current password" value={oldPassword} onChange={setOldPassword} autoComplete="current-password" />
-          <PasswordField label="New password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
-          {tooShort && <p className="text-xs text-danger">Must be at least 6 characters.</p>}
-          <PasswordField label="Confirm new password" value={confirm} onChange={setConfirm} autoComplete="new-password" />
-          {mismatch && <p className="text-xs text-danger">Passwords do not match.</p>}
+          <PasswordField label={t('password.old')} value={oldPassword} onChange={setOldPassword} autoComplete="current-password" />
+          <PasswordField label={t('password.new')} value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
+          {tooShort && <p className="text-[13px] text-danger">{t('password.short')}</p>}
+          <PasswordField label={t('password.again')} value={confirm} onChange={setConfirm} autoComplete="new-password" />
+          {mismatch && <p className="text-[13px] text-danger">{t('password.mismatch')}</p>}
 
           <button
             type="submit"
             disabled={!canSubmit}
-            className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full cursor-pointer rounded-full bg-ink px-4 py-2 text-[14px] text-on-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {saving ? 'Saving…' : 'Change password'}
+            {saving ? t('p.choose.saving') : t('password.change')}
           </button>
         </form>
       </div>
@@ -89,14 +91,16 @@ export default function Account() {
 function PasswordField({ label, value, onChange, autoComplete }) {
   return (
     <div className="space-y-1.5">
-      <label className="mono-label">{label}</label>
-      <input
-        type="password"
-        value={value}
-        autoComplete={autoComplete}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan/40 font-mono transition-colors"
-      />
+      <label className="block text-[13px] text-cream-muted">
+        {label}
+        <input
+          type="password"
+          value={value}
+          autoComplete={autoComplete}
+          onChange={(e) => onChange(e.target.value)}
+          className="mt-1.5 w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream focus:border-cream-secondary focus:outline-none"
+        />
+      </label>
     </div>
   );
 }

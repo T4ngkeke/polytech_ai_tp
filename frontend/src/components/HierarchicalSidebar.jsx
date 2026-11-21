@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
 import ThemeToggle from './ThemeToggle';
 import Icon from './Icon';
+import { useT } from '../lib/i18n';
 
 export default function HierarchicalSidebar({
   role = 'student',
@@ -38,7 +39,8 @@ export default function HierarchicalSidebar({
   onHelp,
   children,
 }) {
-  const { username, userRole, logout } = useAuthStore();
+  const t = useT();
+  const { username, logout } = useAuthStore();
   const navigate = useNavigate();
 
   // Classes are expanded by default. Remember the ones the user collapsed: the
@@ -62,43 +64,36 @@ export default function HierarchicalSidebar({
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-ink-base border-r border-border-subtle select-none">
-      {/* Header */}
-      <div className="px-4 pt-5 pb-3 border-b border-border-subtle shrink-0">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-cream-muted mb-1">
-          {role === 'student' ? 'My Classes' : role === 'teacher' ? 'My Classes' : 'All Classes'}
-        </h2>
+      {/* Product mark, then the new class / join row */}
+      <div className="flex h-12 shrink-0 items-center gap-2 px-3">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-[13px] font-semibold text-on-ink">E</span>
+        <span className="flex-1 text-[15px] font-semibold text-cream">Edu-LLM</span>
+      </div>
+      <div className="shrink-0 px-2 pb-1">
         {role === 'student' && (
-          <button
-            id="join-class-btn"
-            data-tour="join-class"
-            onClick={onJoinClass}
-            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border-default text-xs font-medium text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
-          >
-            <Icon name="plus" className="w-3.5 h-3.5" /> Join a Class
+          <button id="join-class-btn" data-tour="join-class" onClick={onJoinClass}
+            className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] text-cream hover:bg-ink-hover cursor-pointer">
+            <Icon name="plus" className="h-4 w-4 shrink-0 text-cream-secondary" />{t('t.sb.join')}
           </button>
         )}
         {(role === 'teacher' || role === 'admin') && (
-          <button
-            id="create-class-btn"
-            data-tour="new-class"
-            onClick={onCreateClass}
-            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border-default text-xs font-medium text-cream-secondary hover:text-cyan hover:border-cyan/30 hover:bg-cyan-muted transition-all cursor-pointer"
-          >
-            <Icon name="plus" className="w-3.5 h-3.5" /> New Class
+          <button id="create-class-btn" data-tour="new-class" onClick={onCreateClass}
+            className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] text-cream hover:bg-ink-hover cursor-pointer">
+            <Icon name="plus" className="h-4 w-4 shrink-0 text-cream-secondary" />{t('t.newClass')}
           </button>
         )}
       </div>
 
       {/* Tree */}
-      <div data-tour="classes" className="flex-1 overflow-y-auto px-2 py-2">
+      <div data-tour="classes" className="flex-1 overflow-y-auto px-2 py-1">
         {loading ? (
           <div className="flex items-center justify-center py-8">
-            <div className="w-4 h-4 rounded-full border-2 border-cyan border-t-transparent animate-[spin_0.8s_linear_infinite]" />
+            <div className="w-4 h-4 rounded-full border-2 border-cream-muted border-t-transparent animate-[spin_0.8s_linear_infinite]" />
           </div>
         ) : classes.length === 0 ? (
           <div className="text-center py-10 px-3">
-            <p className="text-xs text-cream-muted">
-              {role === 'student' ? 'Join a class to get started.' : 'No classes yet.'}
+            <p className="text-[13px] text-cream-muted">
+              {role === 'student' ? t('t.sb.joinToStart') : t('t.sb.noClasses')}
             </p>
           </div>
         ) : (
@@ -121,39 +116,28 @@ export default function HierarchicalSidebar({
 
       {children}
 
-      {/* Footer (User Profile & Sign Out) */}
-      <div className="shrink-0 p-4 border-t border-border-subtle bg-ink-base">
-        <div className="flex items-center justify-between">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-cream truncate">{username || 'User'}</p>
-            <p className="text-[10px] uppercase tracking-wider text-cyan">{userRole}</p>
-          </div>
-          <div className="shrink-0 ml-2 flex items-center gap-1">
+      {/* Footer: user row and the buttons */}
+      <div className="shrink-0 border-t border-border-subtle bg-ink-base px-3 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-[13px] font-medium text-on-ink">
+            {(username || '?').slice(0, 1).toUpperCase()}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[14px] text-cream">{username || t('t.sb.user')}</span>
+          <div className="flex shrink-0 items-center gap-0.5">
             {onHelp && (
-              <button
-                onClick={onHelp}
-                data-tour="help"
-                title="Guided tour"
-                aria-label="Guided tour"
-                className="w-8 h-8 rounded-lg bg-ink-surface border border-border-default text-sm font-semibold text-cream-secondary hover:text-cyan hover:border-cyan/30 transition-all cursor-pointer"
-              >
-                ?
+              <button onClick={onHelp} data-tour="help" title={t('t.sb.tour')} aria-label={t('t.sb.tour')}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-cream-secondary hover:bg-ink-hover hover:text-cream cursor-pointer">
+                <Icon name="help" className="h-4 w-4" />
               </button>
             )}
-            <ThemeToggle />
-            <button
-              onClick={() => navigate('/account')}
-              title="Account"
-              className="p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-cyan hover:border-cyan/30 transition-all cursor-pointer"
-            >
-              <Icon name="settings" className="w-4 h-4" />
+            <ThemeToggle className="!border-transparent !bg-transparent hover:!bg-ink-hover hover:!text-cream" />
+            <button onClick={() => navigate('/account')} title={t('t.sb.account')} aria-label={t('t.sb.account')}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-cream-secondary hover:bg-ink-hover hover:text-cream cursor-pointer">
+              <Icon name="settings" className="h-4 w-4" />
             </button>
-            <button
-              onClick={handleSignOut}
-              title="Sign Out"
-              className="p-2 rounded-lg bg-ink-surface border border-border-default text-cream-secondary hover:text-danger hover:border-danger/30 hover:bg-danger-deep transition-all cursor-pointer"
-            >
-              <Icon name="logout" className="w-4 h-4" />
+            <button onClick={handleSignOut} title={t('logout')} aria-label={t('logout')}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-cream-secondary hover:bg-ink-hover hover:text-danger cursor-pointer">
+              <Icon name="logout" className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -177,6 +161,7 @@ function ClassNode({
   onClassAction,
   onLabAction,
 }) {
+  const t = useT();
   const [showMenu, setShowMenu] = useState(false);
   const hasLabs = cls.labs && cls.labs.length > 0;
 
@@ -195,7 +180,7 @@ function ClassNode({
           onToggle();
           onSelectClass?.(cls);
         }}
-        className="group flex items-center gap-1 px-2 py-2 rounded-lg hover:bg-ink-hover transition-colors cursor-pointer text-left focus-visible:outline focus-visible:outline-cyan"
+        className="group flex min-h-9 items-center gap-1 px-2 py-1 rounded-lg hover:bg-ink-hover transition-colors cursor-pointer text-left focus-visible:outline focus-visible:outline-cream-muted"
       >
         {/* Expand toggle */}
         <span className="shrink-0 w-4 h-4 flex items-center justify-center text-cream-muted group-hover:text-cream transition-colors">
@@ -203,13 +188,13 @@ function ClassNode({
         </span>
 
         {/* Class name */}
-        <span className="flex-1 min-w-0 text-left text-xs font-semibold text-cream-secondary group-hover:text-cream transition-colors truncate">
+        <span className="flex-1 min-w-0 text-left text-[14px] font-medium text-cream truncate">
           {cls.name}
         </span>
 
         {/* Invite code badge (student/teacher) */}
         {role !== 'admin' && cls.invite_code && (
-          <code className="shrink-0 text-[9px] font-mono text-gold bg-gold-muted px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+          <code className="shrink-0 rounded-full bg-ink-hover px-2 py-0.5 font-mono text-[11px] text-cream-muted">
             {cls.invite_code}
           </code>
         )}
@@ -219,7 +204,7 @@ function ClassNode({
           <div className="relative shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-              aria-label={`Actions for ${cls.name}`} title="Class actions"
+              aria-label={t('t.sb.classActions', { name: cls.name })} title={t('t.sb.classActionsTitle')}
               className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded transition-all cursor-pointer"
             >
               <Icon name="ellipsis" className="w-3.5 h-3.5" />
@@ -239,7 +224,7 @@ function ClassNode({
       {isExpanded && (
         <div className="ml-5 mt-0.5 space-y-0.5 mb-1 animate-fade-in">
           {!hasLabs ? (
-            <p className="text-[11px] text-cream-muted px-2 py-1 italic">No labs yet</p>
+            <p className="text-[13px] text-cream-muted px-2 py-1">{t('t.sb.noLabs')}</p>
           ) : (
             cls.labs.map((lab) => (
               <LabNode
@@ -256,9 +241,9 @@ function ClassNode({
           {(role === 'teacher' || role === 'admin') && (
             <button
               onClick={() => onLabAction?.('create', { class_id: cls.id })}
-              className="w-full text-left text-[11px] text-cream-muted hover:text-cyan px-2 py-1 rounded transition-colors cursor-pointer"
+              className="w-full text-left text-[13px] text-cream-muted hover:text-cream hover:bg-ink-hover px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
-              + Add Lab
+              + {t('t.sb.addLab')}
             </button>
           )}
         </div>
@@ -272,6 +257,7 @@ function ClassNode({
    ═══════════════════════════════════════════ */
 
 function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
+  const t = useT();
   const [showMenu, setShowMenu] = useState(false);
   const isLocked = lab.is_deleted || !lab.is_active;
   // A locked lab is closed to students only: its teacher opens it to unlock it
@@ -283,10 +269,10 @@ function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
       <button
         onClick={!closed ? onSelect : undefined}
         disabled={closed}
-        title={isLocked && !closed ? 'Locked: students cannot write in this lab' : undefined}
-        className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer text-left
+        title={isLocked && !closed ? t('t.sb.lockedHint') : undefined}
+        className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg text-[14px] transition-colors cursor-pointer text-left
           ${isSelected
-            ? 'bg-cyan-muted text-cyan font-medium'
+            ? 'bg-ink-hover text-cream'
             : closed
               ? 'text-cream-muted opacity-50 cursor-not-allowed'
               : isLocked
@@ -294,10 +280,6 @@ function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
                 : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
           }`}
       >
-        {/* Status dot */}
-        <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${
-          isLocked ? 'bg-cream-muted' : isSelected ? 'bg-cyan' : 'bg-success'
-        }`} />
         <span className="truncate">{lab.name}</span>
         {isLocked && <Icon name="lock" className="w-3 h-3 shrink-0 ml-auto" />}
       </button>
@@ -307,7 +289,7 @@ function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
         <div className="relative shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-            aria-label={`Actions for ${lab.name}`} title="Lab actions"
+            aria-label={t('t.sb.labActions', { name: lab.name })} title={t('t.sb.labActionsTitle')}
             className="md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 w-7 h-7 flex items-center justify-center text-cream-muted hover:text-cream hover:bg-ink-hover rounded cursor-pointer transition-all"
           >
             <Icon name="ellipsis" className="w-3.5 h-3.5" />
@@ -330,28 +312,30 @@ function LabNode({ lab, role, isSelected, onSelect, onLabAction }) {
    ═══════════════════════════════════════════ */
 
 function ClassMenu({ role, onAction, onClose }) {
+  const t = useT();
   return (
     <DropdownMenu onClose={onClose}>
-      <MenuItem icon="pencil" label="Rename" onClick={() => onAction('rename')} />
-      <MenuItem icon="key" label="Reset Code" onClick={() => onAction('reset-code')} />
+      <MenuItem icon="pencil" label={t('t.rename')} onClick={() => onAction('rename')} />
+      <MenuItem icon="key" label={t('t.sb.resetCode')} onClick={() => onAction('reset-code')} />
       {role === 'admin' && (
-        <MenuItem icon="transfer" label="Transfer" onClick={() => onAction('transfer')} />
+        <MenuItem icon="transfer" label={t('t.sb.transfer')} onClick={() => onAction('transfer')} />
       )}
-      <MenuItem icon="archive" label="Archive" danger onClick={() => onAction('delete')} />
+      <MenuItem icon="archive" label={t('t.archive')} danger onClick={() => onAction('delete')} />
     </DropdownMenu>
   );
 }
 
 function LabMenu({ lab, onAction, onClose }) {
+  const t = useT();
   return (
     <DropdownMenu onClose={onClose}>
-      <MenuItem icon="pencil" label="Rename" onClick={() => onAction('rename')} />
+      <MenuItem icon="pencil" label={t('t.rename')} onClick={() => onAction('rename')} />
       <MenuItem
         icon={lab.is_active ? 'lock' : 'unlock'}
-        label={lab.is_active ? 'Lock' : 'Unlock'}
+        label={lab.is_active ? t('t.lock') : t('t.unlock')}
         onClick={() => onAction('toggle')}
       />
-      <MenuItem icon="archive" label="Archive" danger onClick={() => onAction('delete')} />
+      <MenuItem icon="archive" label={t('t.archive')} danger onClick={() => onAction('delete')} />
     </DropdownMenu>
   );
 }
@@ -360,7 +344,7 @@ function DropdownMenu({ children, onClose }) {
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute right-0 top-6 w-36 bg-ink-surface border border-border-default rounded-lg shadow-elevated py-1 z-50 animate-scale-in">
+      <div className="absolute right-0 top-6 w-44 rounded-[14px] border border-border-subtle bg-ink-raised p-1.5 shadow-elevated z-50 animate-scale-in">
         {children}
       </div>
     </>
@@ -371,11 +355,11 @@ function MenuItem({ icon, label, onClick, danger }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2 text-left px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
-        danger ? 'text-danger hover:bg-danger-muted' : 'text-cream-secondary hover:text-cream hover:bg-ink-hover'
+      className={`flex h-9 w-full items-center gap-2.5 rounded-lg text-left px-2.5 text-[14px] transition-colors cursor-pointer ${
+        danger ? 'text-danger hover:bg-ink-hover' : 'text-cream hover:bg-ink-hover'
       }`}
     >
-      {icon && <Icon name={icon} className="w-3.5 h-3.5 shrink-0" />}
+      {icon && <Icon name={icon} className="h-4 w-4 shrink-0 text-cream-secondary" />}
       {label}
     </button>
   );

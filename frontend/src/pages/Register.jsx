@@ -6,8 +6,12 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import ThemeToggle from '../components/ThemeToggle';
+import { useT } from '../lib/i18n';
+
+const FIELD = 'w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream placeholder:text-cream-muted focus:outline-none focus:border-cream-secondary';
 
 export default function Register() {
+  const t = useT();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -20,11 +24,11 @@ export default function Register() {
     setError('');
 
     if (password !== confirm) {
-      setError('Passwords do not match');
+      setError(t('password.mismatch'));
       return;
     }
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError(t('password.short'));
       return;
     }
 
@@ -38,82 +42,67 @@ export default function Register() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || 'Registration failed');
+        throw new Error(body.detail || t('p.register.failed'));
       }
 
-      toast.success('Account created! Please sign in.');
+      toast.success(t('p.register.done'));
       navigate('/login', { replace: true });
     } catch (err) {
-      setError(err.message || 'Registration failed');
+      setError(err.message || t('p.register.failed'));
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-ink-deep relative overflow-hidden">
-      <ThemeToggle className="absolute top-4 right-4 z-20" />
-      {/* Background glow */}
-      <div className="absolute top-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-cyan/[0.04] blur-[120px] pointer-events-none" />
+    <div className="relative flex min-h-screen items-center justify-center bg-ink-deep px-4 py-8">
+      <ThemeToggle className="absolute right-4 top-4" />
+      <div className="w-full max-w-[380px]">
+        <div className="mb-6 flex items-center justify-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-[15px] font-semibold text-on-ink">E</span>
+          <span className="text-[18px] font-semibold text-cream">Edu-LLM</span>
+        </div>
+        <div className="rounded-2xl border border-border-subtle bg-ink-raised p-6">
+          <h1 className="text-[15px] font-semibold text-cream">{t('p.register.title')}</h1>
+          <p className="mt-1 text-[13px] text-cream-muted">{t('p.register.subtitle')}</p>
 
-      <div className="relative z-10 w-full max-w-md px-4 animate-fade-in">
-        <div className="bg-ink-base rounded-2xl border border-border-subtle shadow-elevated overflow-hidden noise">
-          <div className="relative z-10 px-8 pt-10 pb-6 text-center">
-            <div className="mx-auto w-14 h-14 rounded-xl gradient-cyan flex items-center justify-center shadow-glow mb-5">
-              <svg className="w-7 h-7 text-on-accent" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M12 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11l-3 3-3-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
-              </svg>
-            </div>
-            <h1 className="text-3xl font-display text-cream mb-1.5 tracking-tight">Create Account</h1>
-            <p className="text-sm text-cream-secondary">Register as a student to join classes</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="relative z-10 px-8 pb-10 space-y-5">
+          <form onSubmit={handleSubmit} className="mt-5 space-y-4">
             {error && (
-              <div className="flex items-center gap-2.5 px-4 py-3 rounded-lg bg-danger-muted border border-danger/20 text-danger text-sm animate-fade-in">
+              <div role="alert" className="rounded-xl border border-danger/20 bg-danger-muted px-3 py-2 text-[13px] text-danger">
                 {error}
               </div>
             )}
 
             <div className="space-y-1.5">
-              <label htmlFor="reg-username" className="mono-label">Username</label>
+              <label htmlFor="reg-username" className="block text-[13px] text-cream-muted">{t('account.username')}</label>
               <input id="reg-username" type="text" required autoComplete="username"
                 value={username} onChange={(e) => setUsername(e.target.value)}
-                placeholder="Choose a username"
-                className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan focus:ring-1 focus:ring-cyan/30 transition-colors" />
+                placeholder={t('p.register.usernameHint')} className={FIELD} />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="reg-password" className="mono-label">Password</label>
+              <label htmlFor="reg-password" className="block text-[13px] text-cream-muted">{t('p.login.password')}</label>
               <input id="reg-password" type="password" required autoComplete="new-password"
                 value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
-                className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan focus:ring-1 focus:ring-cyan/30 transition-colors" />
+                placeholder={t('password.short')} className={FIELD} />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="reg-confirm" className="mono-label">Confirm Password</label>
+              <label htmlFor="reg-confirm" className="block text-[13px] text-cream-muted">{t('p.register.confirm')}</label>
               <input id="reg-confirm" type="password" required autoComplete="new-password"
-                value={confirm} onChange={(e) => setConfirm(e.target.value)}
-                placeholder="Repeat your password"
-                className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan focus:ring-1 focus:ring-cyan/30 transition-colors" />
+                value={confirm} onChange={(e) => setConfirm(e.target.value)} className={FIELD} />
             </div>
 
             <button id="register-submit" type="submit" disabled={isLoading}
-              className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold tracking-wide transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-glow">
-              {isLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <div className="w-4 h-4 rounded-full border-2 border-cream/30 border-t-cream animate-[spin_0.8s_linear_infinite]" />
-                  Creating account…
-                </span>
-              ) : 'Create Account'}
+              className="w-full cursor-pointer rounded-full bg-ink px-4 py-2 text-[14px] text-on-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
+              {isLoading ? t('p.register.busy') : t('p.register.submit')}
             </button>
-
-            <p className="text-center text-xs text-cream-muted">
-              Already have an account?{' '}
-              <Link to="/login" className="text-cyan hover:underline">Sign in</Link>
-            </p>
           </form>
+
+          <p className="mt-5 text-center text-[13px] text-cream-muted">
+            {t('p.register.haveAccount')}{' '}
+            <Link to="/login" className="text-cream-secondary underline">{t('p.login.submit')}</Link>
+          </p>
         </div>
       </div>
     </div>

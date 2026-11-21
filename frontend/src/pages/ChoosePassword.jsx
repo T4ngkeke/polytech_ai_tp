@@ -11,12 +11,17 @@ import toast from 'react-hot-toast';
 
 import api from '../lib/api';
 import useAuthStore from '../store/authStore';
+import { useT } from '../lib/i18n';
 
+const FIELD = 'w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream focus:outline-none focus:border-cream-secondary';
+
+// Server codes → our keys.
 const MESSAGES = {
-  choose_another_password: 'Choose a password other than the one the admin gave you.',
+  choose_another_password: 'p.choose.another',
 };
 
 export default function ChoosePassword() {
+  const t = useT();
   const { username, logout } = useAuthStore();
   const [password, setPassword] = useState('');
   const [again, setAgain] = useState('');
@@ -25,42 +30,47 @@ export default function ChoosePassword() {
 
   const submit = async (e) => {
     e.preventDefault();
-    const problem = password.length < 6 ? 'At least 6 characters.'
-      : password !== again ? 'The two passwords differ.' : '';
+    const problem = password.length < 6 ? t('password.short')
+      : password !== again ? t('password.mismatch') : '';
     setError(problem);
     if (problem) return;
     setSaving(true);
     try {
       await api.post('/api/auth/change-password', { new_password: password });
       useAuthStore.setState({ mustChangePassword: false });
-      toast.success('Password changed');
+      toast.success(t('password.changed'));
     } catch (err) {
-      setError(MESSAGES[err.message] || err.message || 'Could not change the password');
+      setError(MESSAGES[err.message] ? t(MESSAGES[err.message]) : err.message || t('p.choose.failed'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="flex h-screen items-center justify-center overflow-y-auto bg-ink-deep px-4">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4">
-        <h1 className="text-xl font-semibold text-cream">Choose a new password</h1>
-        <p className="rounded-lg bg-gold-muted px-3 py-2.5 text-sm text-cream-secondary">
-          An admin reset the password of <span className="font-medium text-cream">{username}</span>.
-          Choose your own password to continue.
-        </p>
-        <Field id="choose-password" label="New password" value={password} onChange={setPassword} autoFocus />
-        <Field id="choose-password-again" label="New password again" value={again} onChange={setAgain} />
-        {error && <p className="text-xs text-danger" role="alert">{error}</p>}
-        <button type="submit" disabled={saving}
-          className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold hover:brightness-110 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-          {saving ? 'Saving…' : 'Save and continue'}
-        </button>
-        <button type="button" onClick={() => { logout(); window.location.href = '/login'; }}
-          className="w-full py-2 rounded-lg text-sm text-cream-secondary hover:bg-ink-hover cursor-pointer">
-          Sign out
-        </button>
-      </form>
+    <div className="flex h-screen items-center justify-center overflow-y-auto bg-ink-deep px-4 py-8">
+      <div className="w-full max-w-[380px]">
+        <div className="mb-6 flex items-center justify-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-[15px] font-semibold text-on-ink">E</span>
+          <span className="text-[18px] font-semibold text-cream">Edu-LLM</span>
+        </div>
+        <form onSubmit={submit} className="space-y-4 rounded-2xl border border-border-subtle bg-ink-raised p-6">
+          <h1 className="text-[15px] font-semibold text-cream">{t('p.choose.title')}</h1>
+          <p className="rounded-xl bg-warn-soft px-3 py-2.5 text-[13px] text-cream-secondary">
+            {t('p.choose.notice', { name: username })}
+          </p>
+          <Field id="choose-password" label={t('p.choose.new')} value={password} onChange={setPassword} autoFocus />
+          <Field id="choose-password-again" label={t('password.again')} value={again} onChange={setAgain} />
+          {error && <p className="text-[13px] text-danger" role="alert">{error}</p>}
+          <button type="submit" disabled={saving}
+            className="w-full cursor-pointer rounded-full bg-ink px-4 py-2 text-[14px] text-on-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
+            {saving ? t('p.choose.saving') : t('p.choose.submit')}
+          </button>
+          <button type="button" onClick={() => { logout(); window.location.href = '/login'; }}
+            className="w-full cursor-pointer rounded-full px-4 py-2 text-[14px] text-cream-secondary hover:bg-ink-hover">
+            {t('logout')}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
@@ -68,10 +78,9 @@ export default function ChoosePassword() {
 function Field({ id, label, value, onChange, autoFocus = false }) {
   return (
     <div className="space-y-1.5">
-      <label className="mono-label" htmlFor={id}>{label}</label>
+      <label className="block text-[13px] text-cream-muted" htmlFor={id}>{label}</label>
       <input id={id} type="password" value={value} autoFocus={autoFocus} autoComplete="new-password"
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm focus:outline-none focus:border-cyan/40 font-mono transition-colors" />
+        onChange={(e) => onChange(e.target.value)} className={FIELD} />
     </div>
   );
 }

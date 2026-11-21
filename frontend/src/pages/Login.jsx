@@ -1,6 +1,6 @@
 /**
  * Login.jsx — Full-screen login page for Edu-LLM.
- * Editorial layout with a cyan call to action.
+ * A centered card on a plain page: the product mark, two fields, one black button.
  */
 
 import { useState } from 'react';
@@ -8,8 +8,12 @@ import { useNavigate, Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import useAuthStore, { DEFAULT_ROUTES } from '../store/authStore';
 import ThemeToggle from '../components/ThemeToggle';
+import { useT } from '../lib/i18n';
+
+const FIELD = 'w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream placeholder:text-cream-muted focus:outline-none focus:border-cream-secondary';
 
 export default function Login() {
+  const t = useT();
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
 
@@ -32,75 +36,43 @@ export default function Login() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || 'Login failed');
+        throw new Error(body.detail || t('p.login.failed'));
       }
 
       const { access_token } = await res.json();
       const role = await login(access_token);
       const target = DEFAULT_ROUTES[role] || '/chat';
-      toast.success('Welcome back.');
+      toast.success(t('p.login.welcome'));
       navigate(target, { replace: true });
     } catch (err) {
-      setError(err.message || 'Login failed. Please try again.');
+      setError(err.message || t('p.login.failedRetry'));
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-ink-deep">
-      <ThemeToggle className="absolute top-4 right-4 z-20" />
-      {/* ── Background decoration ── */}
-      <div className="absolute inset-0 pointer-events-none select-none">
-        {/* Warm cyan glow */}
-        <div className="absolute top-[-25%] left-[-15%] w-[700px] h-[700px] rounded-full bg-cyan/[0.04] blur-[140px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-gold/[0.03] blur-[120px]" />
-        {/* Subtle grid */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage:
-              'linear-gradient(var(--color-cream-muted) 1px, transparent 1px), linear-gradient(90deg, var(--color-cream-muted) 1px, transparent 1px)',
-            backgroundSize: '80px 80px',
-          }}
-        />
-      </div>
+    <div className="relative flex min-h-screen items-center justify-center bg-ink-deep px-4 py-8">
+      <ThemeToggle className="absolute right-4 top-4" />
+      <div className="w-full max-w-[380px]">
+        <div className="mb-6 flex items-center justify-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-[15px] font-semibold text-on-ink">E</span>
+          <span className="text-[18px] font-semibold text-cream">Edu-LLM</span>
+        </div>
+        <div className="rounded-2xl border border-border-subtle bg-ink-raised p-6">
+          <h1 className="text-[15px] font-semibold text-cream">{t('p.login.title')}</h1>
+          <p className="mt-1 text-[13px] text-cream-muted">{t('p.login.subtitle')}</p>
 
-      {/* ── Login Card ── */}
-      <div className="relative z-10 w-full max-w-md px-4 animate-fade-in">
-        <div className="bg-ink-base rounded-2xl border border-border-subtle shadow-elevated overflow-hidden noise">
-          {/* Card Header */}
-          <div className="relative z-10 px-8 pt-10 pb-6 text-center">
-            {/* Logo */}
-            <div className="mx-auto w-14 h-14 rounded-xl gradient-cyan flex items-center justify-center shadow-glow mb-5">
-              <svg className="w-7 h-7 text-on-accent" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2L14.09 8.26L20 9.27L15.55 13.97L16.91 20L12 16.9L7.09 20L8.45 13.97L4 9.27L9.91 8.26L12 2Z" />
-              </svg>
-            </div>
-            <h1 className="text-3xl font-display text-cream mb-1.5 tracking-tight">
-              Edu-LLM
-            </h1>
-            <p className="text-sm text-cream-secondary">
-              Sign in to access your learning environment
-            </p>
-          </div>
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="relative z-10 px-8 pb-10 space-y-5">
-            {/* Error banner */}
+          <form onSubmit={handleSubmit} className="mt-5 space-y-4">
             {error && (
-              <div className="flex items-center gap-2.5 px-4 py-3 rounded-lg bg-danger-muted border border-danger/20 text-danger text-sm animate-fade-in">
-                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" /><path d="m15 9-6 6M9 9l6 6" />
-                </svg>
+              <div role="alert" className="rounded-xl border border-danger/20 bg-danger-muted px-3 py-2 text-[13px] text-danger">
                 {error}
               </div>
             )}
 
-            {/* Username */}
             <div className="space-y-1.5">
-              <label htmlFor="login-username" className="mono-label">
-                Username
+              <label htmlFor="login-username" className="block text-[13px] text-cream-muted">
+                {t('account.username')}
               </label>
               <input
                 id="login-username"
@@ -109,15 +81,13 @@ export default function Login() {
                 autoComplete="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
-                className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan focus:ring-1 focus:ring-cyan/30 transition-colors"
+                className={FIELD}
               />
             </div>
 
-            {/* Password */}
             <div className="space-y-1.5">
-              <label htmlFor="login-password" className="mono-label">
-                Password
+              <label htmlFor="login-password" className="block text-[13px] text-cream-muted">
+                {t('p.login.password')}
               </label>
               <input
                 id="login-password"
@@ -126,42 +96,26 @@ export default function Login() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                className="w-full px-4 py-3 rounded-lg bg-ink-deep border border-border-default text-cream text-sm placeholder:text-cream-muted focus:outline-none focus:border-cyan focus:ring-1 focus:ring-cyan/30 transition-colors"
+                className={FIELD}
               />
             </div>
 
-            {/* Submit */}
             <button
               id="login-submit"
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 rounded-lg gradient-cyan text-on-accent text-sm font-semibold tracking-wide transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-glow"
+              className="w-full cursor-pointer rounded-full bg-ink px-4 py-2 text-[14px] text-on-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <div className="w-4 h-4 rounded-full border-2 border-cream/30 border-t-cream animate-[spin_0.8s_linear_infinite]" />
-                  Signing in…
-                </span>
-              ) : (
-                'Sign In'
-              )}
+              {isLoading ? t('p.login.busy') : t('p.login.submit')}
             </button>
           </form>
 
-          {/* Register link */}
-          <div className="px-8 pb-8 text-center">
-            <p className="text-xs text-cream-muted">
-              New student?{' '}
-              <Link to="/register" className="text-cyan hover:underline">Create an account</Link>
-            </p>
-          </div>
+          <p className="mt-5 text-center text-[13px] text-cream-muted">
+            {t('p.login.newStudent')}{' '}
+            <Link to="/register" className="text-cream-secondary underline">{t('p.login.create')}</Link>
+          </p>
         </div>
-
-        {/* Footer */}
-        <p className="text-center text-[11px] text-cream-muted mt-6 font-body tracking-wide">
-          Edu-LLM · Polytech
-        </p>
+        <p className="mt-5 text-center text-[12px] text-cream-muted">Edu-LLM · Polytech</p>
       </div>
     </div>
   );

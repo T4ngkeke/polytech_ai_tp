@@ -27,18 +27,20 @@ import {
   autoName, conflictKey, conflictNumbers, liveConflicts, loadIgnored, saveIgnored,
 } from '../lib/rules';
 import Icon from './Icon';
+import { Switch } from '../pages/student/ui';
+import { t as tr, useT } from '../lib/i18n';
 
 const MAX_RULES = 30;
-const ONLY_HERE = { class: 'This class only', lab: 'This TP only', student: 'This student only' };
+const ONLY_HERE = { class: 't.rl.only.class', lab: 't.rl.only.lab', student: 't.rl.only.student' };
 
 function undoToast(message, undo) {
   toast((t) => (
     <span className="flex items-center gap-3">
       <span>{message}</span>
       {undo && (
-        <button type="button" className="cursor-pointer font-semibold text-cyan hover:underline"
+        <button type="button" className="cursor-pointer font-semibold text-cream underline underline-offset-2"
           onClick={() => { toast.dismiss(t.id); undo(); }}>
-          Undo
+          {tr('t.undo')}
         </button>
       )}
     </span>
@@ -48,6 +50,7 @@ function undoToast(message, undo) {
 const short = (text) => (text.length > 40 ? `${text.slice(0, 40)}…` : text);
 
 export default function RuleList({ level, targetId, classId, inherited, inheritedLabel }) {
+  const t = useT();
   const [items, setItems] = useState(null);
   const [builtIn, setBuiltIn] = useState([]);
   const [mine, setMine] = useState([]);
@@ -96,12 +99,12 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
   const minesChanged = () => window.dispatchEvent(new Event('edullm-presets-changed'));
 
   const buttons = [
-    ...builtIn.map((p) => ({ source: `b:${p.key}`, name: p.name, text: p.text, group: 'Ready-made' })),
-    ...mine.map((p) => ({ source: `m:${p.id}`, name: p.name, text: p.content, group: 'My rules', preset: p })),
+    ...builtIn.map((p) => ({ source: `b:${p.key}`, name: p.name, text: p.text, group: t('t.rl.readyMade') })),
+    ...mine.map((p) => ({ source: `m:${p.id}`, name: p.name, text: p.content, group: t('t.rl.mine'), preset: p })),
   ];
   const origin = (source) => {
     const b = buttons.find((x) => x.source === source);
-    return b ? `${b.group} · ${b.name}` : source ? 'My rules' : ONLY_HERE[level];
+    return b ? `${b.group} · ${b.name}` : source ? t('t.rl.mine') : t(ONLY_HERE[level]);
   };
   const inList = (source) => items?.find((r) => r.source === source);
 
@@ -116,7 +119,7 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
       if (created.is_active) runCheck();
       return created;
     } catch (err) {
-      toast.error(err.message === 'too_many_rules' ? `At most ${MAX_RULES} rules` : err.message);
+      toast.error(err.message === 'too_many_rules' ? t('t.rl.max', { n: MAX_RULES }) : err.message);
       return null;
     } finally {
       setBusy(false);
@@ -144,7 +147,7 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
       setItems(left);
       // The reasons name rule numbers, which move after a delete.
       if (liveConflicts(check.conflicts, left).length) runCheck();
-      undoToast(`Removed “${short(item.text)}”`, () => add(item.text, item.source,
+      undoToast(t('t.rl.removed', { text: short(item.text) }), () => add(item.text, item.source,
         { is_active: item.is_active, position }));
     } catch (err) { toast.error(err.message); }
   };
@@ -164,15 +167,15 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
     try {
       if (editor.mode === 'edit') {
         await api.put(`/api/teacher/skill-presets/${editor.id}`, { name, content: text });
-        toast.success(`Saved “${name}”`);
+        toast.success(t('t.rl.saved', { name }));
         loadMine(); minesChanged(); await load();
         if ((items || []).some((r) => r.source === `m:${editor.id}` && r.is_active)) runCheck();
       } else if (editor.save) {
         const preset = await api.post('/api/teacher/skill-presets', { name, content: text });
         loadMine(); minesChanged();
-        if (await add(text, `m:${preset.id}`)) toast.success('Added, and saved in My rules');
+        if (await add(text, `m:${preset.id}`)) toast.success(t('t.rl.addedSaved'));
       } else if (await add(text, null)) {
-        toast.success(`Added (${ONLY_HERE[level].toLowerCase()})`);
+        toast.success(t('t.rl.added', { where: t(ONLY_HERE[level]) }));
       }
       setEditor(null);
     } catch (err) {
@@ -189,7 +192,7 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
       await api.delete(`/api/teacher/skill-presets/${preset.id}`);
       setEditor(null);
       loadMine(); minesChanged(); await load();
-      undoToast(`“${preset.name}” removed from My rules`, async () => {
+      undoToast(t('t.rl.presetRemoved', { name: preset.name }), async () => {
         const again = await api.post('/api/teacher/skill-presets', { name: preset.name, content: preset.content });
         await Promise.all(linked.map((r) => api.patch(`/api/teacher/rule-items/${r.id}`, { source: `m:${again.id}` })));
         loadMine(); minesChanged(); load();
@@ -201,7 +204,7 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
     if (editingRule.text.trim() && await patch(item, { text: editingRule.text.trim() })) setEditingRule(null);
   };
 
-  if (items === null) return <p className="text-xs text-cream-muted">Loading rules…</p>;
+  if (items === null) return <p className="text-[13px] text-cream-muted">{t('t.rl.loading')}</p>;
   const active = items.filter((r) => r.is_active).length;
   const full = items.length >= MAX_RULES;
   const live = liveConflicts(check.conflicts, items).map((c) => ({ ...c, key: conflictKey(items, c) }));
@@ -213,10 +216,10 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
     <div className="space-y-4">
       {inherited?.length > 0 && (
         <div>
-          <p className="text-[10px] text-cream-muted uppercase tracking-widest mb-2 font-semibold">{inheritedLabel}</p>
+          <p className="mb-2 text-[13px] font-medium text-cream-muted">{inheritedLabel}</p>
           <ol className="space-y-1">
             {inherited.map((r, i) => (
-              <li key={r.id} className="flex gap-2 rounded-lg bg-ink-raised/60 px-3 py-2 text-xs text-cream-secondary">
+              <li key={r.id} className="flex gap-2 rounded-lg bg-ink-base px-3 py-2 text-[13px] text-cream-secondary">
                 <span className="font-mono text-cream-muted">{i + 1}.</span><span className="whitespace-pre-wrap">{r.text}</span>
               </li>
             ))}
@@ -226,44 +229,44 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
 
       <div>
         <div className="mb-2 flex items-baseline justify-between">
-          <p className="text-[10px] text-cream-muted uppercase tracking-widest font-semibold">Rules</p>
-          <span className="text-[11px] text-cream-muted">
-            {items.length ? `${active} on · ${items.length} of ${MAX_RULES}` : 'No rule yet'}
+          <p className="text-[15px] font-semibold text-cream">{t('tab.rules')}</p>
+          <span className="text-[12.5px] text-cream-muted">
+            {items.length ? t('t.rl.count', { on: active, n: items.length, max: MAX_RULES }) : t('t.rl.none')}
           </span>
         </div>
         {items.length === 0 ? (
-          <p className="text-xs italic text-cream-muted">No rule yet. Pick one below, or write your own.</p>
+          <p className="text-[13px] text-cream-muted">{t('t.rl.noneHelp')}</p>
         ) : (
           <ol className="space-y-1.5">
             {items.map((r, i) => (
               <li key={r.id} id={`rule-${r.id}`} className={`flex items-start gap-3 rounded-xl border px-3 py-2 transition-shadow ${
                 !r.is_active ? 'border-border-subtle bg-ink-base'
                   : flagged.has(r.id) ? 'border-gold/50 bg-ink-raised ring-2 ring-gold-muted' : 'border-border-default bg-ink-raised'}`}>
-                <span className="mt-0.5 w-5 shrink-0 text-right font-mono text-xs text-cream-muted">{i + 1}.</span>
+                <span className="mt-0.5 w-5 shrink-0 text-right font-mono text-[13px] text-cream-muted">{i + 1}.</span>
                 {editingRule?.id === r.id ? (
                   <div className="flex-1 space-y-2">
-                    <textarea value={editingRule.text} autoFocus rows={2} aria-label="Rule text"
+                    <textarea value={editingRule.text} autoFocus rows={2} aria-label={t('t.rl.ruleText')}
                       onChange={(e) => setEditingRule({ ...editingRule, text: e.target.value })}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') setEditingRule(null);
                         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveRule(r); }
                       }}
-                      className="w-full resize-y rounded-lg border border-border-default bg-ink-deep px-3 py-2 text-sm text-cream focus:border-cyan/40 focus:outline-none" />
+                      className="w-full resize-y rounded-lg border border-border-default bg-ink-deep px-3 py-2 text-sm text-cream focus:border-cream-muted focus:outline-none" />
                     <div className="flex gap-2">
                       <button type="button" disabled={!editingRule.text.trim()} onClick={() => saveRule(r)}
-                        className="cursor-pointer rounded-lg bg-cyan-muted px-3 py-1 text-xs text-cyan hover:bg-cyan/20 disabled:opacity-40">Save</button>
+                        className="cursor-pointer rounded-full bg-ink px-3.5 py-1.5 text-[13px] text-on-ink disabled:opacity-40">{t('save')}</button>
                       <button type="button" onClick={() => setEditingRule(null)}
-                        className="cursor-pointer rounded-lg px-3 py-1 text-xs text-cream-secondary hover:bg-ink-hover">Cancel</button>
+                        className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover">{t('cancel')}</button>
                     </div>
                   </div>
                 ) : (
                   <div className="min-w-0 flex-1">
-                    <p className={`whitespace-pre-wrap text-sm ${r.is_active ? 'text-cream' : 'text-cream-muted line-through'}`}>{r.text}</p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-cream-muted">
+                    <p className={`whitespace-pre-wrap text-[14px] ${r.is_active ? 'text-cream' : 'text-cream-muted line-through'}`}>{r.text}</p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-cream-muted">
                       <span>{origin(r.source)}</span>
                       {flagged.has(r.id) && r.is_active && (
                         <span className="inline-flex items-center gap-1 text-gold">
-                          <Icon name="warning" className="h-3 w-3" />May contradict
+                          <Icon name="warning" className="h-3 w-3" />{t('t.rl.mayContradict')}
                         </span>
                       )}
                     </p>
@@ -271,10 +274,10 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
                 )}
                 {editingRule?.id !== r.id && (
                   <div className="flex shrink-0 items-center gap-0.5">
-                    <Switch on={r.is_active} label={r.is_active ? 'Switch this rule off (it stays in the list)' : 'Switch this rule on'}
-                      onToggle={() => patch(r, { is_active: !r.is_active })} />
-                    <IconBtn title="Edit" onClick={() => setEditingRule({ id: r.id, text: r.text })}><Icon name="pencil" className="h-3.5 w-3.5" /></IconBtn>
-                    <IconBtn title="Delete" danger onClick={() => remove(r)}><Icon name="trash" className="h-3.5 w-3.5" /></IconBtn>
+                    <span className="mx-1 flex"><Switch checked={r.is_active} label={t(r.is_active ? 't.rl.switchOff' : 't.rl.switchOn')}
+                      onChange={() => patch(r, { is_active: !r.is_active })} /></span>
+                    <IconBtn title={t('edit')} onClick={() => setEditingRule({ id: r.id, text: r.text })}><Icon name="pencil" className="h-3.5 w-3.5" /></IconBtn>
+                    <IconBtn title={t('delete')} danger onClick={() => remove(r)}><Icon name="trash" className="h-3.5 w-3.5" /></IconBtn>
                   </div>
                 )}
               </li>
@@ -293,76 +296,76 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
         onIgnore={(c) => {
           ignore([...ignored, c.key]);
           setReview(null);
-          undoToast('Warning ignored for these two rules', () => ignore(ignored.filter((k) => k !== c.key)));
+          undoToast(t('t.rl.warnIgnored'), () => ignore(ignored.filter((k) => k !== c.key)));
         }}
         onWarnAgain={(c) => ignore(ignored.filter((k) => k !== c.key))} />
 
-      <div className="rounded-xl border border-border-subtle bg-ink-raised/40 p-3 space-y-3">
-        <Group title="Ready-made rules" note="Click to add, click again to remove">
+      <div className="rounded-2xl border border-border-subtle bg-ink-raised p-4 space-y-4">
+        <Group title={t('t.rl.readyMadeTitle')} note={t('t.rl.readyMadeNote')}>
           {buttons.filter((b) => !b.preset).map((b) => (
             <RuleButton key={b.source} b={b} found={inList(b.source)} disabled={busy || (full && !inList(b.source))}
               onClick={() => toggle(b)} />
           ))}
         </Group>
-        <Group title="My rules" note="Saved by you, for all your classes">
+        <Group title={t('t.rl.mine')} note={t('t.rl.mineNote')}>
           {buttons.filter((b) => b.preset).map((b) => (
             <span key={b.source} className="inline-flex items-stretch">
               <RuleButton b={b} found={inList(b.source)} joined disabled={busy || (full && !inList(b.source))}
                 onClick={() => toggle(b)} />
-              <button type="button" title="Edit this saved rule" aria-label={`Edit ${b.name}`}
+              <button type="button" title={t('t.rl.editSaved')} aria-label={t('t.rl.editName', { name: b.name })}
                 onClick={() => setEditor({ mode: 'edit', id: b.preset.id, text: b.preset.content, name: b.preset.name, save: true })}
                 className={`cursor-pointer rounded-r-full border border-l-0 px-2 transition-colors ${inList(b.source)
-                  ? 'border-cyan/30 bg-cyan-muted text-cyan' : 'border-border-default text-cream-muted hover:text-cream'}`}>
+                  ? 'border-ink bg-ink text-on-ink' : 'border-border-default text-cream-muted hover:text-cream'}`}>
                 <Icon name="pencil" className="h-3 w-3" />
               </button>
             </span>
           ))}
           <button type="button" disabled={full} onClick={() => setEditor({ mode: 'new', text: '', name: '', save: true })}
-            className="cursor-pointer rounded-full border border-dashed border-cyan/50 px-2.5 py-1 text-xs text-cyan hover:bg-cyan-muted disabled:opacity-40">
-            + Custom rule
+            className="cursor-pointer rounded-full border border-dashed border-border-default px-2.5 py-1 text-[13px] text-cream-secondary hover:bg-ink-hover hover:text-cream disabled:opacity-40">
+            + {t('t.rl.custom')}
           </button>
         </Group>
 
         {editor && (
-          <div className="space-y-2 rounded-xl border border-cyan/30 bg-ink-base p-3">
-            <label className="block text-xs text-cream-secondary" htmlFor="rule-editor-text">
-              {editor.mode === 'edit' ? 'Edit your saved rule' : 'Your rule'}
+          <div className="space-y-2 rounded-xl border border-border-default bg-ink-base p-3">
+            <label className="block text-[13px] text-cream-secondary" htmlFor="rule-editor-text">
+              {t(editor.mode === 'edit' ? 't.rl.editYours' : 't.rl.yours')}
             </label>
             <textarea id="rule-editor-text" rows={3} autoFocus value={editor.text}
-              placeholder="e.g. Answer with an example from the TP subject first."
+              placeholder={t('t.rl.example')}
               onChange={(e) => setEditor({ ...editor, text: e.target.value })}
               onKeyDown={(e) => { if (e.key === 'Escape') setEditor(null); }}
-              className="w-full resize-y rounded-lg border border-border-default bg-ink-deep px-3 py-2 text-sm text-cream placeholder:text-cream-muted focus:border-cyan/40 focus:outline-none" />
+              className="w-full resize-y rounded-lg border border-border-default bg-ink-deep px-3 py-2 text-[14px] text-cream placeholder:text-cream-muted focus:border-cream-muted focus:outline-none" />
             {(editor.save || editor.mode === 'edit') && (
               <>
-                <label className="block text-xs text-cream-secondary" htmlFor="rule-editor-name">Short name (shown on the button)</label>
+                <label className="block text-[13px] text-cream-secondary" htmlFor="rule-editor-name">{t('t.rl.shortName')}</label>
                 <input id="rule-editor-name" type="text" value={editor.name}
-                  placeholder={editor.text.trim() ? autoName(editor.text) : 'Made from the rule if empty'}
+                  placeholder={editor.text.trim() ? autoName(editor.text) : t('t.rl.nameAuto')}
                   onChange={(e) => setEditor({ ...editor, name: e.target.value })}
-                  className="w-full rounded-lg border border-border-default bg-ink-deep px-3 py-1.5 text-sm text-cream placeholder:text-cream-muted focus:border-cyan/40 focus:outline-none" />
+                  className="w-full rounded-lg border border-border-default bg-ink-deep px-3 py-1.5 text-[14px] text-cream placeholder:text-cream-muted focus:border-cream-muted focus:outline-none" />
               </>
             )}
             {editor.mode === 'new' && (
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-cream-secondary" htmlFor="rule-editor-save">
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-cream-secondary" htmlFor="rule-editor-save">
                 <input id="rule-editor-save" type="checkbox" checked={editor.save}
-                  onChange={(e) => setEditor({ ...editor, save: e.target.checked })} className="h-4 w-4 accent-[rgb(var(--cyan))]" />
-                Also save in My rules, to reuse in other classes
+                  onChange={(e) => setEditor({ ...editor, save: e.target.checked })} className="h-4 w-4 accent-[rgb(var(--ink))]" />
+                {t('t.rl.alsoSave')}
               </label>
             )}
             {editor.mode === 'edit' && (
-              <p className="text-[11px] text-cream-muted">Rules added from it change too, unless you edited them in a list.</p>
+              <p className="text-[12px] text-cream-muted">{t('t.rl.editNote')}</p>
             )}
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" disabled={busy || !editor.text.trim()} onClick={saveEditor}
-                className="cursor-pointer rounded-lg gradient-cyan px-3 py-1.5 text-xs font-semibold text-on-accent hover:brightness-110 disabled:opacity-40">
-                {editor.mode === 'edit' ? 'Save' : 'Add rule'}
+                className="cursor-pointer rounded-full bg-ink px-3.5 py-1.5 text-[13px] text-on-ink disabled:opacity-40">
+                {editor.mode === 'edit' ? t('save') : t('t.rl.add')}
               </button>
               <button type="button" onClick={() => setEditor(null)}
-                className="cursor-pointer rounded-lg px-3 py-1.5 text-xs text-cream-secondary hover:bg-ink-hover">Cancel</button>
+                className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover">{t('cancel')}</button>
               {editor.mode === 'edit' && (
                 <button type="button" onClick={() => deleteMine(mine.find((m) => m.id === editor.id))}
-                  className="ml-auto cursor-pointer rounded-lg px-3 py-1.5 text-xs text-danger hover:bg-danger-muted">
-                  Delete from My rules
+                  className="ml-auto cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-danger hover:bg-danger-muted">
+                  {t('t.rl.deleteSaved')}
                 </button>
               )}
             </div>
@@ -375,17 +378,18 @@ export default function RuleList({ level, targetId, classId, inherited, inherite
 
 function ConflictPanel({ check, items, shown, hidden, reviewed, showIgnored, setShowIgnored,
   onReview, onDone, onIgnore, onWarnAgain }) {
+  const t = useT();
   if (check.state === 'checking') {
-    return <p className="text-xs text-cream-muted" role="status">Checking the rules for contradictions…</p>;
+    return <p className="text-[13px] text-cream-muted" role="status">{t('t.rl.checking')}</p>;
   }
   if (check.state === 'unavailable') {
-    return <p className="text-xs text-cream-muted" role="status">The rules could not be checked for contradictions just now.</p>;
+    return <p className="text-[13px] text-cream-muted" role="status">{t('t.rl.unavailable')}</p>;
   }
   if (check.state !== 'done') return null;
   if (!shown.length && !hidden.length) {
     return (
-      <p className="inline-flex items-center gap-1.5 text-xs text-cream-muted" role="status">
-        <Icon name="check" className="h-3.5 w-3.5 text-cyan" />No contradiction found between these rules.
+      <p className="inline-flex items-center gap-1.5 text-[13px] text-cream-muted" role="status">
+        <Icon name="check" className="h-3.5 w-3.5" />{t('t.rl.noConflict')}
       </p>
     );
   }
@@ -396,41 +400,39 @@ function ConflictPanel({ check, items, shown, hidden, reviewed, showIgnored, set
         const reviewing = reviewed?.key === c.key;
         return (
           <div key={c.key} className="space-y-2 rounded-xl border border-gold/40 bg-gold-muted px-3 py-2.5">
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-gold">
-              <Icon name="warning" className="h-4 w-4" />Rules {a} and {b} may contradict
+            <p className="flex items-center gap-1.5 text-[14px] font-semibold text-gold">
+              <Icon name="warning" className="h-4 w-4" />{t('t.rl.conflict', { a, b })}
             </p>
-            {c.reason && <p className="text-sm text-cream-secondary">{c.reason}</p>}
-            <p className="text-[11px] text-cream-muted">
-              {reviewing
-                ? 'Switch one of the two rules off, edit it, or delete it. The warning goes away by itself.'
-                : 'The tutor would follow one of them without telling the student. Rules of different levels do not need this: a student rule wins over a TP rule, a TP rule over a class rule.'}
+            {c.reason && <p className="text-[14px] text-cream-secondary">{c.reason}</p>}
+            <p className="text-[12.5px] text-cream-muted">
+              {t(reviewing ? 't.rl.reviewHelp' : 't.rl.conflictHelp')}
             </p>
             <div className="flex flex-wrap gap-2">
               {reviewing ? (
                 <button type="button" onClick={onDone}
-                  className="cursor-pointer rounded-lg px-3 py-1 text-xs text-cream-secondary hover:bg-ink-hover">Done</button>
+                  className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover">{t('t.done')}</button>
               ) : (
                 <button type="button" onClick={() => onReview(c)}
-                  className="cursor-pointer rounded-lg border border-gold/40 px-3 py-1 text-xs text-gold hover:bg-gold-muted">Review the two rules</button>
+                  className="cursor-pointer rounded-lg border border-gold/40 px-3 py-1.5 text-[13px] text-gold hover:bg-gold-muted">{t('t.rl.review')}</button>
               )}
               <button type="button" onClick={() => onIgnore(c)}
-                className="cursor-pointer rounded-lg px-3 py-1 text-xs text-cream-secondary hover:bg-ink-hover">Ignore</button>
+                className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover">{t('t.ignore')}</button>
             </div>
           </div>
         );
       })}
       {hidden.length > 0 && (
-        <p className="text-[11px] text-cream-muted">
-          {hidden.length} ignored warning{hidden.length > 1 ? 's' : ''} ·{' '}
+        <p className="text-[12.5px] text-cream-muted">
+          {t('t.rl.ignoredCount', { n: hidden.length })} ·{' '}
           <button type="button" onClick={() => setShowIgnored(!showIgnored)}
-            className="cursor-pointer text-cyan hover:underline">{showIgnored ? 'Hide' : 'Show'}</button>
+            className="cursor-pointer text-cream underline underline-offset-2">{showIgnored ? t('t.hide') : t('t.show')}</button>
         </p>
       )}
       {showIgnored && hidden.map((c) => (
         <div key={c.key} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle px-3 py-2">
-          <p className="text-xs text-cream-secondary">Rules {conflictNumbers(items, c).join(' and ')}: {c.reason}</p>
+          <p className="text-[13px] text-cream-secondary">{t('t.rl.ignoredRules', { nums: conflictNumbers(items, c).join(' · ') })} {c.reason}</p>
           <button type="button" onClick={() => onWarnAgain(c)}
-            className="cursor-pointer rounded-lg px-2 py-1 text-xs text-cyan hover:bg-cyan-muted">Warn me again</button>
+            className="cursor-pointer rounded-lg px-2 py-1 text-[13px] text-cream-secondary hover:bg-ink-hover hover:text-cream">{t('t.rl.warnAgain')}</button>
         </div>
       ))}
     </div>
@@ -441,8 +443,8 @@ function Group({ title, note, children }) {
   return (
     <div>
       <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-cyan/80">{title}</p>
-        <span className="text-[11px] text-cream-muted">{note}</span>
+        <p className="text-[13px] font-medium text-cream">{title}</p>
+        <span className="text-[12px] text-cream-muted">{note}</span>
       </div>
       <div className="flex flex-wrap gap-1.5">{children}</div>
     </div>
@@ -452,20 +454,11 @@ function Group({ title, note, children }) {
 function RuleButton({ b, found, joined = false, disabled, onClick }) {
   return (
     <button type="button" title={b.text} aria-pressed={!!found} disabled={disabled} onClick={onClick}
-      className={`cursor-pointer border px-2.5 py-1 text-xs transition-colors disabled:cursor-default disabled:opacity-50 ${
+      className={`cursor-pointer border px-2.5 py-1 text-[13px] transition-colors disabled:cursor-default disabled:opacity-50 ${
         joined ? 'rounded-l-full' : 'rounded-full'} ${found
-        ? `border-cyan/30 bg-cyan-muted text-cyan ${found.is_active ? '' : 'opacity-60'}`
-        : 'border-border-default text-cream-secondary hover:border-cyan/40 hover:text-cream'}`}>
+        ? `border-ink bg-ink text-on-ink ${found.is_active ? '' : 'opacity-60'}`
+        : 'border-border-default text-cream-secondary hover:bg-ink-hover hover:text-cream'}`}>
       {found ? '✓ ' : '+ '}{b.name}
-    </button>
-  );
-}
-
-function Switch({ on, onToggle, label }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} title={label} onClick={onToggle}
-      className={`relative mx-1 h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${on ? 'bg-cyan' : 'bg-ink-surface border border-border-default'}`}>
-      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-cream shadow transition-all ${on ? 'left-4' : 'left-0.5'}`} />
     </button>
   );
 }

@@ -12,16 +12,35 @@ import toast from 'react-hot-toast';
 
 import api, { responseError } from '../lib/api';
 import {
-  KIND_NAME, boxStyle, cropStyle, displayPieces, pictureNumbers, searchNote, visibleIssues, withoutText,
+  boxStyle, cropStyle, displayPieces, pictureNumbers, visibleIssues, withoutText,
 } from '../lib/documentBlocks';
+import { useT } from '../lib/i18n';
 import Icon from './Icon';
 
 const KINDS = ['heading', 'text', 'code', 'formula', 'table', 'figure', 'navigation'];
 const DESCRIBABLE = new Set(['figure', 'formula', 'table']);
-const STATE_LABEL = {
-  queued: 'queued', processing: 'processing', parsed: 'indexing',
-  ready: 'ready', partial: 'partial', failed: 'failed',
-};
+const STATES = new Set(['queued', 'processing', 'parsed', 'ready', 'partial', 'failed']);
+const PUBLICATIONS = new Set(['draft', 'published', 'superseded']);
+const REASONS = new Set(['upload', 'reparse', 'teacher_edit']);
+
+// Machine values of the server shown in the language of the page (unknown ones as they are).
+function useLabels() {
+  const t = useT();
+  return {
+    state: (v) => (STATES.has(v) ? t(`p.block.state.${v}`) : v),
+    publication: (v) => (PUBLICATIONS.has(v) ? t(`p.block.pub.${v}`) : v),
+    reason: (v) => (REASONS.has(v) ? t(`p.block.reason.${v}`) : v),
+    kind: (v) => (KINDS.includes(v) ? t(`p.block.kind.${v}`) : v),
+    // How search treats the block (same cases as lib/documentBlocks.js searchNote).
+    searchNote: (block) => {
+      if (block.index_state === 'excluded') return t('p.block.note.excluded');
+      if (withoutText(block)) return t('p.block.note.noText');
+      if (block.index_state === 'needs_review') return t('p.block.note.notSearched');
+      if (block.type === 'figure' && block.edited_by_teacher) return t('p.block.note.described');
+      return null;
+    },
+  };
+}
 
 function useAssetUrl(url) {
   // Assets are private: fetched with the token, shown from a blob URL that is
@@ -42,6 +61,8 @@ function useAssetUrl(url) {
 }
 
 export default function StructuredDocumentDetail({ document: doc, onBack, onRefresh }) {
+  const t = useT();
+  const label = useLabels();
   const [versions, setVersions] = useState(null);
   const [revisionId, setRevisionId] = useState(null);
   const [outline, setOutline] = useState([]);
@@ -87,20 +108,18 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
   };
 
   // Run one change; on success show the new draft it created.
-  const change = async (label, fn) => {
+  const change = async (action, fn) => {
     setBusy(true);
     try {
       const out = await fn({ expected_revision_id: revisionId, expected_generation: versions.generation });
       const newId = out?.revision_id || out?.revision?.revision_id;
-      toast.success(newId ? `${label}: new draft created` : `${label}: saved`);
+      toast.success(newId ? t('p.block.draftCreated', { action }) : t('p.block.actionSaved', { action }));
       await loadVersions(newId || revisionId);
       if (!newId) await loadPage();
       onRefresh?.().catch(() => {});
       return true;
     } catch (err) {
-      toast.error(err.status === 409
-        ? `${err.message} — someone changed this document; the view was reloaded.`
-        : err.message);
+      toast.error(err.status === 409 ? t('p.block.conflict', { message: err.message }) : err.message);
       if (err.status === 409) await loadVersions(revisionId).catch(() => {});
       return false;
     } finally {
@@ -108,7 +127,7 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
     }
   };
 
-  const reprocess = () => change('Reprocess', (target) =>
+  const reprocess = () => change(t('p.block.act.reprocess'), (target) =>
     api.post(`/api/teacher/documents/${doc.id}/revisions/${revisionId}/reprocess`,
       { expected_generation: target.expected_generation }));
 
@@ -121,7 +140,7 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
         expected_generation: versions.generation,
         acknowledge_issues: revision.processing_state === 'partial',
       });
-      toast.success('Published: students can search this version');
+      toast.success(t('p.block.published'));
       await loadVersions(revisionId);
       onRefresh?.().catch(() => {});
     } catch (err) {
@@ -144,42 +163,43 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
 
   return (
     <div className="space-y-4">
-      <button type="button" onClick={onBack} className="text-sm text-cyan hover:underline">← Back to documents</button>
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border-default p-3">
-        <h3 className="truncate font-medium text-cream">{doc.filename}</h3>
+      <button type="button" onClick={onBack} className="cursor-pointer rounded-full px-3 py-1 text-[14px] text-cream-secondary hover:bg-ink-hover">← {t('p.block.back')}</button>
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border-subtle bg-ink-raised p-4">
+        <h3 className="min-w-0 truncate text-[15px] font-semibold text-cream">{doc.filename}</h3>
         {versions && (
           <select value={revisionId || ''} onChange={(e) => setRevisionId(e.target.value)}
-            className="rounded border border-border-default bg-ink-deep px-2 py-1 text-xs text-cream">
+            aria-label={t('p.block.version')}
+            className="rounded-xl border border-border-default bg-ink-raised px-2 py-1.5 text-[13px] text-cream">
             {versions.revisions.map((r, i) => (
               <option key={r.id} value={r.id}>
-                v{i + 1} · {r.reason} · {STATE_LABEL[r.processing_state] || r.processing_state} · {r.publication_state}
-                {r.id === versions.current_revision_id ? ' (published)' : ''}
+                v{i + 1} · {label.reason(r.reason)} · {label.state(r.processing_state)} · {label.publication(r.publication_state)}
+                {r.id === versions.current_revision_id ? ` (${t('p.block.pub.published')})` : ''}
               </option>
             ))}
           </select>
         )}
         {canPublish && (
           <button type="button" disabled={busy} onClick={publish}
-            title={revision.processing_state === 'partial' ? 'Students will not find the pages that were not read' : undefined}
-            className="rounded border border-cyan/40 bg-cyan-muted px-2 py-1 text-xs text-cream hover:bg-cyan/20 disabled:opacity-50">
-            {revision.processing_state === 'partial' ? 'Publish anyway' : 'Publish'}
+            title={revision.processing_state === 'partial' ? t('p.block.publishPartialTitle') : undefined}
+            className="cursor-pointer rounded-full bg-ink px-4 py-1.5 text-[13px] text-on-ink hover:opacity-90 disabled:opacity-50">
+            {revision.processing_state === 'partial' ? t('p.block.publishAnyway') : t('p.block.publish')}
           </button>
         )}
         <button type="button" disabled={busy || !revision} onClick={reprocess}
-          className="rounded border border-border-default px-2 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
-          Reprocess file
+          className="cursor-pointer rounded-full border border-border-default px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
+          {t('p.block.reprocess')}
         </button>
         <button type="button" disabled={!revision} onClick={downloadSource}
-          className="rounded border border-border-default px-2 py-1 text-xs text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
-          Download original
+          className="cursor-pointer rounded-full border border-border-default px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover disabled:opacity-50">
+          {t('p.block.download')}
         </button>
       </div>
       {revision && <RevisionSummary revision={revision} />}
       {revision && !hasContent && (
-        <p className="text-sm text-cream-muted">
+        <p className="text-[14px] text-cream-muted">
           {revision.processing_state === 'failed'
-            ? `This version failed (${revision.report?.error_code || 'unknown error'}). Reprocess to try again.`
-            : 'This version is still being processed.'}
+            ? t('p.block.versionFailed', { code: revision.report?.error_code || t('p.block.unknownError') })
+            : t('p.block.stillProcessing')}
         </p>
       )}
       {hasContent && (
@@ -187,14 +207,14 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
           <nav className="max-h-[70vh] space-y-1 overflow-y-auto">
             {outline.map((p) => (
               <button key={p.page_id} type="button" onClick={() => setPageId(p.page_id)}
-                className={`block w-full rounded px-2 py-1 text-left text-xs ${p.page_id === pageId ? 'bg-ink-hover text-cream' : 'text-cream-secondary hover:bg-ink-hover'}`}>
-                <span className="font-medium">Page {p.source_slide_no}</span>
+                className={`block w-full cursor-pointer rounded-lg px-2 py-1.5 text-left text-[13px] ${p.page_id === pageId ? 'bg-ink-hover text-cream' : 'text-cream-secondary hover:bg-ink-hover'}`}>
+                <span className="font-medium">{t('p.block.page', { n: p.source_slide_no })}</span>
                 {p.state !== 'usable' && <span className="ml-1 text-gold"><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /></span>}
                 <span className="block truncate text-cream-muted"><DisplayText text={p.title || p.summary || '—'} /></span>
               </button>
             ))}
             {outlineCursor && (
-              <button type="button" onClick={moreOutline} className="text-xs text-cyan hover:underline">More pages…</button>
+              <button type="button" onClick={moreOutline} className="cursor-pointer rounded-full px-2 py-1 text-[13px] text-cream-secondary hover:bg-ink-hover">{t('p.block.morePages')}</button>
             )}
           </nav>
           {page && <PageView page={page} base={base} busy={busy} change={change} docId={doc.id} />}
@@ -213,26 +233,30 @@ function DisplayText({ text, kind }) {
 }
 
 function RevisionSummary({ revision }) {
+  const t = useT();
+  const label = useLabels();
   const report = revision.report || {};
   const notes = [];
   const unread = report.index?.unread_pages || [];
-  if (report.totals?.pages != null) notes.push(`${report.totals.pages} pages`);
-  if (unread.length) notes.push(`not read: page${unread.length > 1 ? 's' : ''} ${unread.join(', ')}`);
+  if (report.totals?.pages != null) notes.push(t('p.block.nPages', { n: report.totals.pages }));
+  if (unread.length) notes.push(t('p.block.notRead', { pages: unread.join(', ') }));
   if (report.carried_forward) {
-    notes.push(`teacher changes carried over: ${report.carried_forward.carried}, to check: ${report.carried_forward.reviews}`);
+    notes.push(t('p.block.carried', { a: report.carried_forward.carried, b: report.carried_forward.reviews }));
   }
   return (
-    <p className="text-xs text-cream-muted">
-      {STATE_LABEL[revision.processing_state] || revision.processing_state} · {revision.publication_state}
+    <p className="text-[13px] text-cream-muted">
+      {label.state(revision.processing_state)} · {label.publication(revision.publication_state)}
       {notes.length > 0 && ` · ${notes.join(' · ')}`}
-      {revision.processing_state === 'parsed' && (revision.reason === 'teacher_edit'
-        ? ' · your changes go live about a minute after your last change'
-        : ' · cannot be published before indexing')}
+      {revision.processing_state === 'parsed' && ` · ${revision.reason === 'teacher_edit'
+        ? t('p.block.goesLive')
+        : t('p.block.notBeforeIndex')}`}
     </p>
   );
 }
 
 function PageView({ page, base, busy, change, docId }) {
+  const t = useT();
+  const label = useLabels();
   const preview = useAssetUrl(page.page.preview_asset_id ? `${base}/assets/${page.page.preview_asset_id}` : null);
   const [ratio, setRatio] = useState(null); // page width / height, from the preview
   const [active, setActive] = useState(null); // block under the pointer
@@ -244,44 +268,42 @@ function PageView({ page, base, busy, change, docId }) {
   const show = (blockId) => window.document.getElementById(`block-${blockId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-2 text-sm text-cream">
-        <span className="font-medium">Page {page.page.source_slide_no}</span>
-        {page.page.preview_mapping !== 'verified' && <span className="text-xs text-cream-muted">preview page not verified</span>}
+      <div className="flex items-center gap-2 text-[14px] text-cream">
+        <span className="font-semibold">{t('p.block.page', { n: page.page.source_slide_no })}</span>
+        {page.page.preview_mapping !== 'verified' && <span className="text-[13px] text-cream-muted">{t('p.block.previewUnverified')}</span>}
       </div>
       {preview ? (
         <div className="relative inline-block max-w-full overflow-hidden rounded">
-          <img src={preview} alt={`Preview of page ${page.page.source_slide_no}`}
+          <img src={preview} alt={t('p.block.previewAlt', { n: page.page.source_slide_no })}
             onLoad={(e) => setRatio(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)}
             className="block max-h-[28rem] max-w-full rounded border border-border-default" />
           {page.blocks.filter((b) => b.region && (numbers[b.block_id] || b.block_id === active)).map((b) => (
             <button key={b.block_id} type="button" onClick={() => show(b.block_id)}
               onMouseEnter={() => setActive(b.block_id)} onMouseLeave={() => setActive(null)}
-              aria-label={numbers[b.block_id] ? `Picture ${numbers[b.block_id]}` : KIND_NAME[b.type]}
+              aria-label={numbers[b.block_id] ? t('p.block.picture', { n: numbers[b.block_id] }) : label.kind(b.type)}
               style={boxStyle(b.region)}
               className={`absolute cursor-pointer rounded-sm border-2 ${b.block_id === active
-                ? 'z-10 border-[3px] border-cyan bg-cyan/25 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]'
-                : 'border-cyan/60 hover:border-cyan'}`}>
+                ? 'z-10 border-[3px] border-yellow-400 bg-yellow-300/30 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]'
+                : 'border-yellow-400/70 hover:border-yellow-400'}`}>
               {numbers[b.block_id] && (
-                <span className="absolute -left-0.5 -top-0.5 rounded-br bg-cyan px-1 text-[10px] font-semibold leading-4 text-on-accent">
+                <span className="absolute -left-0.5 -top-0.5 rounded-br bg-yellow-400 px-1 text-[10px] font-semibold leading-4 text-neutral-900">
                   {numbers[b.block_id]}
                 </span>
               )}
             </button>
           ))}
         </div>
-      ) : <p className="rounded bg-ink-surface p-2 text-xs text-cream-muted">No preview for this page.</p>}
+      ) : <p className="rounded-xl bg-ink-surface p-2 text-[13px] text-cream-muted">{t('p.block.noPreview')}</p>}
       {page.unavailable.filter((u) => u.scope === 'page').length > 0 && (
-        <ul className="space-y-1 rounded bg-gold-muted p-2 text-xs text-gold">
+        <ul className="space-y-1 rounded-xl bg-warn-soft p-2 text-[13px] text-gold">
           {page.unavailable.filter((u) => u.scope === 'page').map((u, i) => (
             <li key={i}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {u.message}</li>
           ))}
         </ul>
       )}
       {unsearched > 0 && (
-        <p className="text-xs text-cream-muted">
-          {unsearched === 1 ? 'One picture on this page has no text, so Search does not find it'
-            : `${unsearched} pictures on this page have no text, so Search does not find them`}; Research can still
-          look at the page image. Describe a diagram if Search should find it.
+        <p className="text-[13px] text-cream-muted">
+          {unsearched === 1 ? t('p.block.unsearched1') : t('p.block.unsearchedN', { n: unsearched })}
         </p>
       )}
       {loose.map((r) => <ReviewCard key={r.id} review={r} busy={busy} change={change} base={base} />)}
@@ -297,23 +319,24 @@ function PageView({ page, base, busy, change, docId }) {
 }
 
 function ReviewCard({ review, busy, change, base }) {
+  const t = useT();
   const [text, setText] = useState(review.candidate_content || '');
-  const resolve = (status) => change(status === 'confirmed' ? 'Confirm' : 'Ignore', (target) =>
+  const resolve = (status) => change(status === 'confirmed' ? t('p.block.act.confirm') : t('p.block.act.ignore'), (target) =>
     api.put(`${base}/reviews/${review.id}`, {
       expected_generation: target.expected_generation, review_revision: review.revision, status,
       ...(status === 'confirmed' ? { content: text } : {}),
     }));
   return (
-    <div className="mt-2 rounded border border-gold/40 p-2 text-xs">
+    <div className="mt-2 rounded-xl border border-gold/40 p-2 text-[13px]">
       <p className="text-gold">
-        {review.kind === 'vision_description' ? `Model description (${review.model}) — check it against the picture` : review.reason}
+        {review.kind === 'vision_description' ? t('p.block.modelDesc', { model: review.model }) : review.reason}
       </p>
-      {review.uncertainties?.length > 0 && <p className="text-cream-muted">Model not sure about: {review.uncertainties.join('; ')}</p>}
+      {review.uncertainties?.length > 0 && <p className="text-cream-muted">{t('p.block.notSure', { items: review.uncertainties.join('; ') })}</p>}
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3}
-        className="mt-1 w-full rounded border border-border-default bg-ink-deep p-1 font-mono text-cream" />
+        className="mt-1 w-full rounded-lg border border-border-default bg-ink-raised p-2 font-mono text-cream" />
       <div className="mt-1 flex gap-2">
-        <button type="button" disabled={busy || !text.trim()} onClick={() => resolve('confirmed')} className="text-cyan hover:underline disabled:opacity-50">Use it</button>
-        <button type="button" disabled={busy} onClick={() => resolve('ignored')} className="text-cream-muted hover:underline disabled:opacity-50">Ignore</button>
+        <button type="button" disabled={busy || !text.trim()} onClick={() => resolve('confirmed')} className="cursor-pointer rounded-full bg-ink px-3 py-1 text-on-ink hover:opacity-90 disabled:opacity-50">{t('p.block.useIt')}</button>
+        <button type="button" disabled={busy} onClick={() => resolve('ignored')} className="cursor-pointer rounded-full px-3 py-1 text-cream-secondary hover:bg-ink-hover disabled:opacity-50">{t('p.block.ignore')}</button>
       </div>
     </div>
   );
@@ -331,6 +354,8 @@ function Crop({ preview, region, pageRatio, label }) {
 }
 
 function BlockCard({ block, number, busy, change, docId, preview, pageRatio, active, onActive, reviews, base }) {
+  const t = useT();
+  const label = useLabels();
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(block.content);
   const [kind, setKind] = useState(block.type);
@@ -338,9 +363,9 @@ function BlockCard({ block, number, busy, change, docId, preview, pageRatio, act
   const url = `/api/teacher/documents/${docId}/blocks/${block.block_id}`;
   const excluded = block.index_state === 'excluded';
   const bare = withoutText(block);
-  const note = searchNote(block);
+  const note = label.searchNote(block);
   const issues = visibleIssues(block);
-  const name = number ? `Picture ${number}` : KIND_NAME[block.type] || block.type;
+  const name = number ? t('p.block.picture', { n: number }) : label.kind(block.type);
 
   const save = async () => {
     const body = {};
@@ -351,33 +376,33 @@ function BlockCard({ block, number, busy, change, docId, preview, pageRatio, act
     }
     if (Object.keys(body).length === 0) { setEditing(false); return; }
     // The typed text is kept if the save fails.
-    if (await change('Edit', (target) => api.put(url, { ...target, ...body }))) setEditing(false);
+    if (await change(t('edit'), (target) => api.put(url, { ...target, ...body }))) setEditing(false);
   };
 
   return (
     <li id={`block-${block.block_id}`} onMouseEnter={() => onActive(block.block_id)} onMouseLeave={() => onActive(null)}
-      className={`rounded border p-2 ${active ? 'border-cyan/60' : 'border-border-default'} ${excluded ? 'border-dashed opacity-70' : ''}`}>
-      <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-cream-muted">
-        {number && <span className="rounded bg-cyan px-1 text-[10px] font-semibold leading-4 text-on-accent">{number}</span>}
+      className={`rounded-xl border p-2.5 ${active ? 'border-yellow-400' : 'border-border-subtle'} ${excluded ? 'border-dashed opacity-70' : ''}`}>
+      <div className="mb-1 flex flex-wrap items-center gap-2 text-[13px] text-cream-muted">
+        {number && <span className="rounded bg-yellow-400 px-1 text-[10px] font-semibold leading-4 text-neutral-900">{number}</span>}
         <span className="font-medium text-cream-secondary">{name}</span>
         {note && <span className="rounded bg-ink-surface px-1.5">{note}</span>}
-        {block.edited_by_teacher && <span className="text-cyan">teacher revised</span>}
+        {block.edited_by_teacher && <span className="text-cream-secondary">{t('p.block.teacherRevised')}</span>}
         <span className="ml-auto flex flex-wrap gap-x-3 gap-y-1">
           {!editing && (
-            <button type="button" disabled={busy} onClick={() => setEditing(true)} className="text-cyan hover:underline">
-              {bare ? 'Add a description' : 'Edit'}
+            <button type="button" disabled={busy} onClick={() => setEditing(true)} className="cursor-pointer text-cream-secondary underline hover:text-cream">
+              {bare ? t('p.block.addDesc') : t('edit')}
             </button>
           )}
           {DESCRIBABLE.has(block.type) && (
             <button type="button" disabled={busy}
-              onClick={() => change('Describe', (target) => api.post(`${url}/describe`, target))}
-              title="The model looks at the picture and proposes a text; you check it before it is used"
-              className="hover:underline">Write with AI</button>
+              onClick={() => change(t('p.block.act.describe'), (target) => api.post(`${url}/describe`, target))}
+              title={t('p.block.aiTitle')}
+              className="cursor-pointer text-cream-secondary underline hover:text-cream">{t('p.block.aiWrite')}</button>
           )}
           <button type="button" disabled={busy}
-            onClick={() => change(excluded ? 'Include' : 'Exclude', (target) => api.post(`${url}/exclude`, { ...target, excluded: !excluded }))}
-            title={excluded ? 'Search finds this block again' : 'Search skips this block; it stays on the page'}
-            className="hover:underline">{excluded ? 'Search again' : 'Leave out of search'}</button>
+            onClick={() => change(excluded ? t('p.block.act.include') : t('p.block.act.exclude'), (target) => api.post(`${url}/exclude`, { ...target, excluded: !excluded }))}
+            title={excluded ? t('p.block.includeTitle') : t('p.block.excludeTitle')}
+            className="cursor-pointer text-cream-secondary underline hover:text-cream">{excluded ? t('p.block.include') : t('p.block.exclude')}</button>
         </span>
       </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -385,40 +410,41 @@ function BlockCard({ block, number, busy, change, docId, preview, pageRatio, act
         <div className="min-w-0 flex-1">
           {editing ? (
             <div className="space-y-2">
-              <select value={kind} onChange={(e) => setKind(e.target.value)} className="rounded border border-border-default bg-ink-deep px-2 py-1 text-xs text-cream">
-                {KINDS.map((k) => <option key={k} value={k}>{KIND_NAME[k]}</option>)}
+              <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label={t('p.block.kindLabel')} className="rounded-xl border border-border-default bg-ink-raised px-2 py-1.5 text-[13px] text-cream">
+                {KINDS.map((k) => <option key={k} value={k}>{label.kind(k)}</option>)}
               </select>
               <textarea value={content} onChange={(e) => setContent(e.target.value)}
                 rows={Math.min(16, Math.max(3, content.split('\n').length + 1))}
-                placeholder={bare ? 'What the picture shows, with its labels. Search finds this text.' : undefined}
-                className="w-full resize-y rounded border border-border-default bg-ink-deep p-2 font-mono text-sm text-cream" />
+                placeholder={bare ? t('p.block.barePlaceholder') : undefined}
+                aria-label={t('p.block.contentLabel')}
+                className="w-full resize-y rounded-xl border border-border-default bg-ink-raised p-2 font-mono text-[14px] text-cream" />
               <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={400}
-                placeholder="What this block is for (optional, max 400 characters)"
-                className="w-full rounded border border-border-default bg-ink-deep p-1 text-xs text-cream" />
+                placeholder={t('p.block.descPlaceholder')}
+                className="w-full rounded-xl border border-border-default bg-ink-raised px-2 py-1.5 text-[13px] text-cream" />
               <div className="flex gap-2">
-                <button type="button" onClick={save} disabled={busy} className="rounded gradient-cyan px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50">Save</button>
+                <button type="button" onClick={save} disabled={busy} className="cursor-pointer rounded-full bg-ink px-4 py-1.5 text-[13px] text-on-ink hover:opacity-90 disabled:opacity-50">{t('save')}</button>
                 <button type="button" disabled={busy} onClick={() => { setEditing(false); setContent(block.content); setKind(block.type); setDescription(block.content_description || ''); }}
-                  className="rounded border border-border-default px-3 py-1 text-xs text-cream-secondary">Cancel</button>
+                  className="cursor-pointer rounded-full px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover">{t('cancel')}</button>
               </div>
             </div>
           ) : (
             block.content
               ? <pre className="whitespace-pre-wrap break-words font-mono text-sm text-cream-secondary"><DisplayText text={block.content} kind={block.type} /></pre>
-              : !bare && <p className="text-sm text-cream-muted">—</p>
+              : !bare && <p className="text-[14px] text-cream-muted">—</p>
           )}
-          {block.content_description && !editing && <p className="mt-1 text-xs italic text-cyan"><DisplayText text={block.content_description} /></p>}
+          {block.content_description && !editing && <p className="mt-1 text-[13px] italic text-cream-secondary"><DisplayText text={block.content_description} /></p>}
           {block.edited_by_teacher && block.source_text != null && block.source_text !== block.content && (
-            <details className="mt-1 text-xs text-cream-muted"><summary>Text read from the PDF</summary>
+            <details className="mt-1 text-[13px] text-cream-muted"><summary>{t('p.block.sourceText')}</summary>
               <pre className="whitespace-pre-wrap font-mono">{block.source_text}</pre></details>
           )}
           {issues.length > 0 && (
-            <ul className="mt-1 text-xs text-gold">{issues.map((i, n) => <li key={n}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {i.message}</li>)}</ul>
+            <ul className="mt-1 text-[13px] text-gold">{issues.map((i, n) => <li key={n}><Icon name="warning" className="inline-block w-3.5 h-3.5 align-[-2px]" /> {i.message}</li>)}</ul>
           )}
           {reviews.map((r) => <ReviewCard key={r.id} review={r} busy={busy} change={change} base={base} />)}
-          <details className="mt-1 text-[10px] text-cream-muted">
-            <summary className="cursor-pointer">Details</summary>
-            <p>read from the source: {block.source_completeness} · search: {block.index_state} · {block.source.extraction_method}
-              {block.description_origin !== 'none' ? ` · description: ${block.description_origin}` : ''}</p>
+          <details className="mt-1 text-[12px] text-cream-muted">
+            <summary className="cursor-pointer">{t('p.block.details')}</summary>
+            <p>{t('p.block.detailsRead')}: {block.source_completeness} · {t('p.block.detailsSearch')}: {block.index_state} · {block.source.extraction_method}
+              {block.description_origin !== 'none' ? ` · ${t('p.block.detailsDesc')}: ${block.description_origin}` : ''}</p>
             {(block.issues || []).filter((i) => !issues.includes(i)).map((i, n) => <p key={n}>{i.code}: {i.message}</p>)}
           </details>
         </div>

@@ -15,7 +15,8 @@ import QuotaRequests from '../components/QuotaRequests';
 import RuleList from '../components/RuleList';
 import CitationReport from '../components/CitationReport';
 import Tour from '../components/Tour';
-import { TOURS } from '../lib/tours';
+import { teacherTour } from './teacher/tour';
+import { tourButtons } from './student/tour';
 import Icon from '../components/Icon';
 import { EmptyState, Breadcrumb, SimpleModal } from './teacher/shared';
 import StudentsPanel from './teacher/StudentsPanel';
@@ -69,6 +70,7 @@ export default function Teacher() {
   const [renamingLab, setRenamingLab] = useState(null);
   const [renameLabValue, setRenameLabValue] = useState('');
   
+  const [archiving, setArchiving] = useState(null); // { kind: 'class' | 'lab', item }, asked in the row under the top bar
   const [studentRuleModal, setStudentRuleModal] = useState(null); // { studentId, username }
 
   // ── Load classes + labs ──
@@ -83,9 +85,9 @@ export default function Teacher() {
         })
       );
       setClasses(withLabs);
-    } catch { toast.error('Failed to load classes'); }
+    } catch { toast.error(t('t.err.loadClasses')); }
     finally { setLoading(false); }
-  }, []);
+  }, [t]);
 
   useEffect(() => { loadClasses(); }, [loadClasses]);
 
@@ -171,7 +173,7 @@ export default function Teacher() {
       setClasses((prev) => [{ ...c, labs: [] }, ...prev]);
       setShowCreateClass(false);
       setNewClassName('');
-      toast.success(`Class "${c.name}" created`);
+      toast.success(t('t.toast.classCreated', { name: c.name }));
     } catch (err) { toast.error(err.message); }
   };
 
@@ -182,25 +184,18 @@ export default function Teacher() {
       setClasses((prev) => prev.map((c) => c.id === createLabClassId ? { ...c, labs: [lab, ...(c.labs || [])] } : c));
       setShowCreateLab(false);
       setNewLabName('');
-      toast.success(`Lab "${lab.name}" created`);
+      toast.success(t('t.toast.labCreated', { name: lab.name }));
     } catch (err) { toast.error(err.message); }
   };
 
   const handleClassAction = async (action, cls) => {
     if (action === 'rename') { setRenamingClass(cls); setRenameClassValue(cls.name); setShowRenameClass(true); }
-    else if (action === 'delete') {
-      if (!confirm(`Archive class "${cls.name}"?`)) return;
-      try {
-        await api.delete(`/api/teacher/classes/${cls.id}`);
-        setClasses((prev) => prev.filter((c) => c.id !== cls.id));
-        if (selectedClass?.id === cls.id) { setSelectedClass(null); setSelectedLab(null); }
-        toast.success('Class archived');
-      } catch (err) { toast.error(err.message); }
-    } else if (action === 'reset-code') {
+    else if (action === 'delete') setArchiving({ kind: 'class', item: cls });
+    else if (action === 'reset-code') {
       try {
         const res = await api.post(`/api/teacher/classes/${cls.id}/reset-code`, {});
         setClasses((prev) => prev.map((c) => c.id === cls.id ? { ...c, invite_code: res.invite_code } : c));
-        toast.success(`New code: ${res.invite_code}`);
+        toast.success(t('t.toast.newCode', { code: res.invite_code }));
       } catch (err) { toast.error(err.message); }
     }
   };
@@ -215,17 +210,28 @@ export default function Teacher() {
         // The open lab too: its Settings button must offer the other action next.
         setSelectedLab((prev) => (prev?.id === lab.id ? { ...prev, ...updated } : prev));
         setSelectedClass((prev) => (prev?.labs ? { ...prev, labs: prev.labs.map((l) => (l.id === lab.id ? updated : l)) } : prev));
-        toast.success(updated.is_active ? 'Lab unlocked' : 'Lab locked');
+        toast.success(t(updated.is_active ? 't.toast.labUnlocked' : 't.toast.labLocked'));
       } catch (err) { toast.error(err.message); }
-    } else if (action === 'delete') {
-      if (!confirm(`Archive lab "${lab.name}"?`)) return;
-      try {
-        await api.delete(`/api/teacher/labs/${lab.id}`);
-        setClasses((prev) => prev.map((c) => ({ ...c, labs: c.labs?.filter((l) => l.id !== lab.id) })));
-        if (selectedLab?.id === lab.id) setSelectedLab(null);
-        toast.success('Lab archived');
-      } catch (err) { toast.error(err.message); }
-    }
+    } else if (action === 'delete') setArchiving({ kind: 'lab', item: lab });
+  };
+
+  // Confirmed in the row under the top bar (no browser dialog).
+  const confirmArchive = async () => {
+    const { kind, item } = archiving;
+    setArchiving(null);
+    try {
+      if (kind === 'class') {
+        await api.delete(`/api/teacher/classes/${item.id}`);
+        setClasses((prev) => prev.filter((c) => c.id !== item.id));
+        if (selectedClass?.id === item.id) { setSelectedClass(null); setSelectedLab(null); }
+        toast.success(t('t.toast.classArchived'));
+      } else {
+        await api.delete(`/api/teacher/labs/${item.id}`);
+        setClasses((prev) => prev.map((c) => ({ ...c, labs: c.labs?.filter((l) => l.id !== item.id) })));
+        if (selectedLab?.id === item.id) setSelectedLab(null);
+        toast.success(t('t.toast.labArchived'));
+      }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleRenameClass = async () => {
@@ -235,7 +241,7 @@ export default function Teacher() {
       setClasses((prev) => prev.map((c) => c.id === updated.id ? { ...c, name: updated.name } : c));
       if (selectedClass?.id === updated.id) setSelectedClass((p) => ({ ...p, name: updated.name }));
       setShowRenameClass(false);
-      toast.success('Class renamed');
+      toast.success(t('t.toast.classRenamed'));
     } catch (err) { toast.error(err.message); }
   };
 
@@ -246,7 +252,7 @@ export default function Teacher() {
       setClasses((prev) => prev.map((c) => ({ ...c, labs: c.labs?.map((l) => l.id === updated.id ? updated : l) })));
       if (selectedLab?.id === updated.id) setSelectedLab(updated);
       setShowRenameLab(false);
-      toast.success('Lab renamed');
+      toast.success(t('t.toast.labRenamed'));
     } catch (err) { toast.error(err.message); }
   };
 
@@ -255,7 +261,7 @@ export default function Teacher() {
     try {
       await api.delete(`/api/teacher/classes/${selectedClass.id}/students/${studentId}`);
       setStudents((prev) => prev.filter((s) => s.id !== studentId));
-      toast.success('Student removed');
+      toast.success(t('t.toast.studentRemoved'));
     } catch (err) { toast.error(err.message); }
   };
 
@@ -297,7 +303,7 @@ export default function Teacher() {
       {/* RIGHT: Panel */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="md:hidden shrink-0 h-12 px-2 flex items-center gap-2 border-b border-border-subtle bg-ink-base">
-          <button type="button" onClick={() => setNavOpen(true)} title="Classes and labs" aria-label="Classes and labs"
+          <button type="button" onClick={() => setNavOpen(true)} title={t('t.classesAndLabs')} aria-label={t('t.classesAndLabs')}
             className="p-2 rounded-lg text-cream-secondary hover:text-cream hover:bg-ink-hover cursor-pointer">
             <Icon name="menu" className="w-5 h-5" />
           </button>
@@ -310,22 +316,31 @@ export default function Teacher() {
         <div className="hidden md:flex shrink-0 items-center justify-end px-4 pt-2">
           <Notifications align="right" />
         </div>
+        {archiving && (
+          <div role="alertdialog" className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border-subtle bg-ink-base px-4 py-2 md:px-8">
+            <span className="min-w-0 flex-1 text-[14px] text-cream">
+              {t(archiving.kind === 'class' ? 't.archiveClassConfirm' : 't.archiveLabConfirm', { name: archiving.item.name })}
+            </span>
+            <button type="button" onClick={confirmArchive} className="rounded-lg bg-danger px-3 py-1.5 text-[13px] text-white cursor-pointer">{t('t.archive')}</button>
+            <button type="button" onClick={() => setArchiving(null)} className="rounded-lg px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover cursor-pointer">{t('cancel')}</button>
+          </div>
+        )}
         <QuotaRequests onReset={activeTab === tabs.indexOf('Analytics') ? loadAnalytics : undefined} />
         {!selectedClass && !selectedLab ? (
           <EmptyState />
         ) : (
           <>
             {/* Panel header */}
-            <div className="shrink-0 px-4 pt-2 md:px-8 md:pt-6 pb-0 border-b border-border-subtle bg-ink-base/60">
+            <div className="shrink-0 px-4 pt-2 md:px-8 md:pt-6 pb-0 border-b border-border-subtle bg-ink-deep">
               <Breadcrumb cls={selectedClass} lab={selectedLab} onClass={() => handleSelectClass(selectedClass)}
-                className="hidden md:block mb-1 text-[11px] text-cream-muted uppercase tracking-widest font-mono" />
+                className="hidden md:block mb-1 text-[13px] text-cream-muted" />
               {/* Phones: the tabs wrap onto a second line, so none is hidden off screen. */}
               <div data-tour="tabs" className="flex flex-wrap gap-x-5 md:flex-nowrap md:gap-6 md:overflow-x-auto no-scrollbar">
                 {tabs.map((tab, i) => (
                   <button
                     key={tab}
                     onClick={(e) => { setActiveTab(i); e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }}
-                    className={`shrink-0 whitespace-nowrap pb-3 text-sm font-medium border-b-2 transition-all cursor-pointer ${
+                    className={`shrink-0 whitespace-nowrap pb-3 text-[14px] font-medium border-b-2 transition-colors cursor-pointer ${
                       activeTab === i ? 'border-cream text-cream' : 'border-transparent text-cream-secondary hover:text-cream'
                     }`}
                   >
@@ -371,35 +386,35 @@ export default function Teacher() {
 
       {/* Modals */}
       {showCreateClass && (
-        <SimpleModal title="New Class" value={newClassName} setValue={setNewClassName}
-          placeholder="e.g. Algorithms 2024" onConfirm={handleCreateClass} onClose={() => setShowCreateClass(false)} confirmLabel="Create" />
+        <SimpleModal title={t('t.newClass')} value={newClassName} setValue={setNewClassName}
+          placeholder={t('t.classPlaceholder')} onConfirm={handleCreateClass} onClose={() => setShowCreateClass(false)} confirmLabel={t('t.create')} />
       )}
       {showCreateLab && (
-        <SimpleModal title="New Lab" value={newLabName} setValue={setNewLabName}
-          placeholder="e.g. Python Lab 1" onConfirm={handleCreateLab} onClose={() => setShowCreateLab(false)} confirmLabel="Create" />
+        <SimpleModal title={t('t.newLab')} value={newLabName} setValue={setNewLabName}
+          placeholder={t('t.labPlaceholder')} onConfirm={handleCreateLab} onClose={() => setShowCreateLab(false)} confirmLabel={t('t.create')} />
       )}
       {showRenameClass && (
-        <SimpleModal title="Rename Class" value={renameClassValue} setValue={setRenameClassValue}
-          placeholder="" onConfirm={handleRenameClass} onClose={() => setShowRenameClass(false)} confirmLabel="Rename" />
+        <SimpleModal title={t('t.renameClass')} value={renameClassValue} setValue={setRenameClassValue}
+          placeholder="" onConfirm={handleRenameClass} onClose={() => setShowRenameClass(false)} confirmLabel={t('t.rename')} />
       )}
       {showRenameLab && (
-        <SimpleModal title="Rename Lab" value={renameLabValue} setValue={setRenameLabValue}
-          placeholder="" onConfirm={handleRenameLab} onClose={() => setShowRenameLab(false)} confirmLabel="Rename" />
+        <SimpleModal title={t('t.renameLab')} value={renameLabValue} setValue={setRenameLabValue}
+          placeholder="" onConfirm={handleRenameLab} onClose={() => setShowRenameLab(false)} confirmLabel={t('t.rename')} />
       )}
       {tourOpen && (
-        <Tour steps={TOURS.teacher} onNav={setNavOpen}
+        <Tour steps={teacherTour(t)} buttons={tourButtons(t)} onNav={setNavOpen}
           onClose={() => { setTourOpen(false); if (!tourSeen) markTourSeen(); }} />
       )}
       {studentRuleModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setStudentRuleModal(null); }}>
-          <div className="bg-ink-surface border border-border-default rounded-2xl w-full max-w-lg max-h-[90dvh] overflow-y-auto p-6 shadow-elevated animate-scale-in">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl border border-border-subtle bg-ink-raised p-5 shadow-elevated animate-scale-in">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold text-cream mb-1">Rules for one student</h3>
-                <p className="text-xs text-cream-muted">Only for <span className="text-cyan font-medium">{studentRuleModal.username}</span>, in {selectedClass?.name}. They come after the class and lab rules.</p>
+                <h3 className="mb-1 text-[15px] font-semibold text-cream">{t('t.studentRules.title')}</h3>
+                <p className="text-[13px] text-cream-muted">{t('t.studentRules.text', { name: studentRuleModal.username, cls: selectedClass?.name })}</p>
               </div>
-              <button onClick={() => setStudentRuleModal(null)} aria-label="Close"
+              <button onClick={() => setStudentRuleModal(null)} aria-label={t('close')}
                 className="rounded-lg p-1.5 text-cream-muted hover:bg-ink-hover hover:text-cream cursor-pointer">
                 <Icon name="close" className="h-4 w-4" />
               </button>
