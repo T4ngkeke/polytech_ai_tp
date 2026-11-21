@@ -12,18 +12,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { fetchEventSource } from '@microsoft/fetch-event-source';
 import toast from 'react-hot-toast';
 import api from '../../lib/api';
 import useAuthStore from '../../store/authStore';
 import { useT } from '../../lib/i18n';
-import { createMessageId, createRequestId } from '../../lib/messageId';
-import { interpretStreamEvent, openStream } from '../../lib/streamEvents';
-import { applyToMessage } from '../../lib/streamMessage';
 import { nearLimit, resetNotice } from '../../lib/quota';
 import { useChatScroll } from '../../lib/chatScroll';
-import { buildTurns } from '../../lib/turns';
-import { runForAgent } from '../../lib/python';
 import { downloadText } from '../../lib/exportFile';
 import useMediaQuery from '../../lib/useMediaQuery';
 import Icon from '../../components/Icon';
@@ -35,7 +29,9 @@ import SourcePanel from './SourcePanel';
 import SettingsModal from './SettingsModal';
 import SearchModal from './SearchModal';
 import JoinModal from './JoinModal';
-import { Answer, Question, VersionSwitch, preloadContent } from './Turns';
+import { preloadContent } from './Turns';
+import Thread from './Thread';
+import useChat from './useChat';
 
 const REFRESH_MS = 90_000;
 const MIN_GAP_MS = 10_000;
@@ -77,35 +73,30 @@ export default function StudentChat() {
   const t = useT();
   const { labId: urlLabId } = useParams();
   const navigate = useNavigate();
-  const { token, username, tourSeen, markTourSeen, logout } = useAuthStore();
+  const { username, tourSeen, markTourSeen, logout } = useAuthStore();
   const isWide = useMediaQuery('(min-width: 900px)');
 
   const [classes, setClasses] = useState([]);
   const [activeLabId, setActiveLabId] = useState(urlLabId || null);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [usage, setUsage] = useState({ used: 0, limit: 0, week_used: 0, week_limit: 0, blocked: null });
   const [resetAsked, setResetAsked] = useState(false);
   const [input, setInput] = useState('');
   const [tools, setTools] = useState([]);
-  const [streaming, setStreaming] = useState(false);
   const [preview, setPreview] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [modal, setModal] = useState(null);       // null | 'join' | 'search' | {settings: tab}
   const [tourOpen, setTourOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [chosenVersion, setChosenVersion] = useState({});
   const [historyStart, setHistoryStart] = useState(null);
   const [seenReset, setSeenReset] = useState(0);
-  const abortRef = useRef(null);
   const listRef = useRef(null);
   const inputRef = useRef(null);
   const composerRef = useRef(null);
   const restoredRef = useRef(false);
-  const streamedIds = useRef(new Set());
   const { onScroll, update: updateScroll, follow } = useChatScroll(listRef);
 
   useEffect(() => { if (!tourSeen) setTourOpen(true); }, [tourSeen]);
@@ -147,13 +138,40 @@ export default function StudentChat() {
     });
   }, [features, examMode]);
 
+  // ── The conversation (useChat: sending, stream events, Python runs, versions) ──
+  const chat = useChat({
+    tools, follow,
+    getSessionId: async () => {
+      if (activeSessionId) return activeSessionId;
+      if (!activeLabId) return null;
+      try {
+        const created = await api.post(`/api/student/labs/${activeLabId}/sessions`, {});
+        setSessions((prev) => [created, ...prev]);
+        setActiveSessionId(created.id);
+        return created.id;
+      } catch (err) {
+        toast.error(err.message || t('error.newChat'));
+        return null;
+      }
+    },
+    onDone: loadUsage,
+    onTitle: (sessionId, title) => setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s))),
+    // The teacher may have turned exam mode on or off since the page loaded.
+    onStatus: (action) => { if (activeClass && action.examMode !== !!activeClass.exam_mode) loadClasses(); },
+    onRefusal: (refusal, text, isVersion) => {
+      // Nothing was asked: the question goes back into the box.
+      if (!isVersion) setInput((current) => current || text);
+      if (refusal.reload === 'classes') loadClasses();
+      if (refusal.reload === 'usage') loadUsage();
+    },
+  });
+  const { messages, setMessages, streaming, send, stop, reset } = chat;
+
   // ── Lab and sessions ──
   const loadSession = useCallback(async (sessionId) => {
-    abortRef.current?.abort();
-    setStreaming(false);
+    reset();
     setActiveSessionId(sessionId);
     setPreview(null);
-    setChosenVersion({});
     follow('tail');
     setLoadingMessages(true);
     try {
@@ -164,13 +182,12 @@ export default function StudentChat() {
     } finally {
       setLoadingMessages(false);
     }
-  }, [follow, t]);
+  }, [follow, t, reset, setMessages]);
 
   const selectLab = useCallback(async (labId, { openLatest = false } = {}) => {
     restoredRef.current = true;
-    abortRef.current?.abort();
+    reset();
     setActiveLabId(labId);
-    setMessages([]);
     setActiveSessionId(null);
     setPreview(null);
     setNavOpen(false);
@@ -182,7 +199,7 @@ export default function StudentChat() {
     } catch {
       setSessions([]);
     }
-  }, [navigate, loadSession]);
+  }, [navigate, loadSession, reset]);
 
   useEffect(() => {
     if (urlLabId && !restoredRef.current) selectLab(urlLabId, { openLatest: true });
@@ -195,16 +212,14 @@ export default function StudentChat() {
   }, [classes, urlLabId, selectLab]);
 
   const newChat = useCallback(() => {
-    abortRef.current?.abort();
+    reset();
     setActiveSessionId(null);
-    setMessages([]);
     setPreview(null);
     setNavOpen(false);
     setTimeout(() => inputRef.current?.focus(), 0);
-  }, []);
+  }, [reset]);
 
   useEffect(() => { updateScroll(); }, [messages, updateScroll]);
-  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Where the history the assistant sees starts (older messages are summarized).
   useEffect(() => {
@@ -225,123 +240,6 @@ export default function StudentChat() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // ── Send ──
-  const send = useCallback(async (text, attachments = [], { versionOf = null, toolsOverride = null } = {}) => {
-    const message = (text || '').trim();
-    if ((!message && !attachments.length) || streaming || !activeLabId) return;
-    let sessionId = activeSessionId;
-    if (!sessionId) {
-      try {
-        const created = await api.post(`/api/student/labs/${activeLabId}/sessions`, {});
-        setSessions((prev) => [created, ...prev]);
-        setActiveSessionId(created.id);
-        sessionId = created.id;
-      } catch (err) {
-        toast.error(err.message || t('error.newChat'));
-        return;
-      }
-    }
-    const userId = createMessageId();
-    const answerId = createMessageId();
-    streamedIds.current.add(answerId);
-    const now = new Date().toISOString();
-    const root = versionOf ? (messages.find((m) => m.id === versionOf)?.version_of || versionOf) : null;
-    setMessages((prev) => {
-      let next = prev;
-      if (versionOf) {
-        // The replaced question and what follows it stay, marked replaced.
-        const at = prev.findIndex((m) => m.id === versionOf);
-        next = prev.map((m, i) => (i >= at && !m.superseded_at ? { ...m, superseded_at: now } : m));
-      }
-      return [...next,
-        { id: userId, sender: 'user', content: message, attachments, version_of: root, created_at: now },
-        { id: answerId, sender: 'llm', content: '', created_at: now, started_at: Date.now(), phases: [], steps: [] }];
-    });
-    if (versionOf) setChosenVersion((v) => ({ ...v, [root]: undefined }));
-    follow('pin');
-    setStreaming(true);
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    const update = (action) => setMessages((prev) => prev.map((m) => (m.id === answerId ? applyToMessage(m, action) : m)));
-    let realAnswerId = answerId;
-    try {
-      await fetchEventSource('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          session_id: sessionId, message, client_request_id: createRequestId(), mode: 'research',
-          tools: toolsOverride || tools, attachments: attachments.map((a) => ({ kind: a.kind, id: a.id })),
-          version_of: versionOf || undefined,
-        }),
-        signal: ctrl.signal,
-        openWhenHidden: true,
-        onopen: openStream,
-        onmessage(ev) {
-          const action = interpretStreamEvent(ev);
-          switch (action.type) {
-            case 'status':
-            case 'step':
-            case 'tasks':
-            case 'draft':
-            case 'draft_reset':
-            case 'token':
-            case 'citations':
-            case 'clarification':
-              update(action);
-              if (action.type === 'status' && activeClass && action.examMode !== !!activeClass.exam_mode) loadClasses();
-              return;
-            case 'code':
-              update(action);
-              // Python for this browser: run it, send the output back to the agent.
-              runForAgent(action.id, action.code).then((output) => update({ type: 'code_output', id: action.id,
-                output: { status: output.error || output.stderr ? 'error' : 'ok', ...output } }));
-              return;
-            case 'done':
-              streamedIds.current.delete(answerId);
-              realAnswerId = action.messageId || answerId;
-              setMessages((prev) => prev.map((m) => {
-                if (m.id === answerId) return { ...applyToMessage(m, { ...action, at: Date.now() }), id: realAnswerId };
-                if (m.id === userId && action.userMessageId) return { ...m, id: action.userMessageId };
-                return m;
-              }));
-              setStreaming(false);
-              loadUsage();
-              return;
-            case 'title':
-              setSessions((prev) => prev.map((s) => (s.id === (action.sessionId || sessionId) ? { ...s, title: action.title } : s)));
-              return;
-            case 'follow_ups':
-              setMessages((prev) => prev.map((m) => (m.id === (action.messageId || realAnswerId) ? applyToMessage(m, action) : m)));
-              return;
-            case 'error':
-              setStreaming(false);
-              update({ type: 'draft_reset' });
-              toast.error(action.detail);
-              return;
-            default:
-          }
-        },
-        onerror(err) { throw err; },
-      });
-    } catch (err) {
-      if (err?.refusal) {
-        // Nothing was asked: the question goes back into the box.
-        streamedIds.current.delete(answerId);
-        setMessages((prev) => prev.filter((m) => m.id !== userId && m.id !== answerId)
-          .map((m) => (versionOf && m.superseded_at === now ? { ...m, superseded_at: null } : m)));
-        if (!versionOf) setInput((current) => current || message);
-        toast.error(err.refusal.message, { duration: 8000 });
-        if (err.refusal.reload === 'classes') loadClasses();
-        if (err.refusal.reload === 'usage') loadUsage();
-      } else if (!ctrl.signal.aborted) toast.error(t('error.stream'));
-    } finally {
-      setMessages((prev) => prev.map((m) => (m.id === answerId || m.id === realAnswerId
-        ? { ...m, draft: '', finished_at: m.finished_at || Date.now() } : m)));
-      setStreaming(false);
-    }
-  }, [streaming, activeLabId, activeSessionId, messages, tools, token, follow, activeClass, loadClasses, loadUsage, t]);
-
-  const stop = () => { abortRef.current?.abort(); setStreaming(false); };
 
   // ── Session actions ──
   const renameSession = async (id, title) => {
@@ -381,8 +279,6 @@ export default function StudentChat() {
   };
 
   // ── Derived ──
-  const turns = useMemo(() => buildTurns(messages), [messages]);
-  const lastTurn = turns[turns.length - 1];
   const locked = activeLab && !activeLab.is_active;
   const blocked = usage.blocked;
   const disabledReason = !activeLabId ? 'noLab' : locked ? 'locked' : blocked ? 'quota' : null;
@@ -390,7 +286,6 @@ export default function StudentChat() {
   const showReset = (() => { try { return resetKey && localStorage.getItem(resetKey) !== '1'; } catch { return false; } })();
   void seenReset;
   const hidden = historyStart?.sessionId === activeSessionId ? historyStart : null;
-  const lastQuestion = lastTurn?.versions[lastTurn.current]?.question;
   const welcome = !messages.length && !loadingMessages;
 
   const composer = (
@@ -511,47 +406,9 @@ export default function StudentChat() {
             <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-[760px] space-y-8 px-4 pb-8 pt-4">
                 {loadingMessages && <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-cream-faint border-t-cream" />}
-                {turns.map((turn, ti) => {
-                  const index = chosenVersion[turn.root] ?? turn.current;
-                  const { question, answer } = turn.versions[index] || turn.versions[turn.current];
-                  const isLast = ti === turns.length - 1;
-                  const live = streaming && isLast && answer && !answer.finished_at;
-                  const showLine = hidden?.hidden > 0 && question?.id === hidden.seen_from;
-                  return (
-                    <div key={turn.root} className="space-y-4">
-                      {showLine && (
-                        <div className="flex items-center gap-3 text-[12.5px] text-cream-muted">
-                          <span className="h-px flex-1 bg-border-default" />
-                          <span>{t('history.summarized', { n: hidden.hidden })}</span>
-                          <button type="button" onClick={newChat} className="underline hover:text-cream">{t('chat.new')}</button>
-                          <span className="h-px flex-1 bg-border-default" />
-                        </div>
-                      )}
-                      {question && (
-                        <Question question={question} canEdit={isLast && !streaming && !disabledReason}
-                          onEdit={(text) => send(text, question.attachments || [], { versionOf: turn.versions[turn.current].question.id })}
-                          versions={<VersionSwitch index={index} count={turn.versions.length}
-                            onChange={(i) => setChosenVersion((v) => ({ ...v, [turn.root]: i }))} />} />
-                      )}
-                      {answer && (
-                        <div data-latest-answer={isLast ? '' : undefined}>
-                          <Answer answer={answer} live={live} isLast={isLast && index === turn.current}
-                            sessionId={activeSessionId} onOpenSource={setPreview}
-                            canRunCode={!!features.code && !examMode}
-                            rateable={!streamedIds.current.has(answer.id)}
-                            onPick={isLast && !streaming ? (option) => send(option) : null}
-                            onType={() => inputRef.current?.focus()}
-                            onRegenerate={!disabledReason && !streaming && lastQuestion ? () => send(lastQuestion.content, lastQuestion.attachments || [], { versionOf: lastQuestion.id }) : null}
-                            onSearchCourse={!disabledReason && !streaming ? () => send(t('ask.searchCourse')) : null}
-                            onDeep={!disabledReason && !streaming && features.deep && !examMode && lastQuestion
-                              ? () => send(lastQuestion.content, lastQuestion.attachments || [], { versionOf: lastQuestion.id, toolsOverride: ['deep'] }) : null}
-                            onAskAgain={!disabledReason && !streaming && lastQuestion ? () => send(lastQuestion.content, lastQuestion.attachments || [], { versionOf: lastQuestion.id }) : null}
-                            onFollowUp={(text) => send(text)} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                <Thread chat={chat} sessionId={activeSessionId} features={features} examMode={examMode}
+                  disabledReason={disabledReason} onOpenSource={setPreview} inputRef={inputRef}
+                  hidden={hidden} onNewChat={newChat} />
               </div>
             </div>
             <div className="mx-auto w-full max-w-[760px] shrink-0 px-4">

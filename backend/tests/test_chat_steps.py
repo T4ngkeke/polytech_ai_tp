@@ -55,3 +55,28 @@ async def test_the_lab_course_files_for_the_attachment_menu(pg_session, tmp_path
         await pg_session.commit()
         assert (await client.get(f'/api/student/labs/{lab.id}/documents')).json() == []
         assert (await client.get(f'/api/student/labs/{uuid.uuid4()}/documents')).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_the_audit_gets_the_citations_of_an_opened_conversation(pg_session, tmp_path, monkeypatch):
+    from backend.app.models import User
+    steps = []
+    rev, student, chat, _ = await _chat(pg_session, monkeypatch, tmp_path, steps)
+    page = await pg_session.scalar(select(DocumentPage).where(DocumentPage.revision_id == rev.id))
+    steps += [tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
+              ModelReply('Voir la définition [E1].', [], 'fixture', 50, 20)]
+    async with await make_client(pg_session, student) as client:
+        await client.post('/api/chat/stream', json={
+            'session_id': str(chat.id), 'message': 'Où est définie θ₁ ?', 'client_request_id': str(uuid.uuid4())})
+    lab_id, chat_id = chat.lab_id, chat.id
+    pg_session.expire_all()                  # the test shares the app's database session
+    lab = await pg_session.get(Lab, lab_id)
+    teacher = await pg_session.get(User, (await pg_session.get(Class, lab.class_id)).teacher_id)
+    async with await make_client(pg_session, teacher) as client:
+        listed = (await client.get(f'/api/teacher/chat-history?lab_id={lab.id}')).json()
+        opened = (await client.get(f'/api/teacher/chat-history?session_id={chat_id}')).json()
+    def answer(rows):
+        row = next(r for r in rows if r['id'] == str(chat_id))
+        return next(m for m in row['messages'] if m['sender'] == 'llm')
+    assert answer(listed)['citations'] == []                    # the list stays light
+    assert [c['label'] for c in answer(opened)['citations']] == ['E1']

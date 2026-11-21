@@ -4,10 +4,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from backend.app.auth import require_teacher
+from backend.app.config import settings
+from backend.app.services.document_access import DocumentNotFound
+from backend.app.services.research_runs import ResearchRuns
 from backend.app.database import get_db
 from backend.app.models import Class, ClassStudent, Lab, Session, UsageStat, User, UserRole
 from backend.app.routers.teacher_access import _class_access, _lab_access, _verify_class_ownership
@@ -140,7 +143,19 @@ async def get_chat_history(
     query = query.order_by(Session.created_at.desc())
     result = await db.execute(query)
     sessions = result.scalars().all()
-    return [SessionWithMessagesResponse.model_validate(s) for s in sessions]
+    out = [SessionWithMessagesResponse.model_validate(s) for s in sessions]
+    # One conversation opened in the audit: its answers' citations too, as the
+    # student sees them (not for the whole list: a few queries per session).
+    if session_id is not None and settings.AGENTIC_SEARCH_ENABLED:
+        runs = ResearchRuns(async_sessionmaker(db.bind, expire_on_commit=False))
+        for row, response in zip(sessions, out):
+            try:
+                found = await runs.load_session_citations(session_id=row.id, user_id=row.user_id)
+            except DocumentNotFound:          # a conversation the student deleted
+                continue
+            for message in response.messages:
+                message.citations = found.get(message.id, [])
+    return out
 
 
 # ===================================================================

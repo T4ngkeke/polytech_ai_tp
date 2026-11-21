@@ -1,16 +1,44 @@
 /**
  * teacher/AuditPanel.jsx — Lab "Audit" tab: student conversations, by student, material or time.
  */
-import { lazy, Suspense, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import api from '../../lib/api';
 import TeachingReport from '../../components/TeachingReport';
 import CitationReport from '../../components/CitationReport';
 import { useT } from '../../lib/i18n';
 import QuestionSearch from './QuestionSearch';
+import { buildTurns } from '../../lib/turns';
+import { Answer, Question, VersionSwitch } from '../student/Turns';
 
-// Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
-// it in when a test-drive is actually opened.
-const MODE_KEYS = { direct: 'p.chat.mode.direct', search: 'p.chat.mode.search', research: 'p.chat.mode.research' };
-const MessageContent = lazy(() => import('../../components/MessageContent'));
+/** A conversation as the student saw it (the student chat's pieces, read-only), with every version. */
+function Transcript({ sessionId, messages: listed }) {
+  const [chosen, setChosen] = useState({});
+  // The opened conversation again, with its answers' citations (the list has none).
+  const [messages, setMessages] = useState(listed);
+  useEffect(() => {
+    let current = true;
+    api.get(`/api/teacher/chat-history?session_id=${sessionId}`)
+      .then((rows) => { if (current && rows[0]) setMessages(rows[0].messages || []); }).catch(() => {});
+    return () => { current = false; };
+  }, [sessionId]);
+  return (
+    <div className="mx-auto max-w-[760px] space-y-6">
+      {buildTurns(messages).map((turn) => {
+        const index = chosen[turn.root] ?? turn.current;
+        const { question, answer } = turn.versions[index] || turn.versions[turn.current];
+        return (
+          <div key={turn.root} className="space-y-3">
+            {question && <Question question={question} canEdit={false}
+              versions={<VersionSwitch index={index} count={turn.versions.length}
+                onChange={(i) => setChosen((v) => ({ ...v, [turn.root]: i }))} />} />}
+            {answer && <Answer answer={answer} live={false} isLast={false} sessionId={null}
+              onOpenSource={() => {}} rateable={false} canRunCode={false} onFollowUp={() => {}} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function AuditPanel({ lab, sessions, students, expandedStudentId, setExpandedStudentId, expandedSession, setExpandedSession }) {
   // Three views of the same conversations: per student, which course material
@@ -116,24 +144,8 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
                         </div>
                       </button>
                       {expandedSession === s.id && (
-                        <div className="px-4 py-3 space-y-3 bg-ink-surface max-h-80 overflow-y-auto">
-                          {s.messages?.map((m) => (
-                            <div key={m.id} className={`flex gap-2 ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`max-w-[80%] px-3 py-2 rounded-xl text-[13px] ${
-                                m.sender === 'user' ? 'bg-ink-hover text-cream' : 'bg-ink-base border border-border-default text-cream-secondary'
-                              }`}>
-                                <p className="text-[12px] text-cream-muted mb-1">
-                                  {t(m.sender === 'user' ? 't.audit.student' : 't.audit.assistant')}{m.sender !== 'user' && MODE_KEYS[m.answer_mode] ? ` · ${t(MODE_KEYS[m.answer_mode])}` : ''}
-                                </p>
-                                {/* Answers are Markdown (tables, code, formulas), as the student saw them. */}
-                                {m.sender === 'user'
-                                  ? <span className="whitespace-pre-wrap">{m.content}</span>
-                                  : <Suspense fallback={<span className="whitespace-pre-wrap">{m.content}</span>}>
-                                      <MessageContent content={m.content} />
-                                    </Suspense>}
-                              </div>
-                            </div>
-                          ))}
+                        <div className="max-h-[70vh] overflow-y-auto bg-ink-deep px-4 py-4">
+                          <Transcript sessionId={s.id} messages={s.messages || []} />
                         </div>
                       )}
                     </div>
