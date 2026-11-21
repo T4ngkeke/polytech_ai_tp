@@ -31,6 +31,7 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm4v_course_use_v1',
     'm4w_task_checklist_v1',
     'm4x_web_sources_v1',
+    'm4y_code_runs_v1',
 )
 
 # Structured ingestion alone needs the versions before the research ones.

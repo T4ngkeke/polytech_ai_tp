@@ -29,6 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, f
 from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.language import language_sentence, with_language
+from backend.app.agent.code_tools import CODE_NOTE, CODE_TOOL_NAMES, CODE_TOOLS, CodeTools
+from backend.app.agent.visuals import VISUAL_NOTE
 from backend.app.agent.task_tools import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
 from backend.app.agent.web_tools import WEB_NOTE, WEB_TOOL_NAMES, WEB_TOOLS, WebTools
 from backend.app.agent.result import (
@@ -177,11 +179,14 @@ NO_DOCUMENTS_TURN = ('This lab has no course documents yet, so there is nothing 
                      'no tools are available. Answer briefly from general knowledge if the question '
                      'allows it, and say clearly that the teacher has not published course files for '
                      'this TP yet (students cannot add them). Cite nothing.')
-# The same, when the student turned web search on: the web tools stay.
+# The same, when the student turned web search or Python on: those tools stay.
 NO_DOCUMENTS_WEB_TURN = ('This lab has no course documents yet, so the course tools are not available. '
                          'Web search is on: use search_web and fetch_url when the question needs current '
                          'or external information, and cite those sources as [W1], [W2]. Say that the '
                          'teacher has not published course files for this TP yet.')
+NO_DOCUMENTS_CODE_TURN = ('This lab has no course documents yet, so the course tools are not available. '
+                          'The Python interpreter is on: use execute_code when running code helps. Say that '
+                          'the teacher has not published course files for this TP yet.')
 # Added after the tool results of each turn when the teacher set rules, with
 # the rules themselves. Measured 2026-11-17 without it: a class rule "Always
 # answer in English" was ignored in 2 of 2 Research runs (followed in Search and
@@ -293,6 +298,7 @@ class ResearchRunner:
                  on_tasks: Callable[[list[dict]], None] | None = None,
                  offer_tasks: bool = True,
                  web_tools: WebTools | None = None,
+                 code_tools: CodeTools | None = None,
                  clock: Callable[[], float] = time.monotonic):
         # model: model.ResearchModel, or a wrapper with the same call (billing, tests).
         self.course_tools, self.model = course_tools, model
@@ -314,6 +320,9 @@ class ResearchRunner:
         # Web search (web_tools.py, from Open WebUI): only when the student turned
         # it on and the lab allows it; None otherwise.
         self.web_tools = web_tools
+        # Python in the student's browser (code_tools.py, from Open WebUI): only
+        # when the student turned it on and the lab allows it; None otherwise.
+        self.code_tools = code_tools
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
@@ -343,6 +352,8 @@ class ResearchRunner:
         system = (system_prompt(self.max_tool_calls, tools.max_visual_calls)
                   + (('\n' + CATALOGUE_NOTE + '\n' + catalogue) if catalogue else '')
                   + ('\n' + WEB_NOTE if self.web_tools else '')
+                  + ('\n' + CODE_NOTE if self.code_tools else '')
+                  + '\n' + VISUAL_NOTE
                   + '\n' + teaching_rules + '\n' + research_note)
         # Earlier answers are real turns and keep their [E#] IDs, so the model
         # sees how to cite. The session numbers evidence across runs
@@ -365,7 +376,7 @@ class ResearchRunner:
         read_turn_sent = False
         drafted = False  # draft text was sent and not withdrawn
         offered = (COURSE_TOOLS + ([ASK_STUDENT] if allow_ask else []) + (TASK_TOOLS if self.offer_tasks else [])
-                   + (WEB_TOOLS if self.web_tools else []))
+                   + (WEB_TOOLS if self.web_tools else []) + (CODE_TOOLS if self.code_tools else []))
         checklist = TaskList(self.on_tasks)
         clarification = None
         seen_pages: set = set()  # pages any search or grep of this run returned
@@ -422,10 +433,11 @@ class ResearchRunner:
         # A lab without readable course files: searching would only fail,
         # call after call, until the budget runs out.
         no_documents = not await tools.document_count()
-        if no_documents and self.web_tools:
-            # Only the course tools go: the web stays open for this question.
+        if no_documents and (self.web_tools or self.code_tools):
+            # Only the course tools go: the web or Python stays open for this question.
             offered = [t for t in offered if t['function']['name'] not in COURSE_TOOL_NAMES]
-            messages.append({'role': 'user', 'content': NO_DOCUMENTS_WEB_TURN + language})
+            messages.append({'role': 'user', 'content': (NO_DOCUMENTS_WEB_TURN if self.web_tools
+                                                         else NO_DOCUMENTS_CODE_TURN) + language})
             note('course_tools_withdrawn', reason='no_documents')
         elif no_documents:
             withdraw('no_documents', NO_DOCUMENTS_TURN)
@@ -497,6 +509,13 @@ class ResearchRunner:
                         # Its own budget; its sources are W#, not course evidence.
                         self.on_phase('searching_web')
                         text = await self.web_tools.call(c['name'], c['arguments'])
+                    elif self.code_tools and c['name'] in CODE_TOOL_NAMES:
+                        # Its own budget; the wait for the browser is not research time.
+                        self.on_phase('running_code')
+                        tick, real_tick = self.clock(), time.monotonic()
+                        text = await self.code_tools.call(c['name'], c['arguments'])
+                        start += self.clock() - tick
+                        tools.started += time.monotonic() - real_tick   # CourseTools' own clock
                     else:
                         text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
@@ -542,7 +561,7 @@ class ResearchRunner:
                 continue
             answer = reply.content.strip()
             # finished: the model stopped calling tools by itself.
-            stop = ('no_documents' if no_documents and (not tools_open or self.web_tools)
+            stop = ('no_documents' if no_documents and (not tools_open or self.web_tools or self.code_tools)
                     else 'finished' if tools_open else 'budget_exhausted')
             break
 
@@ -550,7 +569,8 @@ class ResearchRunner:
             note('finished', stop=stop, answer_chars=len(answer), cited=0)
             return ResearchResult(answer, [], stop, [], len(tools.trace), model_calls,
                                   tools.trace + trace, usage, clarification=clarification,
-                                  tasks=checklist.tasks or None)
+                                  tasks=checklist.tasks or None,
+                                  code_runs=self.code_tools.runs if self.code_tools and self.code_tools.runs else None)
 
         # Evidence read in this run, then earlier answers' sources (their IDs
         # never repeat within a session, see CourseTools first_evidence).
@@ -606,7 +626,8 @@ class ResearchRunner:
             text, web_sources = web_citations(text, self.web_tools)
             return ResearchResult(text, citations, reason, unresolved, len(tools.trace), model_calls,
                                   tools.trace + trace, usage, tasks=checklist.tasks or None,
-                                  web_sources=web_sources)
+                                  web_sources=web_sources,
+                                  code_runs=self.code_tools.runs if self.code_tools and self.code_tools.runs else None)
 
         unresolved = []
         if not answer or _has_tool_markup(answer):

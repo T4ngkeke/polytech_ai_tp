@@ -61,6 +61,9 @@ class ResearchResult:
     tasks: list[dict] | None = None
     # The web sources the answer cites ([W#], web_tools.py): [{id, url, title}].
     web_sources: list[dict] | None = None
+    # The Python runs in the student's browser (code_tools.py):
+    # [{id, code, stdout, stderr, result, images: [chat file id], status}].
+    code_runs: list[dict] | None = None
     # The answer mode that wrote it: direct, search or research.
     mode: str = 'research'
 

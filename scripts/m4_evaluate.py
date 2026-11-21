@@ -33,6 +33,9 @@ Environment:
                    as the student chat
   M4_WEB           1: offer the web search tools, as when the student turns web search on;
                    needs M4_SEARXNG_URL (a SearXNG instance with the JSON format on)
+  M4_CODE          1: offer execute_code, as when the student turns Python on; there is no
+                   browser here, so each run goes to a throwaway container (M4_CODE_IMAGE,
+                   default python:3.12-slim; no network, 256 MB, 30 s)
   M4_DEEP          1: deep research as the student chat runs it (more tool calls, visual calls
                    and time: research_service.deep_limits; the DEEP_NOTE added to the note)
   M4_ROUNDS        rounds, default 1,2 (round 2 runs the variants in reverse order)
@@ -266,6 +269,33 @@ def load_tasks(benchmark, split):
     return tasks, digest
 
 
+def container_code_tools(agent_code):
+    """execute_code for the benchmark: no browser, so a throwaway container
+    with no network stands in for Pyodide."""
+    user = uuid.uuid4()
+
+    async def run(event):
+        process = await asyncio.create_subprocess_exec(
+            'docker', 'run', '--rm', '-i', '--network', 'none', '--memory', '256m', '--cpus', '1',
+            os.getenv('M4_CODE_IMAGE', 'python:3.12-slim'), 'timeout', '30', 'python', '-',
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            out, err = await asyncio.wait_for(process.communicate(event['code'].encode()), 45)
+            output = {'stdout': out.decode(errors='replace'), 'stderr': err.decode(errors='replace')}
+        except asyncio.TimeoutError:
+            process.kill()
+            output = {'error': 'timeout'}
+        agent_code.deliver(event['id'], user, output)
+
+    pending = set()
+
+    def send(event):
+        task = asyncio.get_running_loop().create_task(run(event))
+        pending.add(task)
+        task.add_done_callback(pending.discard)
+    return agent_code.CodeTools(user, send)
+
+
 async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                    benchmark='m4e', split='dev', variants=None, budget='standard'):
     from sqlalchemy import select
@@ -275,6 +305,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     from backend.app.agent.result import ResearchResult
     from backend.app.agent.runner import NO_LEAD_CALLS, ResearchRunner
     from backend.app.agent.web_tools import WebTools
+    from backend.app.agent import code_tools as agent_code
     from backend.app.agent.search import SearchRunner, min_score_for
     from backend.app.agent.tools import PerCallTools, create_scope
     from backend.app.models import Document, Session, User, UserRole
@@ -428,7 +459,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                                              no_lead_calls=no_lead_calls,
                                              offer_tasks=os.getenv('M4_TASKS', '1') == '1',
                                              web_tools=(WebTools(os.environ['M4_SEARXNG_URL'])
-                                                        if os.getenv('M4_WEB') == '1' else None))
+                                                        if os.getenv('M4_WEB') == '1' else None),
+                                             code_tools=container_code_tools(agent_code)
+                                             if os.getenv('M4_CODE') == '1' else None)
             course_tools, research = runner()
             # The clarify questions are asked as in the student chat, without the
             # benchmark note that asks for course support.

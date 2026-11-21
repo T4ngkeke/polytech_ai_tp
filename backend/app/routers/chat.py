@@ -47,7 +47,7 @@ from backend.app.models import (
     User,
     UserRole,
 )
-from backend.app.schemas import ChatStreamRequest, MessageFeedbackRequest
+from backend.app.schemas import ChatStreamRequest, CodeResultRequest, MessageFeedbackRequest
 from backend.app.services import chat_file_service, feature_service, memory_service, quota_service, rule_service
 from backend.app.agent import attachments as agent_attachments
 from backend.app.agent import memory as agent_memory
@@ -58,6 +58,7 @@ from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
 from backend.app.services.research_service import DEEP_NOTE, deep_limits, run_persisted_research
 from backend.app.agent.web_tools import WebTools
+from backend.app.agent import code_tools as agent_code
 from backend.app.services.model_clients import (  # noqa: F401  (tests import _get_llm_config from here)
     get_llm_config as _get_llm_config, make_embed_fn as _make_embed_fn, make_rerank_fn as _make_rerank_fn,
 )
@@ -92,15 +93,16 @@ def _history_budget(context: int | None, limits, mode: str) -> int:
 def _research_frames(items):
     """SSE frames for queued research events: a phase name is a status event;
     ('draft', text) adds draft text, ('draft', None) withdraws the draft;
-    ('tasks', list) is the model's task checklist as it is now.
+    ('tasks', list) is the model's task checklist as it is now; ('code', {id, code})
+    asks the browser to run Python (agent/code_tools.py).
     Consecutive draft text goes out as one frame."""
     frames, text = [], ''
     for item in [*items, None]:
-        if isinstance(item, tuple) and item[0] == 'tasks':
+        if isinstance(item, tuple) and item[0] in ('tasks', 'code'):
             if text:
                 frames.append(f"event: draft\ndata: {json.dumps(text)}\n\n")
                 text = ''
-            frames.append(f"event: tasks\ndata: {json.dumps(item[1], ensure_ascii=False)}\n\n")
+            frames.append(f"event: {item[0]}\ndata: {json.dumps(item[1], ensure_ascii=False)}\n\n")
             continue
         if isinstance(item, tuple) and item[1] is not None:
             text += item[1]
@@ -286,6 +288,10 @@ async def chat_stream(
         web = 'web' in body.tools and mode != 'direct'
         if web:
             mode = 'research'
+        # Python in the browser: the research loop gets execute_code (agent/code_tools.py).
+        run_code = 'code' in body.tools and mode != 'direct'
+        if run_code:
+            mode = 'research'
         # Attachments (agent/attachments.py) go to the research loop; an attached
         # course file limits this question's course search to it.
         if attachments and mode != 'direct':
@@ -339,7 +345,8 @@ async def chat_stream(
     async def research_events():
         queue = asyncio.Queue()
         def phase(name):
-            if name in {'finding', 'reading', 'checking_image', 'checking_sources'}:
+            if name in {'finding', 'reading', 'checking_image', 'checking_sources', 'searching_web',
+                        'running_code'}:
                 queue.put_nowait(name)
 
         def draft(text):
@@ -348,6 +355,22 @@ async def chat_stream(
 
         def tasks(items):
             queue.put_nowait(('tasks', items))
+
+        async def save_code_image(data: bytes, n: int) -> str | None:
+            # An image a Python run printed: a chat file of this conversation.
+            try:
+                async with research_factory() as file_db:
+                    row = await chat_file_service.save(
+                        file_db, root=get_storage_root(), user_id=current_user.id, lab_id=lab_id,
+                        filename=f'python-{n}.png', data=data)
+                    row.session_id = scope.session_id
+                    await file_db.commit()
+                    return str(row.id)
+            except Exception as exc:
+                logger.warning('Code output image not saved (%s)', type(exc).__name__)
+                return None
+        code_tools = (agent_code.CodeTools(current_user.id, lambda event: queue.put_nowait(('code', event)),
+                                           save_image=save_code_image) if run_code else None)
         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
         task = asyncio.create_task(run_persisted_research(
             scope=scope, question=body.message, client_request_id=request_id,
@@ -357,7 +380,7 @@ async def chat_stream(
             history=safe_history, earlier_citations=earlier_citations,
             teaching_rules=teaching_rules, research_note=DEEP_NOTE if deep else '',
             memory_context=memory_block, attachment_context=attachment_block, images=images,
-            web_tools=WebTools(settings.WEB_SEARCH_URL) if web else None,
+            web_tools=WebTools(settings.WEB_SEARCH_URL) if web else None, code_tools=code_tools,
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
@@ -394,7 +417,7 @@ async def chat_stream(
                 yield f"event: clarification\ndata: {json.dumps(result['clarification'])}\n\n"
             yield f"event: citations\ndata: {json.dumps(result['citations'])}\n\n"
             # The question's id too: the page shows it under a temporary id.
-            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id'], 'user_message_id': result.get('user_message_id'), 'course_use': result.get('course_use'), 'web_sources': result.get('web_sources')}, ensure_ascii=False)}\n\n"
+            yield f"event: done\ndata: {json.dumps({'message_id': result['message_id'], 'user_message_id': result.get('user_message_id'), 'course_use': result.get('course_use'), 'web_sources': result.get('web_sources'), 'code_runs': result.get('code_runs')}, ensure_ascii=False)}\n\n"
             # After the answer is final: a new conversation gets its title.
             # A failure here must not turn a delivered answer into an error.
             try:
@@ -470,6 +493,18 @@ async def history_start_of_session(
     if not hidden:
         return {"seen_from": None, "hidden": 0}
     return {"seen_from": history[0]['id'] if history else None, "hidden": hidden}
+
+
+@router.post("/code/{call_id}", status_code=204)
+async def code_result(
+    call_id: str,
+    body: CodeResultRequest,
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """The browser's output of one Python run (agent/code_tools.py): only the
+    person whose question asked for it, while the run still waits."""
+    if not agent_code.deliver(call_id, current_user.id, body.model_dump()):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "code_run_not_waiting")
 
 
 @router.post("/messages/{message_id}/feedback")

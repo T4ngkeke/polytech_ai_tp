@@ -782,6 +782,9 @@ class Message(Base):
     tasks: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # The web sources an answer cites ([W#]): [{id, url, title}].
     web_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The Python runs in the student's browser while answering:
+    # [{id, code, stdout, stderr, result, images: [chat file id], status}].
+    code_runs: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

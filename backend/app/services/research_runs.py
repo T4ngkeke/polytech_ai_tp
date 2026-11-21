@@ -13,6 +13,7 @@ from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from backend.app.agent import visuals
 from backend.app.agent.history import estimate_length, history_start
 from backend.app.agent.result import LABEL_RE, ResearchResult, cited_ids, course_use
 from backend.app.agent.tools import ResearchScope, _live_session
@@ -282,12 +283,12 @@ class ResearchRuns:
                 completion_tokens = sum(x.output_tokens or 0 for x in calls)
                 billed_tokens = sum(x.billed_tokens for x in calls)
                 assistant = Message(session_id=run.session_id, sender=SenderType.llm,
-                    content=result.answer, prompt_tokens=prompt_tokens,
+                    content=visuals.checked(result.answer), prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     billed_tokens=billed_tokens, clarification=result.clarification,
                     answer_mode=result.mode, course_use=course_use(result), tasks=result.tasks,
-                    web_sources=result.web_sources)
+                    web_sources=result.web_sources, code_runs=result.code_runs)
                 db.add(assistant)
                 await db.flush()
                 citations = [MessageCitation(message_id=assistant.id,
@@ -325,7 +326,8 @@ class ResearchRuns:
                     'mode': answer.answer_mode if answer else None,
                     'course_use': answer.course_use if answer else None,
                     'tasks': answer.tasks if answer else None,
-                    'web_sources': answer.web_sources if answer else None}
+                    'web_sources': answer.web_sources if answer else None,
+                    'code_runs': answer.code_runs if answer else None}
 
     async def load_session_citations(self, *, session_id: uuid.UUID,
                                      user_id: uuid.UUID) -> dict[uuid.UUID, list[dict]]:

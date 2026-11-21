@@ -602,6 +602,8 @@ class MessageResponse(BaseModel):
     tasks: list[dict] | None = None
     # The web sources the answer cites ([W#]): [{id, url, title}].
     web_sources: list[dict] | None = None
+    # The Python runs in the student's browser: [{id, code, stdout, stderr, result, images, status}].
+    code_runs: list[dict] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +615,17 @@ class MessageResponse(BaseModel):
 # fits): about 7k tokens, next to a history of 30% of the context
 # (agent/history.py). The chat page counts the characters and stops at it.
 MAX_MESSAGE_CHARS = 20000
+
+
+class CodeResultRequest(BaseModel):
+    """What the browser's Python (Pyodide) printed for one execute_code run
+    (agent/code_tools.py). An image comes as a data:image/png;base64 line, as
+    Open WebUI's Pyodide worker prints a matplotlib figure."""
+    stdout: str = Field('', max_length=8_000_000)
+    stderr: str = Field('', max_length=200_000)
+    result: str = Field('', max_length=8_000_000)
+    # Set when the browser could not run it (Pyodide failed to load, …).
+    error: str | None = Field(None, max_length=2_000)
 
 
 class ChatStreamRequest(BaseModel):
