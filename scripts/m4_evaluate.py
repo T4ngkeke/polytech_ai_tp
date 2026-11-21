@@ -33,6 +33,9 @@ Environment:
                    as the student chat
   M4_WEB           1: offer the web search tools, as when the student turns web search on;
                    needs M4_SEARXNG_URL (a SearXNG instance with the JSON format on)
+  M4_TP            1: put the TP text (the lab's own files, agent/tp_text.py) in the research
+                   system message, as the chat does with RESEARCH_TP_TEXT on; budget 30% of
+                   M4_CONTEXT tokens (default 131072)
   M4_CODE          1: offer execute_code, as when the student turns Python on; there is no
                    browser here, so each run goes to a throwaway container (M4_CODE_IMAGE,
                    default python:3.12-slim; no network, 256 MB, 30 s)
@@ -306,6 +309,7 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
     from backend.app.agent.runner import NO_LEAD_CALLS, ResearchRunner
     from backend.app.agent.web_tools import WebTools
     from backend.app.agent import code_tools as agent_code
+    from backend.app.agent.tp_text import tp_char_budget
     from backend.app.agent.search import SearchRunner, min_score_for
     from backend.app.agent.tools import PerCallTools, create_scope
     from backend.app.models import Document, Session, User, UserRole
@@ -461,7 +465,9 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                                              web_tools=(WebTools(os.environ['M4_SEARXNG_URL'])
                                                         if os.getenv('M4_WEB') == '1' else None),
                                              code_tools=container_code_tools(agent_code)
-                                             if os.getenv('M4_CODE') == '1' else None)
+                                             if os.getenv('M4_CODE') == '1' else None,
+                                             tp_chars=tp_char_budget(int(os.getenv('M4_CONTEXT', '131072')), 30)
+                                             if os.getenv('M4_TP') == '1' else None)
             course_tools, research = runner()
             # The clarify questions are asked as in the student chat, without the
             # benchmark note that asks for course support.
