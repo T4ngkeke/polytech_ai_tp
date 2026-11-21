@@ -69,6 +69,8 @@ M4Y_VERSION = 'm4y_code_runs_v1'
 M4Y_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4y.sql')
 M4Z_VERSION = 'm4z_follow_ups_v1'
 M4Z_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4z.sql')
+M5A_VERSION = 'm5a_context_summary_v1'
+M5A_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m5a.sql')
 MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_SQL_PATH),
               (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH),
               (M4C_VERSION, M4C_SQL_PATH), (M4E_VERSION, M4E_SQL_PATH),
@@ -90,7 +92,8 @@ MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_
               (M4W_VERSION, M4W_SQL_PATH),
               (M4X_VERSION, M4X_SQL_PATH),
               (M4Y_VERSION, M4Y_SQL_PATH),
-              (M4Z_VERSION, M4Z_SQL_PATH))
+              (M4Z_VERSION, M4Z_SQL_PATH),
+              (M5A_VERSION, M5A_SQL_PATH))
 
 
 async def _apply_one(conn, version, path):

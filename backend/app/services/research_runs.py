@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.app.agent import visuals
+from backend.app.agent.compaction import Compaction
 from backend.app.agent.history import estimate_length, history_start
 from backend.app.agent.result import LABEL_RE, ResearchResult, cited_ids, course_use
 from backend.app.agent.tools import ResearchScope, _live_session
@@ -483,7 +484,7 @@ class ResearchRuns:
 
     async def load_context(self, scope: ResearchScope, *, limit: int = 20,
                            max_tokens: int | None = None,
-                           exclude_ids=()) -> tuple[list[dict], dict[str, dict], int]:
+                           exclude_ids=(), compact: bool = False) -> tuple[list[dict], dict[str, dict], int]:
         """The safe chat history, the citations of the answers in it by
         label, and how many safe messages were left out by ``max_tokens``.
 
@@ -499,6 +500,10 @@ class ResearchRuns:
 
         Replaced versions (superseded_at) are left out, and so are
         ``exclude_ids``: the turn a new version is about to replace.
+
+        compact: the first item is an agent/compaction.Compaction instead of
+        the history: also the safe messages left out since the latest stored
+        summary still valid for these course files, and that summary.
         """
         current = (Message.session_id == scope.session_id, Message.superseded_at.is_(None),
                    Message.id.not_in(list(exclude_ids)))
@@ -562,7 +567,7 @@ class ResearchRuns:
             hidden = 0
             if max_tokens is not None:
                 hidden = history_start(history, max_tokens=max_tokens, offset=offset)
-                history = history[hidden:]
+            full, history = history, history[hidden:]
             sent = {m['id'] for m in history}
             sources = {}
             for c in current:
@@ -581,4 +586,16 @@ class ResearchRuns:
             # different sources is ambiguous.
             earlier = {label: found[0] for label, found in sources.items()
                        if all(x == found[0] for x in found)}
-            return history, earlier, hidden
+            if not compact:
+                return history, earlier, hidden
+            # The latest summary at or before the first message sent, written
+            # with the same course files (agent/compaction.py).
+            by_id = {str(m.id): m for m in messages}
+            point = next((i for i in range(min(hidden, len(full) - 1), -1, -1)
+                          if by_id[full[i]['id']].context_summary
+                          and by_id[full[i]['id']].context_summary_snapshot == snapshot), None)
+            if point is None:
+                return Compaction(history, dropped=full[:hidden]), earlier, hidden
+            return (Compaction(history, dropped=full[point:hidden],
+                               previous=by_id[full[point]['id']].context_summary,
+                               previous_on=full[point]['id']), earlier, hidden)

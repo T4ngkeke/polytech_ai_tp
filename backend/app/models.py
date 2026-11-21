@@ -787,6 +787,11 @@ class Message(Base):
     code_runs: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Suggested next questions under an answer (agent/follow_ups.py): [str].
     follow_ups: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # On a student question: the summary of the conversation before it, sent in
+    # front of it once older messages no longer fit (agent/compaction.py), and
+    # the course file revisions it was written with ({document id: revision id}).
+    context_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_summary_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

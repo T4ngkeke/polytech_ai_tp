@@ -52,6 +52,7 @@ from backend.app.services import chat_file_service, feature_service, memory_serv
 from backend.app.agent import attachments as agent_attachments
 from backend.app.agent import memory as agent_memory
 from backend.app.agent import follow_ups as agent_follow_ups
+from backend.app.agent import compaction as agent_compaction
 from backend.app.routers.teacher_access import get_storage_root
 from backend.app.services.model_routing import Endpoint
 from backend.app.services.model_servers import context_tokens
@@ -307,9 +308,20 @@ async def chat_stream(
         runs = ResearchRuns(research_factory)
         # Only what fits the history limit is sent, with the citations of
         # those answers only.
-        safe_history, earlier_citations, _ = await runs.load_context(
+        # Past the limit, a summary of the older part goes in front of the
+        # history (agent/compaction.py). None in exam mode, nor when an attached
+        # course file narrows the course files (the summary belongs to all of them).
+        narrowed = any(a['kind'] == 'document' for a in attachments or ())
+        compact = settings.CONTEXT_COMPACTION_ENABLED and not exam_mode and not narrowed
+        loaded, earlier_citations, _ = await runs.load_context(
             scope, limit=HISTORY_MESSAGES, max_tokens=_history_budget(context, limits, mode),
-            exclude_ids=replaced)
+            exclude_ids=replaced, compact=compact)
+        if compact:
+            safe_history, _ = await agent_compaction.apply(
+                research_factory, loaded, ResearchModel(agent) if loaded.dropped else None,
+                {str(k): str(v) for k, v in scope.snapshot_revisions.items()})
+        else:
+            safe_history = loaded
         # Right after a question back the model must answer, not ask again.
         allow_ask = not await runs.last_answer_asked(scope.session_id, exclude_ids=replaced)
     except DocumentNotFound:

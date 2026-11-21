@@ -84,6 +84,8 @@ An answer may hold a diagram or a chart, in two fixed formats only (`backend/app
 
 After the `done` (and `title`) events, a `follow_ups` event may come: `{message_id, follow_ups: [string]}`, up to 5 suggested next questions written by one more model call (`agent/follow_ups.py`, ported from Open WebUI), with the teacher's rules; also saved on the answer (`follow_ups` in the session's messages). None in exam mode or after a question back; the call is not charged to the student.
 
+A long conversation: once older messages no longer fit the history limit, they are not just left out: one model call summarizes them (with the previous summary), and the summary goes in front of the first message still sent (`agent/compaction.py`, ported from Open WebUI; `CONTEXT_COMPACTION_ENABLED`, on by default). It is stored on that message and reused until the history start moves again. None in exam mode, or for a question that attaches a course file; not charged to the student.
+
 The events, in order:
 
 | Event | Data |

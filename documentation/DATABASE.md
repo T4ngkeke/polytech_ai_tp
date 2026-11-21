@@ -193,6 +193,8 @@ The messages of a session, with the tokens each one used.
 | web_sources | JSON | Nullable. On an answer: the web sources it cites as `[W#]`, `[{id, url, title}]` (web search, `agent/web_tools.py`). Added by `m4x_web_sources_v1`. |
 | code_runs | JSON | Nullable. On an answer: the Python runs made in the student's browser while answering, `[{id, code, stdout, stderr, result, images, status}]` (`agent/code_tools.py`; `images` are `chat_files` ids). Added by `m4y_code_runs_v1`. |
 | follow_ups | JSON | Nullable. On an answer: the suggested next questions, `[string]` (`agent/follow_ups.py`). Added by `m4z_follow_ups_v1`. |
+| context_summary | TEXT | Nullable. On a student question: the summary of the conversation before it, sent in front of it once the older messages no longer fit the history (`agent/compaction.py`). Added by `m5a_context_summary_v1`. |
+| context_summary_snapshot | JSON | Nullable. The course file revisions that summary was written with, `{document id: revision id}`; with other revisions it is not used. Added by `m5a_context_summary_v1`. |
 | created_at | Timestamp | |
 
 ## Usage and quota

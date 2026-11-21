@@ -347,6 +347,8 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
                             user_message_id=question.id, assistant_message_id=answer.id))
         await db.commit()
         monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
+        # The limit itself; what is left out is summarized otherwise (test_compaction.py).
+        monkeypatch.setattr(settings, 'CONTEXT_COMPACTION_ENABLED', False)
         import backend.app.routers.chat as chat_api
         from backend.app.agent.history import estimate_tokens
         model_messages = []

@@ -15,6 +15,7 @@ default: about 39k tokens with the 128k server; 2026-11-18, it was 7k tokens).
 Past the limit the oldest turns go, several at once (``history_start``), so the
 start of the prompt stays the same for the next questions and the model server
 can reuse its cache. The chat page draws a line where the history starts.
+What drops out is summarized (agent/compaction.py) unless that is turned off.
 """
 
 # Default context when the model server does not say (agent/tp_text.py).

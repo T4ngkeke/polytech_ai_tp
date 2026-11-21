@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # http://searxng:8080 on the compose network. Empty: no web search; a
     # question that asks for it is refused (503 web_search_not_configured).
     WEB_SEARCH_URL: str = ""
+    # A summary of the older part of a long conversation instead of dropping it
+    # (agent/compaction.py, ported from Open WebUI).
+    CONTEXT_COMPACTION_ENABLED: bool = True
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/edudb"
