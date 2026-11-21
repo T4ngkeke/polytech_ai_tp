@@ -24,6 +24,12 @@ const DEFAULT_ROUTES = {
   student: '/chat',
 };
 
+/** The user's settings kept in the store (PUT /api/auth/settings changes them). */
+export function profileOf(user) {
+  return { uiLanguage: user.ui_language || null, aboutMe: user.about_me || '',
+    memoryEnabled: user.memory_enabled !== false };
+}
+
 const useAuthStore = create((set, get) => ({
   // ── State ──
   token: null,
@@ -31,6 +37,10 @@ const useAuthStore = create((set, get) => ({
   username: null,
   userRole: null,
   tourSeen: true,
+  // Settings: interface language (null: the browser's), "about me", memory switch.
+  uiLanguage: null,
+  aboutMe: '',
+  memoryEnabled: true,
   // An admin reset the password: the app shows only "Choose a new password".
   mustChangePassword: false,
   isHydrated: false,
@@ -67,6 +77,7 @@ const useAuthStore = create((set, get) => ({
         userRole: user.role,
         tourSeen: !!user.tour_seen_at,
         mustChangePassword: !!user.must_change_password,
+        ...profileOf(user),
       });
 
       return user.role;
@@ -121,12 +132,25 @@ const useAuthStore = create((set, get) => ({
         userRole: user.role,
         tourSeen: !!user.tour_seen_at,
         mustChangePassword: !!user.must_change_password,
+        ...profileOf(user),
         isHydrated: true,
       });
     } catch {
       get().logout();
       set({ isHydrated: true });
     }
+  },
+
+  /** Save settings (only the fields given) and keep what the server returns. */
+  saveSettings: async (changes) => {
+    const res = await fetch('/api/auth/settings', {
+      method: 'PUT', body: JSON.stringify(changes),
+      headers: { Authorization: `Bearer ${get().token}`, 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const user = await res.json();
+    set(profileOf(user));
+    return user;
   },
 
   /** The guided tour was finished or skipped: remember it on the server. */

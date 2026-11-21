@@ -13,7 +13,9 @@
 // The checked answer arrives as a content-token frame at the end. When the
 // answer is a question back, `clarification` follows with its options.
 // After `done`, a new conversation may receive its `title` (written from the
-// first question and answer).
+// first question and answer), then `follow_ups` (suggested next questions).
+// While the agent works: `step` (what one tool call did), `tasks` (its
+// checklist), `code` (Python for this browser to run, agent/code_tools.py).
 
 import { quotaRefusal } from './quota.js';
 
@@ -38,9 +40,31 @@ export function interpretStreamEvent(ev) {
       return { type: 'status', route: parsed?.route ?? null, phase: parsed?.phase ?? null,
         mode: parsed?.mode ?? null, examMode: parsed?.exam_mode === true };
     }
-    case 'done':
-      return { type: 'done', messageId: safeParse(ev.data)?.message_id ?? null,
-        userMessageId: safeParse(ev.data)?.user_message_id ?? null };
+    case 'done': {
+      const parsed = safeParse(ev.data) || {};
+      return { type: 'done', messageId: parsed.message_id ?? null,
+        userMessageId: parsed.user_message_id ?? null, courseUse: parsed.course_use ?? null,
+        webSources: Array.isArray(parsed.web_sources) ? parsed.web_sources : null,
+        codeRuns: Array.isArray(parsed.code_runs) ? parsed.code_runs : null };
+    }
+    case 'step': {
+      const parsed = safeParse(ev.data);
+      return parsed && typeof parsed.tool === 'string' ? { type: 'step', step: parsed } : { type: 'ignore' };
+    }
+    case 'tasks': {
+      const parsed = safeParse(ev.data);
+      return { type: 'tasks', tasks: Array.isArray(parsed) ? parsed : [] };
+    }
+    case 'code': {
+      const parsed = safeParse(ev.data);
+      return parsed && typeof parsed.id === 'string' && typeof parsed.code === 'string'
+        ? { type: 'code', id: parsed.id, code: parsed.code } : { type: 'ignore' };
+    }
+    case 'follow_ups': {
+      const parsed = safeParse(ev.data);
+      const list = Array.isArray(parsed?.follow_ups) ? parsed.follow_ups.filter((x) => typeof x === 'string') : [];
+      return { type: 'follow_ups', messageId: parsed?.message_id ?? null, followUps: list };
+    }
     case 'error':
       return { type: 'error', detail: safeParse(ev.data)?.detail || 'Generation failed' };
     case 'draft': {

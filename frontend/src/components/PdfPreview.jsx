@@ -14,7 +14,7 @@ export function PdfFrame({ pdfUrl, error, page, className = '' }) {
 }
 
 /** A page image with the cited regions marked like a highlighter; a click hides them. */
-function HighlightedPage({ source, page }) {
+export function HighlightedPage({ source, page }) {
   const { imageUrl, error } = usePageImage(source.documentId, source.revisionId, page, source.sessionId);
   const [shown, setShown] = useState(true);
   const scrollRef = useRef(null);

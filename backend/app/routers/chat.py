@@ -96,11 +96,12 @@ def _research_frames(items):
     """SSE frames for queued research events: a phase name is a status event;
     ('draft', text) adds draft text, ('draft', None) withdraws the draft;
     ('tasks', list) is the model's task checklist as it is now; ('code', {id, code})
-    asks the browser to run Python (agent/code_tools.py).
+    asks the browser to run Python (agent/code_tools.py); ('step', {...}) is
+    what one tool call did (runner.step_of), for the process line.
     Consecutive draft text goes out as one frame."""
     frames, text = [], ''
     for item in [*items, None]:
-        if isinstance(item, tuple) and item[0] in ('tasks', 'code'):
+        if isinstance(item, tuple) and item[0] in ('tasks', 'code', 'step'):
             if text:
                 frames.append(f"event: draft\ndata: {json.dumps(text)}\n\n")
                 text = ''
@@ -375,6 +376,9 @@ async def chat_stream(
         def tasks(items):
             queue.put_nowait(('tasks', items))
 
+        def step(item):
+            queue.put_nowait(('step', item))
+
         async def save_code_image(data: bytes, n: int) -> str | None:
             # An image a Python run printed: a chat file of this conversation.
             try:
@@ -403,7 +407,7 @@ async def chat_stream(
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
-            rerank_model=llm_config['rerank_model'], on_phase=phase, on_tasks=tasks,
+            rerank_model=llm_config['rerank_model'], on_phase=phase, on_tasks=tasks, on_step=step,
             vision_fn=vision, vision_model=vlm.model, limits=limits, tp_chars=tp_chars,
             language_model=language_model(agent), context_tokens=context,
             on_draft=draft, allow_ask=allow_ask and mode == 'research',

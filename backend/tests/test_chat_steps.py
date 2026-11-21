@@ -1,0 +1,57 @@
+"""test_chat_steps.py — what the new chat page needs: the step events of the
+process line, and the lab's course files for the attachment menu."""
+import uuid
+
+import pytest
+from sqlalchemy import select
+
+from backend.app.agent.model import ModelReply
+from backend.app.agent.runner import step_of
+from backend.app.models import Class, DocumentPage, Lab
+from backend.tests.conftest import make_client
+from backend.tests.test_m4d_chat_pg import events, tool_call
+from backend.tests.test_unified_entry import _chat
+
+
+def test_a_tool_call_is_described_in_a_few_fields():
+    assert step_of('search', '{"query": "cas de base"}', '6 locations (leads, not evidence)\n…') == \
+        {'tool': 'search', 'query': 'cas de base', 'count': 6, 'ok': True}
+    assert step_of('read', '{"page": "d1.p4"}', 'd1.p4 · TP3_enonce.pdf · page 4 of 6 · previous d1.p3') == \
+        {'tool': 'read', 'file': 'TP3_enonce.pdf', 'page': 4, 'ok': True}
+    assert step_of('search_web', '{"query": "python"}', '[{"id": "W1"}, {"id": "W2"}]')['count'] == 2
+    assert step_of('execute_code', '{}', '{"status": "success", "stdout": "1", "stderr": ""}') == \
+        {'tool': 'execute_code', 'ok': True}
+    assert step_of('execute_code', '{}', '{"error": "timeout"}')['ok'] is False
+    assert step_of('create_tasks', '{}', 'ok') is None
+    assert step_of('read', 'not json', 'error: invalid_arguments') == {'tool': 'read', 'file': None, 'page': None, 'ok': False}
+
+
+@pytest.mark.asyncio
+async def test_the_stream_sends_a_step_per_tool_call(pg_session, tmp_path, monkeypatch):
+    steps = []
+    rev, student, chat, seen = await _chat(pg_session, monkeypatch, tmp_path, steps)
+    page = await pg_session.scalar(select(DocumentPage).where(DocumentPage.revision_id == rev.id))
+    steps += [tool_call('search', {'query': 'Définition θ₁'}),
+              tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
+              ModelReply('Voir la définition [E1].', [], 'fixture', 50, 20)]
+    async with await make_client(pg_session, student) as client:
+        response = await client.post('/api/chat/stream', json={
+            'session_id': str(chat.id), 'message': 'Où est définie θ₁ ?', 'client_request_id': str(uuid.uuid4())})
+    found = [payload for name, payload in events(response.text) if name == 'step']
+    assert [s['tool'] for s in found] == ['search', 'read']
+    assert found[0]['query'] == 'Définition θ₁' and found[1]['page'] == page.preview_page_no and found[1]['file']
+
+
+@pytest.mark.asyncio
+async def test_the_lab_course_files_for_the_attachment_menu(pg_session, tmp_path, monkeypatch):
+    rev, student, chat, _ = await _chat(pg_session, monkeypatch, tmp_path, [])
+    lab = await pg_session.get(Lab, chat.lab_id)
+    async with await make_client(pg_session, student) as client:
+        listed = (await client.get(f'/api/student/labs/{lab.id}/documents')).json()
+        assert [d['id'] for d in listed] == [str(rev.document_id)] and listed[0]['filename']
+        # In exam mode only the files allowed in the exam are listed.
+        cls = await pg_session.get(Class, lab.class_id)
+        cls.exam_mode = True
+        await pg_session.commit()
+        assert (await client.get(f'/api/student/labs/{lab.id}/documents')).json() == []
+        assert (await client.get(f'/api/student/labs/{uuid.uuid4()}/documents')).status_code == 404

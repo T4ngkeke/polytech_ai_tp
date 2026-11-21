@@ -103,3 +103,16 @@ test('a question refused before the stream says why and what to reload', async (
       { status: 403, headers: { 'content-type': 'application/json' } })),
     (err) => err.refusal.message === 'You are not a member of the class that owns this lab' && err.refusal.reload === 'classes');
 });
+
+test('steps, tasks, code, follow-ups and the done fields are read', () => {
+  assert.deepEqual(interpretStreamEvent({ event: 'step', data: '{"tool":"read","file":"a.pdf","page":4}' }).step,
+    { tool: 'read', file: 'a.pdf', page: 4 });
+  assert.equal(interpretStreamEvent({ event: 'step', data: '{}' }).type, 'ignore');
+  assert.deepEqual(interpretStreamEvent({ event: 'tasks', data: '[{"id":"1"}]' }).tasks, [{ id: '1' }]);
+  const code = interpretStreamEvent({ event: 'code', data: '{"id":"r1","code":"print(1)"}' });
+  assert.deepEqual([code.type, code.id, code.code], ['code', 'r1', 'print(1)']);
+  const follow = interpretStreamEvent({ event: 'follow_ups', data: '{"message_id":"m","follow_ups":["a",2]}' });
+  assert.deepEqual(follow.followUps, ['a']);
+  const done = interpretStreamEvent({ event: 'done', data: '{"message_id":"m","course_use":"cited","web_sources":[{"id":"W1"}],"code_runs":null}' });
+  assert.deepEqual([done.courseUse, done.webSources, done.codeRuns], ['cited', [{ id: 'W1' }], null]);
+});

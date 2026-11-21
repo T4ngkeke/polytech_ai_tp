@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from backend.app.auth import get_current_user, require_student
 from backend.app.config import settings
 from backend.app.database import get_db
-from backend.app.models import Class, ClassStudent, Lab, User
+from backend.app.models import Class, ClassStudent, Document, Lab, User
 from backend.app.schemas import (
     ClassResponse,
     JoinClassRequest,
@@ -224,6 +224,30 @@ async def create_session_in_lab(
     # Dependency cleanup may run after that response, so commit before returning.
     await db.commit()
     return SessionResponse.model_validate(session)
+
+
+@router.get("/labs/{lab_id}/documents")
+async def lab_documents(
+    lab_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[dict]:
+    """The course files a question of this lab can use now, for the chat's
+    attachment menu: [{id, filename, scope: 'lab' | 'class'}]. In exam mode,
+    only the files the teacher allowed (the same rule as the research tools)."""
+    lab = await db.get(Lab, lab_id)
+    if lab is None or lab.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Lab not found")
+    member = await db.scalar(select(ClassStudent.student_id).where(
+        ClassStudent.class_id == lab.class_id, ClassStudent.student_id == current_user.id))
+    if member is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You are not a member of the class that owns this lab")
+    exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == lab.class_id)))
+    readable = readable_files(lab.class_id, lab_id, exam_only=exam_mode).subquery()
+    rows = (await db.execute(select(Document.id, Document.filename, Document.lab_id)
+                             .where(Document.id.in_(select(readable.c[0])))
+                             .order_by(Document.lab_id.is_(None), Document.filename))).all()
+    return [{'id': str(i), 'filename': name, 'scope': 'lab' if lab_ref else 'class'} for i, name, lab_ref in rows]
 
 
 # ===================================================================

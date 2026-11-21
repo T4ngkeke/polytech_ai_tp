@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { distinctImages, groupCitations, labelRange, linkCitations, pageHighlights } from './citations.js';
+import { distinctImages, groupCitations, labelRange, linkCitations, linkWeb, pageHighlights } from './citations.js';
 
 const cite = (label, page, extra = {}) => ({
   citation_id: `c-${label}`, label, document_id: 'doc-a', revision_id: 'rev-1',
@@ -96,4 +96,16 @@ test('a page shows its cited regions; two labels on one region share a box', () 
   assert.deepEqual(pageHighlights(cites, 22, ['E4', 'E7']), [
     { box: [0.1, 0.2, 0.9, 0.5], labels: ['E4'] },
     { box: [0.1, 0.6, 0.4, 0.8], labels: ['E7'] }]);
+});
+
+test('bare links have no brackets, for the pills of the new chat', () => {
+  const labels = new Set(['E3', 'E5']);
+  assert.equal(linkCitations('Voir [E5].', labels, null, true), 'Voir [E5](#cite-E5).');
+  assert.equal(linkCitations('Ici [E3, E5]', labels, null, true), 'Ici [E3](#cite-E3) [E5](#cite-E5)');
+});
+
+test('web sources [W#] become links; unknown ones and code stay', () => {
+  const ids = new Set(['W1', 'W2']);
+  assert.equal(linkWeb('Doc [W1, W2].', ids), 'Doc [W1](#web-W1) [W2](#web-W2).');
+  assert.equal(linkWeb('Doc [W3] `[W1]`', ids), 'Doc [W3] `[W1]`');
 });

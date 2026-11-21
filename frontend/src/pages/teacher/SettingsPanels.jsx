@@ -6,10 +6,11 @@ import toast from 'react-hot-toast';
 import api from '../../lib/api';
 import ExamFiles from '../../components/ExamFiles';
 import Icon from '../../components/Icon';
+import { ClassFeatures, LabFeatures } from './Features';
 
-export function LabSettingsPanel({ lab, onToggle }) {
+export function LabSettingsPanel({ lab, onToggle, examMode, onLabChange }) {
   return (
-    <div className="max-w-md space-y-4">
+    <div className="max-w-2xl space-y-4">
       <h3 className="text-sm font-semibold text-cream mb-4">Lab Settings</h3>
       <div className="flex items-center justify-between px-4 py-4 rounded-xl bg-ink-raised border border-border-subtle">
         <div>
@@ -26,11 +27,12 @@ export function LabSettingsPanel({ lab, onToggle }) {
           </span>
         </button>
       </div>
+      <LabFeatures lab={lab} examMode={examMode} onLabChange={onLabChange} />
     </div>
   );
 }
 
-export function ClassSettingsPanel({ cls, onChange }) {
+export function ClassSettingsPanel({ cls, onChange, onLabChange }) {
   const [saving, setSaving] = useState(false);
   const toggle = async () => {
     setSaving(true);
@@ -44,7 +46,8 @@ export function ClassSettingsPanel({ cls, onChange }) {
     }
   };
   return (
-    <div className="max-w-2xl p-5 rounded-xl bg-ink-raised border border-border-subtle">
+    <div className="max-w-3xl space-y-4">
+    <div className="p-5 rounded-xl bg-ink-raised border border-border-subtle">
       <h3 className="text-sm font-semibold text-cream mb-4">Class Settings</h3>
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -62,6 +65,8 @@ export function ClassSettingsPanel({ cls, onChange }) {
         </button>
       </div>
       <ExamFiles classId={cls.id} examMode={!!cls.exam_mode} />
+    </div>
+    <ClassFeatures cls={cls} labs={cls.labs || []} onClassChange={onChange} onLabChange={onLabChange} />
     </div>
   );
 }

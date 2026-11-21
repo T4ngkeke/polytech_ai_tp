@@ -12,8 +12,8 @@
 :root {
   --sidebar-width: 272px;
   --header-height: 60px;
-  --font-display: "Outfit", system-ui, sans-serif;
-  --font-body: "Inter", system-ui, sans-serif;
+  --font-display: "Inter", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 
   /* Color tokens for inline style usage */
@@ -23,62 +23,109 @@
   --color-cyan: rgb(var(--cyan));
 }
 
-/* Theme colors as RGB channels (see tailwind.config.js). Light is the default;
-   lib/theme.js sets data-theme="dark" on <html> when the user picks dark. */
+/* Theme colors as RGB channels (see tailwind.config.js). Restrained, as in
+   the approved 2026-11-20 demo: black and white, and color only for course
+   citations (cyan = the citation teal). Light by default; lib/theme.js sets
+   data-theme="light" or "dark" on <html>, or removes it to follow the system. */
 :root {
   color-scheme: light;
-  --ink-deep: 238 240 243;
-  --ink-base: 248 249 251;
+  --ink-deep: 255 255 255;
+  --ink-base: 247 247 248;
   --ink-raised: 255 255 255;
-  --ink-surface: 241 243 246;
-  --ink-hover: 230 233 238;
-  --ink-elevated: 220 224 230;
-  --cream: 27 31 39;
-  --cream-secondary: 71 80 99;
-  --cream-muted: 102 112 133;
-  --cream-faint: 152 161 178;
+  --ink-surface: 243 243 245;
+  --ink-hover: 236 236 238;
+  --ink-elevated: 226 226 230;
+  --cream: 17 18 20;
+  --cream-secondary: 93 95 102;
+  --cream-muted: 142 144 151;
+  --cream-faint: 180 182 187;
   --on-accent: 255 255 255;
-  --line: 27 31 39;
-  --line-subtle: 0.08;
-  --line-default: 0.14;
-  --line-strong: 0.24;
+  --ink: 17 18 20;
+  --on-ink: 255 255 255;
+  --line: 17 18 20;
+  --line-subtle: 0.07;
+  --line-default: 0.11;
+  --line-strong: 0.2;
   --cyan: 14 116 144;
-  --cyan-hover: 8 145 178;
-  --gold: 161 98 7;
-  --gold-hover: 180 83 9;
+  --cyan-hover: 21 94 117;
+  --gold: 180 83 9;
+  --gold-hover: 146 64 14;
+  --warn-soft: 254 243 199;
   --success: 21 128 61;
-  --danger: 220 38 38;
-  --danger-hover: 239 68 68;
-  --shadow-elevated: 0 8px 32px rgb(15 23 42 / 0.12);
-  --shadow-card: 0 1px 3px rgb(15 23 42 / 0.06), 0 2px 12px rgb(15 23 42 / 0.05);
+  --danger: 185 28 28;
+  --danger-hover: 220 38 38;
+  --hl: 250 204 21;
+  --shadow-elevated: 0 12px 32px rgb(17 18 20 / 0.12), 0 2px 6px rgb(17 18 20 / 0.06);
+  --shadow-card: 0 2px 12px rgb(17 18 20 / 0.06);
+  --shadow-input: 0 6px 24px rgb(17 18 20 / 0.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  --ink-deep: 23 24 26;
+  --ink-base: 31 32 35;
+  --ink-raised: 38 39 43;
+  --ink-surface: 42 43 47;
+  --ink-hover: 46 47 52;
+  --ink-elevated: 56 57 62;
+  --cream: 236 236 237;
+  --cream-secondary: 163 165 171;
+  --cream-muted: 117 119 126;
+  --cream-faint: 90 92 98;
+  --on-accent: 17 18 20;
+  --ink: 236 236 237;
+  --on-ink: 17 18 20;
+  --line: 236 236 237;
+  --line-subtle: 0.07;
+  --line-default: 0.11;
+  --line-strong: 0.2;
+  --cyan: 34 184 207;
+  --cyan-hover: 103 211 228;
+  --gold: 245 158 11;
+  --gold-hover: 251 191 36;
+  --warn-soft: 66 49 18;
+  --success: 74 222 128;
+  --danger: 248 113 113;
+  --danger-hover: 252 165 165;
+  --hl: 250 204 21;
+  --shadow-elevated: 0 12px 40px rgb(0 0 0 / 0.5);
+  --shadow-card: 0 2px 16px rgb(0 0 0 / 0.3);
+  --shadow-input: 0 6px 28px rgb(0 0 0 / 0.35);
+  }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --ink-deep: 12 14 18;
-  --ink-base: 19 22 28;
-  --ink-raised: 26 29 37;
-  --ink-surface: 33 37 47;
-  --ink-hover: 40 45 57;
-  --ink-elevated: 48 54 67;
-  --cream: 232 226 214;
-  --cream-secondary: 176 169 155;
-  --cream-muted: 140 134 123;
-  --cream-faint: 98 93 85;
-  --on-accent: 12 14 18;
-  --line: 232 226 214;
-  --line-subtle: 0.08;
-  --line-default: 0.14;
-  --line-strong: 0.22;
-  --cyan: 6 182 212;
-  --cyan-hover: 34 211 238;
-  --gold: 201 168 76;
-  --gold-hover: 217 188 106;
-  --success: 62 207 113;
-  --danger: 255 45 45;
-  --danger-hover: 255 82 82;
-  --shadow-elevated: 0 8px 40px rgb(0 0 0 / 0.5);
+  --ink-deep: 23 24 26;
+  --ink-base: 31 32 35;
+  --ink-raised: 38 39 43;
+  --ink-surface: 42 43 47;
+  --ink-hover: 46 47 52;
+  --ink-elevated: 56 57 62;
+  --cream: 236 236 237;
+  --cream-secondary: 163 165 171;
+  --cream-muted: 117 119 126;
+  --cream-faint: 90 92 98;
+  --on-accent: 17 18 20;
+  --ink: 236 236 237;
+  --on-ink: 17 18 20;
+  --line: 236 236 237;
+  --line-subtle: 0.07;
+  --line-default: 0.11;
+  --line-strong: 0.2;
+  --cyan: 34 184 207;
+  --cyan-hover: 103 211 228;
+  --gold: 245 158 11;
+  --gold-hover: 251 191 36;
+  --warn-soft: 66 49 18;
+  --success: 74 222 128;
+  --danger: 248 113 113;
+  --danger-hover: 252 165 165;
+  --hl: 250 204 21;
+  --shadow-elevated: 0 12px 40px rgb(0 0 0 / 0.5);
   --shadow-card: 0 2px 16px rgb(0 0 0 / 0.3);
+  --shadow-input: 0 6px 28px rgb(0 0 0 / 0.35);
 }
 
 /* ── Base Layer ── */
@@ -106,9 +153,8 @@
 
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
-    line-height: 1.15;
-    font-weight: 400;
-    letter-spacing: -0.01em;
+    line-height: 1.25;
+    font-weight: 600;
   }
 
   /* ── Scrollbar ── */
@@ -138,7 +184,7 @@
 
   /* ── Focus Ring ── */
   :focus-visible {
-    outline: 2px solid var(--color-cyan);
+    outline: 2px solid rgb(var(--cream-muted));
     outline-offset: 2px;
   }
 
@@ -153,19 +199,24 @@
 @layer utilities {
   /* Markdown rendering for chat assistant messages. Tailwind's base reset
      strips list/heading styles, so restore the few we need inside .prose-chat. */
-  .prose-chat p { margin: 0.25rem 0; }
-  .prose-chat ul { list-style: disc; padding-left: 1.25rem; margin: 0.25rem 0; }
-  .prose-chat ol { list-style: decimal; padding-left: 1.25rem; margin: 0.25rem 0; }
-  .prose-chat li { margin: 0.15rem 0; }
-  .prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.5rem 0 0.25rem; }
-  .prose-chat h1 { font-size: 1.1rem; }
-  .prose-chat h2 { font-size: 1.05rem; }
-  .prose-chat h3 { font-size: 1rem; }
-  .prose-chat blockquote { border-left: 3px solid rgb(var(--line) / var(--line-strong)); padding-left: 0.75rem; opacity: 0.85; margin: 0.4rem 0; }
-  .prose-chat table { border-collapse: collapse; margin: 0.4rem 0; display: block; max-width: 100%; overflow-x: auto; }
+  .prose-chat { font-size: 16px; line-height: 1.75; color: rgb(var(--cream)); }
+  .prose-chat > * { margin-top: 0; margin-bottom: 0; }
+  .prose-chat > * + * { margin-top: 0.85rem; }
+  .prose-chat ul { list-style: disc; padding-left: 1.4rem; }
+  .prose-chat ol { list-style: decimal; padding-left: 1.4rem; }
+  .prose-chat li { margin: 0.2rem 0; }
+  .prose-chat li > p { margin: 0; }
+  .prose-chat h1, .prose-chat h2, .prose-chat h3, .prose-chat h4 { font-weight: 600; font-size: 1.05rem; margin-top: 1.25rem; }
+  .prose-chat strong { font-weight: 600; }
+  .prose-chat blockquote { border-left: 2px solid rgb(var(--line) / var(--line-strong)); padding-left: 0.9rem; color: rgb(var(--cream-secondary)); }
+  .prose-chat table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; font-size: 14.5px; }
   .prose-chat .katex-display { overflow-x: auto; overflow-y: hidden; }
-  .prose-chat th, .prose-chat td { border: 1px solid rgb(var(--line) / var(--line-default)); padding: 0.3rem 0.6rem; }
+  .prose-chat th, .prose-chat td { border-bottom: 1px solid rgb(var(--line) / var(--line-default)); padding: 0.4rem 0.75rem; text-align: left; }
+  .prose-chat th { font-weight: 600; }
   .prose-chat a { word-break: break-word; }
+  .prose-chat hr { border: 0; border-top: 1px solid rgb(var(--line) / var(--line-default)); }
+  /* Old chat bubbles and the teacher's pages keep the smaller text. */
+  .prose-chat.prose-small { font-size: 14px; line-height: 1.65; }
 
   /* Scrolls sideways without a visible scrollbar (tab rows on phones) */
   .no-scrollbar { scrollbar-width: none; }
@@ -185,24 +236,24 @@
   }
 
   /* Gradients */
+  /* Primary buttons: solid ink (black in light, near-white in dark). The name
+     stays for the existing pages. */
   .gradient-cyan {
-    background: linear-gradient(135deg, rgb(var(--cyan)), rgb(var(--cyan-hover)));
+    background: rgb(var(--ink));
+    color: rgb(var(--on-ink));
   }
 
   .gradient-gold {
-    background: linear-gradient(135deg, rgb(var(--gold)), rgb(var(--gold-hover)));
+    background: rgb(var(--gold));
   }
 
   .gradient-warm {
-    background: linear-gradient(135deg, rgb(var(--cyan)), rgb(var(--gold)));
+    background: rgb(var(--ink));
   }
 
   /* Text gradient */
   .text-gradient {
-    background: linear-gradient(135deg, rgb(var(--cyan)), rgb(var(--gold)));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: rgb(var(--cream));
   }
 
   /* Noise texture overlay */
@@ -210,7 +261,7 @@
     position: relative;
   }
   .noise::before {
-    content: '';
+    content: none;
     position: absolute;
     inset: 0;
     opacity: 0.025;

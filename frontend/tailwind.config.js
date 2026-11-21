@@ -9,8 +9,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Outfit"', 'system-ui', 'sans-serif'],
-        body: ['"Inter"', 'system-ui', 'sans-serif'],
+        display: ['"Inter"', 'system-ui', '-apple-system', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif'],
+        body: ['"Inter"', 'system-ui', '-apple-system', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif'],
         mono: ['"JetBrains Mono"', '"Fira Code"', 'ui-monospace', 'monospace'],
       },
       // Colors are CSS variables (RGB channels) set per theme in index.css,
@@ -31,6 +31,11 @@ export default {
         'cream-faint': v('cream-faint'),
         // Text on solid cyan or danger buttons
         'on-accent': v('on-accent'),
+        // Primary buttons (send): black in light, near-white in dark
+        'ink': v('ink'),
+        'on-ink': v('on-ink'),
+        'warn-soft': v('warn-soft'),
+        'hl': v('hl'),
 
         // Borders
         'border-subtle': 'rgb(var(--line) / var(--line-subtle))',
@@ -105,8 +110,10 @@ export default {
         },
       },
       boxShadow: {
-        'glow': '0 0 24px rgb(var(--cyan) / 0.12)',
-        'glow-gold': '0 0 24px rgb(var(--gold) / 0.10)',
+        // No glow in the restrained look; the names stay for existing pages.
+        'glow': 'none',
+        'glow-gold': 'none',
+        'input': 'var(--shadow-input)',
         'elevated': 'var(--shadow-elevated)',
         'card': 'var(--shadow-card)',
         'inner-glow': 'inset 0 1px 0 rgb(var(--line) / 0.04)',

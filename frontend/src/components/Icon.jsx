@@ -3,6 +3,8 @@
  * as the admin model map. Icons use currentColor and follow the theme.
  */
 import {
+  ArrowUp, Bell, BookOpen, Camera, ChevronDown, ChevronLeft, CircleHelp, Code, FileCode, Globe, Image, ListChecks,
+  Microscope, Paperclip, PanelLeft, Pin, PinOff, Play, SquarePen, Sparkles, Telescope, Terminal,
   Activity, Archive, ArrowRightLeft, ArrowUpDown, Bot, Check, ChevronRight, Compass, Copy, Cpu, Database,
   Download, Ellipsis, Eye, EyeOff, FileText, KeyRound, Layers, LayoutGrid, Lock, LockOpen, LogOut, Menu,
   MessageSquare, Network, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Search, Send, Server, Settings, Square, ThumbsDown,
@@ -18,6 +20,10 @@ const ICONS = {
   logout: LogOut, settings: Settings, users: Users, grid: LayoutGrid, pulse: Activity, chip: Cpu,
   database: Database, upload: Upload, search: Search, eyeOff: EyeOff, swap: ArrowRightLeft,
   server: Server, refresh: RefreshCw,
+  arrowUp: ArrowUp, bell: Bell, book: BookOpen, camera: Camera, chevronDown: ChevronDown,
+  chevronLeft: ChevronLeft, help: CircleHelp, code: Code, fileCode: FileCode, globe: Globe, image: Image,
+  tasks: ListChecks, deep: Telescope, microscope: Microscope, paperclip: Paperclip, sidebar: PanelLeft,
+  pin: Pin, unpin: PinOff, play: Play, newChat: SquarePen, sparkles: Sparkles, terminal: Terminal,
 };
 
 export default function Icon({ name, className = 'w-4 h-4', title }) {

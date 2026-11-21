@@ -23,12 +23,19 @@ import RulesPanel from './teacher/RulesPanel';
 import { LabSettingsPanel, ClassSettingsPanel } from './teacher/SettingsPanels';
 import TestDrivePanel from './teacher/TestDrivePanel';
 import AuditPanel from './teacher/AuditPanel';
+import Notifications from './student/Notifications';
+import { useT } from '../lib/i18n';
+
+// Tab names stay English in the code (the panels are picked by them); shown translated.
+const TAB_KEYS = { Settings: 'tab.settings', Rules: 'tab.rules', Analytics: 'tab.analytics', Documents: 'tab.documents',
+  'Course use': 'tab.courseUse', Audit: 'tab.audit', Students: 'tab.students', 'Test drive': 'tab.testDrive' };
 
 const TABS_CLASS = ['Settings', 'Rules', 'Analytics', 'Documents', 'Course use'];
 // New tabs appended last so existing tab indices stay stable.
 const TABS_LAB = ['Settings', 'Rules', 'Analytics', 'Audit', 'Students', 'Documents', 'Test drive'];
 
 export default function Teacher() {
+  const t = useT();
   // ── Tree state ──
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +105,13 @@ export default function Teacher() {
   const handleClassChanged = useCallback((updated) => {
     setClasses((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
     setSelectedClass((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+  }, []);
+
+  // A lab changed on the server (its features): keep it in the tree and the selection.
+  const handleLabChanged = useCallback((updated) => {
+    setClasses((prev) => prev.map((c) => ({ ...c, labs: c.labs?.map((l) => (l.id === updated.id ? { ...l, ...updated } : l)) })));
+    setSelectedClass((prev) => (prev ? { ...prev, labs: prev.labs?.map((l) => (l.id === updated.id ? { ...l, ...updated } : l)) } : prev));
+    setSelectedLab((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
   }, []);
 
   // ── When class node clicked (no lab): set selectedClass, clear lab ──
@@ -237,7 +251,7 @@ export default function Teacher() {
   };
 
   const handleKickStudent = async (studentId) => {
-    if (!selectedClass || !confirm('Remove this student from class?')) return;
+    if (!selectedClass) return;   // confirmed in the row (StudentsPanel)
     try {
       await api.delete(`/api/teacher/classes/${selectedClass.id}/students/${studentId}`);
       setStudents((prev) => prev.filter((s) => s.id !== studentId));
@@ -290,7 +304,11 @@ export default function Teacher() {
           {selectedClass
             ? <Breadcrumb cls={selectedClass} lab={selectedLab} onClass={() => handleSelectClass(selectedClass)}
                 className="min-w-0 truncate text-sm font-medium text-cream" />
-            : <span className="min-w-0 truncate text-sm font-medium text-cream">Teacher</span>}
+            : <span className="min-w-0 truncate text-sm font-medium text-cream">Edu-LLM</span>}
+          <span className="ml-auto"><Notifications align="right" /></span>
+        </div>
+        <div className="hidden md:flex shrink-0 items-center justify-end px-4 pt-2">
+          <Notifications align="right" />
         </div>
         <QuotaRequests onReset={activeTab === tabs.indexOf('Analytics') ? loadAnalytics : undefined} />
         {!selectedClass && !selectedLab ? (
@@ -308,10 +326,10 @@ export default function Teacher() {
                     key={tab}
                     onClick={(e) => { setActiveTab(i); e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }}
                     className={`shrink-0 whitespace-nowrap pb-3 text-sm font-medium border-b-2 transition-all cursor-pointer ${
-                      activeTab === i ? 'border-cyan text-cyan' : 'border-transparent text-cream-secondary hover:text-cream'
+                      activeTab === i ? 'border-cream text-cream' : 'border-transparent text-cream-secondary hover:text-cream'
                     }`}
                   >
-                    {tab}
+                    {t(TAB_KEYS[tab] || tab)}
                   </button>
                 ))}
               </div>
@@ -319,7 +337,7 @@ export default function Teacher() {
 
             {/* Panel content */}
             <div className="flex-1 p-4 md:p-8 overflow-y-auto">
-              {level === 'class' && activeTab === 0 && <ClassSettingsPanel cls={selectedClass} onChange={handleClassChanged} />}
+              {level === 'class' && activeTab === 0 && <ClassSettingsPanel cls={selectedClass} onChange={handleClassChanged} onLabChange={handleLabChanged} />}
               {level === 'class' && activeTab === 1 && <RulesPanel level="class" targetId={selectedClass.id} classId={selectedClass.id} context={context} />}
               {level === 'class' && activeTab === 2 && (
                 <TeacherAnalytics data={analytics} classId={selectedClass.id} onReload={loadAnalytics}
@@ -333,7 +351,7 @@ export default function Teacher() {
                     { lab_id: labId, user_id: userId, session_id: sessionId })} />
               )}
 
-              {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} onToggle={() => handleLabAction('toggle', selectedLab)} />}
+              {level === 'lab' && activeTab === 0 && <LabSettingsPanel lab={selectedLab} examMode={!!selectedClass?.exam_mode} onLabChange={handleLabChanged} onToggle={() => handleLabAction('toggle', selectedLab)} />}
               {level === 'lab' && activeTab === 1 && <RulesPanel level="lab" targetId={selectedLab.id} classId={selectedClass.id} context={context} />}
               {level === 'lab' && activeTab === 2 && (
                 <TeacherAnalytics data={analytics} classId={selectedClass.id} onReload={loadAnalytics}
@@ -341,7 +359,7 @@ export default function Teacher() {
                   onOpenStudent={(userId) => openConversation({ user_id: userId })} />
               )}
               {level === 'lab' && activeTab === 3 && <AuditPanel lab={selectedLab} sessions={auditSessions} students={students} expandedStudentId={expandedStudentId} setExpandedStudentId={setExpandedStudentId} expandedSession={expandedSession} setExpandedSession={setExpandedSession} />}
-              {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
+              {level === 'lab' && activeTab === 4 && <StudentsPanel students={students} classId={selectedClass?.id} onKick={handleKickStudent} onSetRule={handleOpenStudentRule} />}
               {level === 'lab' && activeTab === 5 && <DocumentManager labId={selectedLab.id}
                 examMode={!!selectedClass?.exam_mode} onOpenClassSettings={() => handleSelectClass(selectedClass)}
                 onOpenClassDocuments={() => { handleSelectClass(selectedClass); setActiveTab(3); }} />}

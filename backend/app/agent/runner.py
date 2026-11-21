@@ -287,6 +287,43 @@ def partial_answer(state: dict, stop: str, *, max_pages: int = 6) -> str | None:
     return '\n'.join(lines)
 
 
+def step_of(name: str, arguments: str | None, result: str) -> dict | None:
+    """What one tool call did, in a few fields the page words itself:
+    {tool, query?, file?, page?, count?, url?, ok}. None for the checklist."""
+    try:
+        args = json.loads(arguments or '{}')
+        args = args if isinstance(args, dict) else {}
+    except ValueError:
+        args = {}
+    first = (result or '').split('\n', 1)[0]
+    ok = not first.lower().startswith(('error', '{"error'))
+    if name in ('search', 'grep'):
+        found = re.match(r'(\d+) (?:locations?|matches?)', first)
+        return {'tool': name, 'query': str(args.get('query') or args.get('pattern') or '')[:120],
+                'count': int(found.group(1)) if found else None, 'ok': ok}
+    if name in ('read', 'open', 'view_image'):
+        parts = [p.strip() for p in first.split(' · ')]
+        page = next((p for p in parts if p.startswith('page ')), '')
+        number = re.match(r'page (\d+)', page)
+        return {'tool': name, 'file': parts[1] if len(parts) > 1 and ok else None,
+                'page': int(number.group(1)) if number else None, 'ok': ok}
+    if name == 'search_web':
+        try:
+            count = len(json.loads(result)) if ok else None
+        except ValueError:
+            count = None
+        return {'tool': name, 'query': str(args.get('query') or '')[:120], 'count': count, 'ok': ok}
+    if name == 'fetch_url':
+        return {'tool': name, 'url': str(args.get('url') or '')[:300], 'ok': ok}
+    if name == 'execute_code':
+        try:
+            ok = 'error' not in json.loads(result) and not json.loads(result).get('stderr')
+        except ValueError:
+            pass
+        return {'tool': name, 'ok': ok}
+    return None
+
+
 class ResearchRunner:
     def __init__(self, course_tools: CourseTools, model, *, max_tool_calls: int = 8,
                  research_timeout: float = 45.0, total_timeout: float = 60.0,
@@ -294,6 +331,7 @@ class ResearchRunner:
                  final_reserve: int = FINAL_RESERVE,
                  lead_min_score: float | None = None, no_lead_calls: int = NO_LEAD_CALLS,
                  on_phase: Callable[[str], None] | None = None,
+                 on_step: Callable[[dict], None] | None = None,
                  on_draft: Callable[[str | None], None] | None = None,
                  on_tasks: Callable[[list[dict]], None] | None = None,
                  offer_tasks: bool = True,
@@ -310,6 +348,9 @@ class ResearchRunner:
         # no_lead_calls 0 never sends NO_LEAD_TURN.
         self.lead_min_score, self.no_lead_calls = lead_min_score, no_lead_calls
         self.on_phase = on_phase or (lambda _phase: None)
+        # on_step(step): what one tool call did, for the page's process line
+        # (step_of below); not stored.
+        self.on_step = on_step or (lambda _step: None)
         # on_draft(text) receives the reply text as the model writes it, and
         # on_draft(None) when that draft is withdrawn. A draft is not checked;
         # the student sees the checked answer once the run ends.
@@ -519,6 +560,9 @@ class ResearchRunner:
                     else:
                         text = await self._tool(c['name'], c['arguments'])
                     messages.append({'role': 'tool', 'tool_call_id': c['id'], 'content': text})
+                    step = step_of(c['name'], c['arguments'], text)
+                    if step:
+                        self.on_step(step)
                 if rules_reminder:
                     # After many course pages the rules at the start were often
                     # not followed: repeat that they hold, after the last result.

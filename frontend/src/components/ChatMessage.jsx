@@ -16,7 +16,7 @@ export const loadMessageContent = () => import('./MessageContent');
 const MessageContent = lazy(loadMessageContent);
 
 /* ── Message Bubble ── */
-function FeedbackButtons({ messageId, initial }) {
+export function FeedbackButtons({ messageId, initial }) {
   const [value, setValue] = useState(initial || null);
   const [busy, setBusy] = useState(false);
 
@@ -56,7 +56,7 @@ const PHASE_LABELS = { thinking: 'Thinking…', finding: 'Searching course mater
   checking_sources: 'Checking citations…' };
 
 /** What the preview window needs to show citation c's page (and its file's other cited pages). */
-function sourceOf(citations, c, sessionId, focusLabels = null) {
+export function sourceOf(citations, c, sessionId, focusLabels = null) {
   const sameFile = citations.filter((x) => x.document_id === c.document_id
     && (x.revision_id || null) === (c.revision_id || null));
   return { documentId: c.document_id, revisionId: c.revision_id || null,
@@ -167,7 +167,7 @@ export const MessageBubble = memo(function MessageBubble({ message, streaming, p
 });
 
 
-function VisualEvidenceCard({ citation, sessionId, onOpen }) {
+export function VisualEvidenceCard({ citation, sessionId, onOpen }) {
   const [imageUrl, setImageUrl] = useState(null);
   useEffect(() => {
     if (!sessionId || !citation.available || !citation.asset_id) return;

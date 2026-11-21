@@ -5,6 +5,8 @@ import { lazy, Suspense, useState, useCallback } from 'react';
 import TeachingReport from '../../components/TeachingReport';
 import CitationReport from '../../components/CitationReport';
 import { modeLabel } from '../../lib/answerModes';
+import { useT } from '../../lib/i18n';
+import QuestionSearch from './QuestionSearch';
 
 // Heavy (markdown + KaTeX + highlight) — lazy so the teacher bundle only pulls
 // it in when a test-drive is actually opened.
@@ -14,6 +16,7 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
   // Three views of the same conversations: per student, which course material
   // the answers cite ("open conversation" leads back to a student), and a
   // report the model writes on the lab when the teacher asks.
+  const t = useT();
   const [view, setView] = useState('students');
   const openConversation = useCallback((studentId, sessionId) => {
     setView('students');
@@ -22,7 +25,7 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
   }, [setExpandedStudentId, setExpandedSession]);
   const views = (
     <div className="flex gap-1 mb-4" role="tablist" aria-label="Audit view">
-      {[['students', 'By student'], ['course', 'Course use'], ['report', 'AI report']].map(([key, label]) => (
+      {[['students', t('audit.byStudent')], ['search', t('audit.search')], ['course', t('audit.courseUse')], ['report', t('audit.report')]].map(([key, label]) => (
         <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setView(key)}
           className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
             view === key ? 'bg-cyan-muted text-cream border border-cyan/20' : 'text-cream-muted hover:bg-ink-hover'}`}>
@@ -37,6 +40,15 @@ export default function AuditPanel({ lab, sessions, students, expandedStudentId,
         <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
         {views}
         <TeachingReport labId={lab.id} labName={lab.name} />
+      </div>
+    );
+  }
+  if (view === 'search') {
+    return (
+      <div>
+        <h3 className="text-sm font-semibold text-cream mb-4">Chat Audit</h3>
+        {views}
+        <QuestionSearch labId={lab.id} onOpenConversation={openConversation} />
       </div>
     );
   }

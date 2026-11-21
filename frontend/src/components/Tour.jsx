@@ -23,7 +23,7 @@ function visibleRect(target, scroll = false) {
   return { top: r.top - PAD, left: r.left - PAD, width: r.width + 2 * PAD, height: r.height + 2 * PAD };
 }
 
-export default function Tour({ steps, onClose, onNav }) {
+export default function Tour({ steps, onClose, onNav, buttons = TOUR_BUTTONS }) {
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState(null);
   const [boxH, setBoxH] = useState(160);
@@ -77,21 +77,21 @@ export default function Tour({ steps, onClose, onNav }) {
       )}
       <div ref={boxRef} className="fixed rounded-xl border border-border-default bg-ink-surface p-4 shadow-elevated transition-all duration-200"
         style={pos}>
-        <p className="text-[10px] uppercase tracking-widest text-cream-muted">{index + 1} {TOUR_BUTTONS.of} {steps.length}</p>
+        <p className="text-[10px] uppercase tracking-widest text-cream-muted">{index + 1} {buttons.of} {steps.length}</p>
         <h3 id="tour-title" className="mt-1 text-sm font-semibold text-cream">{step.title}</h3>
         <p className="mt-1.5 text-sm leading-relaxed text-cream-secondary">{step.text}</p>
         <div className="mt-4 flex items-center gap-2">
           <button type="button" onClick={() => close(false)}
-            className="mr-auto cursor-pointer text-xs text-cream-muted hover:text-cream">{TOUR_BUTTONS.skip}</button>
+            className="mr-auto cursor-pointer text-xs text-cream-muted hover:text-cream">{buttons.skip}</button>
           {index > 0 && (
             <button type="button" onClick={() => setIndex(index - 1)}
               className="cursor-pointer rounded-lg px-3 py-1.5 text-xs text-cream-secondary hover:bg-ink-hover hover:text-cream">
-              {TOUR_BUTTONS.back}
+              {buttons.back}
             </button>
           )}
           <button type="button" autoFocus onClick={() => (last ? close(true) : setIndex(index + 1))}
             className="cursor-pointer rounded-lg gradient-cyan px-3 py-1.5 text-xs font-semibold text-on-accent hover:brightness-110">
-            {last ? TOUR_BUTTONS.done : TOUR_BUTTONS.next}
+            {last ? buttons.done : buttons.next}
           </button>
         </div>
       </div>

@@ -20,7 +20,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './components/MainLayout';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import Chat from './pages/Chat';
+import StudentChat from './pages/student/StudentChat';
 import SourcePdf from './pages/SourcePdf';
 import Teacher from './pages/Teacher';
 import Admin from './pages/Admin';
@@ -46,8 +46,8 @@ export default function App() {
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={['student']} />}>
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/chat/:labId" element={<Chat />} />
+            <Route path="/chat" element={<StudentChat />} />
+            <Route path="/chat/:labId" element={<StudentChat />} />
           </Route>
 
           {/* Every role: a cited page, the account settings */}

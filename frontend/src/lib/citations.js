@@ -70,7 +70,11 @@ export function labelRange(ids) {
   return `E${runs.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join('·')}`;
 }
 
-const link = (pages) => `\\[${pages.map((ids) => `[${labelRange(ids)}](#cite-${ids.join(',')})`).join(', ')}\\]`;
+// bare: the links side by side without the brackets (the chat draws them as pills).
+const link = (pages, bare = false) => {
+  const links = pages.map((ids) => `[${labelRange(ids)}](#cite-${ids.join(',')})`);
+  return bare ? links.join(' ') : `\\[${links.join(', ')}\\]`;
+};
 
 /**
  * Turn the answer's [E#] markers into links (#cite-E5) the chat renders as
@@ -79,7 +83,7 @@ const link = (pages) => `\\[${pages.map((ids) => `[${labelRange(ids)}](#cite-${i
  * Groups side by side become one; with pageOf (label -> page key), labels of
  * one page become one link named by their range ([E21–22](#cite-E21,E22)).
  */
-export function linkCitations(markdown, labels, pageOf = null) {
+export function linkCitations(markdown, labels, pageOf = null, bare = false) {
   if (!markdown || !labels?.size) return markdown;
   // Odd parts are code (fenced or inline); only even parts are prose.
   return markdown.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, i) => (i % 2 ? part
@@ -89,7 +93,7 @@ export function linkCitations(markdown, labels, pageOf = null) {
         // An unknown label stays as written, its group unlinked; the others are linked.
         return run.replace(new RegExp(GROUP, 'g'), (whole) => {
           const list = whole.slice(1, -1).split(/\s*[,;]\s*/);
-          return list.every((id) => labels.has(id)) ? link(list.map((id) => [id])) : whole;
+          return list.every((id) => labels.has(id)) ? link(list.map((id) => [id]), bare) : whole;
         });
       }
       const pages = new Map();
@@ -98,7 +102,19 @@ export function linkCitations(markdown, labels, pageOf = null) {
         if (!pages.has(key)) pages.set(key, []);
         pages.get(key).push(id);
       }
-      return link([...pages.values()]);
+      return link([...pages.values()], bare);
+    }))).join('');
+}
+
+const WEB_GROUP = /\[(W[1-9]\d*(?:\s*[,;]\s*W[1-9]\d*)*)\]/g;
+
+/** The answer's [W#] web sources as links (#web-W1) the chat draws as pills; code is left as it is. */
+export function linkWeb(markdown, ids) {
+  if (!markdown || !ids?.size) return markdown;
+  return markdown.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, i) => (i % 2 ? part
+    : part.replace(WEB_GROUP, (whole, inner) => {
+      const list = inner.split(/\s*[,;]\s*/);
+      return list.every((id) => ids.has(id)) ? list.map((id) => `[${id}](#web-${id})`).join(' ') : whole;
     }))).join('');
 }
 
