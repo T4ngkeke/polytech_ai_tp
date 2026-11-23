@@ -33,6 +33,7 @@ import re
 import time
 from typing import Callable
 
+from backend.app.agent.code_tools import NO_CODE_NOTE
 from backend.app.agent.visuals import VISUAL_NOTE
 from backend.app.agent.course_tools import CourseTools
 from backend.app.agent.result import (
@@ -205,7 +206,7 @@ class SearchRunner:
         # Ends the answer turn: the rules again and the answer language
         # (runner.answer_ending, agent/language.py).
         language = answer_ending(teaching_rules, answer_language)
-        system = (SEARCH_PROMPT + ('\n' + CONCISE_NOTE if self.concise else '') + '\n' + VISUAL_NOTE
+        system = (SEARCH_PROMPT + ('\n' + CONCISE_NOTE if self.concise else '') + '\n' + VISUAL_NOTE + '\n' + NO_CODE_NOTE
                   + '\n' + teaching_rules + '\n' + research_note)
         catalogue = await tools.catalogue()
 

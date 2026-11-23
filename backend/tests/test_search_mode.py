@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from backend.app.agent.code_tools import NO_CODE_NOTE
 from backend.app.agent.visuals import VISUAL_NOTE
 
 from backend.app.agent.course_tools import CourseTools
@@ -351,7 +352,7 @@ async def test_without_a_tp_file_the_prompt_is_as_before():
         model = Script('Oui [E3].')
         result = await SearchRunner(CourseTools(tools), model).run(
             'Produit ?', teaching_rules='RULES', research_note='NOTE')
-        assert model.seen[0][0]['content'] == SEARCH_PROMPT + '\n' + VISUAL_NOTE + '\nRULES\nNOTE'
+        assert model.seen[0][0]['content'] == SEARCH_PROMPT + '\n' + VISUAL_NOTE + '\n' + NO_CODE_NOTE + '\nRULES\nNOTE'
         assert model.seen[0][-1]['content'].startswith(
             'Produit ?\n\nCourse pages found:\n\n--- Algebre.pdf, page 9 ---\n[E1] Exemple')
         assert reads(tools) == [str(tools.p9), str(tools.p10)]

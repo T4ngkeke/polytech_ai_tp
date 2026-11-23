@@ -16,6 +16,7 @@ import asyncio
 import time
 from typing import Callable
 
+from backend.app.agent.code_tools import NO_CODE_NOTE
 from backend.app.agent.visuals import VISUAL_NOTE
 from backend.app.agent.language import with_language
 from backend.app.agent.result import ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, call_usage
@@ -102,7 +103,7 @@ class DirectRunner:
         note = ((EXAM_FILES_NOTE if self.exam_files else EXAM_NOTE) if self.exam_mode
                 else TP_COURSE_NOTE if with_tp else COURSE_NOTE)
         system = '\n'.join([DIRECT_TP_PROMPT if with_tp else DIRECT_PROMPT, note,
-                            *([CONCISE_NOTE] if self.concise else []), VISUAL_NOTE, teaching_rules])
+                            *([CONCISE_NOTE] if self.concise else []), VISUAL_NOTE, NO_CODE_NOTE, teaching_rules])
         if with_tp:
             # After the rules, before the conversation: the same for every question.
             system += '\n' + TP_NOTE + '\n\n' + tp.text

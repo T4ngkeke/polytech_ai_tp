@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, f
 from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
 from backend.app.agent.history import estimate_tokens
 from backend.app.agent.language import language_sentence, with_language
-from backend.app.agent.code_tools import CODE_NOTE, CODE_TOOL_NAMES, CODE_TOOLS, CodeTools
+from backend.app.agent.code_tools import CODE_NOTE, CODE_TOOL_NAMES, CODE_TOOLS, NO_CODE_NOTE, CodeTools
 from backend.app.agent.visuals import VISUAL_NOTE
 from backend.app.agent.task_tools import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
 from backend.app.agent.web_tools import WEB_NOTE, WEB_TOOL_NAMES, WEB_TOOLS, WebTools
@@ -393,7 +393,7 @@ class ResearchRunner:
         system = (system_prompt(self.max_tool_calls, tools.max_visual_calls)
                   + (('\n' + CATALOGUE_NOTE + '\n' + catalogue) if catalogue else '')
                   + ('\n' + WEB_NOTE if self.web_tools else '')
-                  + ('\n' + CODE_NOTE if self.code_tools else '')
+                  + '\n' + (CODE_NOTE if self.code_tools else NO_CODE_NOTE)
                   + '\n' + VISUAL_NOTE
                   + '\n' + teaching_rules + '\n' + research_note)
         # Earlier answers are real turns and keep their [E#] IDs, so the model

@@ -79,9 +79,16 @@ async def test_the_loop_offers_the_tool_and_keeps_the_runs():
     model = Script([('execute_code', {'code': 'print(sum(range(5)))'})], 'La somme vaut 10.', 'DONE')
     tools = browser(ct.CodeTools(USER, None), {'stdout': '10\n', 'stderr': '', 'result': ''})
     result = await ResearchRunner(CourseTools(ViewFixture()), model, code_tools=tools).run('Somme de 0 à 4 ?')
-    assert ct.CODE_NOTE in model.seen[0][0]['content']
+    assert ct.CODE_NOTE in model.seen[0][0]['content'] and ct.NO_CODE_NOTE not in model.seen[0][0]['content']
     assert json.loads(model.seen[1][-1]['content'])['stdout'] == '10\n'
     assert result.answer == 'La somme vaut 10.' and result.code_runs[0]['stdout'] == '10\n'
+
+
+@pytest.mark.asyncio
+async def test_without_python_the_model_is_told_nothing_runs():
+    model = Script('Voici le code, à lancer avec Run.', 'DONE')
+    await ResearchRunner(CourseTools(ViewFixture()), model).run('Trace sin(x)')
+    assert ct.NO_CODE_NOTE in model.seen[0][0]['content'] and ct.CODE_NOTE not in model.seen[0][0]['content']
 
 
 @pytest.mark.asyncio
