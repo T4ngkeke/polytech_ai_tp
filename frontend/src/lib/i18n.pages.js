@@ -289,6 +289,8 @@ const S = {
   'p.cr.periodFrom': { zh: '从 {a} 起', fr: 'à partir du {a}', en: 'from {a}' },
   'p.cr.periodUntil': { zh: '到 {a} 为止', fr: 'jusqu’au {a}', en: 'until {a}' },
   'p.cr.periodAll': { zh: '全部时间', fr: 'toute la période', en: 'all time' },
+  'p.cr.allTime': { zh: '清除日期', fr: 'Effacer les dates', en: 'Clear dates' },
+  'p.cr.noQuestions': { zh: '这段时间内没有学生提问（老师的试用不计入）。', fr: 'Aucune question d’étudiant sur cette période (les essais des enseignants ne sont pas comptés).', en: 'No student question in this period (teacher test drives are not counted).' },
   'p.cr.from': { zh: '从', fr: 'Du', en: 'From' },
   'p.cr.to': { zh: '到', fr: 'Au', en: 'To' },
   'p.cr.loadFailed': { zh: '没能载入报告', fr: 'Impossible de charger le rapport', en: 'Could not load the report' },

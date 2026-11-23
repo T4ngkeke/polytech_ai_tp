@@ -19,11 +19,8 @@ function useCount() {
   return (n, word) => t(n === 1 ? `p.cr.${word}1` : `p.cr.${word}N`, { n });
 }
 
-// The period of the report in words (the API end is exclusive: the day after the last day chosen).
-function periodWords(period, t) {
-  const iso = (v) => (v ? v.slice(0, 10) : '');
-  const start = iso(period?.start);
-  const end = period?.end ? iso(new Date(new Date(period.end).getTime() - 86400000).toISOString()) : '';
+// The chosen period in words: first and last day included ('' when open).
+function periodWords(start, end, t) {
   if (start && end) return t('p.cr.periodRange', { a: start, b: end });
   if (start) return t('p.cr.periodFrom', { a: start });
   if (end) return t('p.cr.periodUntil', { a: end });
@@ -96,11 +93,12 @@ function FileRow({ file, report, scopeWord, printing, onOpen }) {
 /** labId, or classId for all labs of the class; name is the lab's or the class's. */
 export default function CitationReport({ labId, classId, name, onOpenConversation }) {
   const t = useT();
-  const count = useCount();
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
+  // A new period is being loaded: the old report stays, dimmed.
+  const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
   const sheet = useRef(null);
   const url = classId ? `/api/teacher/classes/${classId}/citation-report` : `/api/teacher/labs/${labId}/citation-report`;
@@ -119,9 +117,11 @@ export default function CitationReport({ labId, classId, name, onOpenConversatio
     if (start) params.set('start', start);
     if (end) params.set('end', end);
     setError(null);
+    setLoading(true);
     api.get(`${url}${params.toString() ? `?${params}` : ''}`)
       .then((r) => { if (current) setReport(r); })
-      .catch((err) => { if (current) { setReport(null); setError(err.message || t('p.cr.loadFailed')); } });
+      .catch((err) => { if (current) { setReport(null); setError(err.message || t('p.cr.loadFailed')); } })
+      .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [url, start, end, t]);
 
@@ -129,8 +129,7 @@ export default function CitationReport({ labId, classId, name, onOpenConversatio
   return (
     <div ref={sheet} className="max-w-3xl space-y-5">
       <h3 className="hidden text-lg font-semibold print:block">{t('p.cr.title')}{name ? ` — ${name}` : ''}</h3>
-      {report && <p className="hidden text-xs print:block">{t('p.cr.period', { text: periodWords(report.period, t) })}</p>}
-      <div className="no-print flex flex-wrap items-end gap-3">
+      <div className="no-print flex flex-wrap items-center gap-3">
         <label className="text-[13px] text-cream-muted">{t('p.cr.from')}
           <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
             className="ml-2 rounded-xl border border-border-default bg-ink-raised px-2 py-1 text-[13px] text-cream" />
@@ -139,9 +138,10 @@ export default function CitationReport({ labId, classId, name, onOpenConversatio
           <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
             className="ml-2 rounded-xl border border-border-default bg-ink-raised px-2 py-1 text-[13px] text-cream" />
         </label>
+        <div className="ml-auto flex gap-2">
         <button type="button" disabled={!report}
           onClick={() => downloadText(`course-use-${name || labId || classId}.md`, reportMarkdown(report, name))}
-          className="ml-auto cursor-pointer rounded-full border border-border-default px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover disabled:opacity-40">
+          className="cursor-pointer rounded-full border border-border-default px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover disabled:opacity-40">
           {t('p.exportMd')}
         </button>
         <button type="button" disabled={!report} onClick={() => setPrinting(true)}
@@ -149,10 +149,37 @@ export default function CitationReport({ labId, classId, name, onOpenConversatio
           className="cursor-pointer rounded-full border border-border-default px-3 py-1.5 text-[13px] text-cream-secondary hover:bg-ink-hover disabled:opacity-40">
           {t('p.print')}
         </button>
+        </div>
       </div>
       {error && <p role="alert" className="text-[14px] text-danger">{error}</p>}
       {!report && !error && <p className="text-[14px] text-cream-muted">{t('p.loading')}</p>}
       {report && (
+        <div className={`space-y-5 transition-opacity ${loading ? 'opacity-50' : ''}`} aria-busy={loading}>
+          <p className="text-[14px] font-medium text-cream">
+            {t('p.cr.period', { text: periodWords(start, end, t) })}
+            {(start || end) && (
+              <button type="button" onClick={() => { setStart(''); setEnd(''); }}
+                className="no-print ml-2 cursor-pointer text-[13px] font-normal text-cream-secondary underline hover:text-cream">
+                {t('p.cr.allTime')}
+              </button>
+            )}
+            <span role="status" className="no-print ml-2 font-normal text-cream-muted">{loading ? t('p.loading') : ''}</span>
+          </p>
+          {totals.questions === 0
+            ? <p className="text-[14px] text-cream-muted">{t('p.cr.noQuestions')}</p>
+            : <ReportBody report={report} scopeWord={scopeWord} printing={printing} onOpenConversation={onOpenConversation} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The report of a period with at least one student question. */
+function ReportBody({ report, scopeWord, printing, onOpenConversation }) {
+  const t = useT();
+  const count = useCount();
+  const totals = report.totals;
+  return (
         <>
           <p className="text-[13px] text-cream-muted">
             {t('p.cr.summary', { q: count(totals.questions, 'question'), s: count(totals.students, 'student'),
@@ -198,7 +225,5 @@ export default function CitationReport({ labId, classId, name, onOpenConversatio
             </section>
           )}
         </>
-      )}
-    </div>
   );
 }
