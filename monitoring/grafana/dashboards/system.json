@@ -95,6 +95,17 @@
           "range": false,
           "instant": true,
           "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(max(container_last_seen{name=\"edullm-release-searxng\"}) > bool (time() - 60)) or vector(0)",
+          "legendFormat": "Web search",
+          "range": false,
+          "instant": true,
+          "refId": "E"
         }
       ],
       "fieldConfig": {
@@ -1154,6 +1165,17 @@
               "range": false,
               "instant": true,
               "refId": "D"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "(max(container_last_seen{name=\"edullm-searxng\"}) > bool (time() - 60)) or vector(0)",
+              "legendFormat": "Web search",
+              "range": false,
+              "instant": true,
+              "refId": "E"
             }
           ],
           "fieldConfig": {

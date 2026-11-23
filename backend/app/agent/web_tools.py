@@ -42,6 +42,8 @@ import urllib3
 from pydantic import BaseModel, Field, ValidationError
 from requests.adapters import HTTPAdapter
 
+from backend.app.services import failure_log
+
 logger = logging.getLogger(__name__)
 
 USER_AGENT = 'Edu-LLM web search (course assistant)'
@@ -258,7 +260,12 @@ def _decode(body: bytes, content_type: str) -> str:
 
 async def search_searxng(base_url: str, query: str, count: int, *, client: httpx.AsyncClient | None = None,
                          language: str = 'all') -> list[dict]:
-    """The first ``count`` results of a SearXNG instance (its JSON API), best first."""
+    """The first ``count`` results of a SearXNG instance (its JSON API), best first.
+
+    A failed search, and an empty one while some engines did not answer (they
+    refused SearXNG, e.g. a captcha), are recorded for monitoring (failure_log,
+    component web_search): the model just answers without the web, so nobody
+    would notice otherwise."""
     params = {'q': query, 'format': 'json', 'pageno': 1, 'safesearch': '1', 'language': language}
     own = client is None
     client = client or httpx.AsyncClient(timeout=FETCH_TIMEOUT, headers={'User-Agent': USER_AGENT})
@@ -266,9 +273,14 @@ async def search_searxng(base_url: str, query: str, count: int, *, client: httpx
         response = await client.get(base_url.rstrip('/') + '/search', params=params)
         response.raise_for_status()
         payload = response.json()
+    except Exception as exc:
+        failure_log.record('web_search', type(exc).__name__)
+        raise
     finally:
         if own:
             await client.aclose()
+    if not payload.get('results') and payload.get('unresponsive_engines'):
+        failure_log.record('web_search', 'no_results')
     results = sorted(payload.get('results', []), key=lambda x: x.get('score', 0), reverse=True)
     # Some engines return links without a host ("http:///go/..."): left out.
     usable = [item for item in results if _is_web_link(item.get('url') or '')]

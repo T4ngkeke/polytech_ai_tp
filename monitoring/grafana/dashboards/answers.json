@@ -1828,7 +1828,7 @@
       "type": "table",
       "id": 44,
       "title": "Service failures",
-      "description": "Failures the student does not see: a service failed and the answer went on without it (the reranker: merged order kept; the embeddings: full-text search only; a picture view; a TP page; a session title). Retried means the second try worked. Failed model calls are in Model calls (Errors).",
+      "description": "Failures the student does not see: a service failed and the answer went on without it (the reranker: merged order kept; the embeddings: full-text search only; a picture view; a TP page; a session title; a web search that failed or found nothing because the search engines did not answer). Retried means the second try worked. Failed model calls are in Model calls (Errors).",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${db}"
@@ -1845,7 +1845,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "SELECT CASE component WHEN 'rerank' THEN 'Reranker' WHEN 'embedding' THEN 'Embeddings' WHEN 'vision' THEN 'Picture view' WHEN 'tp_text' THEN 'TP text' WHEN 'title' THEN 'Session title' WHEN 'report' THEN 'Teacher report' WHEN 'report_embedding' THEN 'Teacher report (embeddings)' WHEN 'captions' THEN 'Figure captions (worker)' WHEN 'worker' THEN 'Worker' ELSE component END AS \"Service\", kind AS \"Error\", count(*) AS \"Count\", max(created_at) AS \"Last\"\nFROM service_failures WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 3 DESC",
+          "rawSql": "SELECT CASE component WHEN 'rerank' THEN 'Reranker' WHEN 'embedding' THEN 'Embeddings' WHEN 'vision' THEN 'Picture view' WHEN 'tp_text' THEN 'TP text' WHEN 'title' THEN 'Session title' WHEN 'report' THEN 'Teacher report' WHEN 'report_embedding' THEN 'Teacher report (embeddings)' WHEN 'captions' THEN 'Figure captions (worker)' WHEN 'worker' THEN 'Worker' WHEN 'web_search' THEN 'Web search' ELSE component END AS \"Service\", kind AS \"Error\", count(*) AS \"Count\", max(created_at) AS \"Last\"\nFROM service_failures WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 3 DESC",
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
@@ -1906,7 +1906,7 @@
             "type": "grafana-postgresql-datasource",
             "uid": "${db}"
           },
-          "rawSql": "SELECT $__timeGroupAlias(created_at, 1h), CASE component WHEN 'rerank' THEN 'Reranker' WHEN 'embedding' THEN 'Embeddings' WHEN 'vision' THEN 'Picture view' WHEN 'tp_text' THEN 'TP text' WHEN 'title' THEN 'Session title' WHEN 'report' THEN 'Teacher report' WHEN 'report_embedding' THEN 'Teacher report (embeddings)' WHEN 'captions' THEN 'Figure captions (worker)' WHEN 'worker' THEN 'Worker' ELSE component END AS metric, count(*) AS value\nFROM service_failures WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, 1h), CASE component WHEN 'rerank' THEN 'Reranker' WHEN 'embedding' THEN 'Embeddings' WHEN 'vision' THEN 'Picture view' WHEN 'tp_text' THEN 'TP text' WHEN 'title' THEN 'Session title' WHEN 'report' THEN 'Teacher report' WHEN 'report_embedding' THEN 'Teacher report (embeddings)' WHEN 'captions' THEN 'Figure captions (worker)' WHEN 'worker' THEN 'Worker' WHEN 'web_search' THEN 'Web search' ELSE component END AS metric, count(*) AS value\nFROM service_failures WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1",
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,

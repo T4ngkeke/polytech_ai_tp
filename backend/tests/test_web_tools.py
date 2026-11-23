@@ -166,3 +166,31 @@ async def test_a_lab_without_course_files_keeps_web_search():
     assert 'search_web' in offered[0] and not COURSE_TOOL_NAMES & offered[0]
     assert NO_DOCUMENTS_WEB_TURN in model.seen[0][-1]['content']
     assert [s['id'] for s in result.web_sources] == ['W1'] and result.answer == 'Python 3.14 [W1].'
+
+
+@pytest.mark.parametrize('respond, kind', [
+    (lambda request: httpx.Response(502), 'HTTPStatusError'),
+    (lambda request: (_ for _ in ()).throw(httpx.ConnectError('refused')), 'ConnectError'),
+])
+def test_a_failed_search_is_recorded_for_monitoring(respond, kind):
+    from backend.app.services import failure_log
+    failure_log._pending.clear()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    with pytest.raises(httpx.HTTPError):
+        asyncio.run(wt.search_searxng('http://searxng:8080', 'récursion', 5, client=client))
+    assert [(c, k) for c, k, _ in failure_log._pending] == [('web_search', kind)]
+    failure_log._pending.clear()
+
+
+@pytest.mark.parametrize('payload, recorded', [
+    ({'results': [], 'unresponsive_engines': [['google', 'CAPTCHA']]}, True),
+    ({'results': [], 'unresponsive_engines': []}, False),  # nothing found: not a failure
+    ({'results': [{'url': 'https://a.org', 'title': 'A'}], 'unresponsive_engines': [['google', 'timeout']]}, False),
+])
+def test_an_empty_search_with_silent_engines_is_recorded(payload, recorded):
+    from backend.app.services import failure_log
+    failure_log._pending.clear()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload)))
+    asyncio.run(wt.search_searxng('http://searxng:8080', 'récursion', 5, client=client))
+    assert [(c, k) for c, k, _ in failure_log._pending] == ([('web_search', 'no_results')] if recorded else [])
+    failure_log._pending.clear()
