@@ -1,7 +1,7 @@
 /**
  * MessageContent.jsx — markdown rendering for assistant messages.
  *
- * Also: [E#] course citations as teal pills (onCite opens the passage;
+ * Also: [E#] course citations as gray pills (onCite opens the passage;
  * citeInfo gives the hover card), [W#] web sources as gray pills (webSources
  * map), ```mermaid diagrams and ```chart charts (components/Diagram, Chart;
  * the only drawn formats, checked by the server), and a Run button on Python
@@ -151,7 +151,7 @@ function makeComponents({ streaming, onCite, citeInfo, webSources, onRun }) {
         return (
           <button type="button" onClick={() => onCite(ids)}
             title={info ? `${info.filename} · p.${info.page}${info.text ? `\n${info.text}` : ''}` : ids}
-            className="mx-0.5 inline-flex -translate-y-px items-center rounded-md bg-cyan/10 px-1.5 align-baseline text-[11.5px] font-medium leading-5 text-cyan hover:bg-cyan/20 cursor-pointer">
+            className="mx-0.5 inline-flex -translate-y-px items-center rounded-md bg-ink-surface px-1.5 align-baseline text-[11.5px] leading-5 text-cream-secondary hover:bg-ink-hover hover:text-cream cursor-pointer">
             {children}
           </button>
         );

@@ -187,11 +187,11 @@ function Sources({ answer, sessionId, onOpenSource }) {
                     onClick={() => onOpenSource({ ...sourceOf(answer.citations, answer.citations.find((c) =>
                       c.document_id === file.documentId && (c.revision_id || null) === file.revisionId), sessionId),
                       page: page.pageNo })}
-                    className="rounded-md bg-cyan/10 px-1.5 text-[12px] leading-5 text-cyan hover:bg-cyan/20">
+                    className="rounded-md bg-ink-surface px-1.5 text-[12px] leading-5 text-cream-secondary hover:bg-ink-hover hover:text-cream">
                     {t('sources.page', { n: page.pageNo })}
                   </button>
                 ) : (
-                  <span key={page.pageNo} className="rounded-md bg-ink-surface px-1.5 text-[12px] leading-5 text-cream-muted" title={t('sources.unavailable')}>
+                  <span key={page.pageNo} className="rounded-md border border-dashed border-border-default px-1.5 text-[12px] leading-[18px] text-cream-muted" title={t('sources.unavailable')}>
                     {t('sources.page', { n: page.pageNo })}
                   </span>
                 )))}

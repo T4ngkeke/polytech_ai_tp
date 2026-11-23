@@ -54,7 +54,7 @@ export default function SourcePanel({ source, onClose }) {
         <div className="flex shrink-0 flex-wrap gap-1.5 border-b border-border-subtle px-3 py-2">
           {pages.map((p) => (
             <button key={p.pageNo} type="button" onClick={() => setPage(p.pageNo)} aria-pressed={p.pageNo === page}
-              className={`rounded-md px-1.5 text-[12px] leading-5 ${p.pageNo === page ? 'bg-cyan text-on-accent' : 'bg-cyan/10 text-cyan hover:bg-cyan/20'}`}>
+              className={`rounded-md px-1.5 text-[12px] leading-5 ${p.pageNo === page ? 'bg-cyan text-on-accent' : 'bg-ink-surface text-cream-secondary hover:bg-ink-hover hover:text-cream'}`}>
               {t('sources.page', { n: p.pageNo })}
             </button>
           ))}
