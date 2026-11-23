@@ -6,22 +6,35 @@
 // and disclaimer: see third_party/open-webui/LICENSE.
 //
 // Python in the student's browser (backend/app/agent/code_tools.py). Messages:
-// in {id, code}; out {id, stdout, stderr, result}. The worker keeps its Python
-// state between runs of one page; the page ends it when a run takes too long.
+// in {id, code}; out {id, phase: 'ready'} once Python and the imported packages
+// are loaded (the page starts the run clock then), and {id, stdout, stderr,
+// result} at the end. The worker keeps its Python state between runs of one
+// page; the page ends it when loading or a run takes too long.
 /* global importScripts, loadPyodide */
 
-const PYODIDE_URL = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
+// Served by our nginx (frontend/scripts/fetch-pyodide.mjs), not a CDN.
+const PYODIDE_URL = `${self.location.origin}/pyodide/`;
 let ready = null;
 
 function load() {
   if (!ready) {
     ready = (async () => {
       importScripts(`${PYODIDE_URL}pyodide.js`);
-      return loadPyodide({ indexURL: PYODIDE_URL });
+      const pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
+      // pandas 2.2 warns about pyarrow on every import: noise for students.
+      await pyodide.runPythonAsync(PANDAS_QUIET);
+      return pyodide;
     })();
+    // A failed load (network) is tried again on the next run.
+    ready.catch(() => { ready = null; });
   }
   return ready;
 }
+
+const PANDAS_QUIET = `
+import warnings
+warnings.filterwarnings("ignore", message=r"(?s)\\s*Pyarrow will become a required dependency")
+`;
 
 const MATPLOTLIB_SHOW = `
 import base64
@@ -61,6 +74,7 @@ self.onmessage = async (event) => {
     pyodide.setStdin({ error: true });
     await pyodide.loadPackagesFromImports(code);
     if (code.includes('matplotlib')) await pyodide.runPythonAsync(MATPLOTLIB_SHOW);
+    self.postMessage({ id, phase: 'ready' });
     result = text(await pyodide.runPythonAsync(code));
   } catch (error) {
     stderr += String(error && error.message ? error.message : error);

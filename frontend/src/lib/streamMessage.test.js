@@ -32,6 +32,9 @@ test('the process line keeps phases (no repeat), steps, tasks and Python runs', 
   m = applyToMessage(m, { type: 'step', step: { tool: 'search', query: 'cas de base', count: 3 } });
   assert.equal(m.steps.length, 1);
   m = applyToMessage(m, { type: 'code', id: 'r1', code: 'print(1)' });
+  assert.equal(m.live_runs[0].status, 'loading');
+  m = applyToMessage(m, { type: 'code_phase', id: 'r1', phase: 'running' });
+  assert.equal(m.live_runs[0].status, 'running');
   m = applyToMessage(m, { type: 'code_output', id: 'r1', output: { status: 'ok', stdout: '1\n' } });
   assert.deepEqual(m.live_runs, [{ id: 'r1', code: 'print(1)', status: 'ok', stdout: '1\n' }]);
   m = applyToMessage(m, { type: 'done', courseUse: 'none', webSources: null, codeRuns: null, at: 5 });

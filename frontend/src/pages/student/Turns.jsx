@@ -279,7 +279,7 @@ export const Answer = memo(function Answer({ answer, live, isLast, sessionId, on
     }
     return linkWeb(text, new Set(webSources.keys()));
   }, [answer.content, citations, webSources]);
-  const onRun = useMemo(() => (canRunCode ? (code) => runPython(code) : null), [canRunCode]);
+  const onRun = useMemo(() => (canRunCode ? (code, onPhase) => runPython(code, { onPhase }) : null), [canRunCode]);
   const hasText = !!answer.content;
   return (
     <div className="group/answer">

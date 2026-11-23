@@ -67,8 +67,8 @@ function CopyButton({ value }) {
 export function RunOutput({ run }) {
   const t = useT();
   if (!run) return null;
-  if (run.status === 'running') {
-    return <div className="rounded-b-xl border-t border-white/10 bg-[#16181d] px-4 py-2.5 font-mono text-[12.5px] text-white/60">{t('code.running')}</div>;
+  if (run.status === 'loading' || run.status === 'running') {
+    return <div className="rounded-b-xl border-t border-white/10 bg-[#16181d] px-4 py-2.5 font-mono text-[12.5px] text-white/60">{t(`code.${run.status}`)}</div>;
   }
   const parts = [...outputParts(run.stdout), ...outputParts(run.result && run.result !== 'None' ? run.result : '')];
   const error = run.error || run.stderr;
@@ -90,8 +90,8 @@ const CodeBlock = memo(function CodeBlock({ language, value, streaming, onRun })
   const [run, setRun] = useState(null);
   const python = /^(python|py|python3)$/i.test(language || '');
   const start = async () => {
-    setRun({ status: 'running' });
-    setRun({ status: 'done', ...(await onRun(value)) });
+    setRun({ status: 'loading' });
+    setRun({ status: 'done', ...(await onRun(value, (phase) => setRun({ status: phase }))) });
   };
   return (
     <div className="my-3 overflow-hidden rounded-xl bg-[#0f1115] text-[13px]">
@@ -99,7 +99,7 @@ const CodeBlock = memo(function CodeBlock({ language, value, streaming, onRun })
         <span className="font-mono text-[11.5px] text-white/50">{language || 'code'}</span>
         <div className="flex items-center gap-1">
           {python && onRun && !streaming && (
-            <button type="button" onClick={start} disabled={run?.status === 'running'}
+            <button type="button" onClick={start} disabled={run?.status === 'loading' || run?.status === 'running'}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-white/60 hover:bg-white/10 hover:text-white cursor-pointer disabled:opacity-50">
               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z" /></svg>
               {t('code.run')}

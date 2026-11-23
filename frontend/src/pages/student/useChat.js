@@ -115,8 +115,9 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
             case 'code':
               update(action);
               // Python for this browser: run it, send the output back to the agent.
-              runForAgent(action.id, action.code).then((output) => update({ type: 'code_output', id: action.id,
-                output: { status: output.error || output.stderr ? 'error' : 'ok', ...output } }));
+              runForAgent(action.id, action.code, (phase) => update({ type: 'code_phase', id: action.id, phase }))
+                .then((output) => update({ type: 'code_output', id: action.id,
+                output: { status: output.error || /Traceback|Error:/.test(output.stderr || '') ? 'error' : 'ok', ...output } }));
               return;
             case 'done':
               streamedIds.current.delete(answerId);

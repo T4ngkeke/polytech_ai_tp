@@ -46,9 +46,11 @@ from pydantic import BaseModel, Field, ValidationError
 logger = logging.getLogger(__name__)
 
 MAX_CODE_CALLS = 5
-# One run, from the event to the result. The first run also loads Pyodide in
-# the browser (a few seconds); Open WebUI waits up to 300 s by default.
-CODE_TIMEOUT = 60.0
+# One run, from the event to the result. The page allows 90 s to load Python
+# and the imported packages (served by our nginx) and then 50 s to run
+# (frontend/src/lib/python.js LOAD_SECONDS, RUN_SECONDS), so it answers within
+# 140 s; Open WebUI waits up to 300 s by default.
+CODE_TIMEOUT = 150.0
 CODE_MAX_CHARS = 20_000
 # Each of stdout, stderr and result, as stored and as the model reads it.
 STORED_OUTPUT_CHARS = 20_000
@@ -74,7 +76,9 @@ EXECUTE_CODE = {'type': 'function', 'function': {
 CODE_TOOLS = [EXECUTE_CODE]
 
 CODE_NOTE = ('A Python interpreter is on for this question: execute_code runs Python in the student\'s '
-             'browser (Pyodide). Do not install packages: pip, subprocess and micropip are not available; '
+             'browser (Pyodide). Besides the standard library, only these packages exist: numpy, matplotlib, '
+             'pandas, scipy, sympy, networkx, scikit-learn, statsmodels, sqlite3. Do not install packages: '
+             'pip, subprocess and micropip are not available; '
              'input() does not work, so give values in the code. Print meaningful outputs; a matplotlib '
              'figure shown with plt.show() appears to the student under the code. Use it to run the '
              "student's code on a small example, to check a result, or to show one. Keep to hints when "
