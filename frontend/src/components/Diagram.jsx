@@ -1,11 +1,14 @@
 /**
  * Diagram.jsx — a ```mermaid block of an answer, drawn by Mermaid with its
  * strict security level (no HTML labels, no click handlers). The server has
- * checked the diagram type (backend agent/visuals.py); if Mermaid still
- * cannot read it, the source is shown as code.
+ * checked the diagram type (backend agent/visuals.py). A source Mermaid
+ * cannot read is tried once more with its labels quoted (lib/mermaidRepair.js);
+ * if that fails too, the source is shown as code. Mermaid never draws its own
+ * error picture (it used to land at the bottom of the page).
  */
 import { memo, useEffect, useState } from 'react';
 import { useTheme } from '../lib/theme';
+import { repairMermaid } from '../lib/mermaidRepair';
 
 let counter = 0;
 let loading = null;
@@ -22,9 +25,20 @@ function Diagram({ source }) {
     let current = true;
     loadMermaid().then(async (mermaid) => {
       mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme === 'dark' ? 'dark' : 'neutral',
-        fontFamily: 'Inter, system-ui, sans-serif' });
-      const { svg: drawn } = await mermaid.render(`edullm-diagram-${++counter}`, source);
-      if (current) { setSvg(drawn); setFailed(false); }
+        fontFamily: 'Inter, system-ui, sans-serif', suppressErrorRendering: true });
+      let text = source;
+      if (!(await mermaid.parse(text, { suppressErrors: true }))) {
+        text = repairMermaid(source);
+        if (text === source || !(await mermaid.parse(text, { suppressErrors: true }))) throw new Error('unreadable');
+      }
+      const id = `edullm-diagram-${++counter}`;
+      try {
+        const { svg: drawn } = await mermaid.render(id, text);
+        if (current) { setSvg(drawn); setFailed(false); }
+      } finally {
+        // render() leaves its scratch element in <body> when it fails.
+        document.getElementById(`d${id}`)?.remove();
+      }
     }).catch(() => { if (current) setFailed(true); });
     return () => { current = false; };
   }, [source, theme]);
