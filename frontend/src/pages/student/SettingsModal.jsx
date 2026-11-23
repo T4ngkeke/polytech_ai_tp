@@ -9,11 +9,12 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../lib/api';
 import useAuthStore from '../../store/authStore';
-import { LANGUAGES, useLanguage, useT } from '../../lib/i18n';
+import { useT } from '../../lib/i18n';
 import { setTheme, themeChoice, useTheme } from '../../lib/theme';
 import { percent } from '../../lib/quota';
 import { downloadText } from '../../lib/exportFile';
 import Icon from '../../components/Icon';
+import LanguageSelect from '../../components/LanguageSelect';
 import { Meter, Modal, Switch } from './ui';
 
 const TABS = [
@@ -52,20 +53,12 @@ function Segmented({ value, options, onChange, label }) {
 
 function General() {
   const t = useT();
-  const lang = useLanguage();
-  const setting = useAuthStore((s) => s.uiLanguage);
-  const saveSettings = useAuthStore((s) => s.saveSettings);
   useTheme();
   const [theme, setChoice] = useState(themeChoice());
   return (
     <div>
       <Row label={t('settings.language')}>
-        <select id="settings-language" value={setting || ''} aria-label={t('settings.language')}
-          onChange={(e) => saveSettings({ ui_language: e.target.value || null }).catch(() => toast.error(t('error.save')))}
-          className="rounded-lg border border-border-default bg-ink-raised px-2.5 py-1.5 text-[13.5px] text-cream">
-          <option value="">{t('settings.languageAuto', { lang: LANGUAGES.find((l) => l.code === lang)?.label })}</option>
-          {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-        </select>
+        <LanguageSelect />
       </Row>
       <Row label={t('settings.theme')}>
         <Segmented value={theme} label={t('settings.theme')}

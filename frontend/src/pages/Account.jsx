@@ -1,7 +1,8 @@
 /**
  * Account.jsx — User center.
  *
- * Self-service password change for every role (student / teacher / admin).
+ * Page language and self-service password change for every role (student /
+ * teacher / admin).
  * The old password is verified server-side; on success the user stays logged in.
  */
 
@@ -12,6 +13,7 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import useAuthStore from '../store/authStore';
 import { useT } from '../lib/i18n';
+import LanguageSelect from '../components/LanguageSelect';
 
 export default function Account() {
   const t = useT();
@@ -63,7 +65,12 @@ export default function Account() {
 
         <div className="rounded-2xl border border-border-subtle bg-ink-raised p-5">
           <p className="truncate text-[15px] font-semibold text-cream">{username || t('p.account.user')}</p>
-          <p className="text-[13px] text-cream-muted">{userRole}</p>
+          <p className="text-[13px] text-cream-muted">{userRole && t(`a.role.${userRole}`)}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-ink-raised p-5">
+          <label htmlFor="account-language" className="text-[15px] font-semibold text-cream">{t('settings.language')}</label>
+          <LanguageSelect id="account-language" />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-border-subtle bg-ink-raised p-5">

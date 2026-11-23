@@ -82,6 +82,10 @@ export default function Admin() {
             </span>
             <span className="min-w-0 flex-1 truncate text-[14px] text-cream">{username || 'Admin'}</span>
             <ThemeToggle className="!p-1.5 !rounded-lg" />
+            <button type="button" onClick={() => navigate('/account')} title={t('t.sb.account')} aria-label={t('t.sb.account')}
+              className="cursor-pointer rounded-lg p-1.5 text-cream-secondary hover:bg-ink-hover hover:text-cream">
+              <Icon name="settings" className="h-4 w-4" />
+            </button>
             <button type="button" onClick={handleSignOut} title={t('logout')} aria-label={t('logout')}
               className="cursor-pointer rounded-lg p-1.5 text-cream-secondary hover:bg-ink-hover hover:text-cream">
               <Icon name="logout" className="h-4 w-4" />

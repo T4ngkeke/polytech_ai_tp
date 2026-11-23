@@ -54,6 +54,17 @@ async def test_settings_change_only_what_is_sent(db_session, seed):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('role', [UserRole.teacher, UserRole.admin])
+async def test_teachers_and_admins_choose_their_language_too(db_session, role):
+    user = make_user(role=role, username=f'lang-{role.value}')
+    db_session.add(user)
+    await db_session.commit()
+    async with await make_client(db_session, user) as c:
+        assert (await c.put('/api/auth/settings', json={'ui_language': 'zh'})).json()['ui_language'] == 'zh'
+        assert (await c.get('/api/auth/me')).json()['ui_language'] == 'zh'
+
+
+@pytest.mark.asyncio
 async def test_pin_and_rename_a_chat(db_session, seed):
     sid = seed['kept'].id
     async with await make_client(db_session, seed['lea']) as c:
