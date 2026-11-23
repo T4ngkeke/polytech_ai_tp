@@ -31,7 +31,7 @@ def test_urls_that_are_refused_before_any_lookup(url):
 
 
 @pytest.mark.parametrize('address', [
-    '127.0.0.1', '10.0.0.5', '192.168.168.199', '172.17.0.2', '169.254.169.254', '100.108.32.29',
+    '127.0.0.1', '10.0.0.5', '192.168.1.10', '172.17.0.2', '169.254.169.254', '100.64.0.1',
     '0.0.0.0', '::1', 'fe80::1', '::ffff:127.0.0.1', '64:ff9b::7f00:1', '2002:7f00:1::',
 ])
 def test_hosts_that_resolve_to_inner_addresses_are_refused(monkeypatch, address):
