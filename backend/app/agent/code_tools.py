@@ -46,11 +46,11 @@ from pydantic import BaseModel, Field, ValidationError
 logger = logging.getLogger(__name__)
 
 MAX_CODE_CALLS = 5
-# One run, from the event to the result. The page allows 90 s to load Python
-# and the imported packages (served by our nginx) and then 50 s to run
-# (frontend/src/lib/python.js LOAD_SECONDS, RUN_SECONDS), so it answers within
-# 140 s; Open WebUI waits up to 300 s by default.
-CODE_TIMEOUT = 150.0
+# One run, from the event to the result. The page allows 180 s to load Python
+# and the imported packages (served by our nginx; slow links) and then 50 s to
+# run (frontend/src/lib/python.js LOAD_SECONDS, RUN_SECONDS), so it answers
+# within 230 s; Open WebUI waits up to 300 s by default.
+CODE_TIMEOUT = 240.0
 CODE_MAX_CHARS = 20_000
 # Each of stdout, stderr and result, as stored and as the model reads it.
 STORED_OUTPUT_CHARS = 20_000

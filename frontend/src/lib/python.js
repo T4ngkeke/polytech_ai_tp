@@ -21,7 +21,9 @@ import api from './api';
 
 // Same as VERSION in scripts/fetch-pyodide.mjs (pyodideVersion.test.js checks it).
 export const PYODIDE_VERSION = '0.29.3';
-export const LOAD_SECONDS = 90;
+// A first load is ~20 MB (Python, numpy, matplotlib): over a slow link (~250 kB/s
+// seen through a forwarded port) that is 80 s. Later loads come from the cache.
+export const LOAD_SECONDS = 180;
 export const RUN_SECONDS = 50;
 const AGENT = typeof navigator === 'undefined' ? '' : navigator.userAgent;
 export const DRAW_SVG = /AppleWebKit/.test(AGENT) && !/Chrome\/|Chromium\//.test(AGENT);

@@ -17,6 +17,36 @@
 const VERSION = new URL(self.location.href).searchParams.get('pyodide');
 const PYODIDE_URL = `${self.location.origin}/pyodide/${VERSION}/`;
 let ready = null;
+let lock = null;
+
+// The packages the code imports, one at a time, each after its dependencies.
+// loadPackagesFromImports asks for all of them at once; on a slow link Safari
+// fails the requests that wait too long in its queue ("Load failed").
+async function loadImports(pyodide, code) {
+  if (!lock) lock = (await (await fetch(`${PYODIDE_URL}pyodide-lock.json`)).json()).packages;
+  const byImport = new Map();
+  for (const [name, pkg] of Object.entries(lock)) {
+    for (const module of pkg.imports || []) byImport.set(module, name);
+  }
+  const findImports = pyodide.pyimport('pyodide.code').find_imports;
+  const found = findImports(code);
+  const imports = found.toJs();
+  found.destroy();
+  findImports.destroy();
+  const order = [];
+  const seen = new Set();
+  const visit = (name) => {
+    if (!name || seen.has(name) || !lock[name]) return;
+    seen.add(name);
+    (lock[name].depends || []).forEach(visit);
+    order.push(name);
+  };
+  imports.forEach((module) => visit(byImport.get(String(module).split('.')[0])));
+  for (const name of order) {
+    // Quiet: the "Loading numpy…" lines are not the student's output.
+    if (!pyodide.loadedPackages[name]) await pyodide.loadPackage(name, { messageCallback: () => {} });
+  }
+}
 
 function load() {
   if (!ready) {
@@ -81,8 +111,7 @@ self.onmessage = async (event) => {
     pyodide.setStderr({ batched: (line) => { stderr += `${line}\n`; } });
     // input() cannot wait for the student here: it raises instead of hanging.
     pyodide.setStdin({ error: true });
-    // Quiet: the "Loading numpy…" lines are not the student's output.
-    await pyodide.loadPackagesFromImports(code, { messageCallback: () => {} });
+    await loadImports(pyodide, code);
     pyodide.globals.set('_edullm_svg', !!svg);
     if (code.includes('matplotlib')) await pyodide.runPythonAsync(MATPLOTLIB_SHOW);
     self.postMessage({ id, phase: 'ready' });
