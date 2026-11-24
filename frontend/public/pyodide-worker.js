@@ -72,7 +72,8 @@ self.onmessage = async (event) => {
     pyodide.setStderr({ batched: (line) => { stderr += `${line}\n`; } });
     // input() cannot wait for the student here: it raises instead of hanging.
     pyodide.setStdin({ error: true });
-    await pyodide.loadPackagesFromImports(code);
+    // Quiet: the "Loading numpy…" lines are not the student's output.
+    await pyodide.loadPackagesFromImports(code, { messageCallback: () => {} });
     if (code.includes('matplotlib')) await pyodide.runPythonAsync(MATPLOTLIB_SHOW);
     self.postMessage({ id, phase: 'ready' });
     result = text(await pyodide.runPythonAsync(code));

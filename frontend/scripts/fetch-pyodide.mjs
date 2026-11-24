@@ -10,14 +10,16 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const VERSION = '0.26.4';
+// 0.29 or later: with 0.26 and 0.27 (Emscripten 3.1.58), Safari 27 draws blank
+// matplotlib figures (Agg draws nothing; numpy and Pillow are fine).
+const VERSION = '0.29.3';
 const BASE = `https://cdn.jsdelivr.net/pyodide/v${VERSION}/full/`;
 const CORE = {
-  'pyodide.js': 'c0069107621d5b942a659e737a12e774cc0451feaa2256f475d72e071d844ec7',
-  'pyodide.asm.js': '919560652ed3dad3707cb3a394785da1e046fb13dc0defa162058ff230cb7eed',
-  'pyodide.asm.wasm': 'b7e66a19427a55010ac3367c1b6c64b893f9826f783412945fdf0c3337f3bc94',
-  'python_stdlib.zip': '72894522b791858b9d613ac786b951d8b5094035dcf376313ea24a466810f336',
-  'pyodide-lock.json': 'cd50b49de944c579045e122fe8628b31f9ce446379f032f36c05e273d38766e0',
+  'pyodide.js': '718d40f1c015dd25ec724cc8fc4e2325d6a45a92ae225121ff6953f224a16f72',
+  'pyodide.asm.js': '1263f02b5b26099b96112378156f242dd98b39a8201ba7765e5fe3d455c5ce91',
+  'pyodide.asm.wasm': 'e2f4ee75b325e35eb31bfb8c613d4dd5098f5502c156a97847686875b5025480',
+  'python_stdlib.zip': '4298b6ee445cb724c3973437da47789752b9e6ff4e26619026b283ec801fc46b',
+  'pyodide-lock.json': '3256ffc76388de0e37f4b34d42ab484268d1afc675179ff97b2a5bb14f84ccac',
 };
 // What a course may import (with their dependencies). sqlite3 for SQL exercises.
 const PACKAGES = ['numpy', 'matplotlib', 'pandas', 'scipy', 'sympy', 'networkx',
