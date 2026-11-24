@@ -6,7 +6,7 @@
 // and disclaimer: see third_party/open-webui/LICENSE.
 //
 // Python in the student's browser (backend/app/agent/code_tools.py). Messages:
-// in {id, code}; out {id, phase: 'ready'} once Python and the imported packages
+// in {id, code, svg}; out {id, phase: 'ready'} once Python and the imported packages
 // are loaded (the page starts the run clock then), and {id, stdout, stderr,
 // result} at the end. The worker keeps its Python state between runs of one
 // page; the page ends it when loading or a run takes too long.
@@ -45,13 +45,20 @@ from io import BytesIO
 os.environ["MPLBACKEND"] = "AGG"
 import matplotlib.pyplot
 def _edullm_show(*, block=None):
+    # _edullm_svg (set by the worker): an SVG the page turns into a PNG.
     buf = BytesIO()
-    matplotlib.pyplot.savefig(buf, format="png")
+    if _edullm_svg:
+        with matplotlib.rc_context({"svg.fonttype": "none"}):
+            matplotlib.pyplot.savefig(buf, format="svg")
+        mime = "image/svg+xml"
+    else:
+        matplotlib.pyplot.savefig(buf, format="png")
+        mime = "image/png"
     buf.seek(0)
     img_str = base64.b64encode(buf.read()).decode("utf-8")
     matplotlib.pyplot.clf()
     buf.close()
-    print(f"data:image/png;base64,{img_str}")
+    print(f"data:{mime};base64,{img_str}")
 matplotlib.pyplot.show = _edullm_show
 `;
 
@@ -64,7 +71,7 @@ function text(value) {
 }
 
 self.onmessage = async (event) => {
-  const { id, code } = event.data;
+  const { id, code, svg = false } = event.data;
   let stdout = '';
   let stderr = '';
   let result = '';
@@ -76,6 +83,7 @@ self.onmessage = async (event) => {
     pyodide.setStdin({ error: true });
     // Quiet: the "Loading numpy…" lines are not the student's output.
     await pyodide.loadPackagesFromImports(code, { messageCallback: () => {} });
+    pyodide.globals.set('_edullm_svg', !!svg);
     if (code.includes('matplotlib')) await pyodide.runPythonAsync(MATPLOTLIB_SHOW);
     self.postMessage({ id, phase: 'ready' });
     result = text(await pyodide.runPythonAsync(code));
