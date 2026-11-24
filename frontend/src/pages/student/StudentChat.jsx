@@ -406,7 +406,7 @@ export default function StudentChat() {
             <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-[760px] space-y-8 px-4 pb-8 pt-4">
                 {loadingMessages && <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-cream-faint border-t-cream" />}
-                <Thread chat={chat} sessionId={activeSessionId} features={features} examMode={examMode}
+                <Thread chat={chat} sessionId={activeSessionId} features={features} examMode={examMode} pythonOn={tools.includes('code')}
                   disabledReason={disabledReason} onOpenSource={setPreview} inputRef={inputRef}
                   hidden={hidden} onNewChat={newChat} />
               </div>

@@ -100,7 +100,7 @@ export default function TestDrivePanel({ lab, labName, examMode = false }) {
         <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[760px] space-y-8 px-4 pb-8 pt-4">
             {!messages.length && <p className="pt-6 text-center text-[14px] text-cream-muted">{t('t.test.hint')}</p>}
-            <Thread chat={chat} sessionId={sessionId} features={features} examMode={examMode}
+            <Thread chat={chat} sessionId={sessionId} features={features} examMode={examMode} pythonOn={tools.includes('code')}
               onOpenSource={setPreview} inputRef={inputRef} rate={false} />
           </div>
         </div>

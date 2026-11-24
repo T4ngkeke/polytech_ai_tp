@@ -89,8 +89,8 @@ CODE_NOTE = ('A Python interpreter is on for this question: execute_code runs Py
 # modes): earlier turns of the chat may show runs and figures, and the model
 # then claimed a figure "shown below" that nothing had drawn (2026-11-23).
 NO_CODE_NOTE = ('No code runs for this question: never say that code was run, or that a figure or an '
-                'output is shown. You may give Python code; the student can run it with the Run button '
-                'under it, or turn Python on for the next question.')
+                'output is shown. You may give Python code; to run it, the student turns Python on '
+                '(a Run button then shows under it).')
 
 ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*[A-Za-z]|\x1b\([AB]|\x1b[PX^_].*?\x1b\\|\x1b\].*?(?:\x07|\x1b\\)')
 

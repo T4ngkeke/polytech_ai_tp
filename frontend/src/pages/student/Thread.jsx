@@ -1,14 +1,15 @@
 /**
  * Thread.jsx — the turns of one conversation (questions, answers, versions),
  * drawn the same way in the student chat and the teacher's test drive.
- * `chat` is what useChat returns.
+ * `chat` is what useChat returns. The Run button under code shows only while
+ * the Python switch of the composer is on (`pythonOn`).
  */
 import { useMemo } from 'react';
 import { useT } from '../../lib/i18n';
 import { buildTurns } from '../../lib/turns';
 import { Answer, Question, VersionSwitch } from './Turns';
 
-export default function Thread({ chat, sessionId, features = {}, examMode = false, disabledReason = null,
+export default function Thread({ chat, sessionId, features = {}, examMode = false, pythonOn = false, disabledReason = null,
   onOpenSource, inputRef, hidden = null, onNewChat = null, rate = true }) {
   const t = useT();
   const { messages, streaming, send, chosenVersion, setChosenVersion, streamedIds } = chat;
@@ -46,7 +47,7 @@ export default function Thread({ chat, sessionId, features = {}, examMode = fals
               <div data-latest-answer={isLast ? '' : undefined}>
                 <Answer answer={answer} live={live} isLast={isLast && index === turn.current}
                   sessionId={sessionId} onOpenSource={onOpenSource}
-                  canRunCode={!!features.code && !examMode}
+                  canRunCode={!!features.code && !examMode && pythonOn}
                   rateable={rate && !streamedIds.current.has(answer.id)}
                   onPick={isLast && !streaming ? (option) => send(option) : null}
                   onType={() => inputRef?.current?.focus()}
