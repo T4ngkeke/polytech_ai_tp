@@ -64,7 +64,8 @@ export default function TeachingReport({ labId, labName = '', studentId = null, 
       first += from === to ? ` ${t('p.tr.on', { a: from })}` : ` ${t('p.tr.fromTo', { a: from, b: to })}`;
     }
     const parts = [first];
-    if (f.questions_given_to_model < f.questions) parts.push(t('p.tr.latest', { n: f.questions_given_to_model }));
+    if (f.replaced_versions) parts.push(t('p.tr.replaced', { n: f.replaced_versions }));
+    if (f.questions_given_to_model < f.questions + (f.replaced_versions || 0)) parts.push(t('p.tr.latest', { n: f.questions_given_to_model }));
     if (f.pages_matched_by_search) parts.push(t('p.tr.pagesTied', { n: f.pages_matched_by_search }));
     return parts.join(' · ');
   })();

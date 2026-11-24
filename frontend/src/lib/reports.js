@@ -27,7 +27,8 @@ export function basis(report) {
     const to = day(f.period.last_question);
     parts[0] += from === to ? ` on ${from}` : ` from ${from} to ${to}`;
   }
-  if (f.questions_given_to_model < f.questions) parts.push(`the latest ${f.questions_given_to_model} given to the model`);
+  if (f.replaced_versions) parts.push(`plus ${f.replaced_versions} replaced version(s)`);
+  if (f.questions_given_to_model < f.questions + (f.replaced_versions || 0)) parts.push(`the latest ${f.questions_given_to_model} given to the model`);
   if (f.pages_matched_by_search) parts.push(`${f.pages_matched_by_search} tied to pages by a course search`);
   return parts.join(' · ');
 }

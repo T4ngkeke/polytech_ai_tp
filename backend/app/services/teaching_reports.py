@@ -8,6 +8,10 @@ Two kinds, both for one lab, made when the teacher asks:
 
 The numbers are counted here, never by the model. The model gets them with the
 questions themselves (students named S1, S2, ...), not the answers. A question
+the student edited or asked again keeps its replaced versions (messages
+.superseded_at): the numbers count current questions only, and the list marks
+each version ("version 2/5, replaced") and whether its answer had code, so a
+report can say when a student rewrote a question many times to get a solution. A question
 is tied to PDF pages by the citations of its answer; a question without
 citations (Direct mode, exam mode) is tied to the pages a course search finds
 for it (top 3 passages, no answer model). Teacher test sessions are left out.
@@ -18,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -41,6 +46,15 @@ MAX_OUTPUT = 1500
 CALL_SECONDS = 180
 STALE_AFTER = timedelta(minutes=10)
 PROBLEM_STOPS = {"budget_exhausted": "tool limit reached", "no_answer": "no answer"}
+
+# A fenced code block that is not a drawing (mermaid, chart): the answer gave code.
+_FENCE = re.compile(r"```([\w-]*)")
+_DRAWINGS = {"mermaid", "chart"}
+
+
+def has_code(text: str | None) -> bool:
+    return any(lang.lower() not in _DRAWINGS for lang in _FENCE.findall(text or "")[::2])
+
 
 _tasks: set[asyncio.Task] = set()     # keeps running reports from being collected
 
@@ -66,7 +80,8 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
     """Everything the model is told, counted from stored rows."""
     rows = (await db.execute(
         select(Message.id, Message.session_id, Message.sender, Message.content, Message.created_at,
-               Message.answer_mode, Message.feedback, Session.user_id)
+               Message.answer_mode, Message.feedback, Message.version_of, Message.superseded_at,
+               Session.user_id)
         .join(Session, Session.id == Message.session_id)
         .where(Session.lab_id == lab.id, Session.is_test.is_(False),
                *([Session.user_id == student_id] if student_id else []))
@@ -77,15 +92,25 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
     for r in rows:
         if r.sender == SenderType.user:
             pending[r.session_id] = {"id": r.id, "user_id": r.user_id, "text": r.content,
-                                     "at": r.created_at, "mode": None, "down": False, "answer_id": None}
+                                     "at": r.created_at, "mode": None, "down": False, "answer_id": None,
+                                     "root": r.version_of or r.id, "replaced": r.superseded_at is not None,
+                                     "code": False}
             questions.append(pending[r.session_id])
         elif r.sender == SenderType.llm and r.session_id in pending:
             q = pending.pop(r.session_id)
-            q.update(mode=r.answer_mode, answer_id=r.id,
+            q.update(mode=r.answer_mode, answer_id=r.id, code=has_code(r.content),
                      down=getattr(r.feedback, "value", r.feedback) == MessageFeedback.down.value)
     if not questions:
         raise NoQuestions()
     questions.sort(key=lambda q: q["at"])
+    # Versions of one question (edit, ask again): numbered in time order.
+    versions = defaultdict(list)
+    for q in questions:
+        versions[q["root"]].append(q)
+    for group in versions.values():
+        for k, q in enumerate(group, 1):
+            q["version"] = (k, len(group))
+    current = [q for q in questions if not q["replaced"]]
 
     documents = await _lab_documents(db, lab)
     names = {doc_id: name for doc_id, (_, name) in documents.items()}
@@ -125,7 +150,7 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
             q["pages_from"] = "search"
 
     file_questions, page_questions = Counter(), Counter()
-    for q in questions:
+    for q in current:
         pages = pages_of.get(q["id"], set())
         for name in {n for n, _ in pages}:
             file_questions[name] += 1
@@ -143,21 +168,25 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
     alias = {}
     for q in questions:
         alias.setdefault(q["user_id"], f"S{len(alias) + 1}")
-    per_student = Counter(q["user_id"] for q in questions)
+    per_student = Counter(q["user_id"] for q in current)
     recent = questions[-MAX_QUESTIONS:]
+    replaced = [q for q in questions if q["replaced"]]
     facts = {
         "lab": lab.name,
         "period": {"first_question": _iso(questions[0]["at"]), "last_question": _iso(questions[-1]["at"])},
-        "questions": len(questions),
+        "questions": len(current),
+        "replaced_versions": len(replaced),
+        "questions_asked_in_several_versions": sum(1 for g in versions.values() if len(g) > 1),
+        "replaced_versions_whose_answer_had_code": sum(q["code"] for q in replaced),
         "questions_given_to_model": len(recent),
         "students": len(per_student),
         "questions_per_student": sorted(per_student.values(), reverse=True),
         # Answers older than the modes (2026-10-15) have none: counted apart, so a
         # report does not read "unknown" as a mode students chose.
-        "modes": dict(Counter(q["mode"] for q in questions if q["mode"])),
-        "answers_before_modes_were_recorded": sum(1 for q in questions if not q["mode"]),
-        "thumbs_down": sum(q["down"] for q in questions),
-        "answers_not_finished": len([q for q in questions if q["id"] in problem]),
+        "modes": dict(Counter(q["mode"] for q in current if q["mode"])),
+        "answers_before_modes_were_recorded": sum(1 for q in current if not q["mode"]),
+        "thumbs_down": sum(q["down"] for q in current),
+        "answers_not_finished": len([q for q in current if q["id"] in problem]),
         "documents_in_lab": sorted(name for _, name in documents.values()),
         "documents_by_questions": [{"file": f, "questions": n} for f, n in file_questions.most_common()],
         "pages_by_questions": [{"file": f, "page": p, "questions": n}
@@ -170,10 +199,21 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
             "pages": sorted(f"{f} p.{p}" for f, p in pages_of.get(q["id"], set()))[:3],
             **({"thumbs_down": True} if q["down"] else {}),
             **({"problem": problem[q["id"]]} if q["id"] in problem else {}),
+            **({"version": f'{q["version"][0]}/{q["version"][1]}', "replaced": q["replaced"],
+                "answer_had_code": q["code"]} if q["version"][1] > 1 else {}),
         } for q in recent],
     }
     return facts
 
+
+# Both reports: versions of one question (the student edited it or asked again).
+VERSIONS_NOTE = """
+A question marked [version k/n] was asked in n versions: the student edited it or asked for a new answer,
+and only the last version stays in the conversation (replaced ones are marked "replaced"). The numbers
+count it once. When a student rewrote a question many times, or asked for a full solution or a corrected
+exercise in several ways, say so under difficulties: give the number of versions, quote the student's
+words, and say whether an answer had code ([answer had code]). Describe what happened; do not say the
+student cheated."""
 
 LAB_PROMPT = """You write a short report for a teacher about how students used the course assistant in one lab ({lab}).
 Use only the facts and the student questions below. Never invent numbers: take them from the facts.
@@ -225,12 +265,16 @@ def build_messages(facts: dict, *, student: str | None = None) -> list[dict]:
     headings = HEADINGS["student" if student else "lab"].get(language, HEADINGS["lab"]["English"])
     system = (STUDENT_PROMPT.format(student=student, lab=facts["lab"], language=language, h=headings)
               if student else LAB_PROMPT.format(lab=facts["lab"], language=language, h=headings))
+    if facts.get("replaced_versions"):
+        system += VERSIONS_NOTE
     lines = [f'- [{q["student"]}, {q["date"]}, {q["mode"] or "?"}] {q["text"]}'
              + (f' (pages: {", ".join(q["pages"])})' if q["pages"] else "")
              + (" [thumbs down]" if q.get("thumbs_down") else "")
-             + (f' [{q["problem"]}]' if q.get("problem") else "") for q in listed]
+             + (f' [{q["problem"]}]' if q.get("problem") else "")
+             + (f' [version {q["version"]}{", replaced" if q["replaced"] else ""}]' if q.get("version") else "")
+             + (" [answer had code]" if q.get("answer_had_code") else "") for q in listed]
     user = ("Facts:\n" + json.dumps(shown, ensure_ascii=False, indent=1)
-            + f"\n\nQuestions ({len(listed)} most recent of {facts['questions']}):\n" + "\n".join(lines))
+            + f"\n\nQuestions ({len(listed)} most recent, replaced versions included):\n" + "\n".join(lines))
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 

@@ -86,7 +86,7 @@ async def lab_question_search(db, lab_id: uuid.UUID, query: str, limit: int = 50
         .join(Session, Session.id == Message.session_id).where(*where))).one()
     rows = (await db.execute(
         select(Message.id, Message.content, Message.created_at, Session.id, Session.is_deleted,
-               User.id, User.username)
+               User.id, User.username, Message.superseded_at)
         .join(Session, Session.id == Message.session_id).join(User, User.id == Session.user_id)
         .where(*where).order_by(Message.created_at.desc()).limit(limit))).all()
     question_ids = [row[0] for row in rows]
@@ -105,7 +105,9 @@ async def lab_question_search(db, lab_id: uuid.UUID, query: str, limit: int = 50
             'message_id': mid, 'session_id': sid, 'student_id': uid, 'student_name': name,
             'question': content if len(content) <= 1000 else content[:1000] + '…',
             'created_at': created, 'session_deleted': deleted,
+            # A version the student replaced (edit, ask again): kept for the audit.
+            'replaced': replaced_at is not None,
             'answer_mode': answers.get(mid, (None, False))[0],
             'cited': answers.get(mid, (None, False))[1],
-        } for mid, content, created, sid, deleted, uid, name in rows],
+        } for mid, content, created, sid, deleted, uid, name, replaced_at in rows],
     }

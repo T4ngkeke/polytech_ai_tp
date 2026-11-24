@@ -50,6 +50,7 @@ export default function QuestionSearch({ labId, onOpenConversation }) {
                     ? <span className="rounded bg-cyan/10 px-1.5 text-cyan">{t('audit.cited')}</span>
                     : item.answer_mode && <span className="rounded bg-warn-soft px-1.5 text-gold">{t('audit.notCited')}</span>}
                   {item.session_deleted && <span className="rounded bg-ink-surface px-1.5">{t('audit.deleted')}</span>}
+                  {item.replaced && <span className="rounded bg-warn-soft px-1.5 text-gold">{t('audit.replaced')}</span>}
                 </div>
                 <p className="mt-1 line-clamp-3 text-[14px] text-cream"><Highlighted text={item.question} term={q.trim()} /></p>
               </button>

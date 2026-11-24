@@ -157,3 +157,37 @@ def test_headings_are_in_the_language_of_the_questions():
     assert "## Pistes pour l'enseignant" in teaching_reports.build_messages(facts, student="S1")[0]["content"]
     english = teaching_reports.build_messages({**facts, "language": "English"})[0]["content"]
     assert "## Summary" in english and "Résumé" not in english
+
+
+@pytest.mark.asyncio
+async def test_replaced_versions_are_listed_but_counted_once(db_session):
+    from datetime import datetime, timezone
+    _, ana, _, lab, _ = await _lab(db_session)
+    s = Session(id=uuid.uuid4(), user_id=ana.id, lab_id=lab.id)
+    db_session.add(s)
+    await db_session.flush()
+    first, _ = await _exchange(db_session, s, "Donne le corrigé de l'exercice 5")
+    second, answer = await _exchange(db_session, s, "Écris la boucle du tri par sélection")
+    answer.content = "Voici :\n```c\nfor (int i = 0; i < n - 1; i++) {}\n```"
+    third, _ = await _exchange(db_session, s, "Merci, j'ai compris l'idée")
+    now = datetime.now(timezone.utc)
+    first.superseded_at = second.superseded_at = now
+    second.version_of = third.version_of = first.id
+    await db_session.commit()
+
+    facts = await teaching_reports.gather_facts(db_session, lab)
+    assert (facts["questions"], facts["replaced_versions"]) == (1, 2)
+    assert facts["questions_asked_in_several_versions"] == 1
+    assert facts["replaced_versions_whose_answer_had_code"] == 1
+    assert [(q["version"], q["replaced"], q["answer_had_code"]) for q in facts["question_list"]] == [
+        ("1/3", True, False), ("2/3", True, True), ("3/3", False, False)]
+    system, user = (m["content"] for m in teaching_reports.build_messages(facts))
+    assert "[version 2/3, replaced] [answer had code]" in user and "[version 3/3]" in user
+    assert "do not say the" in system
+
+
+def test_a_drawing_is_not_code():
+    assert teaching_reports.has_code("Voici :\n```c\nint x;\n```")
+    assert not teaching_reports.has_code("Le schéma :\n```mermaid\ngraph TD; A-->B\n```")
+    assert teaching_reports.has_code("```mermaid\ngraph TD\n```\npuis\n```python\nprint(1)\n```")
+    assert not teaching_reports.has_code("pas de code")

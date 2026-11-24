@@ -336,6 +336,7 @@ const S = {
   'p.tr.on': { zh: '（{a}）', fr: 'le {a}', en: 'on {a}' },
   'p.tr.fromTo': { zh: '（{a} 到 {b}）', fr: 'du {a} au {b}', en: 'from {a} to {b}' },
   'p.tr.latest': { zh: '只把最近的 {n} 个交给了模型', fr: 'les {n} dernières transmises au modèle', en: 'the latest {n} given to the model' },
+  'p.tr.replaced': { zh: '另有 {n} 个被替换的版本', fr: 'plus {n} version(s) remplacée(s)', en: 'plus {n} replaced version(s)' },
   'p.tr.pagesTied': { zh: '{n} 个通过课程搜索对应到了页', fr: '{n} reliées à des pages par une recherche dans le cours', en: '{n} tied to pages by a course search' },
 };
 
