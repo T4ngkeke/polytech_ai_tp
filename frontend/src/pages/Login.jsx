@@ -8,6 +8,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import useAuthStore, { DEFAULT_ROUTES } from '../store/authStore';
 import ThemeToggle from '../components/ThemeToggle';
+import PasswordInput from '../components/PasswordInput';
 import { useT } from '../lib/i18n';
 
 const FIELD = 'w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream placeholder:text-cream-muted focus:outline-none focus:border-cream-secondary';
@@ -89,9 +90,8 @@ export default function Login() {
               <label htmlFor="login-password" className="block text-[13px] text-cream-muted">
                 {t('p.login.password')}
               </label>
-              <input
+              <PasswordInput
                 id="login-password"
-                type="password"
                 required
                 autoComplete="current-password"
                 value={password}

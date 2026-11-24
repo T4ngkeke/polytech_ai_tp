@@ -226,6 +226,8 @@ const S = {
   'export.student': { zh: '学生', fr: 'Étudiant', en: 'Student' },
   'data.teacherSees': { zh: '老师可以看到你在这个班里的对话（包括已删除的）。', fr: 'Votre enseignant peut voir vos conversations de la classe, même supprimées.', en: 'Your teacher can see your conversations in the class, even deleted ones.' },
   'account.username': { zh: '用户名', fr: "Nom d'utilisateur", en: 'Username' },
+  'password.show': { zh: '显示密码', fr: 'Afficher le mot de passe', en: 'Show password' },
+  'password.hide': { zh: '隐藏密码', fr: 'Masquer le mot de passe', en: 'Hide password' },
   'password.change': { zh: '修改密码', fr: 'Changer le mot de passe', en: 'Change password' },
   'password.old': { zh: '当前密码', fr: 'Mot de passe actuel', en: 'Current password' },
   'password.new': { zh: '新密码（至少 6 位）', fr: 'Nouveau mot de passe (6 caractères au moins)', en: 'New password (at least 6 characters)' },

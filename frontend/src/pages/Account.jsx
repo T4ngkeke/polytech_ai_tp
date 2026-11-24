@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import useAuthStore from '../store/authStore';
 import { useT } from '../lib/i18n';
+import PasswordInput from '../components/PasswordInput';
 import LanguageSelect from '../components/LanguageSelect';
 
 export default function Account() {
@@ -100,12 +101,12 @@ function PasswordField({ label, value, onChange, autoComplete }) {
     <div className="space-y-1.5">
       <label className="block text-[13px] text-cream-muted">
         {label}
-        <input
-          type="password"
+        <PasswordInput
+          wrapperClassName="mt-1.5"
           value={value}
           autoComplete={autoComplete}
           onChange={(e) => onChange(e.target.value)}
-          className="mt-1.5 w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream focus:border-cream-secondary focus:outline-none"
+          className="w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream focus:border-cream-secondary focus:outline-none"
         />
       </label>
     </div>

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import ThemeToggle from '../components/ThemeToggle';
+import PasswordInput from '../components/PasswordInput';
 import { useT } from '../lib/i18n';
 
 const FIELD = 'w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream placeholder:text-cream-muted focus:outline-none focus:border-cream-secondary';
@@ -82,14 +83,14 @@ export default function Register() {
 
             <div className="space-y-1.5">
               <label htmlFor="reg-password" className="block text-[13px] text-cream-muted">{t('p.login.password')}</label>
-              <input id="reg-password" type="password" required autoComplete="new-password"
+              <PasswordInput id="reg-password" required autoComplete="new-password"
                 value={password} onChange={(e) => setPassword(e.target.value)}
                 placeholder={t('password.short')} className={FIELD} />
             </div>
 
             <div className="space-y-1.5">
               <label htmlFor="reg-confirm" className="block text-[13px] text-cream-muted">{t('p.register.confirm')}</label>
-              <input id="reg-confirm" type="password" required autoComplete="new-password"
+              <PasswordInput id="reg-confirm" required autoComplete="new-password"
                 value={confirm} onChange={(e) => setConfirm(e.target.value)} className={FIELD} />
             </div>
 

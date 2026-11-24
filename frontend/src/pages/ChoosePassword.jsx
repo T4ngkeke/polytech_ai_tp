@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import useAuthStore from '../store/authStore';
 import { useT } from '../lib/i18n';
+import PasswordInput from '../components/PasswordInput';
 
 const FIELD = 'w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream focus:outline-none focus:border-cream-secondary';
 
@@ -79,7 +80,7 @@ function Field({ id, label, value, onChange, autoFocus = false }) {
   return (
     <div className="space-y-1.5">
       <label className="block text-[13px] text-cream-muted" htmlFor={id}>{label}</label>
-      <input id={id} type="password" value={value} autoFocus={autoFocus} autoComplete="new-password"
+      <PasswordInput id={id} value={value} autoFocus={autoFocus} autoComplete="new-password"
         onChange={(e) => onChange(e.target.value)} className={FIELD} />
     </div>
   );

@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import api from '../../lib/api';
 import useAuthStore from '../../store/authStore';
 import { useT } from '../../lib/i18n';
+import PasswordInput from '../../components/PasswordInput';
 import { setTheme, themeChoice, useTheme } from '../../lib/theme';
 import { percent } from '../../lib/quota';
 import { downloadText } from '../../lib/exportFile';
@@ -200,18 +201,18 @@ function Account() {
       setError(err.message === 'Old password is incorrect' ? t('password.wrongOld') : err.message);
     } finally { setBusy(false); }
   };
-  const field = 'mt-1 w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream outline-none focus:border-cream-muted';
+  const field = 'w-full rounded-xl border border-border-default bg-ink-raised px-3 py-2 text-[14px] text-cream outline-none focus:border-cream-muted';
   return (
     <div>
       <Row label={t('account.username')}><span className="text-[14px] text-cream-secondary">{username}</span></Row>
       <form onSubmit={submit} className="max-w-sm space-y-3 py-3.5">
         <div className="text-[14px] font-medium text-cream">{t('password.change')}</div>
         <label className="block text-[13px] text-cream-secondary" htmlFor="pw-old">{t('password.old')}
-          <input id="pw-old" type="password" autoComplete="current-password" value={old} onChange={(e) => setOld(e.target.value)} className={field} /></label>
+          <PasswordInput id="pw-old" wrapperClassName="mt-1" autoComplete="current-password" value={old} onChange={(e) => setOld(e.target.value)} className={field} /></label>
         <label className="block text-[13px] text-cream-secondary" htmlFor="pw-new">{t('password.new')}
-          <input id="pw-new" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className={field} /></label>
+          <PasswordInput id="pw-new" wrapperClassName="mt-1" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className={field} /></label>
         <label className="block text-[13px] text-cream-secondary" htmlFor="pw-again">{t('password.again')}
-          <input id="pw-again" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} className={field} /></label>
+          <PasswordInput id="pw-again" wrapperClassName="mt-1" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} className={field} /></label>
         {error && <p role="alert" className="text-[13px] text-danger">{error}</p>}
         <button type="submit" disabled={busy || !old || !next} className="rounded-full bg-ink px-4 py-2 text-[13.5px] text-on-ink disabled:opacity-40">{t('password.save')}</button>
       </form>
