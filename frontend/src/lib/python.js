@@ -1,6 +1,6 @@
 /**
  * python.js — run Python in this browser (public/pyodide-worker.js, Pyodide
- * served from /pyodide/ by our nginx).
+ * served from /pyodide/<PYODIDE_VERSION>/ by our nginx).
  *
  * The research agent asks for a run with a `code` stream event; the page runs
  * it here and posts the output to /api/chat/code/{id} (backend
@@ -14,6 +14,8 @@
  */
 import api from './api';
 
+// Same as VERSION in scripts/fetch-pyodide.mjs (python.test.js checks it).
+export const PYODIDE_VERSION = '0.29.3';
 export const LOAD_SECONDS = 90;
 export const RUN_SECONDS = 50;
 let worker = null;
@@ -22,7 +24,7 @@ const waiting = new Map();
 
 function getWorker() {
   if (!worker) {
-    worker = new Worker('/pyodide-worker.js');
+    worker = new Worker(`/pyodide-worker.js?pyodide=${PYODIDE_VERSION}`);
     worker.onmessage = (event) => {
       const done = waiting.get(event.data.id);
       if (!done) return;

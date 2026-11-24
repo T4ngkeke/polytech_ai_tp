@@ -3,6 +3,8 @@
 // reads /pyodide/), not from a CDN: fast on the LAN, and no internet needed.
 //
 // Run at image build time (frontend/Dockerfile): node fetch-pyodide.mjs <out dir>.
+// Files go to <out dir>/<VERSION>/: a new version is a new address, so no browser
+// mixes cached files of two versions. src/lib/python.js names the same VERSION.
 // Every file is checked: the core files against the hashes below, the packages
 // against the sha256 of pyodide-lock.json. The lock written out lists only the
 // packages we serve, so importing any other one is a plain ModuleNotFoundError.
@@ -25,8 +27,8 @@ const CORE = {
 const PACKAGES = ['numpy', 'matplotlib', 'pandas', 'scipy', 'sympy', 'networkx',
   'scikit-learn', 'statsmodels', 'sqlite3'];
 
-const out = process.argv[2];
-if (!out) throw new Error('usage: node fetch-pyodide.mjs <out dir>');
+if (!process.argv[2]) throw new Error('usage: node fetch-pyodide.mjs <out dir>');
+const out = join(process.argv[2], VERSION);
 await mkdir(out, { recursive: true });
 
 async function fetchChecked(name, sha256) {

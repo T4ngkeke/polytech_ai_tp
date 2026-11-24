@@ -12,8 +12,10 @@
 // page; the page ends it when loading or a run takes too long.
 /* global importScripts, loadPyodide */
 
-// Served by our nginx (frontend/scripts/fetch-pyodide.mjs), not a CDN.
-const PYODIDE_URL = `${self.location.origin}/pyodide/`;
+// Served by our nginx (frontend/scripts/fetch-pyodide.mjs), not a CDN; the page
+// names the version (src/lib/python.js: /pyodide-worker.js?pyodide=0.29.3).
+const VERSION = new URL(self.location.href).searchParams.get('pyodide');
+const PYODIDE_URL = `${self.location.origin}/pyodide/${VERSION}/`;
 let ready = null;
 
 function load() {
