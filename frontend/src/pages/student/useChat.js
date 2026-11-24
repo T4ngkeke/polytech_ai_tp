@@ -79,7 +79,10 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
         { id: userId, sender: 'user', content: message, attachments, version_of: root, created_at: now },
         { id: answerId, sender: 'llm', content: '', created_at: now, started_at: Date.now(), phases: [], steps: [] }];
     });
+    // A new question follows the current versions (the ones the model reads):
+    // an older version the student was looking at is put back to the current.
     if (versionOf) setChosenVersion((v) => ({ ...v, [root]: undefined }));
+    else setChosenVersion({});
     cb.follow?.('pin');
     setStreaming(true);
     const ctrl = new AbortController();
