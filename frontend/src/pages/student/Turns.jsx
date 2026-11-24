@@ -302,7 +302,7 @@ export const Answer = memo(function Answer({ answer, live, isLast, sessionId, on
         </Suspense>
       ) : !live && (
         <p className="text-[14px] italic text-cream-muted">
-          {t('answer.none')}{' '}
+          {t(answer.stopped_elsewhere ? 'answer.stoppedElsewhere' : 'answer.none')}{' '}
           {onAskAgain && <button type="button" onClick={onAskAgain} className="not-italic text-cream underline">{t('answer.askAgain')}</button>}
         </p>
       )}

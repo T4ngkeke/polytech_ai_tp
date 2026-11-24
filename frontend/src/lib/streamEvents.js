@@ -70,7 +70,7 @@ export function interpretStreamEvent(ev) {
       return { type: 'follow_ups', messageId: parsed?.message_id ?? null, followUps: list };
     }
     case 'error':
-      return { type: 'error', detail: safeParse(ev.data)?.detail || 'Generation failed' };
+      return { type: 'error', detail: safeParse(ev.data)?.detail || 'Generation failed', code: safeParse(ev.data)?.code || null };
     case 'draft': {
       const parsed = safeParse(ev.data);
       return { type: 'draft', text: typeof parsed === 'string' ? parsed : '' };
@@ -106,12 +106,18 @@ export function interpretStreamEvent(ev) {
 /**
  * What to tell the student when the server refuses a question before the
  * stream starts (routers/chat.py: lab locked, not in the class, quota used,
- * conversation gone). `reload` names what the page should load again:
- * 'classes' (the lab or class changed) or 'usage' (the quota bar).
+ * conversation gone, changed in another window). `reload` names what the page
+ * should load again: 'classes' (the lab or class changed), 'usage' (the quota
+ * bar) or 'conversation'. `messageKey`: the same message in the i18n strings.
  * @param {number} status HTTP status
  * @param {string|null} detail the server's `detail`, when it is a string
  */
 export function streamRefusal(status, detail) {
+  // The conversation changed in another window (a newer question, or this one replaced).
+  if (detail === 'not_latest_question' || detail === 'message_not_found') {
+    return { message: 'This conversation changed in another window; it was loaded again.',
+      messageKey: 'chat.changedElsewhere', reload: 'conversation' };
+  }
   if (status === 429) return { message: quotaRefusal(detail), reload: 'usage' };
   if (status === 403) return { message: detail || 'You can no longer ask questions in this lab.', reload: 'classes' };
   if (status === 404) return { message: 'This conversation no longer exists. Open the lab again.', reload: 'classes' };

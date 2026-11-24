@@ -119,3 +119,11 @@ test('steps, tasks, code, follow-ups and the done fields are read', () => {
     { type: 'question', userMessageId: 'q1' });
   assert.equal(interpretStreamEvent({ event: 'question', data: '{}' }).type, 'ignore');
 });
+
+test('a question changed in another window reloads the conversation', () => {
+  for (const detail of ['not_latest_question', 'message_not_found']) {
+    const refusal = streamRefusal(detail === 'message_not_found' ? 404 : 409, detail);
+    assert.equal(refusal.reload, 'conversation');
+    assert.equal(refusal.messageKey, 'chat.changedElsewhere');
+  }
+});

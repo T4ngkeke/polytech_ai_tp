@@ -24,7 +24,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.agent.history import history_budget
@@ -121,6 +121,11 @@ def _research_frames(items):
     return frames
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+# The answer being written in each conversation, by this process (uvicorn runs
+# one worker): another window of the same student asks whether one is running
+# (GET /sessions/{id}/state) and may stop it (POST /sessions/{id}/stop).
+_running: dict[uuid.UUID, asyncio.Task] = {}
 
 
 async def _refuse(db: AsyncSession, user: User, lab_id, reason: str, code: int, detail: str):
@@ -447,6 +452,11 @@ async def chat_stream(
             language_model=language_model(agent), context_tokens=context,
             on_draft=draft, allow_ask=allow_ask and mode == 'research',
             mode=mode, exam_mode=exam_mode, exam_files=exam_files, session_factory=research_factory))
+        # A second request while one is answering is refused (RunConflict below):
+        # it must not take the place of the answer being written.
+        current_run = _running.get(scope.session_id)
+        if current_run is None or current_run.done():
+            _running[scope.session_id] = task
         last_sent = time.monotonic()
         try:
             while not task.done():
@@ -465,6 +475,10 @@ async def chat_stream(
                     if time.monotonic() - last_sent >= KEEPALIVE_SECONDS:
                         yield ": keep-alive\n\n"
                         last_sent = time.monotonic()
+            if task.cancelled():
+                # Stopped from another window of this conversation.
+                yield f"event: error\ndata: {json.dumps({'detail': 'The answer was stopped', 'code': 'stopped'})}\n\n"
+                return
             result = await task
             if result['status'] != 'finished':
                 yield f"event: error\ndata: {json.dumps({'detail': 'Research did not finish'})}\n\n"
@@ -516,15 +530,20 @@ async def chat_stream(
             if suggestions:
                 yield (f"event: follow_ups\ndata: {json.dumps({'message_id': str(result['message_id']), 'follow_ups': suggestions}, ensure_ascii=False)}\n\n")
         except RunConflict as exc:
-            detail = ('This question was already replaced by a newer version' if str(exc) == 'version_conflict'
+            # code: the page explains it in the student's language (busy: an
+            # answer is being written in another window; nothing was saved).
+            replaced = str(exc) == 'version_conflict'
+            detail = ('This question was already replaced by a newer version' if replaced
                       else 'Another research request is already running')
-            yield f"event: error\ndata: {json.dumps({'detail': detail})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'detail': detail, 'code': 'replaced' if replaced else 'busy'})}\n\n"
         except ResearchQuotaExceeded:
             yield f"event: error\ndata: {json.dumps({'detail': 'Daily token quota exceeded'})}\n\n"
         except Exception:
             logger.exception('Research request failed')
             yield f"event: error\ndata: {json.dumps({'detail': 'Research failed'})}\n\n"
         finally:
+            if _running.get(scope.session_id) is task:
+                del _running[scope.session_id]
             if not task.done():
                 task.cancel()
                 try:
@@ -534,6 +553,51 @@ async def chat_stream(
     return StreamingResponse(research_events(), media_type='text/event-stream',
                              headers={'Cache-Control': 'no-store',
                                       'X-Accel-Buffering': 'no'})
+
+
+async def _own_session(db: AsyncSession, session_id: uuid.UUID, user: User) -> Session:
+    session = (await db.execute(select(Session).where(
+        Session.id == session_id, Session.user_id == user.id,
+        Session.is_deleted.is_(False)))).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    return session
+
+
+@router.get("/sessions/{session_id}/state")
+async def session_state(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+):
+    """For a page that shows this conversation (another window may ask too):
+    whether an answer is being written, how many current questions it has and
+    the last one's id (a page that shows something else loads it again)."""
+    await _own_session(db, session_id, current_user)
+    task = _running.get(session_id)
+    current = (Message.session_id == session_id, Message.sender == SenderType.user,
+               Message.superseded_at.is_(None))
+    questions = await db.scalar(select(func.count()).select_from(Message).where(*current))
+    last = await db.scalar(select(Message.id).where(*current).order_by(Message.created_at.desc()).limit(1))
+    return {"running": task is not None and not task.done(), "questions": questions or 0,
+            "last_question_id": str(last) if last else None}
+
+
+@router.post("/sessions/{session_id}/stop")
+async def stop_session_answer(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+):
+    """Stop the answer being written in this conversation, from any window.
+    The run ends as when its own window stops it (cancelled, nothing saved
+    for the answer); that window is told with an error event, code 'stopped'."""
+    await _own_session(db, session_id, current_user)
+    task = _running.get(session_id)
+    if task is None or task.done():
+        return {"stopped": False}
+    task.cancel()
+    return {"stopped": True}
 
 
 @router.get("/sessions/{session_id}/history-start")

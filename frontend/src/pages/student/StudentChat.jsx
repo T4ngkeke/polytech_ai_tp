@@ -32,6 +32,7 @@ import JoinModal from './JoinModal';
 import { preloadContent } from './Turns';
 import Thread from './Thread';
 import useChat from './useChat';
+import useConversationSync from './useConversationSync';
 
 const REFRESH_MS = 90_000;
 const MIN_GAP_MS = 10_000;
@@ -139,6 +140,7 @@ export default function StudentChat() {
   }, [features, examMode]);
 
   // ── The conversation (useChat: sending, stream events, Python runs, versions) ──
+  const syncRef = useRef(null);
   const chat = useChat({
     tools, follow,
     getSessionId: async () => {
@@ -163,9 +165,15 @@ export default function StudentChat() {
       if (!isVersion) setInput((current) => current || text);
       if (refusal.reload === 'classes') loadClasses();
       if (refusal.reload === 'usage') loadUsage();
+      if (refusal.reload === 'conversation') syncRef.current?.checkNow();
     },
   });
   const { messages, setMessages, streaming, send, stop, reset } = chat;
+
+  // ── The same conversation in the student's other windows (useConversationSync) ──
+  const loadMessages = useCallback(async (sessionId) => (await api.get(`/api/student/sessions/${sessionId}`)).messages || [], []);
+  const sync = useConversationSync({ sessionId: activeSessionId, streaming, messages, setMessages, load: loadMessages });
+  syncRef.current = sync;
 
   // ── Lab and sessions ──
   const loadSession = useCallback(async (sessionId) => {
@@ -281,7 +289,8 @@ export default function StudentChat() {
   // ── Derived ──
   const locked = activeLab && !activeLab.is_active;
   const blocked = usage.blocked;
-  const disabledReason = !activeLabId ? 'noLab' : locked ? 'locked' : blocked ? 'quota' : null;
+  const disabledReason = !activeLabId ? 'noLab' : locked ? 'locked' : blocked ? 'quota'
+    : sync.elsewhere && !streaming ? 'elsewhere' : null;
   const resetKey = resetNotice(usage);
   const showReset = (() => { try { return resetKey && localStorage.getItem(resetKey) !== '1'; } catch { return false; } })();
   void seenReset;
@@ -298,6 +307,15 @@ export default function StudentChat() {
 
   const banners = (
     <>
+      {sync.elsewhere && !streaming && (
+        <div role="status" className="mb-2 flex items-center gap-3 rounded-xl bg-warn-soft px-3 py-2 text-[13px] text-gold">
+          <span className="flex-1">{t('chat.elsewhere')}</span>
+          <button type="button" onClick={sync.stopElsewhere}
+            className="shrink-0 cursor-pointer rounded-full border border-current px-2.5 py-0.5 text-[12.5px] hover:bg-ink-raised">
+            {t('chat.stopElsewhere')}
+          </button>
+        </div>
+      )}
       {showReset && (
         <div role="status" className="mb-2 flex items-center gap-3 rounded-2xl border border-success/30 bg-success/10 px-4 py-2.5 text-[13.5px] text-cream">
           <span className="flex-1">{t('quota.resetDone')}</span>

@@ -140,11 +140,24 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
             case 'follow_ups':
               setMessages((prev) => prev.map((m) => (m.id === (action.messageId || realAnswerId) ? applyToMessage(m, action) : m)));
               return;
-            case 'error':
+            case 'error': {
+              if (action.code === 'busy' || action.code === 'replaced') {
+                // Another window of this conversation was first: nothing was
+                // asked, the question goes back into the box (catch below).
+                const busy = new Error(action.code);
+                busy.refusal = { message: translate(action.code === 'busy' ? 'chat.busy' : 'chat.changedElsewhere'),
+                  reload: 'conversation' };
+                throw busy;
+              }
               setStreaming(false);
               update({ type: 'draft_reset' });
+              if (action.code === 'stopped') {
+                setMessages((prev) => prev.map((m) => (m.id === answerId ? { ...m, stopped_elsewhere: true } : m)));
+                return;
+              }
               toast.error(action.detail);
               return;
+            }
             default:
           }
         },
@@ -156,7 +169,7 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
         streamedIds.current.delete(answerId);
         setMessages((prev) => prev.filter((m) => m.id !== userId && m.id !== answerId)
           .map((m) => (versionOf && m.superseded_at === now ? { ...m, superseded_at: null } : m)));
-        toast.error(err.refusal.message, { duration: 8000 });
+        toast.error(err.refusal.messageKey ? translate(err.refusal.messageKey) : err.refusal.message, { duration: 8000 });
         callbacks.current.onRefusal?.(err.refusal, message, !!versionOf);
       } else if (!ctrl.signal.aborted) toast.error(translate('error.stream'));
     } finally {
