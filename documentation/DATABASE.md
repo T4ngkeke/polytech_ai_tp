@@ -114,7 +114,7 @@ A lab is one activity inside a class. Chat sessions and lab documents belong to 
 
 ### rule_items
 
-The teacher's rules for the tutor, one row per rule, for a class, a lab or a student in one class. The active rules of each level go into the prompt as a numbered list, class first, then lab, then student (`services/rule_service.py`). Added by `m4j_rule_items_v1`, which copied each text of `rules` into one row.
+The teacher's rules for the tutor, one row per rule, for a class, a lab or a student in one class. The active rules of each level go into the prompt as a numbered list, class first, then lab, then student (`services/rule_service.py`). Added by `m4j_rule_items_v1`, which copied each text of the old `rules` table into one row (`rules` itself was dropped by `m5b_drop_unused_tables_v1`).
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -127,18 +127,6 @@ The teacher's rules for the tutor, one row per rule, for a class, a lab or a stu
 | is_active | Boolean | Default true. |
 | position | Integer | Order in the list. |
 | created_at, updated_at | Timestamp | |
-
-### rules
-
-No longer read (replaced by `rule_items`). One text per (`level`, `target_id`); a student rule applied in every class.
-
-| Column | Type | Notes |
-| --- | --- | --- |
-| id | UUID | Primary key. |
-| level | Enum | `class`, `lab` or `student`. |
-| target_id | UUID | The id of the class, lab or student the rule applies to. |
-| rules_text | Text | The instructions. |
-| is_active | Boolean | Default true. |
 
 ### skill_presets
 
@@ -695,17 +683,8 @@ One row per model, embedding or rerank call of a run.
 | status | String(24) | |
 | created_at | Timestamp | |
 
-### session_read_state
-
-Not used any more. It held the follow-up source selection, which was removed. The table stays because the `m4c` migration creates it.
-
-| Column | Type | Notes |
-| --- | --- | --- |
-| session_id | UUID | Primary key. Foreign key to `sessions.id`. |
-| state_revision | Integer | Default 0. |
-| focused_sources, last_used_citation_ids, open_question | JSON | |
-| updated_at | Timestamp | |
-
 ## Tables of removed features
 
 The tables `learner_profiles`, `router_query_log` and `agent_trace_log` belonged to the removed LangGraph chat path. No model defines them any more and nothing writes them. A database created earlier may still hold them and their rows. An administrator can drop them.
+
+The migration `m5b_drop_unused_tables_v1` (2026-11-26) drops `rules` (one text per level, copied into `rule_items` by `m4j_rule_items_v1`) and `session_read_state` (the follow-up source selection, unused since 2026-10-12). A new database gets an empty `rules` table just before `m4j` runs, so that the copy works (`scripts/migrate_document_snapshots.py`, `BEFORE`).

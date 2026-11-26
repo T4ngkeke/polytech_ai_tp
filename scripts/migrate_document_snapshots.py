@@ -71,6 +71,8 @@ M4Z_VERSION = 'm4z_follow_ups_v1'
 M4Z_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m4z.sql')
 M5A_VERSION = 'm5a_context_summary_v1'
 M5A_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m5a.sql')
+M5B_VERSION = 'm5b_drop_unused_tables_v1'
+M5B_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m5b.sql')
 MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_SQL_PATH),
               (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH),
               (M4C_VERSION, M4C_SQL_PATH), (M4E_VERSION, M4E_SQL_PATH),
@@ -93,7 +95,15 @@ MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_
               (M4X_VERSION, M4X_SQL_PATH),
               (M4Y_VERSION, M4Y_SQL_PATH),
               (M4Z_VERSION, M4Z_SQL_PATH),
-              (M5A_VERSION, M5A_SQL_PATH))
+              (M5A_VERSION, M5A_SQL_PATH),
+              (M5B_VERSION, M5B_SQL_PATH))
+
+# Run before a version's own statements, only when it is applied. M4-J copies
+# the old `rules` table, which a new database no longer has (its model went on
+# 2026-11-26): an empty one lets M4-J run, and M5-B drops it again.
+BEFORE = {M4J_VERSION: ('CREATE TABLE IF NOT EXISTS rules (id UUID PRIMARY KEY, level TEXT NOT NULL, '
+                        'target_id UUID NOT NULL, rules_text TEXT NOT NULL, '
+                        'is_active BOOLEAN NOT NULL DEFAULT true)',)}
 
 
 async def _apply_one(conn, version, path):
@@ -104,6 +114,8 @@ async def _apply_one(conn, version, path):
         if previous != checksum:
             raise ValueError('migration_checksum_mismatch')
         return False
+    for stmt in BEFORE.get(version, ()):
+        await conn.execute(text(stmt))
     for stmt in sql.split('-- statement')[1:]:
         if stmt.strip():
             await conn.execute(text(stmt))

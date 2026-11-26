@@ -44,7 +44,7 @@ After a change of the embedding server, `scripts/reembed_documents.py` computes 
 
 This section records how the teachers moved, in case it must be undone.
 
-- The tables were created once with the feature flags off. Then `migrate_from_v6` copied the data from the v6-beta database, which it only read: 8 accounts (1 admin, 2 teachers, 5 students), 5 classes (all set to exam mode), 4 memberships, 5 labs, 5 conversations with their 18 messages and 4 days of usage. The checksums of the accounts and of the messages are the same on both sides. The teachers' passwords did not change. Everyone logged in again once, because the signing secret is new.
+- The tables were created once with the feature flags off. Then `migrate_from_v6` (a one-time script, removed on 2026-11-26) copied the data from the v6-beta database, which it only read: 8 accounts (1 admin, 2 teachers, 5 students), 5 classes (all set to exam mode), 4 memberships, 5 labs, 5 conversations with their 18 messages and 4 days of usage. The checksums of the accounts and of the messages are the same on both sides. The teachers' passwords did not change. Everyone logged in again once, because the signing secret is new.
 - The model settings were copied from the dev database.
 - The v6-stable stack (`edullm-v6-frontend` on port 80, `edullm-v6-backend`, `edullm-v6-db`) and `edullm-v6-beta-backend-1` were stopped. Their containers and volumes are kept. `edullm-v6-beta-postgres-1` and its backup container still run, unchanged.
 

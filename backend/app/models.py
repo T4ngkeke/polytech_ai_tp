@@ -143,13 +143,6 @@ class SenderType(str, enum.Enum):
     llm = "llm"
 
 
-class RuleLevel(str, enum.Enum):
-    """Polymorphic rule target level."""
-    class_ = "class"
-    lab = "lab"
-    student = "student"
-
-
 class DocumentStatus(str, enum.Enum):
     """Ingestion state machine for an uploaded course document."""
     pending = "pending"
@@ -365,43 +358,13 @@ class Lab(Base):
         return f"<Lab id={self.id} name={self.name!r} class={self.class_id}>"
 
 
-# ---------------------------------------------------------------------------
-# 6. Rule — Polymorphic 3-tier (class / lab / student)
-# ---------------------------------------------------------------------------
-
-
-class Rule(Base):
-    __tablename__ = "rules"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), primary_key=True, default=uuid.uuid4
-    )
-    level: Mapped[RuleLevel] = mapped_column(
-        Enum(RuleLevel, name="rulelevel"), nullable=False
-    )
-    # Polymorphic target — points to a Class ID, Lab ID, or User ID
-    # No FK constraint because it references different tables based on `level`
-    target_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), nullable=False, index=True
-    )
-    rules_text: Mapped[str] = mapped_column(Text, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-
-    __table_args__ = (
-        UniqueConstraint("level", "target_id", name="uq_rule_level_target"),
-    )
-
-    def __repr__(self) -> str:  # pragma: no cover
-        return f"<Rule id={self.id} level={self.level} target={self.target_id} active={self.is_active}>"
-
-
 class RuleItem(Base):
     """One rule a teacher gives the tutor, for a class, a lab or a student.
 
     The active rules of each level are sent to the model as a numbered list
     (rule_service.get_active_rule_texts). A student rule belongs to one class
-    (class_id) and applies only there. Replaces the one text per level of
-    `rules` (kept, no longer read).
+    (class_id) and applies only there. Replaced the one text per level of the
+    old `rules` table (copied by M4-J, dropped by M5-B).
     """
     __tablename__ = "rule_items"
     __table_args__ = (
@@ -1342,19 +1305,6 @@ class MessageCitation(Base):
     asset_id: Mapped[uuid.UUID | None] = mapped_column(GUID())
     origin: Mapped[str] = mapped_column(String(32), nullable=False)
     availability: Mapped[str] = mapped_column(String(16), nullable=False, default='available')
-
-
-class SessionReadState(Base):
-    # Unused since 2026-10-12: the follow-up "selected source" was removed and
-    # nothing reads or writes this table. It stays so the ORM matches the m4c
-    # migration; dropping it needs a new migration.
-    __tablename__ = 'session_read_state'
-    session_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey('sessions.id', ondelete='CASCADE'), primary_key=True)
-    state_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    focused_sources: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    last_used_citation_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    open_question: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 
 class ModelCallUsage(Base):

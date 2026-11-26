@@ -104,7 +104,7 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
 
 from backend.app.auth import create_access_token, hash_password
 from backend.app.models import (
-    Class, ClassStudent, Lab, Rule, RuleLevel,
+    Class, ClassStudent, Lab,
     Session, SystemConfig, User, UserRole,
 )
 

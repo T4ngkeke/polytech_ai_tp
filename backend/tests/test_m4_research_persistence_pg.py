@@ -519,12 +519,13 @@ async def test_m4c_sql_migration_repeatable_after_legacy_tables(pg_session):
     from sqlalchemy import text
     from scripts.migrate_document_snapshots import M4C_SQL_PATH, M4C_VERSION, _apply_one
     from backend.app.models import (
-        AgentRun, MessageCitation, SessionReadState, ModelCallUsage, UsageReservation,
+        AgentRun, MessageCitation, ModelCallUsage, UsageReservation,
     )
     await pg_session.commit()
     async with pg_session.bind.begin() as conn:
-        for model in (UsageReservation, ModelCallUsage, MessageCitation,
-                      SessionReadState, AgentRun):
+        # session_read_state has no model since M5-B; M4-C still makes it.
+        await conn.execute(text('DROP TABLE IF EXISTS session_read_state'))
+        for model in (UsageReservation, ModelCallUsage, MessageCitation, AgentRun):
             await conn.run_sync(lambda sync, table=model.__table__: table.drop(sync))
         await conn.execute(text('CREATE TABLE IF NOT EXISTS document_schema_migrations '
             '(version TEXT PRIMARY KEY, checksum TEXT NOT NULL, '
@@ -537,6 +538,9 @@ async def test_m4c_sql_migration_repeatable_after_legacy_tables(pg_session):
                       'model_call_usage','usage_reservations'):
             assert await conn.scalar(text('SELECT to_regclass(:name) IS NOT NULL'),
                                      {'name': table})
+        # It points at sessions and no model knows it: the next test's drop_all
+        # could not drop sessions while it is there (M5-B drops it in a real DB).
+        await conn.execute(text('DROP TABLE session_read_state'))
 
 
 @pytest.mark.asyncio
