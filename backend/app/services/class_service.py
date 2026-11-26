@@ -8,6 +8,7 @@ authorization checks (ownership for teachers, none for admins).
 
 import secrets
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -47,7 +48,8 @@ async def create_class(db: AsyncSession, teacher_id: uuid.UUID, name: str) -> Cl
     NEW_CLASS_EXAM_MODE is off."""
     code = await generate_unique_invite_code(db)
     new_class = Class(name=name, teacher_id=teacher_id, invite_code=code,
-                      exam_mode=settings.NEW_CLASS_EXAM_MODE)
+                      exam_mode=settings.NEW_CLASS_EXAM_MODE,
+                      exam_mode_since=datetime.now(timezone.utc) if settings.NEW_CLASS_EXAM_MODE else None)
     db.add(new_class)
     await db.flush()
     await db.refresh(new_class)

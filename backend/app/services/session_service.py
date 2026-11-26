@@ -12,7 +12,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.models import Session
+from backend.app.models import Class, Lab, Session
+
+
+def visible_in_exam():
+    """A condition on Session: false for a conversation started before its
+    class went into exam mode, while the exam lasts. The student does not see
+    it then (it may hold course answers); the teacher's audit still does."""
+    return ~select(Class.id).join(Lab, Lab.class_id == Class.id).where(
+        Lab.id == Session.lab_id, Class.exam_mode.is_(True), Class.exam_mode_since.is_not(None),
+        Session.created_at < Class.exam_mode_since).exists()
+
+
+async def hidden_in_exam(db: AsyncSession, session_id: uuid.UUID) -> bool:
+    """True when the exam keeps this conversation from its student (visible_in_exam)."""
+    return not await db.scalar(select(visible_in_exam()).select_from(Session).where(Session.id == session_id))
 
 
 async def create_session(
@@ -60,10 +74,11 @@ async def list_sessions_for_student(
     user_id: uuid.UUID,
     lab_id: uuid.UUID | None = None,
 ) -> list[Session]:
-    """List all non-deleted sessions for a student, with optional lab filter."""
+    """List all non-deleted sessions for a student, with optional lab filter;
+    during an exam, not those from before it (visible_in_exam)."""
     query = (
         select(Session)
-        .where(Session.user_id == user_id, Session.is_deleted.is_(False))
+        .where(Session.user_id == user_id, Session.is_deleted.is_(False), visible_in_exam())
         .order_by(Session.created_at.desc())
     )
     if lab_id is not None:

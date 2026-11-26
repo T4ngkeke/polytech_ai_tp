@@ -73,6 +73,8 @@ M5A_VERSION = 'm5a_context_summary_v1'
 M5A_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m5a.sql')
 M5B_VERSION = 'm5b_drop_unused_tables_v1'
 M5B_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m5b.sql')
+M5C_VERSION = 'm5c_exam_mode_since_v1'
+M5C_SQL_PATH = Path(__file__).with_name('ingestion_agent_schema_m5c.sql')
 MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_SQL_PATH),
               (M3A_VERSION, M3A_SQL_PATH), (M3B_VERSION, M3B_SQL_PATH),
               (M4C_VERSION, M4C_SQL_PATH), (M4E_VERSION, M4E_SQL_PATH),
@@ -96,7 +98,8 @@ MIGRATIONS = ((VERSION, SQL_PATH), (M2_VERSION, M2_SQL_PATH), (M2C_VERSION, M2C_
               (M4Y_VERSION, M4Y_SQL_PATH),
               (M4Z_VERSION, M4Z_SQL_PATH),
               (M5A_VERSION, M5A_SQL_PATH),
-              (M5B_VERSION, M5B_SQL_PATH))
+              (M5B_VERSION, M5B_SQL_PATH),
+              (M5C_VERSION, M5C_SQL_PATH))
 
 # Run before a version's own statements, only when it is applied. M4-J copies
 # the old `rules` table, which a new database no longer has (its model went on

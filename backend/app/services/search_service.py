@@ -17,6 +17,7 @@ import uuid
 from sqlalchemy import func, select
 
 from ..models import AgentRun, Class, Lab, Message, MessageCitation, SenderType, Session, User
+from .session_service import visible_in_exam
 
 SNIPPET_CHARS = 140
 MESSAGE_SCAN_LIMIT = 500
@@ -42,7 +43,8 @@ def snippet(text: str, query: str, width: int = SNIPPET_CHARS) -> str:
 async def student_search(db, user_id: uuid.UUID, query: str, limit: int = 20) -> list[dict]:
     """The user's conversations whose title or messages contain the query."""
     pattern = _pattern(query)
-    visible = (Session.user_id == user_id, Session.is_deleted.is_(False), Session.is_test.is_(False))
+    visible = (Session.user_id == user_id, Session.is_deleted.is_(False), Session.is_test.is_(False),
+               visible_in_exam())
     hits = (await db.execute(
         select(Message.id, Message.session_id, Message.content, Message.sender, Message.created_at)
         .join(Session, Session.id == Message.session_id)

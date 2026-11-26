@@ -279,6 +279,9 @@ class Class(Base):
     # Exam mode: only the files allowed in the exam (documents.exam_allowed); with
     # none the agent answers without the course. Web, Python, uploads, deep: off.
     exam_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
+    # When exam mode was turned on: students do not see the conversations they
+    # started before it while it lasts (session_service.visible_in_exam). M5-C.
+    exam_mode_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # What students may use (services/feature_service.py): upload, web, code, deep.
     # A missing key means on.
     features: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default='{}')

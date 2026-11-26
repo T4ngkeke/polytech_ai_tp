@@ -300,7 +300,8 @@ async def get_session(
 
     # A session the student soft-deleted is hidden from them (the "deleted" illusion);
     # it remains retained and visible to teacher/admin audit.
-    if session.is_deleted:
+    # During an exam, a conversation from before it is hidden from its student.
+    if session.is_deleted or await session_service.hidden_in_exam(db, session_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found",

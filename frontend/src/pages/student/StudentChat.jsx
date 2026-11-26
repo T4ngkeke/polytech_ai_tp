@@ -236,6 +236,19 @@ export default function StudentChat() {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [reset]);
 
+  // Exam mode on: the conversations from before it are hidden; off: they are
+  // back. Reload the list when it changes, and leave a conversation now hidden.
+  const examSeen = useRef(examMode);
+  useEffect(() => {
+    if (examSeen.current === examMode) return;
+    examSeen.current = examMode;
+    if (!activeLabId) return;
+    api.get(`/api/student/sessions?lab_id=${activeLabId}`).then((list) => {
+      setSessions(list);
+      if (activeSessionId && !list.some((s) => s.id === activeSessionId)) newChat();
+    }).catch(() => {});
+  }, [examMode, activeLabId, activeSessionId, newChat]);
+
   useEffect(() => { updateScroll(); }, [messages, updateScroll]);
 
   // Where the history the assistant sees starts (older messages are summarized).

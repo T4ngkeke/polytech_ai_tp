@@ -83,6 +83,7 @@ A class is owned by one teacher and joined by students with an invite code.
 | invite_code | String(6) | Unique. Students join with it. |
 | is_deleted | Boolean | Default false. Soft delete. |
 | exam_mode | Boolean | Default false. When true, students and the agent may use only the files allowed in the exam (`documents.exam_allowed`); with none, the agent answers without the course. Web search, Python, uploads and deep research are off. New classes get the value of `NEW_CLASS_EXAM_MODE` (off by default since 2026-11-26). Added by migration `m4f_answer_modes_v1`. |
+| exam_mode_since | Timestamp | Nullable. When exam mode was turned on (null while it is off). During the exam, students do not see the conversations they started before it (`session_service.visible_in_exam`); the teacher's audit does. Added by `m5c_exam_mode_since_v1`, which set it to the time of the migration for the classes already in exam mode. |
 | features | JSON | Default `{}`. What students may use in the class: `upload`, `web`, `code`, `deep`, each true or false. A missing key means on. Added by `m4p_features_v1`. |
 | created_at | Timestamp | |
 

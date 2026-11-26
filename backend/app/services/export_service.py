@@ -14,6 +14,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 from ..models import Class, Lab, Message, SenderType, Session
+from .session_service import visible_in_exam
 
 
 async def conversations(db, user_id: uuid.UUID) -> list[dict]:
@@ -22,7 +23,8 @@ async def conversations(db, user_id: uuid.UUID) -> list[dict]:
         select(Session, Lab.name, Class.name)
         .outerjoin(Lab, Lab.id == Session.lab_id)
         .outerjoin(Class, Class.id == Lab.class_id)
-        .where(Session.user_id == user_id, Session.is_deleted.is_(False), Session.is_test.is_(False))
+        .where(Session.user_id == user_id, Session.is_deleted.is_(False), Session.is_test.is_(False),
+               visible_in_exam())
         .order_by(Session.created_at))).all()
     ids = [session.id for session, _, _ in sessions]
     messages: dict[uuid.UUID, list[Message]] = {i: [] for i in ids}

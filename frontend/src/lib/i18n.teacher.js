@@ -105,9 +105,9 @@ const S = {
     en: 'Off: students use what the class allows (see below). Turn it on during an exam: only the files ticked below stay open; web, Python and uploads close.',
   },
   't.exam.on': {
-    zh: '开：这个班的所有实验里，学生只能搜索和打开下面勾选的文件，其他文件都关闭，包括以前回答里引用过的页面；联网、Python 和上传已关闭。一个文件都没勾选时，AI 不查课程，只按常识回答。',
-    fr: "Activé : dans tous les TP de cette classe, les étudiants ne peuvent chercher et ouvrir que les fichiers cochés ci-dessous ; les autres sont fermés, même les pages citées dans des réponses précédentes. Le web, Python et les envois sont fermés. Sans fichier coché, l'assistant répond sans le cours.",
-    en: 'On: in every lab of this class, students can search and open only the files ticked below; the others are closed, even pages cited in earlier answers. Web, Python and uploads are closed. With no file ticked, the tutor answers without the course.',
+    zh: '开：这个班的所有实验里，学生只能搜索和打开下面勾选的文件，其他文件都关闭，包括以前回答里引用过的页面；联网、Python 和上传已关闭。一个文件都没勾选时，AI 不查课程，只按常识回答。学生在考试期间看不到考试前的对话（你在审计里仍然能看到）。',
+    fr: "Activé : dans tous les TP de cette classe, les étudiants ne peuvent chercher et ouvrir que les fichiers cochés ci-dessous ; les autres sont fermés, même les pages citées dans des réponses précédentes. Le web, Python et les envois sont fermés. Sans fichier coché, l'assistant répond sans le cours. Pendant l'examen, les étudiants ne voient pas leurs conversations d'avant (vous les voyez toujours dans l'audit).",
+    en: 'On: in every lab of this class, students can search and open only the files ticked below; the others are closed, even pages cited in earlier answers. Web, Python and uploads are closed. With no file ticked, the tutor answers without the course. During the exam, students do not see their conversations from before it (you still see them in the audit).',
   },
   't.exam.toastOn': { zh: '考试模式已打开', fr: 'Mode examen activé', en: 'Exam mode on' },
   't.exam.toastOff': { zh: '考试模式已关闭', fr: 'Mode examen désactivé', en: 'Exam mode off' },

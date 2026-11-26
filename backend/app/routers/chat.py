@@ -48,6 +48,7 @@ from backend.app.models import (
 )
 from backend.app.schemas import ChatStreamRequest, CitationOpenedRequest, CodeResultRequest, MessageFeedbackRequest
 from backend.app.services import chat_file_service, feature_service, memory_service, quota_service, rule_service
+from backend.app.services.session_service import visible_in_exam
 from backend.app.agent.context import attachments as agent_attachments
 from backend.app.agent.context import memory as agent_memory
 from backend.app.agent import follow_ups as agent_follow_ups
@@ -158,6 +159,8 @@ async def chat_stream(
             Session.id == body.session_id,
             Session.user_id == current_user.id,
             Session.is_deleted.is_(False),
+            # During an exam, a conversation from before it cannot go on.
+            visible_in_exam(),
         )
     )
     session = result.scalar_one_or_none()
@@ -607,7 +610,7 @@ async def history_start_of_session(
     as /stream (the safe history, then agent/history.history_start)."""
     session = (await db.execute(select(Session).where(
         Session.id == session_id, Session.user_id == current_user.id,
-        Session.is_deleted.is_(False)))).scalar_one_or_none()
+        Session.is_deleted.is_(False), visible_in_exam()))).scalar_one_or_none()
     if session is None or session.lab_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     exam_mode = bool(await db.scalar(select(Class.exam_mode).join(Lab, Lab.class_id == Class.id)

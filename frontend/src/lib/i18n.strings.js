@@ -45,9 +45,9 @@ const S = {
   'lab.locked': { zh: '老师已锁定这个实验', fr: "L'enseignant a verrouillé ce TP", en: 'The teacher locked this lab' },
   'lab.lockedBanner': { zh: '老师已锁定这个实验，暂时不能提问。以前的对话还可以看。', fr: "L'enseignant a verrouillé ce TP : pas de nouvelle question pour le moment. Les anciennes conversations restent lisibles.", en: 'The teacher locked this lab: no new questions for now. Earlier conversations can still be read.' },
   'exam.short': { zh: '考试模式', fr: 'Examen', en: 'Exam' },
-  'exam.bannerFiles': { zh: '考试模式：只能在老师允许的 {n} 个文件里查找。联网、Python 和上传已关闭。', fr: "Mode examen : recherche seulement dans {n} fichier(s) autorisé(s). Web, Python et envoi de fichiers sont fermés.", en: 'Exam mode: search only in the {n} file(s) the teacher allowed. Web, Python and uploads are off.' },
+  'exam.bannerFiles': { zh: '考试模式：只能在老师允许的 {n} 个文件里查找。联网、Python 和上传已关闭。考试前的对话暂时隐藏。', fr: "Mode examen : recherche seulement dans {n} fichier(s) autorisé(s). Web, Python et envoi de fichiers sont fermés. Les conversations d’avant l’examen sont masquées.", en: 'Exam mode: search only in the {n} file(s) the teacher allowed. Web, Python and uploads are off. Conversations from before the exam are hidden.' },
   'exam.bannerTest': { zh: '考试模式：只能在你允许的文件里查找；一个文件都没允许时，AI 不查课程，只按常识回答。联网、Python 和上传已关闭。', fr: "Mode examen : recherche seulement dans les fichiers autorisés ; sans fichier autorisé, l'assistant répond sans le cours. Web, Python et envoi de fichiers sont fermés.", en: 'Exam mode: search only in the allowed files; with none allowed, the tutor answers without the course. Web, Python and uploads are off.' },
-  'exam.bannerNoFiles': { zh: '考试模式：老师没有开放任何文件，AI 不查课程，只按常识回答。', fr: "Mode examen : aucun fichier n'est ouvert, l'assistant répond sans le cours.", en: 'Exam mode: no files are open, the tutor answers without the course.' },
+  'exam.bannerNoFiles': { zh: '考试模式：老师没有开放任何文件，AI 不查课程，只按常识回答。考试前的对话暂时隐藏。', fr: "Mode examen : aucun fichier n'est ouvert, l'assistant répond sans le cours. Les conversations d’avant l’examen sont masquées.", en: 'Exam mode: no files are open, the tutor answers without the course. Conversations from before the exam are hidden.' },
 
   // Quota
   'quota.today': { zh: '今天', fr: "Aujourd'hui", en: 'Today' },

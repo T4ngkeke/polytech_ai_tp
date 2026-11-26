@@ -16,6 +16,7 @@ documentation/API.md lists every endpoint.
 """
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
@@ -164,6 +165,9 @@ async def set_exam_mode(
     if cls.exam_mode != body.exam_mode:
         await notification_service.notify_class_students(
             db, cls.id, 'exam_mode', class_id=cls.id, class_name=cls.name, on=body.exam_mode)
+    if cls.exam_mode != body.exam_mode:
+        # Students do not see the conversations from before it while it lasts.
+        cls.exam_mode_since = datetime.now(timezone.utc) if body.exam_mode else None
     cls.exam_mode = body.exam_mode
     await db.commit()
     await db.refresh(cls)
