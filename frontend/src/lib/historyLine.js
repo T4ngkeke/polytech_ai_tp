@@ -4,7 +4,7 @@
  *
  * The server says where the next question's history starts
  * (GET /api/chat/sessions/{id}/history-start: seen_from, hidden; see
- * backend agent/history.py). Agreed on a prototype first (2026-11-18).
+ * backend agent/context/history.py). Agreed on a prototype first (2026-11-18).
  */
 
 // The longest message the server takes (schemas.MAX_MESSAGE_CHARS).

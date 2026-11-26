@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchResult, ResearchRunStopped
-from backend.app.agent.tools import create_scope
+from backend.app.agent.tools.access import create_scope
 from backend.app.main import app
 from backend.app.models import (
     AgentRun, ClassStudent, Document, DocumentBlock, DocumentPage,
@@ -427,7 +427,7 @@ async def test_cancel_stops_calls_and_replay_never_reopens(pg_session):
 
 @pytest.mark.asyncio
 async def test_persisted_orchestrator_is_idempotent_and_save_failure_never_returns(pg_session):
-    from backend.app.agent.tools import ResearchScope
+    from backend.app.agent.tools.access import ResearchScope
     from backend.app.services.research_service import run_persisted_research
     scope, factory = await _setup(pg_session, quota=5000)
     calls = []

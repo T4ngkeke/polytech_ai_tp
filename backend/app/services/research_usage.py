@@ -15,7 +15,7 @@ from typing import Awaitable, Callable
 
 from sqlalchemy import func, select
 
-from backend.app.agent.history import estimate_tokens
+from backend.app.agent.context.history import estimate_tokens
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchRunStopped
 from backend.app.database import AsyncSessionLocal
@@ -28,7 +28,7 @@ class ResearchCallConflict(ValueError):
     pass
 
 
-IMAGE_TOKENS = 1000   # one image part (agent/attachments.py), as Open WebUI estimates it
+IMAGE_TOKENS = 1000   # one image part (agent/context/attachments.py), as Open WebUI estimates it
 
 
 def _content_tokens(content) -> int:

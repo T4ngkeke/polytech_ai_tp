@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.tools.course import CourseTools
 from backend.app.agent.runner import ResearchRunner
-from backend.app.agent.task_tools import MAX_CALLS, MAX_TASKS, TASK_TOOL_NAMES, TaskList
+from backend.app.agent.tools.tasks import MAX_CALLS, MAX_TASKS, TASK_TOOL_NAMES, TaskList
 from backend.tests.test_course_tools import ViewFixture
 from backend.tests.test_runner import Script
 

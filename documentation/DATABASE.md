@@ -178,10 +178,10 @@ The messages of a session, with the tokens each one used.
 | superseded_at | Timestamp | Nullable. Set on a question and its answer when a newer version replaces them. The model's history and the export leave them out; the student's session and the audit show them. Analytics and quota count every version. Added by `m4t_message_versions_v1`. |
 | course_use | String(16) | Nullable. On an answer: `cited` (it cites course pages), `not_found` (course tools were called, it cites nothing) or `none` (no course tool call). Null for a question back and for older answers. Added by `m4v_course_use_v1`. |
 | tasks | JSON | Nullable. On an answer: the task checklist the model kept while answering, `[{id, content, status}]`. Added by `m4w_task_checklist_v1`. |
-| web_sources | JSON | Nullable. On an answer: the web sources it cites as `[W#]`, `[{id, url, title}]` (web search, `agent/web_tools.py`). Added by `m4x_web_sources_v1`. |
-| code_runs | JSON | Nullable. On an answer: the Python runs made in the student's browser while answering, `[{id, code, stdout, stderr, result, images, status}]` (`agent/code_tools.py`; `images` are `chat_files` ids). Added by `m4y_code_runs_v1`. |
+| web_sources | JSON | Nullable. On an answer: the web sources it cites as `[W#]`, `[{id, url, title}]` (web search, `agent/tools/web.py`). Added by `m4x_web_sources_v1`. |
+| code_runs | JSON | Nullable. On an answer: the Python runs made in the student's browser while answering, `[{id, code, stdout, stderr, result, images, status}]` (`agent/tools/code.py`; `images` are `chat_files` ids). Added by `m4y_code_runs_v1`. |
 | follow_ups | JSON | Nullable. On an answer: the suggested next questions, `[string]` (`agent/follow_ups.py`). Added by `m4z_follow_ups_v1`. |
-| context_summary | TEXT | Nullable. On a student question: the summary of the conversation before it, sent in front of it once the older messages no longer fit the history (`agent/compaction.py`). Added by `m5a_context_summary_v1`. |
+| context_summary | TEXT | Nullable. On a student question: the summary of the conversation before it, sent in front of it once the older messages no longer fit the history (`agent/context/compaction.py`). Added by `m5a_context_summary_v1`. |
 | context_summary_snapshot | JSON | Nullable. The course file revisions that summary was written with, `{document id: revision id}`; with other revisions it is not used. Added by `m5a_context_summary_v1`. |
 | created_at | Timestamp | |
 
@@ -286,7 +286,7 @@ Files students upload in the chat (`services/chat_file_service.py`). Not course 
 
 ### student_memories
 
-What the assistant remembers about a student, per class (`services/memory_service.py`). One sentence each (200 characters at most), learning preferences and progress only, at most 50 per student and class. The student sees and deletes them (for good) or turns memory off (`users.memory_enabled`); the class teacher sees them; exam mode will use none. Written by the agent's background review every 4 student turns and read into each research question (`agent/memory.py`, ported from Open WebUI). Added by `m4u_student_memories_v1`.
+What the assistant remembers about a student, per class (`services/memory_service.py`). One sentence each (200 characters at most), learning preferences and progress only, at most 50 per student and class. The student sees and deletes them (for good) or turns memory off (`users.memory_enabled`); the class teacher sees them; exam mode will use none. Written by the agent's background review every 4 student turns and read into each research question (`agent/context/memory.py`, ported from Open WebUI). Added by `m4u_student_memories_v1`.
 
 | Column | Type | Notes |
 | --- | --- | --- |

@@ -15,12 +15,12 @@ from dataclasses import dataclass, fields, replace
 
 from sqlalchemy import select
 
-from backend.app.agent.course_tools import CourseTools
-from backend.app.agent.history import DEFAULT_CONTEXT, estimate_tokens
-from backend.app.agent.language import ask_language
+from backend.app.agent.tools.course import CourseTools
+from backend.app.agent.context.history import DEFAULT_CONTEXT, estimate_tokens
+from backend.app.agent.context.language import ask_language
 from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
 from backend.app.agent.runner import ResearchRunner, min_score_for
-from backend.app.agent.tools import PerCallTools, ResearchScope
+from backend.app.agent.tools.access import PerCallTools, ResearchScope
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import AgentRun
 from backend.app.services import failure_log
@@ -43,7 +43,7 @@ class ResearchLimits:
     total_seconds: int = 420
     call_seconds: int = 120
     input_tokens: int = 28000
-    # Share of the model's context the chat history may use (agent/history.py).
+    # Share of the model's context the chat history may use (agent/context/history.py).
     # input_tokens is the room for reading on top of it.
     history_context_percent: int = 30
 
@@ -149,7 +149,7 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  context_tokens: int | None = None) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call).
     language_model: the model that names the answer language first
-    (agent/language.py, billed like the others); None: no such call, the
+    (agent/context/language.py, billed like the others); None: no such call, the
     generic language sentence. context_tokens: the model server's context, a
     ceiling for the research input.
     exam_no_files: the class is in exam mode and its teacher allowed no file.

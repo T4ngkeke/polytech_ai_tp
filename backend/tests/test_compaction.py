@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.agent import compaction as cp
+from backend.app.agent.context import compaction as cp
 from backend.app.agent.model import ModelReply
 from backend.app.models import Message, SenderType
 

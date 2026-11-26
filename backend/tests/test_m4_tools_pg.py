@@ -11,7 +11,7 @@ from backend.app.models import (
     DocumentRevision, EMBEDDING_DIM, IngestionJob, Lab, Session,
 )
 from backend.app.routers.teacher import get_storage_root
-from backend.app.agent.tools import ResearchTools, create_scope
+from backend.app.agent.tools.access import ResearchTools, create_scope
 from backend.app.services import document_edits
 from backend.app.services.document_access import DocumentNotFound
 from backend.tests.conftest import make_user

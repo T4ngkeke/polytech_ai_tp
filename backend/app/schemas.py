@@ -620,13 +620,13 @@ class MessageResponse(BaseModel):
 
 # The longest question a student may send (a code file of a few hundred lines
 # fits): about 7k tokens, next to a history of 30% of the context
-# (agent/history.py). The chat page counts the characters and stops at it.
+# (agent/context/history.py). The chat page counts the characters and stops at it.
 MAX_MESSAGE_CHARS = 20000
 
 
 class CodeResultRequest(BaseModel):
     """What the browser's Python (Pyodide) printed for one execute_code run
-    (agent/code_tools.py). An image comes as a data:image/png;base64 line, as
+    (agent/tools/code.py). An image comes as a data:image/png;base64 line, as
     Open WebUI's Pyodide worker prints a matplotlib figure."""
     stdout: str = Field('', max_length=8_000_000)
     stderr: str = Field('', max_length=200_000)

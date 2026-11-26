@@ -10,7 +10,7 @@ chars//3 — deliberately conservative (FR/EN run ~4 chars/token, so //3
 overestimates the count), because this is a safety line, not billing.
 """
 
-from backend.app.agent.history import estimate_tokens, history_start
+from backend.app.agent.context.history import estimate_tokens, history_start
 
 
 def trim_history(history: list[dict], *, max_tokens: int) -> list[dict]:
@@ -69,7 +69,7 @@ def test_zero_budget_gives_empty_history():
 
 # --- The limit as a share of the context, and a start that moves in jumps ---
 
-from backend.app.agent.history import history_budget, history_start  # noqa: E402
+from backend.app.agent.context.history import history_budget, history_start  # noqa: E402
 
 
 def _turns(n: int, chars: int = 300) -> list[dict]:

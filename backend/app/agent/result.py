@@ -57,11 +57,11 @@ class ResearchResult:
     usage: list[dict] = field(default_factory=list)
     # A question back to the student (ask_student): {'question', 'options'}.
     clarification: dict | None = None
-    # The task checklist the model kept (task_tools.py), if any.
+    # The task checklist the model kept (tools/tasks.py), if any.
     tasks: list[dict] | None = None
-    # The web sources the answer cites ([W#], web_tools.py): [{id, url, title}].
+    # The web sources the answer cites ([W#], tools/web.py): [{id, url, title}].
     web_sources: list[dict] | None = None
-    # The Python runs in the student's browser (code_tools.py):
+    # The Python runs in the student's browser (tools/code.py):
     # [{id, code, stdout, stderr, result, images: [chat file id], status}].
     code_runs: list[dict] | None = None
     # Saved as messages.answer_mode. Always research now; answers written before

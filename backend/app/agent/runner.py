@@ -1,7 +1,7 @@
 """The research agent: one model researches the course PDFs and answers.
 
 The model works in one conversation. It receives the course tools
-(course_tools.py) as native tools, every tool result stays in the
+(tools/course.py) as native tools, every tool result stays in the
 conversation, and a reply without tool calls is the answer to the student.
 There is no separate planner or answer-writing call.
 
@@ -27,13 +27,13 @@ from typing import Callable
 from openai import APITimeoutError
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
 
-from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
-from backend.app.agent.history import estimate_tokens
-from backend.app.agent.language import language_sentence, with_language
-from backend.app.agent.code_tools import CODE_NOTE, CODE_TOOL_NAMES, CODE_TOOLS, NO_CODE_NOTE, CodeTools
+from backend.app.agent.tools.course import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
+from backend.app.agent.context.history import estimate_tokens
+from backend.app.agent.context.language import language_sentence, with_language
+from backend.app.agent.tools.code import CODE_NOTE, CODE_TOOL_NAMES, CODE_TOOLS, NO_CODE_NOTE, CodeTools
 from backend.app.agent.visuals import VISUAL_NOTE
-from backend.app.agent.task_tools import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
-from backend.app.agent.web_tools import WEB_NOTE, WEB_TOOL_NAMES, WEB_TOOLS, WebTools
+from backend.app.agent.tools.tasks import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
+from backend.app.agent.tools.web import WEB_NOTE, WEB_TOOL_NAMES, WEB_TOOLS, WebTools
 from backend.app.agent.result import (
     ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, call_usage, cited_ids, cited_sources,
     malformed_refs,
@@ -137,7 +137,7 @@ _HANDLES = re.compile(_HANDLE_GROUP.pattern + r'|\bd\d+(?:\.[pox]\d+)?(?:\s*/\s*
 _HANDLE_BEFORE_FILE = re.compile(r'\bd\d+\s*[–—:-]\s*(?=[`*_]*[\w.-]+\.pdf)')
 
 
-# [W1] or [W1, W2]: web sources (web_tools.py).
+# [W1] or [W1, W2]: web sources (tools/web.py).
 _WEB_GROUP = re.compile(r'\[(W[1-9]\d*(?:\s*[,;]\s*W[1-9]\d*)*)\]')
 
 
@@ -382,13 +382,13 @@ class ResearchRunner:
         # on_draft(None) when that draft is withdrawn. A draft is not checked;
         # the student sees the checked answer once the run ends.
         self.on_draft = on_draft
-        # The task checklist (task_tools.py, from Open WebUI): offered with the
+        # The task checklist (tools/tasks.py, from Open WebUI): offered with the
         # course tools; each change goes to on_tasks(list).
         self.on_tasks, self.offer_tasks = on_tasks, offer_tasks
-        # Web search (web_tools.py, from Open WebUI): only when the student turned
+        # Web search (tools/web.py, from Open WebUI): only when the student turned
         # it on and the lab allows it; None otherwise.
         self.web_tools = web_tools
-        # Python in the student's browser (code_tools.py, from Open WebUI): only
+        # Python in the student's browser (tools/code.py, from Open WebUI): only
         # when the student turned it on and the lab allows it; None otherwise.
         self.code_tools = code_tools
 
@@ -404,9 +404,9 @@ class ResearchRunner:
         allow_ask: offer ask_student (the chat does, except right after a question back).
         earlier_citations: the stored citations of those answers by [E#] label;
         an answer may cite them again (a follow-up answered from the history).
-        memory_context: the student's notes for this question (agent/memory.py),
+        memory_context: the student's notes for this question (agent/context/memory.py),
         added at the end of the question; not stored with it.
-        attachment_context, images: what the question attaches (agent/attachments.py):
+        attachment_context, images: what the question attaches (agent/context/attachments.py):
         text after the question, images as image parts of the question.
         exam_no_files: the class is in exam mode and its teacher allowed no file
         (the scope is empty): no tools at all, stop reason exam_no_files."""
@@ -431,7 +431,7 @@ class ResearchRunner:
         # source and may be cited again (earlier_citations).
         turns = [{'role': m['role'], 'content': m['content']} for m in history or []]
         # The answer language ends the question and every turn that asks for
-        # the answer (see agent/language.py).
+        # the answer (see agent/context/language.py).
         language = with_language('', language_sentence(answer_language))
         rules_reminder = ('\n\n' + RULES_REMINDER.format(rules=teaching_rules.strip())) if teaching_rules.strip() else ''
         text = (question + (('\n\n' + attachment_context) if attachment_context else '')

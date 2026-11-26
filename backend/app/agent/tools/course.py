@@ -1,6 +1,6 @@
 """Course tools as the research model sees and uses them.
 
-ResearchTools (tools.py) authorizes and reads; its results are full reader
+ResearchTools (access.py) authorizes and reads; its results are full reader
 envelopes, built for the API, the review UI and citation audit. A model needs
 much less: the text, its evidence ID, the page, and where it can go next.
 
@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, Valida
 
 from backend.app.agent.evidence import EvidenceStore
 from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
-from backend.app.agent.tools import Kind
+from backend.app.agent.tools.access import Kind
 from backend.app.services import failure_log
 
 

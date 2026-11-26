@@ -261,10 +261,10 @@ async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_the_answer_language_is_named_first_and_billed(pg_session, tmp_path, monkeypatch):
-    """A small call names the answer language (agent/language.py); the
+    """A small call names the answer language (agent/context/language.py); the
     answer turn ends with it. When that call fails, the answer still comes,
     with the generic sentence. done gives the question's id too."""
-    from backend.app.agent.language import GENERIC_SENTENCE
+    from backend.app.agent.context.language import GENERIC_SENTENCE
     try:
         db = pg_session
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
@@ -346,7 +346,7 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
         # The limit itself; what is left out is summarized otherwise (test_compaction.py).
         monkeypatch.setattr(settings, 'CONTEXT_COMPACTION_ENABLED', False)
         import backend.app.routers.chat as chat_api
-        from backend.app.agent.history import estimate_tokens
+        from backend.app.agent.context.history import estimate_tokens
         model_messages = []
         class FakeModel:
             def __init__(self, endpoint):

@@ -7,7 +7,7 @@
 # and disclaimer: see third_party/open-webui/LICENSE.
 """A summary of the conversation that no longer fits in the history.
 
-agent/history.py keeps the history within a share of the model's context and
+agent/context/history.py keeps the history within a share of the model's context and
 moves its start in jumps. Without this module the messages before the start
 are simply not sent. With it, as in Open WebUI:
 

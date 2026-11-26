@@ -1,8 +1,8 @@
-"""The answer language: named by a small model call (agent/language.py), then
+"""The answer language: named by a small model call (agent/context/language.py), then
 one sentence at the end of the last user message."""
 import pytest
 
-from backend.app.agent.language import (
+from backend.app.agent.context.language import (
     ASK_PROMPT, DEFAULT_LANGUAGE, GENERIC_SENTENCE, ask_language, ask_messages, language_sentence,
     parse_language,
 )
@@ -66,7 +66,7 @@ def test_the_sentence_names_the_language_or_stays_generic():
 
 @pytest.mark.asyncio
 async def test_research_ends_the_question_with_the_language_sentence():
-    from backend.app.agent.course_tools import CourseTools
+    from backend.app.agent.tools.course import CourseTools
     from backend.app.agent.runner import ResearchRunner
     from backend.tests.test_course_tools import ViewFixture
     from backend.tests.test_runner import Script

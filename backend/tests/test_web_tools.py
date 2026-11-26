@@ -6,8 +6,8 @@ import socket
 import httpx
 import pytest
 
-from backend.app.agent import web_tools as wt
-from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.tools import web as wt
+from backend.app.agent.tools.course import CourseTools
 from backend.app.agent.runner import ResearchRunner, web_citations
 from backend.tests.test_course_tools import ViewFixture
 from backend.tests.test_runner import Script

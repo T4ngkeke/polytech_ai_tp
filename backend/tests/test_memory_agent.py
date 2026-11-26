@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.agent import memory as am
-from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.context import memory as am
+from backend.app.agent.tools.course import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.runner import ResearchRunner
 from backend.app.models import Class, ClassStudent, Lab, StudentMemory, UserRole

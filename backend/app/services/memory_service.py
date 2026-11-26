@@ -7,7 +7,7 @@ Rules agreed on 2026-11-20:
 - The student sees them, deletes them for good, or turns memory off
   (``users.memory_enabled``); the class teacher sees them; exam mode uses none.
 
-This module stores and lists them. agent/memory.py reads them into a research
+This module stores and lists them. agent/context/memory.py reads them into a research
 question and writes them in a background review every few turns.
 """
 from __future__ import annotations

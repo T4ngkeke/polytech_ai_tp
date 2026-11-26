@@ -137,7 +137,7 @@ def rag_candidates(items, page_index):
 
 
 def rag_page_text(result, limit=RAG_PAGE_CHARS):
-    from backend.app.agent.course_tools import _page_furniture
+    from backend.app.agent.tools.course import _page_furniture
     lines = []
     for item in result.get('items') or []:
         if _page_furniture(item):
@@ -296,13 +296,13 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
                    benchmark='m4e', split='dev', variants=None, budget='standard'):
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    from backend.app.agent.course_tools import CourseTools
+    from backend.app.agent.tools.course import CourseTools
     from backend.app.agent.model import GREEDY, QWEN_NON_THINKING, ResearchModel
     from backend.app.agent.result import ResearchResult
     from backend.app.agent.runner import NO_LEAD_CALLS, ResearchRunner, min_score_for
-    from backend.app.agent.web_tools import WebTools
-    from backend.app.agent import code_tools as agent_code
-    from backend.app.agent.tools import PerCallTools, create_scope
+    from backend.app.agent.tools.web import WebTools
+    from backend.app.agent.tools import code as agent_code
+    from backend.app.agent.tools.access import PerCallTools, create_scope
     from backend.app.models import Document, Session, User, UserRole
     from backend.app.services.model_routing import Endpoint
 
@@ -528,8 +528,8 @@ async def evaluate(db, *, output: Path, storage_root: Path, embedding_url: str,
             'source_hashes': {
                 str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in [
                     ROOT/'backend/app/agent/runner.py',
-                    ROOT/'backend/app/agent/course_tools.py',
-                    ROOT/'backend/app/agent/tools.py', ROOT/'backend/app/agent/evidence.py',
+                    ROOT/'backend/app/agent/tools/course.py',
+                    ROOT/'backend/app/agent/tools/access.py', ROOT/'backend/app/agent/evidence.py',
                     ROOT/'backend/app/agent/model.py', Path(__file__)]}}
         (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         if concurrency == 1:

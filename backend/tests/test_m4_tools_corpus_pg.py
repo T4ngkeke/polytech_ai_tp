@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select
 
-from backend.app.agent.tools import ResearchTools, create_scope
+from backend.app.agent.tools.access import ResearchTools, create_scope
 from backend.app.main import app
 from backend.app.models import ClassStudent, DocChunk, Document, DocumentRevision, Session
 from backend.app.routers.teacher import get_storage_root

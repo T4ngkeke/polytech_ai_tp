@@ -7,7 +7,7 @@ Decided 2026-11-20: an answer may draw only
 - a chart, in a ```chart block holding JSON in the shape of ``Chart`` below;
   the page draws it with its own chart component.
 
-A Python run can also show a matplotlib figure (code_tools.py).
+A Python run can also show a matplotlib figure (tools/code.py).
 
 ``checked(answer)`` runs on every answer before it is saved
 (research_runs.finish_run): a chart block that is not a valid ``Chart``, or a

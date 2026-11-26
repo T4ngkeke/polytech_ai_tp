@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.tools.course import CourseTools
 from backend.app.agent.evidence import EvidenceStore
 from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
-from backend.app.agent.tools import ResearchScope
+from backend.app.agent.tools.access import ResearchScope
 from backend.app.services.document_access import DocumentNotFound
 
 
@@ -294,14 +294,14 @@ async def test_unknown_handle_is_refused_before_dispatch_and_takes_a_slot():
 
 
 def test_model_visible_schemas_name_no_backend_identifiers():
-    from backend.app.agent.course_tools import VIEW_SCHEMAS
+    from backend.app.agent.tools.course import VIEW_SCHEMAS
     for schema in VIEW_SCHEMAS.values():
         names = set(schema.model_json_schema()['properties'])
         assert not names & {'document_id', 'page_id', 'block_id', 'asset_id', 'top_k', 'budget'}
 
 
 def test_only_short_navigation_blocks_are_hidden():
-    from backend.app.agent.course_tools import ToolView
+    from backend.app.agent.tools.course import ToolView
     doc, page = str(uuid4()), str(uuid4())
     view = ToolView({doc: {'filename': 'SQL.pdf', 'pages': [{'page_id': page, 'pdf_page_no': 21}]}})
     ref = {'page_id': page, 'preview_page_no': 21, 'preview_asset_id': None}
@@ -429,7 +429,7 @@ async def test_grep_in_one_document_keeps_its_cursor():
 
 
 def test_an_unchecked_picture_description_says_so_in_search_and_read():
-    from backend.app.agent.course_tools import ToolView
+    from backend.app.agent.tools.course import ToolView
     doc, page, block = str(uuid4()), str(uuid4()), str(uuid4())
     view = ToolView({doc: {'filename': 'Heritage.pdf', 'pages': [{'page_id': page, 'pdf_page_no': 10}]}})
     search = {'ok': True, 'items': [{

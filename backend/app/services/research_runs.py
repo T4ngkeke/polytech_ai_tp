@@ -14,10 +14,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.app.agent import visuals
-from backend.app.agent.compaction import Compaction
-from backend.app.agent.history import estimate_length, history_start
+from backend.app.agent.context.compaction import Compaction
+from backend.app.agent.context.history import estimate_length, history_start
 from backend.app.agent.result import LABEL_RE, ResearchResult, cited_ids, course_use
-from backend.app.agent.tools import ResearchScope, _live_session
+from backend.app.agent.tools.access import ResearchScope, _live_session
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import (
     AgentRun, ChatFile, Document, DocumentAsset, DocumentBlock, DocumentBlockAsset, DocumentPage, Message, MessageCitation,
@@ -590,7 +590,7 @@ class ResearchRuns:
             if not compact:
                 return history, earlier, hidden
             # The latest summary at or before the first message sent, written
-            # with the same course files (agent/compaction.py).
+            # with the same course files (agent/context/compaction.py).
             by_id = {str(m.id): m for m in messages}
             point = next((i for i in range(min(hidden, len(full) - 1), -1, -1)
                           if by_id[full[i]['id']].context_summary

@@ -21,7 +21,7 @@ from pathlib import Path, PurePath
 import pymupdf
 from sqlalchemy import select
 
-from ..agent.tools import readable_files
+from ..agent.tools.access import readable_files
 from ..models import ChatFile, Document, Session
 
 MAX_BYTES = 10 * 1024 * 1024

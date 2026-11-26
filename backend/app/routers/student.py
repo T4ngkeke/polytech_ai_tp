@@ -46,7 +46,7 @@ from backend.app.schemas import (
 )
 from backend.app.services import (export_service, feature_service, memory_service, notification_service,
                                   quota_service, search_service, session_service)
-from backend.app.agent.tools import readable_files
+from backend.app.agent.tools.access import readable_files
 from backend.app.services.research_runs import ResearchRuns
 
 router = APIRouter(prefix="/api/student", tags=["student"])

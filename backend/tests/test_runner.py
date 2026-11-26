@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from backend.app.agent.language import GENERIC_SENTENCE
-from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.context.language import GENERIC_SENTENCE
+from backend.app.agent.tools.course import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchRunStopped
 from backend.app.agent.runner import (
@@ -86,7 +86,7 @@ async def test_answer_is_written_in_the_research_conversation():
 
 
 def test_the_catalogue_lists_files_in_handle_order_and_stops_at_the_limit():
-    from backend.app.agent.course_tools import ToolView
+    from backend.app.agent.tools.course import ToolView
     index = {f'id{n}': {'filename': f'Cours{n:02}.pdf', 'pages': [
         {'page_id': f'p{n}-{k}', 'pdf_page_no': k} for k in range(1, n + 2)]} for n in range(3)}
     view = ToolView(index)
@@ -99,7 +99,7 @@ def test_the_catalogue_lists_files_in_handle_order_and_stops_at_the_limit():
 
 
 def test_the_catalogue_puts_the_files_of_this_tp_first_under_their_own_heading():
-    from backend.app.agent.course_tools import ToolView
+    from backend.app.agent.tools.course import ToolView
     page = lambda k: [{'page_id': f'p{k}', 'pdf_page_no': 1}]
     view = ToolView({'a': {'filename': 'Cours1.pdf', 'pages': page(1), 'lab_name': None},
                      'b': {'filename': 'TP1-sujet.pdf', 'pages': page(2), 'lab_name': 'tp1'},

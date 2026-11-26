@@ -10,24 +10,43 @@ How it works, and why, is in [documentation/ARCHITECTURE.md](../../../documentat
 
 ## Files
 
+The folder has two subfolders (since 2026-11-26): `tools/` and `context/`. The main loop and what every part shares stay at the top.
+
+### The main loop
+
 | File | What it does |
 | --- | --- |
 | `runner.py` | The research loop. It keeps the limits (tool calls, time, input room). When a limit is reached, it removes the tools and asks for the answer. It checks the cited `[E#]` IDs, and cleans references such as `[E21 in d1.p21]` without a model call. |
-| `course_tools.py` | The course tools as the model sees them: `search`, `open`, `read`, `grep`, `view_image` (`ask_student` is in `runner.py`). It gives short handles (`d1`, `d1.p20`, `d1.p20.b3`, `a2`, `c1`), keeps the tool budget and registers evidence. |
-| `tools.py` | Access checks and reading of the published course PDFs. The scope and the document revisions are fixed by the server. `check_access` checks that the session is still open to the student and that each document is still readable at its fixed revision; every tool call and the final citation check go through it. |
-| `language.py` | One small model call that names the language of the answer, from the teacher's rules and the student's last messages. |
-| `history.py` | Which earlier messages are sent: a share of the model's context (`HISTORY_CONTEXT_PERCENT`), with fixed start points so that the model server can reuse its cache. |
-| `memory.py` | The student's notes of a class (`services/memory_service.py`), ported from Open WebUI: the notes that fit go at the end of each research question (`<memory_context>`, 2000 characters at most), and a background review every 4 student turns adds, rewrites or removes notes (learning preferences and progress only). Not in exam mode, in a test drive, or when the student turned memory off. The review is not charged to the student. |
-| `web_tools.py` | Web search, when the student turns it on and the lab allows it: `search_web` (a SearXNG instance, `WEB_SEARCH_URL`) and `fetch_url`, ported from Open WebUI with its address checks (only public addresses, checked again at connect time). Results and pages get IDs `W1`, `W2`; the answer cites them as `[W#]`, apart from the course `[E#]`. Own budget of 8 calls. |
-| `code_tools.py` | Python, when the student turns it on and the lab allows it: `execute_code`, ported from Open WebUI. The code runs in the student's browser (Pyodide): the chat stream sends a `code` event and waits up to 240 s (`CODE_TIMEOUT`, a first load can take minutes) for the page to post the output. Own budget of 5 runs; the wait is not research time. Output images become chat files; each run is saved on the answer. |
-| `compaction.py` | Context compaction, ported from Open WebUI: when older messages no longer fit the history (`history.py`), one call summarizes them with the previous summary; the summary is stored on the first message still sent and goes in front of it, reused until the start jumps again (the prompt start stays the same). Only the safe history; a summary is reused only with the same course file revisions; none in exam mode. `CONTEXT_COMPACTION_ENABLED` (on). |
-| `follow_ups.py` | Suggested next questions under an answer, ported from Open WebUI: one call after the answer (first question + last 4 messages), with the teacher's rules; at most 5, saved on the answer and sent as a `follow_ups` event. Not in exam mode, not after a question back, not charged to the student. |
-| `visuals.py` | Diagrams and charts in answers, in two fixed formats only: a ```` ```mermaid ```` block or a ```` ```chart ```` block of checked JSON (`Chart`: bar, line, scatter or pie; labels and series). Every prompt names them (`VISUAL_NOTE`); before an answer is saved, a block that does not pass the check becomes plain code, so the page never renders free HTML or JavaScript. |
-| `attachments.py` | What a question attaches, as the model receives it: images as image parts of the question, a PDF or text file as text (20,000 characters at most), an earlier chat as text; a scanned PDF asks for a screenshot; an attached course file limits the search. Never cited as `[E#]`. |
-| `task_tools.py` | The task checklist the model may keep during a research run: `create_tasks` and `update_task`, ported from Open WebUI (see `third_party/open-webui/`). They do not use the course tool budget; each change is sent to the page and the final list is saved with the answer. |
 | `evidence.py` | Evidence IDs (`E1`, `E2`, ...) and their sources. Only pages that were read count as evidence. Search results are leads. |
 | `result.py` | The run result, the citation patterns, the stop exceptions, the usage entry of a model call (`call_usage`) and the final check of the cited documents (`cited_sources`). |
 | `model.py` | The model client: one OpenAI-compatible chat call with native tools, and the sampling settings. |
+
+### `tools/`: what the model can call
+
+| File | What it does |
+| --- | --- |
+| `tools/course.py` | The course tools as the model sees them: `search`, `open`, `read`, `grep`, `view_image` (`ask_student` is in `runner.py`). It gives short handles (`d1`, `d1.p20`, `d1.p20.b3`, `a2`, `c1`), keeps the tool budget and registers evidence. |
+| `tools/access.py` | Access checks and reading of the published course PDFs. The scope and the document revisions are fixed by the server. `check_access` checks that the session is still open to the student and that each document is still readable at its fixed revision; every tool call and the final citation check go through it. |
+| `tools/web.py` | Web search, when the student turns it on and the lab allows it: `search_web` (a SearXNG instance, `WEB_SEARCH_URL`) and `fetch_url`, ported from Open WebUI with its address checks (only public addresses, checked again at connect time). Results and pages get IDs `W1`, `W2`; the answer cites them as `[W#]`, apart from the course `[E#]`. Own budget of 8 calls. |
+| `tools/code.py` | Python, when the student turns it on and the lab allows it: `execute_code`, ported from Open WebUI. The code runs in the student's browser (Pyodide): the chat stream sends a `code` event and waits up to 240 s (`CODE_TIMEOUT`, a first load can take minutes) for the page to post the output. Own budget of 5 runs; the wait is not research time. Output images become chat files; each run is saved on the answer. |
+| `tools/tasks.py` | The task checklist the model may keep during a research run: `create_tasks` and `update_task`, ported from Open WebUI (see `third_party/open-webui/`). They do not use the course tool budget; each change is sent to the page and the final list is saved with the answer. |
+
+### `context/`: what goes into the prompt besides the question
+
+| File | What it does |
+| --- | --- |
+| `context/history.py` | Which earlier messages are sent: a share of the model's context (`HISTORY_CONTEXT_PERCENT`), with fixed start points so that the model server can reuse its cache. |
+| `context/compaction.py` | Context compaction, ported from Open WebUI: when older messages no longer fit the history (`context/history.py`), one call summarizes them with the previous summary; the summary is stored on the first message still sent and goes in front of it, reused until the start jumps again (the prompt start stays the same). Only the safe history; a summary is reused only with the same course file revisions; none in exam mode. `CONTEXT_COMPACTION_ENABLED` (on). |
+| `context/memory.py` | The student's notes of a class (`services/memory_service.py`), ported from Open WebUI: the notes that fit go at the end of each research question (`<memory_context>`, 2000 characters at most), and a background review every 4 student turns adds, rewrites or removes notes (learning preferences and progress only). Not in exam mode, in a test drive, or when the student turned memory off. The review is not charged to the student. |
+| `context/attachments.py` | What a question attaches, as the model receives it: images as image parts of the question, a PDF or text file as text (20,000 characters at most), an earlier chat as text; a scanned PDF asks for a screenshot; an attached course file limits the search. Never cited as `[E#]`. |
+| `context/language.py` | One small model call that names the language of the answer, from the teacher's rules and the student's last messages. |
+
+### After the answer
+
+| File | What it does |
+| --- | --- |
+| `visuals.py` | Diagrams and charts in answers, in two fixed formats only: a ```` ```mermaid ```` block or a ```` ```chart ```` block of checked JSON (`Chart`: bar, line, scatter or pie; labels and series). Every prompt names them (`VISUAL_NOTE`); before an answer is saved, a block that does not pass the check becomes plain code, so the page never renders free HTML or JavaScript. |
+| `follow_ups.py` | Suggested next questions under an answer, ported from Open WebUI: one call after the answer (first question + last 4 messages), with the teacher's rules; at most 5, saved on the answer and sent as a `follow_ups` event. Not in exam mode, not after a question back, not charged to the student. |
 
 ## Where it is called
 

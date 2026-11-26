@@ -4,7 +4,7 @@
  *
  * The research agent asks for a run with a `code` stream event; the page runs
  * it here and posts the output to /api/chat/code/{id} (backend
- * agent/code_tools.py waits CODE_TIMEOUT for it, more than LOAD + RUN). A Run
+ * agent/tools/code.py waits CODE_TIMEOUT for it, more than LOAD + RUN). A Run
  * button on a Python code block of an answer uses the same worker, without the server.
  *
  * One worker per page keeps the Python state between runs. Loading Python and

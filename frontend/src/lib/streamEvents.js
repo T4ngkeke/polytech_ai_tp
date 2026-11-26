@@ -15,7 +15,7 @@
 // After `done`, a new conversation may receive its `title` (written from the
 // first question and answer), then `follow_ups` (suggested next questions).
 // While the agent works: `step` (what one tool call did), `tasks` (its
-// checklist), `code` (Python for this browser to run, agent/code_tools.py).
+// checklist), `code` (Python for this browser to run, agent/tools/code.py).
 
 import { quotaRefusal } from './quota.js';
 

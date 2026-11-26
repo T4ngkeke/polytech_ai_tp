@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
-from backend.app.agent import attachments as at
-from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.context import attachments as at
+from backend.app.agent.tools.course import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.runner import ResearchRunner
 from backend.app.config import settings

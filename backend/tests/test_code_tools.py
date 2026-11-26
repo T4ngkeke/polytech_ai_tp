@@ -7,8 +7,8 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from backend.app.agent import code_tools as ct
-from backend.app.agent.course_tools import CourseTools
+from backend.app.agent.tools import code as ct
+from backend.app.agent.tools.course import CourseTools
 from backend.app.agent.model import ModelReply
 from backend.app.agent.runner import ResearchRunner
 from backend.app.config import settings

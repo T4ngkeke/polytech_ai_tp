@@ -73,9 +73,9 @@ polytech_ai_tp/
 │   │   │                      # teacher_students, teacher_reports, teacher_access (shared checks)
 │   │   ├── services/          # business logic: classes, labs, rules, quota, analytics,
 │   │   │                      # reports, document reading and editing, research runs, model clients
-│   │   └── agent/             # the research agent: runner.py (the loop), its tools
-│   │                          # (course, web, Python, tasks), the answer language,
-│   │                          # the history limit, memory, attachments
+│   │   └── agent/             # the research agent: runner.py (the loop); tools/ (course,
+│   │                          # web, Python, tasks, access checks); context/ (history,
+│   │                          # summary, memory, attachments, answer language)
 │   ├── worker/                # PDF ingestion worker: queue, MinerU, indexing, load gate
 │   ├── tests/                 # pytest suite
 │   ├── seed.py                # first-time data: settings, demo accounts, one class

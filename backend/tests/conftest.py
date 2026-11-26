@@ -206,7 +206,7 @@ async def make_client(
 @pytest.fixture(autouse=True)
 def _no_language_call(monkeypatch):
     """The chat names the answer language with one more model call first
-    (agent/language.py). Tests that script the model's replies in order do not
+    (agent/context/language.py). Tests that script the model's replies in order do not
     expect it: it is off unless a test sets chat.language_model again."""
     import backend.app.routers.chat as chat_api
     monkeypatch.setattr(chat_api, 'language_model', lambda agent: None)

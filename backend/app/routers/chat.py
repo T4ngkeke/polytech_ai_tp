@@ -25,10 +25,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from backend.app.agent.history import history_budget
+from backend.app.agent.context.history import history_budget
 from backend.app.agent.model import GREEDY, ResearchModel
 from backend.app.agent.result import ResearchQuotaExceeded
-from backend.app.agent.tools import create_scope
+from backend.app.agent.tools.access import create_scope
 from backend.app.config import settings
 from backend.app.auth import get_current_user
 from backend.app.database import get_db
@@ -48,18 +48,18 @@ from backend.app.models import (
 )
 from backend.app.schemas import ChatStreamRequest, CitationOpenedRequest, CodeResultRequest, MessageFeedbackRequest
 from backend.app.services import chat_file_service, feature_service, memory_service, quota_service, rule_service
-from backend.app.agent import attachments as agent_attachments
-from backend.app.agent import memory as agent_memory
+from backend.app.agent.context import attachments as agent_attachments
+from backend.app.agent.context import memory as agent_memory
 from backend.app.agent import follow_ups as agent_follow_ups
-from backend.app.agent import compaction as agent_compaction
+from backend.app.agent.context import compaction as agent_compaction
 from backend.app.routers.teacher_access import get_storage_root
 from backend.app.services.model_routing import Endpoint
 from backend.app.services.model_servers import context_tokens
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns, RunConflict
 from backend.app.services.research_service import DEEP_NOTE, deep_limits, run_persisted_research
-from backend.app.agent.web_tools import WebTools
-from backend.app.agent import code_tools as agent_code
+from backend.app.agent.tools.web import WebTools
+from backend.app.agent.tools import code as agent_code
 from backend.app.services.model_clients import (  # noqa: F401  (tests import _get_llm_config from here)
     get_llm_config as _get_llm_config, make_embed_fn as _make_embed_fn, make_rerank_fn as _make_rerank_fn,
 )
@@ -73,14 +73,14 @@ _memory_reviews: set[asyncio.Task] = set()
 # Seconds without an event before the research stream sends an SSE comment
 # (proxies such as nginx close a stream after 60 s of silence by default).
 KEEPALIVE_SECONDS = 15
-# Messages read for the history; its size limit (agent/history.py) decides
+# Messages read for the history; its size limit (agent/context/history.py) decides
 # how many are sent.
 HISTORY_MESSAGES = 400
 
 
 def language_model(agent: Endpoint):
     """The model that names the answer language before each answer
-    (agent/language.py): the agent, without sampling. Tests replace it."""
+    (agent/context/language.py): the agent, without sampling. Tests replace it."""
     return ResearchModel(agent, sampling=GREEDY)
 
 
@@ -93,7 +93,7 @@ def _research_frames(items):
     """SSE frames for queued research events: a phase name is a status event;
     ('draft', text) adds draft text, ('draft', None) withdraws the draft;
     ('tasks', list) is the model's task checklist as it is now; ('code', {id, code})
-    asks the browser to run Python (agent/code_tools.py); ('step', {...}) is
+    asks the browser to run Python (agent/tools/code.py); ('step', {...}) is
     what one tool call did (runner.step_of), for the process line;
     ('question', {user_message_id}) is the saved question's id.
     Consecutive draft text goes out as one frame."""
@@ -274,7 +274,7 @@ async def chat_stream(
                      llm_config['agent_api_key'], llm_config['agent_model'])
     if not agent.model or not agent.base_url:
         raise HTTPException(503, 'agent_model_not_configured')
-    # The history may use a share of the model's context (agent/history.py).
+    # The history may use a share of the model's context (agent/context/history.py).
     context = await context_tokens(agent.base_url, agent.model, agent.api_key)
     limits = llm_config['research_limits']
     try:
@@ -288,11 +288,11 @@ async def chat_stream(
         deep = 'deep' in body.tools
         if deep:
             limits = deep_limits(limits)
-        # Web search: the research loop gets search_web and fetch_url (agent/web_tools.py).
+        # Web search: the research loop gets search_web and fetch_url (agent/tools/web.py).
         web = 'web' in body.tools
-        # Python in the browser: the research loop gets execute_code (agent/code_tools.py).
+        # Python in the browser: the research loop gets execute_code (agent/tools/code.py).
         run_code = 'code' in body.tools
-        # Attachments (agent/attachments.py): an attached course file limits
+        # Attachments (agent/context/attachments.py): an attached course file limits
         # this question's course search to it.
         full_scope = scope
         if attachments:
@@ -314,7 +314,7 @@ async def chat_stream(
         # Only what fits the history limit is sent, with the citations of
         # those answers only.
         # Past the limit, a summary of the older part goes in front of the
-        # history (agent/compaction.py). None in exam mode, nor when an attached
+        # history (agent/context/compaction.py). None in exam mode, nor when an attached
         # course file narrows the course files (the summary belongs to all of them).
         narrowed = any(a['kind'] == 'document' for a in attachments or ())
         compact = settings.CONTEXT_COMPACTION_ENABLED and not exam_mode and not narrowed
@@ -334,7 +334,7 @@ async def chat_stream(
     embedder = _make_embed_fn(llm_config)
     async def embed_query(query: str):
         return (await embedder([query]))[0]
-    # The student's notes of this class (agent/memory.py): never in exam mode,
+    # The student's notes of this class (agent/context/memory.py): never in exam mode,
     # in a test drive, or when the student turned memory off.
     memory_on = (current_user.memory_enabled and current_user.role == UserRole.student
                  and not exam_mode and not session.is_test)
@@ -629,7 +629,7 @@ async def code_result(
     body: CodeResultRequest,
     current_user: User = Depends(get_current_user),
 ) -> None:
-    """The browser's output of one Python run (agent/code_tools.py): only the
+    """The browser's output of one Python run (agent/tools/code.py): only the
     person whose question asked for it, while the run still waits."""
     if not agent_code.deliver(call_id, current_user.id, body.model_dump()):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "code_run_not_waiting")
