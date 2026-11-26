@@ -56,14 +56,6 @@ class OpenArgs(Args):
         return self
 
 
-class NavigateArgs(Args):
-    document_id: uuid.UUID
-    anchor_block_id: uuid.UUID
-    direction: Literal['next', 'previous']
-    unit: Literal['block', 'page'] = 'block'
-    count: int = Field(default=1, ge=1, le=3, strict=True)
-
-
 class ReadArgs(Args):
     document_id: uuid.UUID
     page_id: uuid.UUID | None = None
@@ -102,7 +94,7 @@ class ViewImageArgs(Args):
 MAX_SEARCH_OUTPUT_CHARS = 8000
 
 SCHEMAS: dict[str, type[Args]] = {
-    'search': SearchArgs, 'open': OpenArgs, 'navigate': NavigateArgs,
+    'search': SearchArgs, 'open': OpenArgs,
     'read': ReadArgs, 'grep': GrepArgs, 'view_image': ViewImageArgs,
 }
 
@@ -251,11 +243,6 @@ class ResearchTools:
                 return await reader.open_document(
                     self.db, rev, reader=self.scope.reader_id,
                     page_id=args.page_id, block_id=args.block_id, cursor=args.cursor)
-            if name == 'navigate':
-                return await reader.navigate(
-                    self.db, rev, reader=self.scope.reader_id,
-                    anchor_block_id=args.anchor_block_id, direction=args.direction,
-                    unit=args.unit, count=args.count)
             if name == 'read':
                 return await reader.read(
                     self.db, rev, reader=self.scope.reader_id, teacher=False,
@@ -334,8 +321,8 @@ class ResearchTools:
                 }
                 items_by_block[key] = item
             if hit.score is not None:
-                # Best reranker score of the block's snippets (search mode
-                # uses it to tell a missing topic from a weak match).
+                # Best reranker score of the block's snippets (the runner's
+                # "no new page" count uses it: runner.lead_pages).
                 item['score'] = max(item.get('score', hit.score), hit.score)
             snippet = {
                 'chunk_id': str(hit.id),

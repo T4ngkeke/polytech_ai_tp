@@ -115,7 +115,8 @@ async def test_scoped_pdf_search_read_cursor_and_asset_contract(pg_session, tmp_
         assert index[str(doc.id)]['pages'][0] == {'page_id': str(page.page_id), 'pdf_page_no': 1}
         assert await ResearchTools(db, await create_scope(
             db, user_id=student.id, session_id=chat.id)).page_index() == index
-        assert (await tools.execute('navigate', {
+        # navigate is gone (2026-11-26): an unknown tool is refused.
+        assert not (await tools.execute('navigate', {
             'document_id': str(doc.id), 'anchor_block_id': item['block_id'],
             'direction': 'next', 'unit': 'page',
         }))['ok']

@@ -192,6 +192,20 @@ async def test_view_uses_handles_and_hides_reader_metadata():
 
 
 @pytest.mark.asyncio
+async def test_a_page_missing_from_the_index_is_not_called_first_and_last():
+    class OnlyNine(ViewFixture):
+        async def page_index(self):
+            index = await super().page_index()
+            index[str(self.doc)]['pages'] = index[str(self.doc)]['pages'][:1]
+            return index
+    tools = OnlyNine()
+    course = CourseTools(tools)
+    await course.call('read', {'page': 'd1.p9'})
+    header = course.view._page_header(tools.doc, tools._ref(tools.p10, 10))
+    assert 'Algebre.pdf' in header and 'first page' not in header and 'last page' not in header
+
+
+@pytest.mark.asyncio
 async def test_next_page_and_cursor_handles_resolve_without_navigate():
     tools = ViewFixture()
     course = CourseTools(tools)
@@ -373,6 +387,32 @@ async def test_grep_without_a_document_searches_every_document_as_one_call():
     assert lines[2].startswith('d1.p4.b1 text: …fuite 0…') and lines[3].startswith('d2.p4.b2 text: …fuite 0…')
     assert lines[-1] == 'more matches in d2; grep one of them with its document handle'
     assert 'cursor' not in text and len(course.trace) == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_over_every_document_says_which_one_could_not_be_searched():
+    class OneFails(GrepFixture):
+        async def execute(self, name, arguments):
+            if arguments['document_id'] == str(self.docs[0]):
+                self.calls.append((name, arguments))
+                return {'ok': False, 'error': {'code': 'source_unavailable'}}
+            return await super().execute(name, arguments)
+    # d1 fails, d3 has no match: "0 matches" and d1 named, not d1's error.
+    tools = OneFails(matches=(1, 0, 0))
+    text, ok = await CourseTools(tools).call('grep', {'pattern': 'fuite'})
+    assert ok and text.splitlines()[0] == '0 matches (leads; read them before citing)'
+    assert text.splitlines()[-1] == 'could not search d1; grep it alone with its document handle to see why'
+    # d1 fails, d2 has matches: the matches, and d1 still named.
+    tools = OneFails(matches=(1, 2, 0))
+    text, ok = await CourseTools(tools).call('grep', {'pattern': 'fuite'})
+    assert ok and text.splitlines()[0] == '2 matches (leads; read them before citing)'
+    assert 'could not search d1' in text
+    # Every document fails: the call fails with the error.
+    class AllFail(GrepFixture):
+        async def execute(self, name, arguments):
+            return {'ok': False, 'error': {'code': 'source_unavailable'}}
+    text, ok = await CourseTools(AllFail()).call('grep', {'pattern': 'fuite'})
+    assert not ok and 'source_unavailable' in text
 
 
 @pytest.mark.asyncio

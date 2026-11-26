@@ -157,7 +157,7 @@ async def test_the_chat_sends_the_attached_screenshot_to_the_model(pg_session, t
                                files={'file': ('capture.png', PNG)})
         assert up.status_code == 201, up.text
         response = await client.post('/api/chat/stream', json={
-            'session_id': str(chat.id), 'message': 'Pourquoi cette erreur ?', 'mode': 'search',
+            'session_id': str(chat.id), 'message': 'Pourquoi cette erreur ?',
             'attachments': [{'kind': 'file', 'id': up.json()['id']}], 'client_request_id': str(uuid.uuid4())})
     assert response.status_code == 200, response.text
     question = seen[0][-1]['content']
@@ -166,3 +166,13 @@ async def test_the_chat_sends_the_attached_screenshot_to_the_model(pg_session, t
     stored = await pg_session.scalar(select(Message).where(Message.session_id == chat.id,
                                                            Message.sender == SenderType.user))
     assert stored.content == 'Pourquoi cette erreur ?' and stored.attachments[0]['name'] == 'capture.png'
+
+
+def test_an_earlier_chat_whose_last_message_is_too_long_keeps_its_start():
+    history = [{'role': 'user', 'content': 'Pourquoi ?'},
+               {'role': 'assistant', 'content': 'x' * (at.EARLIER_CHAT_CHARS + 500)}]
+    text = at._earlier_chat(history)
+    assert text.startswith('assistant: xxx') and text.endswith(at.CUT_NOTE)
+    assert len(text) == at.EARLIER_CHAT_CHARS
+    short = at._earlier_chat([{'role': 'user', 'content': 'Q ?'}, {'role': 'assistant', 'content': 'R.'}])
+    assert short == 'student: Q ?\n\nassistant: R.'

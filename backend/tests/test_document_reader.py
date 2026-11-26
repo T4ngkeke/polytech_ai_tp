@@ -1,4 +1,4 @@
-"""M2-C reading: page, block and asset endpoints, and open/navigate/read/grep.
+"""M2-C reading: page, block and asset endpoints, and open/read/grep.
 
 Permission rules come from M1 (document_access). These tests check that every
 reading entry point goes through them, that nothing leaves the revision it was
@@ -241,26 +241,6 @@ async def test_read_cuts_clearly_and_the_parts_rebuild_the_block(db_session, sto
     assert page['unavailable'] and page['issues']
     with pytest.raises(reader.ReaderError, match='invalid_arguments'):
         await reader.read(db_session, rev, reader='t', teacher=False, page_id=unproven.page_id, block_id=block.block_id)
-
-
-@pytest.mark.asyncio
-async def test_navigate_follows_reading_order(db_session, storage, tmp_path):
-    content = pdf_fixtures.course_pdf(5)
-    _, _, _, ids = await parsed(db_session, storage, tmp_path, content)
-    rev = await rev_of(db_session, ids['rev_id'])
-    _, blocks = await reader.reading_order(db_session, rev)
-    forward = await reader.navigate(db_session, rev, reader='t', anchor_block_id=blocks[1].block_id,
-                                    direction='next', count=3)
-    assert [i['block_id'] for i in forward['items']] == [str(b.block_id) for b in blocks[2:5]]
-    back = await reader.navigate(db_session, rev, reader='t', anchor_block_id=blocks[0].block_id,
-                                 direction='previous')
-    assert back['items'] == [] and back['at_start']
-    pages = await reader.navigate(db_session, rev, reader='t', anchor_block_id=blocks[0].block_id,
-                                  direction='next', unit='page', count=2)
-    assert [i['order_index'] for i in pages['items']] == [1, 2]
-    with pytest.raises(reader.ReaderError, match='invalid_arguments'):
-        await reader.navigate(db_session, rev, reader='t', anchor_block_id=blocks[0].block_id,
-                              direction='next', count=4)
 
 
 def test_a_box_outside_the_page_gives_no_region():

@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import update
 
+from backend.app.agent.follow_ups import truncate_content
 from backend.app.models import Message
 from backend.app.services import failure_log
 
@@ -86,15 +87,6 @@ class Compaction:
     dropped: list[dict] = field(default_factory=list)     # safe messages before history, since the checkpoint
     previous: str | None = None                           # summary of what came before ``dropped``
     previous_on: str | None = None                        # id of the message it is stored on
-
-
-def truncate_content(content: str, max_chars: int) -> str:
-    if max_chars <= 0:
-        return ''
-    if not content or len(content) <= max_chars:
-        return content
-    half = max_chars // 2
-    return f'{content[:half]}...{content[-(max_chars - half):]}'
 
 
 def _render(messages: list[dict], limit: int | None = None) -> str:

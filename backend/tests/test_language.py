@@ -2,7 +2,6 @@
 one sentence at the end of the last user message."""
 import pytest
 
-from backend.app.agent.direct import DirectRunner
 from backend.app.agent.language import (
     ASK_PROMPT, DEFAULT_LANGUAGE, GENERIC_SENTENCE, ask_language, ask_messages, language_sentence,
     parse_language,
@@ -66,19 +65,24 @@ def test_the_sentence_names_the_language_or_stays_generic():
 
 
 @pytest.mark.asyncio
-async def test_direct_ends_the_question_with_the_language_sentence():
-    model = Model()
-    await DirectRunner(model).run('What is a pointer?', answer_language='English')
-    assert model.seen[0][0][-1]['content'] == 'What is a pointer?\n\nWrite the answer in English.'
+async def test_research_ends_the_question_with_the_language_sentence():
+    from backend.app.agent.course_tools import CourseTools
+    from backend.app.agent.runner import ResearchRunner
+    from backend.tests.test_course_tools import ViewFixture
+    from backend.tests.test_runner import Script
+    model = Script('A pointer holds an address.', 'DONE')   # the answer, then CHECK_TURN
+    await ResearchRunner(CourseTools(ViewFixture()), model).run('What is a pointer?', answer_language='English')
+    assert model.seen[0][-1]['content'] == 'What is a pointer?\n\nWrite the answer in English.'
     # The system message does not depend on the language (cached prefix).
-    other = Model()
-    await DirectRunner(other).run("C'est quoi un pointeur ?", answer_language='French')
-    assert other.seen[0][0][0] == model.seen[0][0][0]
-    assert other.seen[0][0][-1]['content'].endswith('Write the answer in French.')
+    other = Script('A pointer holds an address.', 'DONE')   # the answer, then CHECK_TURN
+    await ResearchRunner(CourseTools(ViewFixture()), other).run("C'est quoi un pointeur ?",
+                                                                 answer_language='French')
+    assert other.seen[0][0] == model.seen[0][0]
+    assert other.seen[0][-1]['content'].endswith('Write the answer in French.')
     # No language name (the call failed): the generic sentence.
-    generic = Model()
-    await DirectRunner(generic).run('Was ist ein Zeiger?')
-    assert generic.seen[0][0][-1]['content'].endswith(GENERIC_SENTENCE)
+    generic = Script('A pointer holds an address.', 'DONE')   # the answer, then CHECK_TURN
+    await ResearchRunner(CourseTools(ViewFixture()), generic).run('Was ist ein Zeiger?')
+    assert generic.seen[0][-1]['content'].endswith(GENERIC_SENTENCE)
 
 
 def test_the_rule_block_says_which_level_wins():
@@ -86,15 +90,3 @@ def test_the_rule_block_says_which_level_wins():
     assert teaching_rules_text({'class_rules': None, 'lab_rules': None, 'student_rules': None}) == ''
     text = teaching_rules_text({'class_rules': '1. Court.', 'lab_rules': None, 'student_rules': '1. Long.'})
     assert text == RULES_PRECEDENCE + '\n\n[CLASS RULES]\n1. Court.\n\n[STUDENT RULES]\n1. Long.'
-
-
-@pytest.mark.asyncio
-async def test_direct_repeats_the_rules_before_the_language_sentence():
-    from backend.app.agent.runner import ANSWER_RULES, answer_ending
-    rules = '[CLASS RULES]\n1. Court.'
-    assert answer_ending('', 'English') == 'Write the answer in English.'
-    assert answer_ending(rules, 'English') == ANSWER_RULES.format(rules=rules) + '\n\nWrite the answer in English.'
-    model = Model()
-    await DirectRunner(model).run('What is a pointer?', teaching_rules=rules, answer_language='English')
-    assert model.seen[0][0][-1]['content'] == 'What is a pointer?\n\n' + answer_ending(rules, 'English')
-    assert rules in model.seen[0][0][0]['content']   # still in the system message too

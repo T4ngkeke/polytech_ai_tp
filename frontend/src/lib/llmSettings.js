@@ -18,10 +18,8 @@ export const SERVER_KINDS = { chat: 'Chat model', embed: 'Embeddings', rerank: '
 // has them (services/research_service.ResearchLimits and LIMIT_KEYS, worker/picture_captions).
 // The page uses the backend's research_limits when it sends them.
 export const NUMBERS = [
-  { key: 'tp_context_percent', group: 'context', name: 'TP text', unit: '%', def: 30, min: 0, max: 60,
-    help: 'The lab’s own files, read in full with every question in Search and Direct.' },
   { key: 'history_context_percent', group: 'context', name: 'Chat history', unit: '%', def: 30, min: 0, max: 50,
-    help: 'Earlier messages of the conversation, in every mode. Past the limit the oldest turns go, several at once.' },
+    help: 'Earlier messages of the conversation. Past the limit the oldest turns go, several at once.' },
   { key: 'agent_max_tool_calls', group: 'research', name: 'Course tool calls', unit: '', def: 30, min: 1, max: 40,
     help: 'Searches, page reads and greps in one answer.' },
   { key: 'agent_max_visual_calls', group: 'research', name: 'Image views', unit: '', def: 4, min: 0, max: 10,

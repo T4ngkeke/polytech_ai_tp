@@ -1,6 +1,7 @@
 """M2-C: deterministic reading of one structured revision.
 
-open / navigate / read / grep, as the roadmap's tool contract describes them,
+open / read / grep, as the roadmap's tool contract describes them (its
+"navigate" went: read with a page handle does the same),
 without any agent. The caller first resolves the revision through
 document_access.readable_revision, which applies every permission rule (a
 student never gets a draft, an archived or deleted document is not readable).
@@ -28,7 +29,6 @@ from backend.app.services.document_edits import description_checked
 
 OPEN_BATCH = 20
 GREP_BATCH = 20
-NAVIGATE_MAX = 3
 DEFAULT_BUDGET = 8000
 MAX_BUDGET = 20000
 SUMMARY_CHARS = 160
@@ -271,40 +271,6 @@ async def open_document(db, rev, *, reader: str, page_id=None, block_id=None, cu
                     next_cursor=encode_cursor(reader=reader, revision_id=rev.id, op='open', args=args,
                                               position={'start': end}) if more else None,
                     page_count=len(pages), revision_id=str(rev.id), document_id=str(rev.document_id))
-
-
-async def navigate(db, rev, *, reader: str, anchor_block_id, direction: str, unit: str = 'block', count: int = 1):
-    """Move in true reading order. Never sorted by relevance."""
-    if direction not in ('next', 'previous') or unit not in ('block', 'page') or not 1 <= count <= NAVIGATE_MAX:
-        raise ReaderError('invalid_arguments')
-    pages, blocks = await reading_order(db, rev)
-    index = next((i for i, b in enumerate(blocks) if b.block_id == anchor_block_id), None)
-    if index is None:
-        raise ReaderError('not_found')
-    page_by_id = {p.page_id: p for p in pages}
-    items = []
-    if unit == 'block':
-        step = 1 if direction == 'next' else -1
-        position = index + step
-        while 0 <= position < len(blocks) and len(items) < count:
-            block = blocks[position]
-            items.append({'block_id': str(block.block_id), 'type': block.kind,
-                          'page': _page_ref(page_by_id[block.page_id]), 'summary': _summary(block.content)})
-            position += step
-    else:
-        page_index = page_by_id[blocks[index].page_id].order_index
-        wanted = range(page_index + 1, page_index + 1 + count) if direction == 'next' \
-            else range(page_index - 1, page_index - 1 - count, -1)
-        for number in wanted:
-            if 0 <= number < len(pages):
-                page = pages[number]
-                first = next((b for b in blocks if b.page_id == page.page_id), None)
-                items.append({**_page_ref(page), 'title': page.title,
-                              'first_block_id': str(first.block_id) if first else None,
-                              'summary': _summary(first.content if first else '')})
-    return envelope(items, budget_units=sum(len(i['summary']) for i in items),
-                    at_start=direction == 'previous' and len(items) < count,
-                    at_end=direction == 'next' and len(items) < count)
 
 
 async def read(db, rev, *, reader: str, teacher: bool, page_id=None, block_id=None, start=None, end=None,

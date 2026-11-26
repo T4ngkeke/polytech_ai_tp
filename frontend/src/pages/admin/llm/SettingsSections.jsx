@@ -29,8 +29,6 @@ export function AnswersSection({ st, set, config, contextTokens }) {
     const { tokens, chars } = contextShare(contextTokens, value(k));
     return <span className="mt-0.5 block text-cream-secondary">{t('a.llm.share', { tokens: fmt(tokens), chars: fmt(chars) })}</span>;
   };
-  const tp = value('tp_context_percent');
-  const hist = value('history_context_percent');
   const room = value('agent_total_seconds') - value('agent_research_seconds');
   const call = value('agent_call_seconds');
   return (
@@ -38,10 +36,7 @@ export function AnswersSection({ st, set, config, contextTokens }) {
       <p className="text-[14px] font-semibold text-cream">
         {t('a.llm.contextShare')} <span className="font-normal text-[13px] text-cream-muted">({t('a.llm.contextOn', { n: fmt(contextTokens) })})</span>
       </p>
-      <div>{numbers('context', st, set, config, { tp_context_percent: share('tp_context_percent'), history_context_percent: share('history_context_percent') })}</div>
-      {tp + hist > 75 && (
-        <Note tone="warn">{t('a.llm.tpWarn', { n: tp + hist })}</Note>
-      )}
+      <div>{numbers('context', st, set, config, { history_context_percent: share('history_context_percent') })}</div>
       <p className="mt-1 text-[14px] font-semibold text-cream">{t('a.llm.researchTitle')}</p>
       <div>{numbers('research', st, set, config)}</div>
       {room < call && (

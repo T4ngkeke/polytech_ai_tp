@@ -94,7 +94,7 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          session_id: sessionId, message, client_request_id: createRequestId(), mode: 'research',
+          session_id: sessionId, message, client_request_id: createRequestId(),
           tools: toolsOverride || tools, attachments: attachments.map((a) => ({ kind: a.kind, id: a.id })),
           version_of: versionOf || undefined,
         }),

@@ -46,8 +46,8 @@ const S = {
   'lab.lockedBanner': { zh: '老师已锁定这个实验，暂时不能提问。以前的对话还可以看。', fr: "L'enseignant a verrouillé ce TP : pas de nouvelle question pour le moment. Les anciennes conversations restent lisibles.", en: 'The teacher locked this lab: no new questions for now. Earlier conversations can still be read.' },
   'exam.short': { zh: '考试模式', fr: 'Examen', en: 'Exam' },
   'exam.bannerFiles': { zh: '考试模式：只能在老师允许的 {n} 个文件里查找。联网、Python 和上传已关闭。', fr: "Mode examen : recherche seulement dans {n} fichier(s) autorisé(s). Web, Python et envoi de fichiers sont fermés.", en: 'Exam mode: search only in the {n} file(s) the teacher allowed. Web, Python and uploads are off.' },
-  'exam.bannerTest': { zh: '考试模式：只能在你允许的文件里查找（没有允许的文件时只能直接提问）。联网、Python 和上传已关闭。', fr: "Mode examen : recherche seulement dans les fichiers autorisés (sans fichier, questions directes seulement). Web, Python et envoi de fichiers sont fermés.", en: 'Exam mode: search only in the allowed files (with none, direct questions only). Web, Python and uploads are off.' },
-  'exam.bannerDirect': { zh: '考试模式：老师没有开放任何文件，只能直接提问。', fr: "Mode examen : aucun fichier n'est ouvert, questions directes seulement.", en: 'Exam mode: no files are open, direct questions only.' },
+  'exam.bannerTest': { zh: '考试模式：只能在你允许的文件里查找；一个文件都没允许时，AI 不查课程，只按常识回答。联网、Python 和上传已关闭。', fr: "Mode examen : recherche seulement dans les fichiers autorisés ; sans fichier autorisé, l'assistant répond sans le cours. Web, Python et envoi de fichiers sont fermés.", en: 'Exam mode: search only in the allowed files; with none allowed, the tutor answers without the course. Web, Python and uploads are off.' },
+  'exam.bannerNoFiles': { zh: '考试模式：老师没有开放任何文件，AI 不查课程，只按常识回答。', fr: "Mode examen : aucun fichier n'est ouvert, l'assistant répond sans le cours.", en: 'Exam mode: no files are open, the tutor answers without the course.' },
 
   // Quota
   'quota.today': { zh: '今天', fr: "Aujourd'hui", en: 'Today' },
@@ -78,7 +78,7 @@ const S = {
   // Input card
   'input.label': { zh: '你的问题', fr: 'Votre question', en: 'Your question' },
   'input.placeholder': { zh: '给 Edu-LLM 发消息…', fr: 'Écrivez à Edu-LLM…', en: 'Message Edu-LLM…' },
-  'input.exam': { zh: '考试模式：只能直接提问', fr: 'Mode examen : questions directes', en: 'Exam mode: direct questions' },
+  'input.exam': { zh: '考试模式 · 输入你的问题', fr: 'Mode examen · posez votre question', en: 'Exam mode · ask your question' },
   'input.quota': { zh: '额度已用完', fr: 'Limite atteinte', en: 'Limit reached' },
   'input.locked': { zh: '实验已锁定', fr: 'TP verrouillé', en: 'Lab locked' },
   'input.elsewhere': { zh: '另一个窗口正在回答，结束后可以发送', fr: 'Réponse en cours dans une autre fenêtre', en: 'An answer is being written in another window' },

@@ -13,7 +13,7 @@ the student edited or asked again keeps its replaced versions (messages
 each version ("version 2/5, replaced") and whether its answer had code, so a
 report can say when a student rewrote a question many times to get a solution. A question
 is tied to PDF pages by the citations of its answer; a question without
-citations (Direct mode, exam mode) is tied to the pages a course search finds
+citations (an answer from general knowledge) is tied to the pages a course search finds
 for it (top 3 passages, no answer model). Teacher test sessions are left out.
 """
 
@@ -80,7 +80,7 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
     """Everything the model is told, counted from stored rows."""
     rows = (await db.execute(
         select(Message.id, Message.session_id, Message.sender, Message.content, Message.created_at,
-               Message.answer_mode, Message.feedback, Message.version_of, Message.superseded_at,
+               Message.feedback, Message.version_of, Message.superseded_at,
                Session.user_id)
         .join(Session, Session.id == Message.session_id)
         .where(Session.lab_id == lab.id, Session.is_test.is_(False),
@@ -92,13 +92,13 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
     for r in rows:
         if r.sender == SenderType.user:
             pending[r.session_id] = {"id": r.id, "user_id": r.user_id, "text": r.content,
-                                     "at": r.created_at, "mode": None, "down": False, "answer_id": None,
+                                     "at": r.created_at, "down": False, "answer_id": None,
                                      "root": r.version_of or r.id, "replaced": r.superseded_at is not None,
                                      "code": False}
             questions.append(pending[r.session_id])
         elif r.sender == SenderType.llm and r.session_id in pending:
             q = pending.pop(r.session_id)
-            q.update(mode=r.answer_mode, answer_id=r.id, code=has_code(r.content),
+            q.update(answer_id=r.id, code=has_code(r.content),
                      down=getattr(r.feedback, "value", r.feedback) == MessageFeedback.down.value)
     if not questions:
         raise NoQuestions()
@@ -181,10 +181,6 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
         "questions_given_to_model": len(recent),
         "students": len(per_student),
         "questions_per_student": sorted(per_student.values(), reverse=True),
-        # Answers older than the modes (2026-10-15) have none: counted apart, so a
-        # report does not read "unknown" as a mode students chose.
-        "modes": dict(Counter(q["mode"] for q in current if q["mode"])),
-        "answers_before_modes_were_recorded": sum(1 for q in current if not q["mode"]),
         "thumbs_down": sum(q["down"] for q in current),
         "answers_not_finished": len([q for q in current if q["id"] in problem]),
         "documents_in_lab": sorted(name for _, name in documents.values()),
@@ -194,7 +190,7 @@ async def gather_facts(db, lab: Lab, *, student_id: uuid.UUID | None = None, emb
         "pages_matched_by_search": sum(q.get("pages_from") == "search" for q in questions),
         "language": "French" if detect_language(q["text"] for q in questions) == "fr" else "English",
         "question_list": [{
-            "student": alias[q["user_id"]], "date": q["at"].date().isoformat(), "mode": q["mode"],
+            "student": alias[q["user_id"]], "date": q["at"].date().isoformat(),
             "text": " ".join(q["text"].split())[:QUESTION_CHARS],
             "pages": sorted(f"{f} p.{p}" for f, p in pages_of.get(q["id"], set()))[:3],
             **({"thumbs_down": True} if q["down"] else {}),
@@ -267,7 +263,7 @@ def build_messages(facts: dict, *, student: str | None = None) -> list[dict]:
               if student else LAB_PROMPT.format(lab=facts["lab"], language=language, h=headings))
     if facts.get("replaced_versions"):
         system += VERSIONS_NOTE
-    lines = [f'- [{q["student"]}, {q["date"]}, {q["mode"] or "?"}] {q["text"]}'
+    lines = [f'- [{q["student"]}, {q["date"]}] {q["text"]}'
              + (f' (pages: {", ".join(q["pages"])})' if q["pages"] else "")
              + (" [thumbs down]" if q.get("thumbs_down") else "")
              + (f' [{q["problem"]}]' if q.get("problem") else "")

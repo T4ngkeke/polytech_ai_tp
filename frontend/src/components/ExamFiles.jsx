@@ -3,8 +3,8 @@
  *
  * Data: GET /api/teacher/classes/{classId}/exam-files, and PUT the same with
  * { document_ids } (the ticked files, no others). Each tick is saved at once.
- * In exam mode students search (Search, Research) and open only these files;
- * with none, they get Direct answers only. The list can be prepared before the
+ * In exam mode students search and open only these files; with none, the
+ * agent answers without the course. The list can be prepared before the
  * exam, while exam mode is off.
  */
 import { useCallback, useEffect, useState } from 'react';

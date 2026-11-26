@@ -1,9 +1,8 @@
 """One persisted research run: commit the answer before returning it.
 
-The chat endpoint calls run_persisted_research for each answer mode: direct
-(agent/direct.py), search (agent/search.py) and research (agent/runner.py).
-Every model call is billed on
-the student's quota as it happens; embedding and rerank calls are counted.
+The chat endpoint calls run_persisted_research for every answer; the research
+loop of agent/runner.py writes it. Every model call is billed on the student's
+quota as it happens; embedding and rerank calls are counted.
 Duplicate request IDs return the existing run, never a second model
 invocation or charge. A cancelled run stops before its next tool call.
 """
@@ -16,15 +15,11 @@ from dataclasses import dataclass, fields, replace
 
 from sqlalchemy import select
 
-from backend.app.agent import direct as direct_mode
-from backend.app.agent import search as search_mode
 from backend.app.agent.course_tools import CourseTools
-from backend.app.agent.direct import DirectRunner
 from backend.app.agent.history import DEFAULT_CONTEXT, estimate_tokens
 from backend.app.agent.language import ask_language
 from backend.app.agent.result import ResearchQuotaExceeded, ResearchRunStopped
-from backend.app.agent.runner import ResearchRunner
-from backend.app.agent.search import SearchRunner
+from backend.app.agent.runner import ResearchRunner, min_score_for
 from backend.app.agent.tools import PerCallTools, ResearchScope
 from backend.app.database import AsyncSessionLocal
 from backend.app.models import AgentRun
@@ -48,11 +43,8 @@ class ResearchLimits:
     total_seconds: int = 420
     call_seconds: int = 120
     input_tokens: int = 28000
-    # Share of the model's context the TP text may use in Search and Direct
-    # (agent/tp_text.py). 30% of 128k is about 39k tokens; 0: no TP text.
-    tp_context_percent: int = 30
     # Share of the model's context the chat history may use (agent/history.py).
-    # In Research, input_tokens is the room for reading on top of it.
+    # input_tokens is the room for reading on top of it.
     history_context_percent: int = 30
 
     @classmethod
@@ -74,7 +66,6 @@ LIMIT_KEYS = {
     'AGENT_TOTAL_SECONDS': ('total_seconds', 10, 1800),
     'AGENT_CALL_SECONDS': ('call_seconds', 5, 600),
     'AGENT_MAX_INPUT_TOKENS': ('input_tokens', 4000, 200000),
-    'TP_CONTEXT_PERCENT': ('tp_context_percent', 0, 60),
     'HISTORY_CONTEXT_PERCENT': ('history_context_percent', 0, 50),
 }
 DEFAULT_LIMITS = {f.name: f.default for f in fields(ResearchLimits)}
@@ -122,14 +113,14 @@ class _RunningTools(PerCallTools):
         return await super().execute(name, arguments)
 
 
-# Room kept under the model's context for the answer of a Research call and
+# Room kept under the model's context for the answer of a research call and
 # the estimate's error (characters / 3 is low for Chinese).
 CONTEXT_RESERVE = 6000
 
 
 def research_input_tokens(input_tokens: int, history: list[dict] | None,
                           context_tokens: int | None) -> int:
-    """The input ceiling of a Research call: the admin's reading room on top of
+    """The input ceiling of a research call: the admin's reading room on top of
     the history, never above the model's context minus CONTEXT_RESERVE."""
     wanted = input_tokens + sum(estimate_tokens(m.get('content') or '') for m in history or [])
     return min(wanted, (context_tokens or DEFAULT_CONTEXT) - CONTEXT_RESERVE)
@@ -152,26 +143,22 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
                                  vision_fn=None,
                                  allow_ask: bool = False,
                                  vision_model: str = '',
-                                 mode: str = 'research', exam_mode: bool = False,
-                                 exam_files: bool = False,
+                                 exam_no_files: bool = False,
                                  limits: ResearchLimits = ResearchLimits(),
-                                 tp_chars: int | None = None, language_model=None,
+                                 language_model=None,
                                  context_tokens: int | None = None) -> dict:
     """model: agent.model.ResearchModel (or a test double with the same call).
     language_model: the model that names the answer language first
     (agent/language.py, billed like the others); None: no such call, the
     generic language sentence. context_tokens: the model server's context, a
-    ceiling for the Research input.
-    mode: direct, search or research; exam_mode and exam_files (some files are
-    allowed in the exam) only change the direct prompt. The chat endpoint has
-    already limited the scope to the allowed files, or chosen direct with an
-    empty scope; Direct reads the TP files of the scope only."""
-    if mode not in ('direct', 'search', 'research'):
-        raise ValueError('unknown_mode')
+    ceiling for the research input.
+    exam_no_files: the class is in exam mode and its teacher allowed no file.
+    The chat endpoint has already limited the scope to the allowed files (so
+    here it is empty); the run then has no tools at all."""
     runs = ResearchRuns(session_factory)
     usage = ResearchUsage(session_factory)
     started = await runs.begin_run(scope=scope, question=question,
-        client_request_id=client_request_id, mode=mode, attachments=attachments, version=version,
+        client_request_id=client_request_id, mode='research', attachments=attachments, version=version,
         stale_after=max(STALE_RUN_SECONDS, 2 * limits.total_seconds))
     # The question is saved: the page can use its id (a new version of it)
     # even if the answer never finishes.
@@ -252,41 +239,22 @@ async def run_persisted_research(*, scope: ResearchScope, question: str,
             except Exception as exc:
                 # The answer still comes, with the generic language sentence.
                 failure_log.record('answer_language', type(exc).__name__)
-        if mode == 'direct':
-            # Direct reads only the TP files of the scope (agent/tp_text.py), no other tool.
-            course_tools = CourseTools(tools, max_tool_calls=0, research_seconds=limits.total_seconds,
-                                       max_visual_calls=0)
-            runner = DirectRunner(billed, course_tools=course_tools, exam_mode=exam_mode,
-                                  exam_files=exam_files,
-                                  concise=direct_mode.CONCISE,
-                                  total_timeout=limits.total_seconds, tp_chars=tp_chars,
-                                  model_timeout=limits.call_seconds, on_draft=on_draft)
-        elif mode == 'search':
-            # Searches and page reads are not research tool calls: no tool budget.
-            course_tools = CourseTools(tools, max_tool_calls=40, research_seconds=limits.total_seconds,
-                                       max_visual_calls=0,
-                                       first_evidence=await runs.next_evidence_number(scope.session_id))
-            runner = SearchRunner(course_tools, billed, rewrite=search_mode.REWRITE,
-                                  min_score=search_mode.min_score_for(rerank_model), concise=search_mode.CONCISE,
-                                  total_timeout=limits.total_seconds, tp_chars=tp_chars,
-                                  model_timeout=limits.call_seconds, on_phase=on_phase, on_draft=on_draft)
-        else:
-            course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
-                                       research_seconds=limits.research_seconds,
-                                       max_visual_calls=limits.visual_calls,
-                                       first_evidence=await runs.next_evidence_number(scope.session_id))
-            runner = ResearchRunner(course_tools, billed,
-                max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
-                total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
-                max_input_tokens=research_input_tokens(limits.input_tokens, history, context_tokens),
-                lead_min_score=search_mode.min_score_for(rerank_model),
-                on_phase=on_phase, on_draft=on_draft, on_tasks=on_tasks, web_tools=web_tools,
-                code_tools=code_tools, on_step=on_step)
+        course_tools = CourseTools(tools, max_tool_calls=limits.tool_calls,
+                                   research_seconds=limits.research_seconds,
+                                   max_visual_calls=limits.visual_calls,
+                                   first_evidence=await runs.next_evidence_number(scope.session_id))
+        runner = ResearchRunner(course_tools, billed,
+            max_tool_calls=limits.tool_calls, research_timeout=limits.research_seconds,
+            total_timeout=limits.total_seconds, model_timeout=limits.call_seconds,
+            max_input_tokens=research_input_tokens(limits.input_tokens, history, context_tokens),
+            lead_min_score=min_score_for(rerank_model),
+            on_phase=on_phase, on_draft=on_draft, on_tasks=on_tasks, web_tools=web_tools,
+            code_tools=code_tools, on_step=on_step)
         result = await runner.run(question, history=history, teaching_rules=teaching_rules,
                                   research_note=research_note, earlier_citations=earlier_citations,
                                   allow_ask=allow_ask, answer_language=answer_language,
-                                  **({'memory_context': memory_context, 'attachment_context': attachment_context,
-                                      'images': images} if isinstance(runner, ResearchRunner) else {}))
+                                  memory_context=memory_context, attachment_context=attachment_context,
+                                  images=images, exam_no_files=exam_no_files)
         await runs.finish_run(started.run_id, result)
     except asyncio.CancelledError:
         # Both steps in one shielded task: a second cancellation (the server

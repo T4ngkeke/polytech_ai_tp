@@ -129,6 +129,8 @@ async def test_the_loop_offers_web_only_when_given_and_returns_its_sources():
     assert result.web_sources == [{'id': 'W1', 'url': 'https://docs.python.org/3/', 'title': 'Python docs'}]
     assert result.tool_calls == 0 and result.citations == []           # not course evidence
     assert wt.WEB_NOTE in model.seen[0][0]['content']
+    # A web search is research: no CHECK_TURN after the answer.
+    assert model.purposes == ['agent', 'agent'] and result.answer.endswith('[W1].')
     plain = Script('Bonjour.')
     result = await ResearchRunner(CourseTools(ViewFixture()), plain).run('Bonjour')
     assert result.web_sources is None and wt.WEB_NOTE not in plain.seen[0][0]['content']
@@ -166,6 +168,7 @@ async def test_a_lab_without_course_files_keeps_web_search():
     assert 'search_web' in offered[0] and not COURSE_TOOL_NAMES & offered[0]
     assert NO_DOCUMENTS_WEB_TURN in model.seen[0][-1]['content']
     assert [s['id'] for s in result.web_sources] == ['W1'] and result.answer == 'Python 3.14 [W1].'
+    assert 'answer_check' not in model.purposes
 
 
 @pytest.mark.parametrize('respond, kind', [

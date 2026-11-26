@@ -67,7 +67,7 @@ async def test_facts_are_counted_not_written(db_session):
     _, ana, _, lab = await _activity(db_session)
     facts = await teaching_reports.gather_facts(db_session, lab)
     assert (facts["questions"], facts["students"], facts["thumbs_down"], facts["answers_not_finished"]) == (3, 2, 1, 1)
-    assert facts["modes"] == {"search": 2, "research": 1}
+    assert "modes" not in facts
     assert facts["documents_by_questions"] == [{"file": "SQL.pdf", "questions": 1}]
     assert facts["pages_by_questions"] == [{"file": "SQL.pdf", "page": 12, "questions": 1}]
     assert facts["language"] == "French"

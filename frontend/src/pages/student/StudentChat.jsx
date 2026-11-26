@@ -87,6 +87,15 @@ export default function StudentChat() {
   const [input, setInput] = useState('');
   const [tools, setTools] = useState([]);
   const [preview, setPreview] = useState(null);
+  // A cited page the student opens is counted for the teacher's Analytics
+  // (citation_opens); a failed count changes nothing for the student.
+  const openSource = useCallback((source) => {
+    setPreview(source);
+    if (source?.messageId && source.documentId) {
+      api.post(`/api/chat/messages/${source.messageId}/citation-opened`,
+        { document_id: source.documentId, page_no: source.page ?? null }).catch(() => {});
+    }
+  }, []);
   const [navOpen, setNavOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [modal, setModal] = useState(null);       // null | 'join' | 'search' | {settings: tab}
@@ -233,7 +242,7 @@ export default function StudentChat() {
   useEffect(() => {
     if (!activeSessionId || streaming) return undefined;
     let current = true;
-    api.get(`/api/chat/sessions/${activeSessionId}/history-start?mode=research`)
+    api.get(`/api/chat/sessions/${activeSessionId}/history-start`)
       .then((start) => { if (current) setHistoryStart({ ...start, sessionId: activeSessionId }); })
       .catch(() => {});
     return () => { current = false; };
@@ -384,7 +393,7 @@ export default function StudentChat() {
         </header>
         {examMode && (
           <div role="status" className="shrink-0 bg-warn-soft px-4 py-2 text-center text-[13px] text-cream">
-            {activeLab?.exam_files ? t('exam.bannerFiles', { n: activeLab.exam_files }) : t('exam.bannerDirect')}
+            {activeLab?.exam_files ? t('exam.bannerFiles', { n: activeLab.exam_files }) : t('exam.bannerNoFiles')}
           </div>
         )}
 
@@ -425,7 +434,7 @@ export default function StudentChat() {
               <div className="mx-auto w-full max-w-[760px] space-y-8 px-4 pb-8 pt-4">
                 {loadingMessages && <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-cream-faint border-t-cream" />}
                 <Thread chat={chat} sessionId={activeSessionId} features={features} examMode={examMode} pythonOn={tools.includes('code')}
-                  disabledReason={disabledReason} onOpenSource={setPreview} inputRef={inputRef}
+                  disabledReason={disabledReason} onOpenSource={openSource} inputRef={inputRef}
                   hidden={hidden} onNewChat={newChat} />
               </div>
             </div>

@@ -24,7 +24,6 @@ import {
 import { useLanguage, useT } from '../lib/i18n';
 
 const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const MODE_KEY = { direct: 'p.an.mode.direct', search: 'p.an.mode.search', research: 'p.an.mode.research' };
 // Intensity in the heat map: shades of the text colour, not the citation colour.
 const HEAT = ['bg-ink-surface', 'bg-cream-muted/25', 'bg-cream-muted/45', 'bg-cream-muted/70', 'bg-cream-secondary'];
 const LOCALES = { zh: 'zh-CN', fr: 'fr-FR', en: 'en-GB' };
@@ -67,11 +66,13 @@ export default function TeacherAnalytics({
   const rated = o.thumbs_up + o.thumbs_down;
   return (
     <div className="space-y-6 max-w-5xl">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Stat label={t('p.an.active7')} value={`${o.active_7d} / ${o.members}`}
           hint={t('p.an.activeEver', { a: o.active_ever, b: o.members })} />
         <Stat label={t('p.an.questions7')} value={o.questions_7d} hint={t('p.an.inAll', { n: o.questions })} />
         <Stat label={t('p.an.conversations')} value={o.sessions} />
+        <Stat label={t('p.an.sourcesOpened')} value={`${o.answers_opened ?? 0} / ${o.answers_cited ?? 0}`}
+          hint={t('p.an.sourcesOpenedHint', { n: o.citation_opens ?? 0 })} />
         <Stat label={t('p.an.thumbsDown')} value={o.thumbs_down}
           hint={rated ? t('p.an.ofRated', { pct: Math.round((100 * o.thumbs_down) / rated), n: rated }) : t('p.an.noRated')} />
         <Stat label={t('p.an.atLimit')} value={o.at_limit_today} warn={o.at_limit_today > 0}
@@ -88,10 +89,9 @@ export default function TeacherAnalytics({
         </Card>
       </div>
 
-      <Card title={t('p.an.students')} note={<>
-        <Modes modes={data.modes} />
-        {refill && data.students.some(canRefill) && <RefillAll classId={classId} onReload={onReload} />}
-      </>}>
+      <Card title={t('p.an.students')} note={
+        refill && data.students.some(canRefill) && <RefillAll classId={classId} onReload={onReload} />
+      }>
         <StudentTable students={data.students} classId={classId} onReload={onReload}
           onOpenStudent={onOpenStudent} refill={refill} />
       </Card>
@@ -235,13 +235,6 @@ function Heatmap({ heatmap }) {
       <Tip tip={tip} />
     </div>
   );
-}
-
-function Modes({ modes }) {
-  const t = useT();
-  const entries = Object.entries(modes);
-  if (!entries.length) return null;
-  return t('p.an.byMode', { list: entries.map(([m, n]) => `${MODE_KEY[m] ? t(MODE_KEY[m]) : m} ${n}`).join(' · ') });
 }
 
 function StudentTable({ students, classId, onReload, onOpenStudent, refill }) {

@@ -283,7 +283,8 @@ class Class(Base):
     )
     invite_code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Exam mode: every lab of the class answers in Direct mode only (no course search).
+    # Exam mode: only the files allowed in the exam (documents.exam_allowed); with
+    # none the agent answers without the course. Web, Python, uploads, deep: off.
     exam_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
     # What students may use (services/feature_service.py): upload, web, code, deep.
     # A missing key means on.
@@ -651,6 +652,26 @@ class Notification(Base):
     __table_args__ = (
         Index("ix_notifications_user_created", "user_id", "created_at"),
     )
+
+
+class CitationOpen(Base):
+    """A student opened a page an answer cites (the page buttons under an
+    answer, an [E#] in its text, or a picture card). One row per opening, to
+    see whether students use the sources. Written by POST
+    /api/chat/messages/{id}/citation-opened; a new table (create_all)."""
+    __tablename__ = "citation_opens"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    # The cited file and page; no foreign key, like message_citations: the row
+    # stays when the document is deleted.
+    document_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
 
 
 class ChatRefusal(Base):
@@ -1287,7 +1308,8 @@ class AgentRun(Base):
     user_message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey('messages.id', ondelete='SET NULL'))
     assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey('messages.id', ondelete='SET NULL'))
     stop_reason: Mapped[str | None] = mapped_column(String(64))
-    # direct, search or research: the mode the run answered in (exam mode applied).
+    # The mode the run answered in: research; runs before 2026-11-26, when
+    # there were three modes, may say direct or search.
     mode: Mapped[str | None] = mapped_column(String(16))
     settlement_status: Mapped[str] = mapped_column(String(16), nullable=False, default='open')
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

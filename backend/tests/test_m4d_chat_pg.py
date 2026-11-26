@@ -297,23 +297,23 @@ async def test_the_answer_language_is_named_first_and_billed(pg_session, tmp_pat
         client = await make_client(db, student)
         async with client:
             response = await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'Was ist ein Zeiger?', 'mode': 'direct',
+                'session_id': str(chat.id), 'message': 'Was ist ein Zeiger?',
                 'client_request_id': str(uuid.uuid4())})
             done = [data for name, data in events(response.text) if name == 'done'][0]
             assert seen[0][0] == 'answer_language'
             assert 'Was ist ein Zeiger?' in seen[0][1][-1]['content']
-            answer_turn = [m for purpose, m in seen if purpose == 'direct_answer'][0]
+            answer_turn = [m for purpose, m in seen if purpose == 'agent'][0]
             assert answer_turn[-1]['content'].endswith('Write the answer in German.')
             question = await db.get(Message, uuid.UUID(done['user_message_id']))
             assert question.content == 'Was ist ein Zeiger?'
             run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id))
             purposes = (await db.scalars(select(ModelCallUsage.purpose).where(
                 ModelCallUsage.run_id == run.id))).all()
-            assert sorted(purposes) == ['answer_language', 'direct_answer']
+            assert sorted(purposes) == ['agent', 'answer_check', 'answer_language']
             LanguageModel.fail = True
             seen.clear()
             response = await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'Und jetzt?', 'mode': 'direct',
+                'session_id': str(chat.id), 'message': 'Und jetzt?',
                 'client_request_id': str(uuid.uuid4())})
             assert any(name == 'done' for name, _ in events(response.text))
             assert seen[-1][1][-1]['content'].endswith(GENERIC_SENTENCE)
@@ -379,8 +379,7 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
             assert 'at most twelve course tool calls' in model_messages[0][0]['content']
             # The chat page learns where the next question's history starts:
             # the first question still sent, after the ones that are not.
-            start = (await client.get(f'/api/chat/sessions/{chat.id}/history-start',
-                                      params={'mode': 'research'})).json()
+            start = (await client.get(f'/api/chat/sessions/{chat.id}/history-start')).json()
             first = await db.get(Message, uuid.UUID(start['seen_from']))
             assert first.sender == SenderType.user and start['hidden'] >= 2
             assert start['hidden'] % 2 == 0 and int(first.content[1]) == start['hidden'] // 2
@@ -688,83 +687,14 @@ async def _mode_chat(db, tmp_path, monkeypatch, replies):
             if purpose == 'follow_ups':    # suggestions after the answer (test_follow_ups.py)
                 return ModelReply('{"follow_ups": []}', [], 'fixture', 5, 2)
             calls.append({'purpose': purpose, 'tools': tools, 'messages': messages})
-            return ModelReply(replies.pop(0), [], 'flash-next', 40, 10)
+            reply = replies.pop(0)
+            return reply if isinstance(reply, ModelReply) else ModelReply(reply, [], 'flash-next', 40, 10)
     monkeypatch.setattr(chat_api, 'ResearchModel', FakeModel)
     return doc, student, chat, calls
 
 
 @pytest.mark.asyncio
-async def test_search_mode_answers_from_found_pages_and_records_the_mode(pg_session, tmp_path, monkeypatch):
-    try:
-        db = pg_session
-        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].'])
-        # A class file, found by the search (a file of the lab is the TP text, below).
-        doc.lab_id = None
-        await db.commit()
-        client = await make_client(db, student)
-        async with client:
-            stream = events((await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'Définition θ₁', 'mode': 'search'})).text)
-            assert ('status', {'route': 'agent', 'phase': 'thinking', 'mode': 'search',
-                               'exam_mode': False}) in stream
-            assert ('token', 'Voir [E1].') in stream
-            cited = next(data for name, data in stream if name == 'citations')
-            assert [c['label'] for c in cited] == ['E1']
-            # One answer call without tools (then the conversation title), the found page in the message.
-            assert [c['purpose'] for c in calls] == ['search_answer', 'title'] and calls[0]['tools'] is None
-            assert '[E1]' in calls[0]['messages'][-1]['content']
-            stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
-            assert stored[-1]['answer_mode'] == 'search' and stored[-1]['citations']
-    finally:
-        app.dependency_overrides.pop(get_storage_root, None)
-
-
-@pytest.mark.asyncio
-async def test_search_mode_gives_the_tp_text_and_its_citations_are_stored(pg_session, tmp_path, monkeypatch):
-    try:
-        db = pg_session
-        _, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].', 'Encore [E1].'])
-        client = await make_client(db, student)
-        async with client:
-            stream = events((await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'On fait quoi ?', 'mode': 'search'})).text)
-            assert [c['label'] for c in next(data for name, data in stream if name == 'citations')] == ['E1']
-            # The lab's file is the TP: all of it in the system message, with its IDs.
-            system = calls[0]['messages'][0]['content']
-            assert '--- [This TP] ' in system and '\n[E1] ' in system
-            assert 'Course pages found' not in calls[0]['messages'][-1]['content']
-            # The next question: the same TP text (same IDs), the first answer as history.
-            await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'Et ensuite ?', 'mode': 'search'})
-            assert calls[2]['purpose'] == 'search_answer' and calls[2]['messages'][0]['content'] == system
-    finally:
-        app.dependency_overrides.pop(get_storage_root, None)
-
-
-@pytest.mark.asyncio
-async def test_direct_mode_reads_only_the_tp_and_cites_nothing(pg_session, tmp_path, monkeypatch):
-    try:
-        db = pg_session
-        _, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Une récursion [E3] appelle…'])
-        client = await make_client(db, student)
-        async with client:
-            stream = events((await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'La récursion ?', 'mode': 'direct'})).text)
-            # An ID copied from nowhere is removed: no page was read.
-            assert ('token', 'Une récursion  appelle…') in stream and ('citations', []) in stream
-            assert [c['purpose'] for c in calls] == ['direct_answer', 'title'] and calls[0]['tools'] is None
-            system = calls[0]['messages'][0]['content']
-            assert 'Search or Research' in system
-            # The lab's file is the TP statement: its text, without evidence IDs.
-            assert '--- [This TP] ' in system and '[E1]' not in system[system.index('--- [This TP] '):]
-            stored = (await client.get(f'/api/student/sessions/{chat.id}')).json()['messages']
-            assert stored[-1]['answer_mode'] == 'direct'
-    finally:
-        app.dependency_overrides.pop(get_storage_root, None)
-
-
-@pytest.mark.asyncio
-async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, tmp_path, monkeypatch):
+async def test_exam_mode_without_allowed_files_answers_without_tools(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
         doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Réponse.'])
@@ -774,14 +704,17 @@ async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, 
         await db.commit()
         client = await make_client(db, student)
         async with client:
+            # An old page may still send a mode: it is ignored.
             stream = events((await client.post('/api/chat/stream', json={
                 'session_id': str(chat.id), 'message': 'Définition θ₁', 'mode': 'research'})).text)
-            assert ('status', {'route': 'agent', 'phase': 'thinking', 'mode': 'direct',
-                               'exam_mode': True}) in stream
-            assert [c['purpose'] for c in calls] == ['direct_answer', 'title']
-            assert 'exam mode' in calls[0]['messages'][0]['content']
-            # The TP file is not allowed in the exam: its text is not given either.
-            assert '[This TP]' not in calls[0]['messages'][0]['content']
+            assert ('status', {'route': 'agent', 'phase': 'thinking', 'exam_mode': True}) in stream
+            # One answer call without any tool (then the conversation title).
+            assert [c['purpose'] for c in calls] == ['answer', 'title'] and calls[0]['tools'] is None
+            assert 'exam mode' in calls[0]['messages'][-1]['content']
+            # The TP file is not allowed in the exam: not even its name is given.
+            assert doc.filename not in calls[0]['messages'][0]['content']
+            run = await db.scalar(select(AgentRun).where(AgentRun.session_id == chat.id))
+            assert run.stop_reason == 'exam_no_files' and run.mode == 'research'
             classes = (await client.get('/api/student/classes')).json()
             assert classes[0]['exam_mode'] is True
             labs = (await client.get(f"/api/student/classes/{doc.class_id}/labs")).json()
@@ -794,8 +727,11 @@ async def test_exam_mode_answers_directly_whatever_the_student_asks(pg_session, 
 async def test_exam_mode_searches_only_the_files_the_teacher_allowed(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
-        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Voir [E1].'])
-        from backend.app.models import Class
+        replies = []
+        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, replies)
+        from backend.app.models import Class, DocumentPage
+        page = await db.scalar(select(DocumentPage).where(DocumentPage.revision_id == doc.current_revision_id))
+        replies += [tool_call('read', {'page': f'd1.p{page.preview_page_no}'}), 'Voir [E1].']
         cls = await db.get(Class, doc.class_id)
         cls.exam_mode = True
         await db.commit()
@@ -811,10 +747,10 @@ async def test_exam_mode_searches_only_the_files_the_teacher_allowed(pg_session,
             labs = (await client.get(f"/api/student/classes/{doc.class_id}/labs")).json()
             assert {lab['id']: lab['exam_files'] for lab in labs}[str(doc.lab_id)] == 1
             stream = events((await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'Définition θ₁', 'mode': 'search'})).text)
-            # Search is allowed, inside the allowed file, with the exam note.
-            assert ('status', {'route': 'agent', 'phase': 'thinking', 'mode': 'search',
-                               'exam_mode': True}) in stream
+                'session_id': str(chat.id), 'message': 'Définition θ₁'})).text)
+            # The course tools work, inside the allowed file, with the exam note.
+            assert ('status', {'route': 'agent', 'phase': 'thinking', 'exam_mode': True}) in stream
+            assert calls[0]['purpose'] == 'agent' and calls[0]['tools']
             assert ('token', 'Voir [E1].') in stream
             assert '[EXAM MODE]' in calls[0]['messages'][0]['content']
     finally:
@@ -825,7 +761,7 @@ async def test_exam_mode_searches_only_the_files_the_teacher_allowed(pg_session,
 async def test_the_three_tiers_of_teacher_rules_reach_the_prompt(pg_session, tmp_path, monkeypatch):
     try:
         db = pg_session
-        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Réponse.'])
+        doc, student, chat, calls = await _mode_chat(db, tmp_path, monkeypatch, ['Réponse.', 'DONE'])
         from backend.app.models import Class, ClassStudent, RuleItem
         cls = doc.class_id
         db.add_all([RuleItem(level='class', target_id=cls, class_id=cls, text='CLASS-RULE'),
@@ -844,7 +780,7 @@ async def test_the_three_tiers_of_teacher_rules_reach_the_prompt(pg_session, tmp
         client = await make_client(db, student)
         async with client:
             await client.post('/api/chat/stream', json={
-                'session_id': str(chat.id), 'message': 'Bonjour', 'mode': 'direct'})
+                'session_id': str(chat.id), 'message': 'Bonjour'})
         system = calls[0]['messages'][0]['content']
         # Active rules only, numbered, in their order.
         assert '[CLASS RULES]\n1. CLASS-RULE\n2. SECOND-RULE' in system and 'OFF-RULE' not in system

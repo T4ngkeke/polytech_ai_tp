@@ -76,12 +76,14 @@ async def test_only_the_person_who_asked_can_answer():
 
 @pytest.mark.asyncio
 async def test_the_loop_offers_the_tool_and_keeps_the_runs():
-    model = Script([('execute_code', {'code': 'print(sum(range(5)))'})], 'La somme vaut 10.', 'DONE')
+    model = Script([('execute_code', {'code': 'print(sum(range(5)))'})], 'La somme vaut 10.')
     tools = browser(ct.CodeTools(USER, None), {'stdout': '10\n', 'stderr': '', 'result': ''})
     result = await ResearchRunner(CourseTools(ViewFixture()), model, code_tools=tools).run('Somme de 0 à 4 ?')
     assert ct.CODE_NOTE in model.seen[0][0]['content'] and ct.NO_CODE_NOTE not in model.seen[0][0]['content']
     assert json.loads(model.seen[1][-1]['content'])['stdout'] == '10\n'
     assert result.answer == 'La somme vaut 10.' and result.code_runs[0]['stdout'] == '10\n'
+    # Running Python is research: the answer is not asked whether it is one (CHECK_TURN).
+    assert model.purposes == ['agent', 'agent']
 
 
 @pytest.mark.asyncio
@@ -100,7 +102,7 @@ async def test_waiting_for_the_browser_is_not_research_time():
         now[0] += 100                            # the browser takes 100 s
         asyncio.get_running_loop().call_soon(ct.deliver, event['id'], USER, {'stdout': 'ok'})
     tools.send = send
-    model = Script([('execute_code', {'code': 'print(1)'})], [('execute_code', {'code': 'print(2)'})], 'Fini.', 'DONE')
+    model = Script([('execute_code', {'code': 'print(1)'})], [('execute_code', {'code': 'print(2)'})], 'Fini.')
     course = CourseTools(ViewFixture())
     runner = ResearchRunner(course, model, code_tools=tools, research_timeout=150, total_timeout=200,
                             clock=lambda: now[0])

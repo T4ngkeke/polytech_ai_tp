@@ -35,10 +35,10 @@ function safeParse(data) {
 export function interpretStreamEvent(ev) {
   switch (ev.event) {
     case 'status': {
-      // mode: the answer mode the server applies (exam mode may turn it into direct).
+      // examMode: whether the class is in exam mode now (the page reloads its classes when it changed).
       const parsed = safeParse(ev.data);
       return { type: 'status', route: parsed?.route ?? null, phase: parsed?.phase ?? null,
-        mode: parsed?.mode ?? null, examMode: parsed?.exam_mode === true };
+        examMode: parsed?.exam_mode === true };
     }
     case 'done': {
       const parsed = safeParse(ev.data) || {};

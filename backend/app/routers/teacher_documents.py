@@ -160,50 +160,6 @@ async def list_lab_documents(
     return _document_summaries(await document_service.list_lab_documents(db, lab_id, lab.class_id))
 
 
-@router.get("/labs/{lab_id}/tp-text")
-async def lab_tp_text(
-    lab_id: uuid.UUID,
-    teacher: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db, scope="function"),
-) -> dict:
-    """Which of the lab's own files the tutor reads in full with every question
-    (Search and Direct) and which it only searches: the same rule as the chat
-    (agent/tp_text.plan_files), with sizes estimated from the stored text of
-    each file's published revision. limit_chars: TP_CONTEXT_PERCENT of the
-    agent model's context. In exam mode the chat reads only the allowed files."""
-    from sqlalchemy import func as sa_func
-
-    from backend.app.agent.tp_text import page_overhead, plan_files, tp_char_budget
-    from backend.app.models import DocumentBlock
-    from backend.app.services.model_clients import get_llm_config
-    from backend.app.services.model_servers import context_tokens
-
-    lab = await lab_service.get_lab_by_id(db, lab_id)
-    await lab_service.verify_lab_ownership(db, lab, teacher_id=teacher.id)
-    rows = (await db.execute(
-        select(Document.id, Document.filename, Document.page_count,
-               sa_func.coalesce(sa_func.sum(sa_func.length(DocumentBlock.content)
-                                            + sa_func.coalesce(sa_func.length(DocumentBlock.content_description), 0)), 0),
-               sa_func.count(DocumentBlock.block_id))
-        .outerjoin(DocumentBlock, DocumentBlock.revision_id == Document.current_revision_id)
-        .where(Document.lab_id == lab_id, Document.lifecycle == "active",
-               Document.current_revision_id.is_not(None))
-        .group_by(Document.id, Document.filename, Document.page_count))).all()
-    config = await get_llm_config(db)
-    context = await context_tokens(config["agent_base_url"], config["agent_model"], config["agent_api_key"])
-    percent = config["research_limits"].tp_context_percent
-    limit = tp_char_budget(context, percent)
-    files = [{"document_id": str(doc_id), "filename": name, "pages": pages or 0,
-              "chars": int(chars) + page_overhead(name, pages or 0, blocks)}
-             for doc_id, name, pages, chars, blocks in rows]
-    in_full = set(plan_files([(f["document_id"], f["pages"], f["chars"], f["filename"]) for f in files], limit))
-    for f in files:
-        f["in_full"] = f["document_id"] in in_full
-    return {"limit_chars": limit, "percent": percent, "context_tokens": context,
-            "files": sorted(files, key=lambda f: f["filename"]),
-            "left_out": sum(not f["in_full"] for f in files)}
-
-
 @router.get("/classes/{class_id}/documents", response_model=list[DocumentSummaryResponse])
 async def list_class_documents(
     class_id: uuid.UUID,

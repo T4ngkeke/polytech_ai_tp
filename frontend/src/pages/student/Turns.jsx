@@ -157,8 +157,10 @@ function CodeRuns({ live, stored }) {
   );
 }
 
-function Sources({ answer, sessionId, onOpenSource }) {
+function Sources({ answer, sessionId, onOpenSource: openSource }) {
   const t = useT();
+  // The answer's id goes with the page, so that the chat can record the opening.
+  const onOpenSource = (source) => openSource({ ...source, messageId: answer.id });
   const files = groupCitations(answer.citations || []);
   const images = distinctImages(answer.citations || []);
   const web = answer.web_sources || [];
@@ -263,8 +265,8 @@ export const Answer = memo(function Answer({ answer, live, isLast, sessionId, on
   const onCite = useCallback((ids) => {
     const labels = ids.split(',');
     const c = citations?.find((x) => x.label === labels[0]);
-    if (c && c.available && sessionId) onOpenSource(sourceOf(citations, c, sessionId, labels));
-  }, [citations, sessionId, onOpenSource]);
+    if (c && c.available && sessionId) onOpenSource({ ...sourceOf(citations, c, sessionId, labels), messageId: answer.id });
+  }, [citations, sessionId, onOpenSource, answer.id]);
   const citeInfo = useCallback((ids) => {
     const c = citations?.find((x) => x.label === ids.split(',')[0]);
     return c ? { filename: c.filename, page: c.pdf_page_no ?? c.page_no, text: (c.text || c.snippet || '').slice(0, 120) } : null;

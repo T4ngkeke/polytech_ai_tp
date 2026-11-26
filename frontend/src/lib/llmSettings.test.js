@@ -13,7 +13,7 @@ const RELEASE = {
   rerank_url: 'http://edullm-reranker:8000/rerank', rerank_api_key: '', rerank_model: 'Qwen/Qwen3-Reranker-0.6B',
   rerank_enabled: '', mineru_server_url: '', mineru_api_key: '', mineru_default_url: 'http://edullm-mineru-vlm:8000/v1',
   picture_captions: 'on', picture_caption_priority: '10', picture_caption_budget_seconds: '',
-  agent_max_tool_calls: '', tp_context_percent: '', history_context_percent: '40', token_alpha: 0.2, token_beta: 1,
+  agent_max_tool_calls: '', history_context_percent: '40', token_alpha: 0.2, token_beta: 1,
 };
 
 test('the release settings read as four servers, all features on the main model', () => {

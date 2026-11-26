@@ -69,7 +69,7 @@ def test_zero_budget_gives_empty_history():
 
 # --- The limit as a share of the context, and a start that moves in jumps ---
 
-from backend.app.agent.history import MAX_SHARED_PERCENT, history_budget, history_start  # noqa: E402
+from backend.app.agent.history import history_budget, history_start  # noqa: E402
 
 
 def _turns(n: int, chars: int = 300) -> list[dict]:
@@ -84,12 +84,6 @@ def test_budget_is_a_share_of_the_context():
     assert history_budget(None, 30) == 65536 * 30 // 100     # server did not say
     assert history_budget(131072, 0) == 0
 
-
-def test_budget_leaves_room_next_to_the_tp_text():
-    # TP 30% + history 30% fit under MAX_SHARED_PERCENT; TP 60% leaves 15%.
-    assert history_budget(100000, 30, tp_percent=30) == 30000
-    assert history_budget(100000, 30, tp_percent=60) == (MAX_SHARED_PERCENT - 60) * 1000
-    assert history_budget(100000, 30, tp_percent=80) == 0
 
 
 def test_start_stays_put_for_several_questions():

@@ -74,7 +74,7 @@ async def test_the_chat_summarizes_once_and_reuses_the_checkpoint(pg_session, tm
                                 stop_reason='finished', snapshot_map={str(rev.document_id): str(rev.id)},
                                 client_request_id=str(uuid.uuid4())))
     await pg_session.commit()
-    monkeypatch.setattr(chat_api, '_history_budget', lambda context, limits, mode: 20_000)
+    monkeypatch.setattr(chat_api, '_history_budget', lambda context, limits: 20_000)
 
     def script(answer):
         steps.extend([ModelReply(answer, [], 'fixture', 50, 20), ModelReply('DONE', [], 'fixture', 5, 1)])

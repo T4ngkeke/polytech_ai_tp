@@ -502,14 +502,16 @@ async def test_a_started_question_finishes_over_the_quota(pg_session):
     async def model(messages, max_output, timeout, **kwargs):
         return ModelReply('A full answer.', [], 'fake', 30, 10)
     result = await run_persisted_research(scope=scope, question='Over the quota?',
-        client_request_id='over', model=model, model_name='local', mode='direct',
+        client_request_id='over', model=model, model_name='local',
         token_alpha=1, token_beta=1, session_factory=factory)
     assert result['status'] == 'finished'
     async with factory() as db:
         run = await db.scalar(select(AgentRun).where(AgentRun.client_request_id == 'over'))
-        assert run.status == 'finished' and run.mode == 'direct'
+        assert run.status == 'finished' and run.mode == 'research'
         stat = await db.scalar(select(UsageStat).where(UsageStat.user_id == scope.user_id))
-        assert stat.tokens_used == 40  # over the quota of 10: the next question is refused
+        # One call (the scope has no file, so no tools) of 40, over the quota
+        # of 10: the next question is refused.
+        assert stat.tokens_used == 40
 
 
 @pytest.mark.asyncio

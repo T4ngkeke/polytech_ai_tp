@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import (
-    AgentRun, ClassStudent, Lab, Message, SenderType, Session, UsageStat, User,
+    AgentRun, CitationOpen, ClassStudent, Lab, Message, MessageCitation, SenderType, Session, UsageStat, User,
 )
 from backend.app.services import quota_service
 
@@ -122,7 +122,7 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
                                  now: datetime | None = None) -> dict:
     """Everything the teacher Analytics tab shows, for a class or one of its labs.
 
-    Questions are student messages; modes and thumbs are on the answers.
+    Questions are student messages; thumbs are on the answers.
     Teacher test sessions are left out. Days and hours are in Paris time.
     Token figures for today come from the quota (all classes of the student).
     """
@@ -139,7 +139,7 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
         .order_by(User.username))).scalars().all()
 
     rows = (await db.execute(
-        select(Message.id, Message.session_id, Message.sender, Message.created_at, Message.answer_mode,
+        select(Message.id, Message.session_id, Message.sender, Message.created_at,
                Message.feedback, Message.billed_tokens, Message.content, Session.user_id, Session.lab_id)
         .join(Session, Session.id == Message.session_id)
         .where(Session.lab_id.in_(lab_ids), Session.is_test.is_(False))
@@ -149,11 +149,10 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
     def student(user_id):
         return per_student.setdefault(user_id, {
             "questions": 0, "sessions": set(), "last_active": None, "tokens": 0,
-            "thumbs_down": 0, "modes": {}})
+            "thumbs_down": 0})
 
     daily = {today_local - timedelta(days=i): 0 for i in range(PERIOD_DAYS)}
     heatmap = [[0] * 24 for _ in range(7)]
-    modes: dict[str, int] = {}
     overview = {"questions": 0, "questions_7d": 0, "thumbs_up": 0, "thumbs_down": 0}
     sessions, active_7d = set(), set()
     last_question: dict[uuid.UUID, tuple] = {}      # session -> its latest question
@@ -177,9 +176,6 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
                 active_7d.add(r.user_id)
         elif r.sender == SenderType.llm:
             s["tokens"] += r.billed_tokens or 0
-            if r.answer_mode:
-                modes[r.answer_mode] = modes.get(r.answer_mode, 0) + 1
-                s["modes"][r.answer_mode] = s["modes"].get(r.answer_mode, 0) + 1
             feedback = getattr(r.feedback, "value", r.feedback)
             if feedback == "up":
                 overview["thumbs_up"] += 1
@@ -197,6 +193,22 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
         .where(Session.lab_id.in_(lab_ids), Session.is_test.is_(False),
                (AgentRun.status == "failed") | AgentRun.stop_reason.in_(PROBLEM_STOPS))
         .order_by(AgentRun.started_at.desc()).limit(LIST_LIMIT))).all() if lab_ids else []
+
+    # Do students open the pages an answer cites? Answers with a course
+    # citation, those whose page the student opened at least once
+    # (citation_opens), and how many openings in all.
+    cited = opened = openings = 0
+    if lab_ids:
+        answer_in_labs = (Session.lab_id.in_(lab_ids), Session.is_test.is_(False))
+        cited = await db.scalar(
+            select(func.count(func.distinct(MessageCitation.message_id)))
+            .join(Message, Message.id == MessageCitation.message_id)
+            .join(Session, Session.id == Message.session_id).where(*answer_in_labs)) or 0
+        opened, openings = (await db.execute(
+            select(func.count(func.distinct(CitationOpen.message_id)), func.count(CitationOpen.id))
+            .join(Message, Message.id == CitationOpen.message_id)
+            .join(Session, Session.id == Message.session_id)
+            .where(*answer_in_labs, CitationOpen.user_id == Session.user_id))).one()
 
     names = {u.id: u.username for u in members}
     missing = {r.user_id for r in rows} - set(names)
@@ -216,7 +228,7 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
         students.append({
             "user_id": user_id, "username": names.get(user_id, "?"), "member": u is not None,
             "questions": s["questions"], "sessions": len(s["sessions"]), "last_active": s["last_active"],
-            "tokens": s["tokens"], "thumbs_down": s["thumbs_down"], "modes": s["modes"],
+            "tokens": s["tokens"], "thumbs_down": s["thumbs_down"],
             "used_today": u.used if u else 0, "limit_today": u.limit if u else None,
             "granted_today": u.granted if u else 0,
             "used_week": u.week_used if u else 0, "limit_week": u.week_limit if u else None,
@@ -231,8 +243,8 @@ async def get_teaching_analytics(db: AsyncSession, class_id: uuid.UUID,
                      "active_7d": len(active_7d & set(member_ids)),
                      "active_ever": len({u for u, s in per_student.items() if s["questions"]} & set(member_ids)),
                      "sessions": len(sessions),
+                     "answers_cited": cited, "answers_opened": opened, "citation_opens": openings,
                      "at_limit_today": sum(1 for s in students if s["at_limit"])},
-        "modes": modes,
         "daily": [{"date": d, "questions": n} for d, n in sorted(daily.items())],
         "heatmap": heatmap,
         "students": students,

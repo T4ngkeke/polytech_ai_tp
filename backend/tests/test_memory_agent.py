@@ -37,6 +37,18 @@ def test_the_closest_notes_go_first_when_they_do_not_all_fit():
     assert len(block) < am.CONTEXT_CHAR_LIMIT + 300
 
 
+def test_long_categories_count_when_deciding_whether_all_notes_fit():
+    # The contents alone fit the limit; with their categories they do not.
+    size = am.CONTEXT_CHAR_LIMIT // 10 - 10
+    near = note('N' * size, 'c' * 30, embedding=[1.0, 0.0])
+    far = [note(f'{i}' + 'F' * size, 'c' * 30, embedding=[0.0, 1.0]) for i in range(9)]
+    assert sum(len(m['content']) + 4 for m in far + [near]) <= am.CONTEXT_CHAR_LIMIT
+    assert not am.all_fit(far + [near])
+    # So the closest note goes first and is kept, not cut at the end.
+    block = am.memory_context(far + [near], query_vector=[1.0, 0.1])
+    assert 'N' * size in block and block.index('N' * size) < block.index('F' * size)
+
+
 def test_review_replies_are_checked():
     reply = 'Voici: {"operations": [' + ','.join([
         '{"action":"add","category":"préférences","content":"Préfère des exemples."}',

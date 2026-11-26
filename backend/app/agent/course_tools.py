@@ -354,10 +354,13 @@ class ToolView:
         handle = self.page(page_ref['page_id'], document_id)
         previous, following, position, count = self.neighbours.get(handle, (None, None, 0, 0))
         parts = [handle, self.filenames.get(str(document_id), 'unknown document')]
-        if count:
-            parts.append(f'page {position} of {count}')
-        parts.append(f'previous {previous}' if previous else 'first page')
-        parts.append(f'next {following}' if following else 'last page')
+        # A page missing from the index has no known place: say nothing of it,
+        # rather than "first page" and "last page".
+        if handle in self.neighbours:
+            if count:
+                parts.append(f'page {position} of {count}')
+            parts.append(f'previous {previous}' if previous else 'first page')
+            parts.append(f'next {following}' if following else 'last page')
         if page_ref.get('preview_asset_id'):
             parts.append('page image ' + self.image(page_ref['preview_asset_id'], page_ref['page_id']))
         return ' · '.join(parts)
@@ -492,6 +495,9 @@ class ToolView:
         if result.get('more_in'):
             lines.append('more matches in ' + ', '.join(self.doc_handles.get(d, 'd?') for d in result['more_in'])
                          + '; grep one of them with its document handle')
+        if result.get('failed_in'):
+            lines.append('could not search ' + ', '.join(self.doc_handles.get(d, 'd?') for d in result['failed_in'])
+                         + '; grep it alone with its document handle to see why')
         return lines
 
     def _render_view_image(self, raw_args, result):
@@ -571,11 +577,14 @@ class CourseTools:
             return {'ok': False, 'error': {'code': 'visual_budget_exhausted'}}
         return None
 
-    def refuse(self, name: str, model_arguments, result: dict) -> None:
-        """Record a call that is not a readable course tool call; it takes a slot."""
-        self.trace.append({'event': 'tool', 'name': name, 'arguments': None,
-                           'model_arguments': model_arguments, 'dispatched': False,
-                           'ok': False, 'result': result, 'elapsed_seconds': 0.0})
+    def refuse(self, name: str, model_arguments, result: dict) -> dict:
+        """Record a call that did not run (not a readable course tool call, or
+        arguments that cannot be translated); it takes a slot."""
+        row = {'event': 'tool', 'name': name, 'arguments': None,
+               'model_arguments': model_arguments, 'dispatched': False,
+               'ok': False, 'result': result, 'elapsed_seconds': 0.0}
+        self.trace.append(row)
+        return row
 
     async def document_count(self) -> int:
         """How many course documents this run can read."""
@@ -591,14 +600,11 @@ class CourseTools:
         try:
             raw = self.view.translate(name, arguments)
         except HandleError as exc:
-            # A refused call still takes a tool slot, as a dispatched call does.
-            tick = time.monotonic()
-            row = {'event': 'tool', 'name': name, 'arguments': None, 'model_arguments': arguments,
-                   'dispatched': False}
-            self.trace.append(row)
-            result = self._limit_error(name, tick) or {
+            # A refused call still takes a tool slot, as a dispatched call does;
+            # past the budget it says so (the slot just taken counts).
+            row = self.refuse(name, arguments, None)
+            row['result'] = result = self._limit_error(name, time.monotonic()) or {
                 'ok': False, 'error': {'code': 'invalid_arguments', 'message': str(exc)}}
-            row.update(ok=False, result=result, elapsed_seconds=0.0)
             raw = {}
         else:
             result = await self.execute(name, raw)
@@ -609,23 +615,26 @@ class CourseTools:
 
     async def _grep_all(self, arguments: dict) -> dict:
         """grep over every document of the run as one tool call: the first
-        GREP_ALL_MATCHES matches in document order, and which documents have more."""
-        items, more_in, failure = [], [], None
+        GREP_ALL_MATCHES matches in document order, which documents have more,
+        and which could not be searched (failed_in). Only when every document
+        failed is the call itself a failure."""
+        items, more_in, failed_in, failure = [], [], [], None
         for document_id in arguments['documents']:
             result = await self.tools.execute('grep', {
                 'document_id': document_id, 'pattern': arguments['pattern'],
                 'case_sensitive': arguments['case_sensitive']})
             if not result.get('ok'):
                 failure = failure or result
+                failed_in.append(document_id)
                 continue
             found = [{**item, 'document_id': document_id} for item in result.get('items') or []]
             room = GREP_ALL_MATCHES - len(items)
             items.extend(found[:max(room, 0)])
             if len(found) > room or result.get('next_cursor'):
                 more_in.append(document_id)
-        if failure and not items and not more_in:
+        if failure and len(failed_in) == len(arguments['documents']):
             return failure
-        return {'ok': True, 'issues': [], 'items': items, 'more_in': more_in}
+        return {'ok': True, 'issues': [], 'items': items, 'more_in': more_in, 'failed_in': failed_in}
 
     async def execute(self, name: str, arguments: dict):
         """One call with backend arguments (UUIDs), counted in the budget."""

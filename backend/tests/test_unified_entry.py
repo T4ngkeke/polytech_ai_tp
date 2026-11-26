@@ -82,6 +82,7 @@ async def test_deep_research_gets_more_room_and_the_note(pg_session, tmp_path, m
               ModelReply('Voir la définition [E1].', [], 'fixture', 50, 20)]
     async with await make_client(pg_session, student) as client:
         response = await client.post('/api/chat/stream', json={
+            # An old page still sends a mode: it is ignored (one entry since 2026-11-26).
             'session_id': str(chat.id), 'message': 'Où est définie θ₁ ?', 'mode': 'search',
             'tools': ['deep'], 'client_request_id': str(uuid.uuid4())})
     assert response.status_code == 200, response.text

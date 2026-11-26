@@ -55,8 +55,7 @@ class EvidenceStore:
         # ID in an earlier answer never names a different source in a later run.
         self.snapshot_revisions = snapshot_revisions
         self.first_number = first_number
-        # The number of the next new ID. The TP text (tp_text.py) sets it back
-        # to 1 before anything is read, so the TP keeps the same IDs in every run.
+        # The number of the next new ID.
         self.next_number = first_number
         self._items: dict[str, Evidence] = {}
         self._keys: dict[tuple, str] = {}

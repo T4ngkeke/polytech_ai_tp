@@ -8,6 +8,7 @@ tokens/requests must not inflate the class usage report.
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from backend.app.models import (
     Class, Lab, Message, SenderType, Session, UserRole,
@@ -58,7 +59,7 @@ async def test_teaching_analytics_students_activity_and_problems(db_session):
     o = report["overview"]
     assert (o["members"], o["active_7d"], o["active_ever"], o["questions"], o["sessions"]) == (2, 1, 1, 2, 2)
     assert (o["thumbs_down"], o["at_limit_today"]) == (1, 1)            # 150 used >= 100 + 40
-    assert report["modes"] == {"search": 1, "research": 1}
+    assert "modes" not in report
     assert report["heatmap"][1][14] == 2                                  # Tuesday, 14 h Paris
     assert sum(d["questions"] for d in report["daily"]) == 2
     by_name = {s["username"]: s for s in report["students"]}
@@ -70,3 +71,49 @@ async def test_teaching_analytics_students_activity_and_problems(db_session):
     # One lab: the other lab's question and its problem are left out.
     only = await get_teaching_analytics(db_session, cls.id, lab.id, now=now)
     assert only["overview"]["questions"] == 1 and only["problems"] == []
+
+
+@pytest.mark.asyncio
+async def test_opened_citations_are_recorded_and_counted(db_session):
+    """A student opens a cited page (POST .../citation-opened); analytics count
+    the cited answers and those whose page the student opened."""
+    from backend.app.models import ClassStudent, CitationOpen, MessageCitation
+    from backend.app.services.analytics_service import get_teaching_analytics
+    from backend.tests.conftest import make_client
+
+    teacher, student, other = make_user(role=UserRole.teacher), make_user(username="lea"), make_user(username="max")
+    db_session.add_all([teacher, student, other])
+    await db_session.flush()
+    cls = Class(id=uuid.uuid4(), name="Algo", teacher_id=teacher.id, invite_code=uuid.uuid4().hex[:6])
+    db_session.add(cls)
+    await db_session.flush()
+    lab = Lab(id=uuid.uuid4(), class_id=cls.id, name="TP1")
+    db_session.add_all([lab, ClassStudent(class_id=cls.id, student_id=student.id)])
+    await db_session.flush()
+    chat = Session(id=uuid.uuid4(), user_id=student.id, lab_id=lab.id)
+    db_session.add(chat)
+    await db_session.flush()
+    cited, plain = (Message(id=uuid.uuid4(), session_id=chat.id, sender=SenderType.llm, content=c)
+                    for c in ("Voir [E1].", "Bonjour."))
+    db_session.add_all([Message(session_id=chat.id, sender=SenderType.user, content="Q ?"), cited, plain])
+    await db_session.flush()
+    doc = uuid.uuid4()
+    db_session.add(MessageCitation(message_id=cited.id, label="E1", document_id=doc, revision_id=uuid.uuid4(),
+                                   page_id=uuid.uuid4(), pdf_page_no=3, origin="read"))
+    await db_session.commit()
+
+    async with await make_client(db_session, student) as client:
+        url = f"/api/chat/messages/{cited.id}/citation-opened"
+        assert (await client.post(url, json={"document_id": str(doc), "page_no": 3})).status_code == 204
+        assert (await client.post(url, json={"document_id": str(doc)})).status_code == 204
+        # A file the answer does not cite, or an answer without citations: refused.
+        assert (await client.post(url, json={"document_id": str(uuid.uuid4())})).status_code == 404
+        assert (await client.post(f"/api/chat/messages/{plain.id}/citation-opened",
+                                  json={"document_id": str(doc)})).status_code == 404
+    async with await make_client(db_session, other) as client:      # not their conversation
+        assert (await client.post(url, json={"document_id": str(doc)})).status_code == 404
+
+    rows = (await db_session.execute(select(CitationOpen))).scalars().all()
+    assert {(r.user_id, r.page_no) for r in rows} == {(student.id, 3), (student.id, None)}
+    o = (await get_teaching_analytics(db_session, cls.id))["overview"]
+    assert (o["answers_cited"], o["answers_opened"], o["citation_opens"]) == (1, 1, 2)

@@ -4,11 +4,10 @@ routers/chat.py — the streaming chat endpoint.
 1. Gate checks: session ownership, class membership (or the owning teacher's
    test drive), an open lab, the tools allowed in the lab, the daily quota.
 2. The teacher's rules (class, lab, student) become part of the system prompt.
-3. The research agent answers in the requested mode — direct, search or
-   research (services/research_service.py). A class in exam mode searches only
-   the files its teacher allowed in the exam, and answers in direct mode when
-   there are none. The answer is saved with its citations and billed call by
-   call before it is sent as server-sent events.
+3. The research agent answers (services/research_service.py). A class in exam
+   mode searches only the files its teacher allowed in the exam; with none, the
+   agent has no tools at all. The answer is saved with its citations and billed
+   call by call before it is sent as server-sent events.
 
 Models and limits come from SystemConfig (admin) with environment fallbacks.
 """
@@ -20,7 +19,6 @@ import time
 import uuid
 from dataclasses import replace
 from types import MappingProxyType
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -29,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.agent.history import history_budget
 from backend.app.agent.model import GREEDY, ResearchModel
-from backend.app.agent.tp_text import tp_char_budget
 from backend.app.agent.result import ResearchQuotaExceeded
 from backend.app.agent.tools import create_scope
 from backend.app.config import settings
@@ -37,17 +34,19 @@ from backend.app.auth import get_current_user
 from backend.app.database import get_db
 from backend.app.models import (
     ChatRefusal,
+    CitationOpen,
     Class,
     ClassStudent,
     Lab,
     Message,
+    MessageCitation,
     MessageFeedback,
     SenderType,
     Session,
     User,
     UserRole,
 )
-from backend.app.schemas import ChatStreamRequest, CodeResultRequest, MessageFeedbackRequest
+from backend.app.schemas import ChatStreamRequest, CitationOpenedRequest, CodeResultRequest, MessageFeedbackRequest
 from backend.app.services import chat_file_service, feature_service, memory_service, quota_service, rule_service
 from backend.app.agent import attachments as agent_attachments
 from backend.app.agent import memory as agent_memory
@@ -85,11 +84,9 @@ def language_model(agent: Endpoint):
     return ResearchModel(agent, sampling=GREEDY)
 
 
-def _history_budget(context: int | None, limits, mode: str) -> int:
-    """Estimated tokens of history a question may carry. Search and Direct
-    share the context with the TP text; Research has its own reading room."""
-    return history_budget(context, limits.history_context_percent,
-                          tp_percent=limits.tp_context_percent if mode != 'research' else 0)
+def _history_budget(context: int | None, limits) -> int:
+    """Estimated tokens of history a question may carry."""
+    return history_budget(context, limits.history_context_percent)
 
 
 def _research_frames(items):
@@ -148,7 +145,7 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
-    The answer of the research agent, in the requested mode, as server-sent events.
+    The answer of the research agent, as server-sent events.
     """
     # ---------------------------------------------------------
     # STEP 1: Gate checks
@@ -255,13 +252,13 @@ async def chat_stream(
                       f'{blocked}_quota_reached')
 
     # ---------------------------------------------------------
-    # STEP 2: the research agent (agent/runner.py, search.py, direct.py) answers
+    # STEP 2: the research agent (agent/runner.py) answers
     # ---------------------------------------------------------
     llm_config = await _get_llm_config(db)
 
     rule_texts = await rule_service.get_active_rule_texts(db, class_id, lab_id, current_user.id)
 
-    # The research agent answers every chat (direct, search or research mode).
+    # The research agent answers every chat.
     if not settings.AGENTIC_SEARCH_ENABLED:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "chat_not_enabled")
     if 'web' in body.tools and not settings.WEB_SEARCH_URL:
@@ -271,7 +268,7 @@ async def chat_stream(
     # All source scope and focus IDs are resolved from the authenticated
     # session. The model never supplies a URL or a revision map.
     # A class in exam mode searches only the files allowed in the exam; with
-    # none, it answers in direct mode whatever the client asks.
+    # none, the agent has no tools at all (runner EXAM_NO_FILES_TURN).
     exam_mode = bool(await db.scalar(select(Class.exam_mode).where(Class.id == class_id)))
     # The research model is the AGENT_* endpoint (default: the main LLM);
     # view_image uses the VLM_* endpoint and is off when no VLM_MODEL is set.
@@ -279,33 +276,28 @@ async def chat_stream(
                      llm_config['agent_api_key'], llm_config['agent_model'])
     if not agent.model or not agent.base_url:
         raise HTTPException(503, 'agent_model_not_configured')
-    # The TP text and the history may each use a share of the model's context
-    # (agent/tp_text.py, agent/history.py).
+    # The history may use a share of the model's context (agent/history.py).
     context = await context_tokens(agent.base_url, agent.model, agent.api_key)
     limits = llm_config['research_limits']
     try:
         scope = await create_scope(db, user_id=current_user.id,
                                    session_id=body.session_id, exam_only=exam_mode)
         exam_files = exam_mode and bool(scope.snapshot_revisions)
-        mode = 'direct' if exam_mode and not exam_files else body.mode
+        exam_no_files = exam_mode and not exam_files
+        # The tools below are off in exam mode: the gate above has refused them
+        # (feature_service), so these switches never meet exam_no_files.
         # Deep research: the research loop with more room (research_service.deep_limits).
-        # The gate above has checked that the lab allows it.
-        deep = 'deep' in body.tools and mode != 'direct'
+        deep = 'deep' in body.tools
         if deep:
-            mode, limits = 'research', deep_limits(limits)
+            limits = deep_limits(limits)
         # Web search: the research loop gets search_web and fetch_url (agent/web_tools.py).
-        web = 'web' in body.tools and mode != 'direct'
-        if web:
-            mode = 'research'
+        web = 'web' in body.tools
         # Python in the browser: the research loop gets execute_code (agent/code_tools.py).
-        run_code = 'code' in body.tools and mode != 'direct'
-        if run_code:
-            mode = 'research'
-        # Attachments (agent/attachments.py) go to the research loop; an attached
-        # course file limits this question's course search to it.
+        run_code = 'code' in body.tools
+        # Attachments (agent/attachments.py): an attached course file limits
+        # this question's course search to it.
         full_scope = scope
-        if attachments and mode != 'direct':
-            mode = 'research'
+        if attachments:
             attached_docs = {a['id'] for a in attachments if a['kind'] == 'document'}
             if attached_docs:
                 scope = replace(scope, snapshot_revisions=MappingProxyType({
@@ -319,7 +311,7 @@ async def chat_stream(
                                                     limit=HISTORY_MESSAGES)
             return history
         attachment_block, images, _ = await agent_attachments.build(
-            db, attachments if mode == 'research' else None, storage_root=get_storage_root(),
+            db, attachments, storage_root=get_storage_root(),
             earlier_chat=earlier_chat)
         # Only what fits the history limit is sent, with the citations of
         # those answers only.
@@ -331,28 +323,28 @@ async def chat_stream(
         # The summary itself is written inside the stream (prepare below): it is
         # a model call, and the stream's keep-alives must cover it.
         loaded, earlier_citations, _ = await runs.load_context(
-            scope, limit=HISTORY_MESSAGES, max_tokens=_history_budget(context, limits, mode),
+            scope, limit=HISTORY_MESSAGES, max_tokens=_history_budget(context, limits),
             exclude_ids=replaced, compact=compact)
         # Right after a question back the model must answer, not ask again.
         allow_ask = not await runs.last_answer_asked(scope.session_id, exclude_ids=replaced)
     except DocumentNotFound:
         raise HTTPException(404, 'source_unavailable') from None
     teaching_rules = rule_service.teaching_rules_text(rule_texts)
-    if exam_files and mode != 'direct':
+    if exam_files:
         teaching_rules += ('\n\n[EXAM MODE]\nThe class is in exam mode: only the course files the '
                            'teacher allowed for the exam are available. Use only these.')
     embedder = _make_embed_fn(llm_config)
     async def embed_query(query: str):
         return (await embedder([query]))[0]
-    # The student's notes of this class (agent/memory.py): research mode only,
-    # never in exam mode, in a test drive, or when the student turned memory off.
+    # The student's notes of this class (agent/memory.py): never in exam mode,
+    # in a test drive, or when the student turned memory off.
     memory_on = (current_user.memory_enabled and current_user.role == UserRole.student
-                 and not exam_mode and not session.is_test and mode == 'research')
+                 and not exam_mode and not session.is_test)
     # "About me" (the student's settings): with the notes, under the same
     # conditions except the memory switch, which is about the notes only.
     about = (agent_memory.about_context(current_user.about_me)
-             if (current_user.role == UserRole.student and not exam_mode and not session.is_test
-                 and mode == 'research') else '')
+             if (current_user.role == UserRole.student and not exam_mode and not session.is_test)
+             else '')
     user_id = current_user.id
     snapshot = {str(k): str(v) for k, v in scope.snapshot_revisions.items()}
 
@@ -369,7 +361,7 @@ async def chat_stream(
                 async with research_factory() as notes_db:
                     notes = await memory_service.for_recall(notes_db, user_id, class_id)
                 vector = None
-                if sum(len(n['content']) + 4 for n in notes) > agent_memory.CONTEXT_CHAR_LIMIT:
+                if not agent_memory.all_fit(notes):
                     vector = await embed_query(agent_memory.recall_query(history, body.message))
                 notes_block = agent_memory.memory_context(notes, vector)
             except Exception as exc:              # a question never fails for its notes
@@ -380,7 +372,6 @@ async def chat_stream(
     vision = (ResearchVision(vlm, timeout=llm_config['research_limits'].call_seconds)
               if vlm.model and vlm.base_url else None)
     request_id = str(body.client_request_id or uuid.uuid4())
-    tp_chars = tp_char_budget(context, limits.tp_context_percent) if mode != 'research' else None
     title_model = ResearchModel(agent)
 
     async def research_events():
@@ -418,7 +409,7 @@ async def chat_stream(
                 return None
         code_tools = (agent_code.CodeTools(current_user.id, lambda event: queue.put_nowait(('code', event)),
                                            save_image=save_code_image) if run_code else None)
-        yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'mode': mode, 'exam_mode': exam_mode})}\n\n"
+        yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'exam_mode': exam_mode})}\n\n"
         preparing = asyncio.create_task(prepare())
         try:
             while not preparing.done():
@@ -448,10 +439,10 @@ async def chat_stream(
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],
             rerank_model=llm_config['rerank_model'], on_phase=phase, on_tasks=tasks, on_step=step, on_started=started,
-            vision_fn=vision, vision_model=vlm.model, limits=limits, tp_chars=tp_chars,
+            vision_fn=vision, vision_model=vlm.model, limits=limits,
             language_model=language_model(agent), context_tokens=context,
-            on_draft=draft, allow_ask=allow_ask and mode == 'research',
-            mode=mode, exam_mode=exam_mode, exam_files=exam_files, session_factory=research_factory))
+            on_draft=draft, allow_ask=allow_ask,
+            exam_no_files=exam_no_files, session_factory=research_factory))
         # A second request while one is answering is refused (RunConflict below):
         # it must not take the place of the answer being written.
         current_run = _running.get(scope.session_id)
@@ -603,7 +594,6 @@ async def stop_session_answer(
 @router.get("/sessions/{session_id}/history-start")
 async def history_start_of_session(
     session_id: uuid.UUID,
-    mode: Literal['direct', 'search', 'research'] = 'search',
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db, scope="function"),
 ):
@@ -624,11 +614,10 @@ async def history_start_of_session(
     try:
         scope = await create_scope(db, user_id=current_user.id, session_id=session_id,
                                    exam_only=exam_mode)
-        mode = 'direct' if exam_mode and not scope.snapshot_revisions else mode
         runs = ResearchRuns(async_sessionmaker(db.bind, expire_on_commit=False))
         history, _, hidden = await runs.load_context(
             scope, limit=HISTORY_MESSAGES,
-            max_tokens=_history_budget(context, llm_config['research_limits'], mode))
+            max_tokens=_history_budget(context, llm_config['research_limits']))
     except DocumentNotFound:
         raise HTTPException(404, 'source_unavailable') from None
     if not hidden:
@@ -646,6 +635,29 @@ async def code_result(
     person whose question asked for it, while the run still waits."""
     if not agent_code.deliver(call_id, current_user.id, body.model_dump()):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "code_run_not_waiting")
+
+
+@router.post("/messages/{message_id}/citation-opened", status_code=204)
+async def citation_opened(
+    message_id: uuid.UUID,
+    body: CitationOpenedRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+):
+    """The page opened a cited page of an answer: one row in citation_opens.
+    Only for an answer of the user's own session that cites that file."""
+    cited = await db.scalar(
+        select(MessageCitation.id)
+        .join(Message, Message.id == MessageCitation.message_id)
+        .join(Session, Session.id == Message.session_id)
+        .where(MessageCitation.message_id == message_id, MessageCitation.document_id == body.document_id,
+               Session.user_id == current_user.id)
+        .limit(1))
+    if cited is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "citation_not_found")
+    db.add(CitationOpen(user_id=current_user.id, message_id=message_id,
+                        document_id=body.document_id, page_no=body.page_no))
+    await db.commit()
 
 
 @router.post("/messages/{message_id}/feedback")

@@ -10,7 +10,7 @@ This file describes every table and column of the PostgreSQL database (with the 
 - **New tables.** The backend creates missing tables at startup with `Base.metadata.create_all`. There is no Alembic.
 - **Changes to existing tables.** `create_all` cannot add columns to a table that exists. These changes are SQL files in `scripts/`, applied in order by `python -m scripts.migrate_document_snapshots --database-url URL [--apply]`. The command is a dry run without `--apply`. The script keeps its record in the table `document_schema_migrations` (`version`, `checksum`, `applied_at`), which is not an ORM model.
 - **Startup checks.** The backend stops with an error if an old table lacks a column that a migration adds. With `STRUCTURED_INGEST_ENABLED` or `AGENTIC_SEARCH_ENABLED` on, it also stops if a required migration is missing. The required list is `backend/app/schema_versions.py`.
-- **Tables that came without a migration file.** `quota_grants` and `audit_reports` are new tables, so `create_all` makes them. `quota_reset_requests` and `chat_refusals` are made by `create_all` too, and by the M4-I file. `service_failures` is made by `create_all` only.
+- **Tables that came without a migration file.** `quota_grants` and `audit_reports` are new tables, so `create_all` makes them. `quota_reset_requests` and `chat_refusals` are made by `create_all` too, and by the M4-I file. `service_failures` and `citation_opens` are made by `create_all` only.
 - **Types in tests.** The tests run on SQLite for most cases. There a UUID is stored as `CHAR(36)`, and the vector and full-text columns are plain text. Tests of search use PostgreSQL.
 
 **Known gap: two indexes do not exist.** Search over `doc_chunks` needs an HNSW index on `embedding` (`USING hnsw (embedding vector_cosine_ops)`) and a GIN index on `tsv` (`USING gin (tsv)`). No code creates them, so both searches read the whole table. The answers are correct, but the search will slow down as the material grows.
@@ -82,7 +82,7 @@ A class is owned by one teacher and joined by students with an invite code.
 | teacher_id | UUID | Foreign key to `users.id`. The owner (a teacher, or an admin after a transfer). |
 | invite_code | String(6) | Unique. Students join with it. |
 | is_deleted | Boolean | Default false. Soft delete. |
-| exam_mode | Boolean | Default false. When true, every lab of the class answers in Direct mode only, without course search. New classes get the value of `NEW_CLASS_EXAM_MODE`. Added by migration `m4f_answer_modes_v1`. |
+| exam_mode | Boolean | Default false. When true, students and the agent may use only the files allowed in the exam (`documents.exam_allowed`); with none, the agent answers without the course. Web search, Python, uploads and deep research are off. New classes get the value of `NEW_CLASS_EXAM_MODE`. Added by migration `m4f_answer_modes_v1`. |
 | features | JSON | Default `{}`. What students may use in the class: `upload`, `web`, `code`, `deep`, each true or false. A missing key means on. Added by `m4p_features_v1`. |
 | created_at | Timestamp | |
 
@@ -184,7 +184,7 @@ The messages of a session, with the tokens each one used.
 | billed_tokens | Integer | Nullable. The weighted tokens charged to the quota. |
 | feedback | Enum | Nullable. `up` or `down`, set by the student on an answer. |
 | clarification | JSON | Nullable. `{"question", "options"}` when the answer is a question back to the student. Added by migration `m4e_clarification_v1`. |
-| answer_mode | String(16) | Nullable. The mode that wrote an answer: `direct`, `search` or `research`. Null for answers written before the modes. Added by migration `m4f_answer_modes_v1`. |
+| answer_mode | String(16) | Nullable. The mode that wrote an answer: `research` since 2026-11-26, when the modes `direct` and `search` went (older answers keep them). Null for answers written before the modes. Added by migration `m4f_answer_modes_v1`. |
 | attachments | JSON | Nullable. On a student question: what it attached, `[{kind, id, name}]` with kind `file` (`chat_files`), `document` (a course file) or `session` (an earlier chat). Added by `m4s_chat_files_v1`. |
 | version_of | UUID | Nullable. Foreign key to `messages.id`. On a new version of the last question (edit or new answer): the first question of its group. Added by `m4t_message_versions_v1`. |
 | superseded_at | Timestamp | Nullable. Set on a question and its answer when a newer version replaces them. The model's history and the export leave them out; the student's session and the audit show them. Analytics and quota count every version. Added by `m4t_message_versions_v1`. |
@@ -251,6 +251,19 @@ A question the chat refused before it started, so it has no run. For monitoring.
 | reason | String(32) | `day_quota`, `week_quota`, `lab_locked`, `not_member` or `feature_off` (a tool the lab does not allow). |
 | created_at | Timestamp | Indexed. |
 
+### citation_opens
+
+A student opened a page that an answer cites (a page button under the answer, an `[E#]` in its text, or a picture card). One row per opening, to see whether students use the sources; the teacher's Analytics counts them. Written by `POST /api/chat/messages/{id}/citation-opened`. New table, made by `create_all` (2026-11-26).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Primary key. |
+| user_id | UUID | Foreign key to `users.id`. Who opened it. |
+| message_id | UUID | Foreign key to `messages.id`. The answer. Indexed. |
+| document_id | UUID | The cited file. No foreign key: the row stays when the document is deleted. |
+| page_no | Integer | Nullable. The page opened. |
+| created_at | Timestamp | Indexed. |
+
 ### service_failures
 
 A failure the user does not see: a service failed and the code went on without it. For monitoring. Written by `services/failure_log.py` every 10 seconds, from the backend and from the worker. New table, made by `create_all`.
@@ -258,7 +271,7 @@ A failure the user does not see: a service failed and the code went on without i
 | Column | Type | Notes |
 | --- | --- | --- |
 | id | UUID | Primary key. |
-| component | String(32) | `rerank`, `embedding`, `vision`, `tool_<name>`, `tp_text`, `title`, `report`, `report_embedding`, `captions` or `worker`. |
+| component | String(32) | `rerank`, `embedding`, `vision`, `tool_<name>`, `tp_text` (before 2026-11-26), `title`, `report`, `report_embedding`, `captions` or `worker`. |
 | kind | String(64) | The error name (`ConnectTimeout`, `vision_timeout`...). `retried_...` for a rerank call whose second try was made. No question or course text. |
 | created_at | Timestamp | Indexed. |
 
@@ -605,7 +618,7 @@ A job whose lease ran out is claimed again. Columns from `task_kind` to `lease_e
 
 ## Research agent
 
-These tables are written by the chat in all three answer modes. They were added by migration `m4c_research_persistence_v1`. The columns `messages.clarification` and `messages.answer_mode` and `classes.exam_mode` came later (see above).
+These tables are written by the chat for every answer. They were added by migration `m4c_research_persistence_v1`. The columns `messages.clarification` and `messages.answer_mode` and `classes.exam_mode` came later (see above).
 
 ### agent_runs
 
@@ -622,7 +635,7 @@ One row per chat request. A session can have only one running run at a time (uni
 | snapshot_map | JSON | Which revision of each document the run used, frozen when it starts. |
 | user_message_id, assistant_message_id | UUID | Nullable. Foreign keys to `messages.id`. |
 | stop_reason | String(64) | Nullable. For example `clarification` for a question back. |
-| mode | String(16) | Nullable (older runs). `direct`, `search` or `research`: the mode the run answered in. Added by `m4i_quota_week_v1`. |
+| mode | String(16) | Nullable (older runs). The mode the run answered in: `research` (older runs may say `direct` or `search`). Added by `m4i_quota_week_v1`. |
 | settlement_status | String(16) | `open` (default) or `settled`. Whether the quota was settled. |
 | started_at | Timestamp | |
 | finished_at | Timestamp | Nullable. |
@@ -672,7 +685,7 @@ One row per model, embedding or rerank call of a run.
 | --- | --- | --- |
 | call_id | UUID | Primary key. |
 | run_id | UUID | Foreign key to `agent_runs.id`. |
-| purpose | String(32) | `agent`, `answer`, `answer_check`, `citation_correction`, `answer_language`, `vision`, `embedding` or `rerank` (Search and Direct also `search_query`, `search_answer`, `search_check`, `direct_answer`). |
+| purpose | String(32) | `agent`, `answer`, `answer_check`, `citation_correction`, `answer_language`, `vision`, `embedding` or `rerank` (older runs of the removed Search and Direct modes also `search_query`, `search_answer`, `search_check`, `direct_answer`). |
 | model | String(255) | |
 | input_tokens, output_tokens | Integer | Nullable. |
 | usage_source | String(16) | `actual`, `estimated` or `none`. |

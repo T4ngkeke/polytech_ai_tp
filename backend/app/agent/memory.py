@@ -78,18 +78,28 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / norm if norm else 0.0
 
 
+def _line(m: dict) -> str:
+    return f"- {m['category']}: {m['content']}" if m.get('category') else f"- {m['content']}"
+
+
+def all_fit(memories: list[dict]) -> bool:
+    """Whether every note fits the block, as memory_context writes it (one line
+    each, with its category, and a line break)."""
+    return sum(len(_line(m)) + 1 for m in memories) <= CONTEXT_CHAR_LIMIT
+
+
 def memory_context(memories: list[dict], query_vector: list[float] | None = None) -> str:
     """The block added to the question: the notes that fit it, within the limit
     (all of them when they fit; else the closest ones first)."""
     if not memories:
         return ''
     ordered = sorted(memories, key=lambda m: ((m.get('category') or ''), m['content']))
-    if query_vector is not None and sum(len(m['content']) + 4 for m in memories) > CONTEXT_CHAR_LIMIT:
+    if query_vector is not None and not all_fit(memories):
         ordered = sorted(memories, key=lambda m: -_cosine(query_vector, m['embedding'])
                          if m.get('embedding') else 1.0)
     lines, size = [], 0
     for m in ordered:
-        line = f"- {m['category']}: {m['content']}" if m.get('category') else f"- {m['content']}"
+        line = _line(m)
         if size + len(line) + 1 > CONTEXT_CHAR_LIMIT:
             break
         lines.append(line)

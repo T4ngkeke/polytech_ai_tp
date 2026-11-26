@@ -49,12 +49,19 @@ def _content(text: str) -> str:
     return FRAME_TAGS.sub(lambda m: f'‹{m.group(1)}{m.group(2)}', text or '')
 
 
+CUT_NOTE = ' …(cut)'
+
+
 def _earlier_chat(history: list[dict]) -> str:
     lines, size = [], 0
     for message in reversed(history):                 # newest first, then put back in order
         role = 'student' if message['role'] == 'user' else 'assistant'
         line = f"{role}: {(message.get('content') or '').strip()}"
         if size + len(line) > EARLIER_CHAT_CHARS:
+            if not lines:
+                # The newest message alone is too long (pasted code): its start,
+                # rather than nothing.
+                lines.append(line[:EARLIER_CHAT_CHARS - len(CUT_NOTE)] + CUT_NOTE)
             break
         lines.append(line)
         size += len(line)

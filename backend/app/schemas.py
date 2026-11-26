@@ -43,6 +43,13 @@ class MessageFeedbackRequest(BaseModel):
     feedback: MessageFeedbackValue
 
 
+class CitationOpenedRequest(BaseModel):
+    """A student opened a page that an answer cites."""
+    model_config = ConfigDict(extra="forbid")
+    document_id: uuid.UUID
+    page_no: int | None = Field(default=None, ge=1)
+
+
 class RuleLevel(str, Enum):
     class_ = "class"
     lab = "lab"
@@ -182,7 +189,6 @@ class LLMConfigRequest(BaseModel):
     agent_total_seconds: str | None = None
     agent_call_seconds: str | None = None
     agent_max_input_tokens: str | None = None
-    tp_context_percent: str | None = None
     history_context_percent: str | None = None
     token_alpha: float | None = None
     token_beta: float | None = None
@@ -231,7 +237,6 @@ class LLMConfigResponse(BaseModel):
     agent_total_seconds: str = ""
     agent_call_seconds: str = ""
     agent_max_input_tokens: str = ""
-    tp_context_percent: str = ""
     history_context_percent: str = ""
     # Default and allowed range of each research limit field, for the form:
     # {"agent_max_tool_calls": {"default": 30, "min": 1, "max": 40}, …}.
@@ -589,7 +594,8 @@ class MessageResponse(BaseModel):
     citations: list[dict] = []
     # A question back to the student: {"question": ..., "options": [...]}.
     clarification: dict | None = None
-    # direct, search or research; None for answers written before the modes.
+    # research; older answers may say direct or search (the three modes ended
+    # 2026-11-26); None for answers written before 2026-10-15.
     answer_mode: str | None = None
     # A student question's attachments: [{kind, id, name}].
     attachments: list[dict] | None = None
@@ -634,9 +640,6 @@ class ChatStreamRequest(BaseModel):
     session_id: uuid.UUID
     message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS)
     client_request_id: uuid.UUID | None = None
-    # direct: no course material; search: one search; research: the agent.
-    # A class in exam mode answers in direct mode whatever is asked.
-    mode: Literal['direct', 'search', 'research'] = 'research'
     # Tools the student turned on for this question; each must be allowed in
     # this lab (services/feature_service.py), else the question is refused.
     tools: list[Literal['web', 'code', 'deep']] = Field(default_factory=list, max_length=3)

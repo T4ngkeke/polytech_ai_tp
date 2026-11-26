@@ -18,12 +18,8 @@ can reuse its cache. The chat page draws a line where the history starts.
 What drops out is summarized (agent/compaction.py) unless that is turned off.
 """
 
-# Default context when the model server does not say (agent/tp_text.py).
+# Default context when the model server does not say (services/model_servers.context_tokens).
 DEFAULT_CONTEXT = 65536
-# With the TP text in the prompt (Search, Direct), TP text and history together
-# use at most this share of the context: the question, the found pages, the
-# instructions and the answer need the rest.
-MAX_SHARED_PERCENT = 75
 # A cut drops about this share of the limit at least, so the next cut comes
 # only after as much new conversation.
 STEP = 0.3
@@ -40,12 +36,8 @@ def estimate_tokens(text: str) -> int:
     return estimate_length(len(text or ''))
 
 
-def history_budget(context_tokens: int | None, percent: int, *, tp_percent: int = 0) -> int:
-    """Estimated tokens of history a question may carry: ``percent`` of the
-    context; with the TP text (tp_percent > 0), at most what the TP leaves of
-    MAX_SHARED_PERCENT."""
-    if tp_percent > 0:
-        percent = min(percent, max(0, MAX_SHARED_PERCENT - tp_percent))
+def history_budget(context_tokens: int | None, percent: int) -> int:
+    """Estimated tokens of history a question may carry: ``percent`` of the context."""
     return (context_tokens or DEFAULT_CONTEXT) * max(0, percent) // 100
 
 

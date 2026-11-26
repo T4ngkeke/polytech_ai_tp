@@ -361,6 +361,20 @@ async def test_a_lab_without_documents_gets_no_tools():
     assert 'no course documents yet' in model.seen[0][-1]['content']
 
 
+@pytest.mark.asyncio
+async def test_exam_mode_without_allowed_files_has_no_tools_at_all():
+    class EmptyScope(ViewFixture):          # exam mode, no file allowed: the scope is empty
+        async def page_index(self):
+            return {}
+    model = Script('Un pointeur contient une adresse.')
+    result = await ResearchRunner(CourseTools(EmptyScope()), model).run(
+        'Pointeur ?', allow_ask=True, exam_no_files=True)
+    assert model.with_tools == [False] and model.purposes == ['answer']   # one call, no tools
+    assert result.stop_reason == 'exam_no_files' and result.citations == [] and result.tool_calls == 0
+    assert 'exam mode' in model.seen[0][-1]['content']
+    assert 'no course documents yet' not in model.seen[0][-1]['content']
+
+
 def test_partial_answer_lists_read_pages_once_without_claims():
     doc = str(uuid4())
     state = {'handles': {'filenames': {doc: 'Algebre.pdf'}}, 'evidence': [
@@ -439,6 +453,27 @@ async def test_a_research_call_ends_with_the_research_time_and_the_answer_follow
                                   research_timeout=300, total_timeout=420, model_timeout=120).run('Q ?')
     assert timeouts == [120, 5, 120]
     assert result.answer == 'Vin3 [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']
+    assert {'event': 'tools_withdrawn', 'reason': 'research_time'} in result.trace
+
+
+@pytest.mark.asyncio
+async def test_the_model_clients_own_timeout_also_withdraws_the_tools():
+    # The openai client's APITimeoutError is not a TimeoutError: it must still
+    # end the research and let the model answer from what it read.
+    import httpx
+    from openai import APITimeoutError
+    now, calls = [0.0], []
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [E1].')
+
+    async def timed(messages, max_output, timeout, *, tools=None, purpose=''):
+        calls.append(purpose)
+        if len(calls) == 2:
+            now[0] = 300.0
+            raise APITimeoutError(request=httpx.Request('POST', 'http://model/v1/chat/completions'))
+        return await model(messages, max_output, timeout, tools=tools, purpose=purpose)
+    result = await ResearchRunner(CourseTools(ViewFixture()), timed, clock=lambda: now[0],
+                                  research_timeout=300, total_timeout=420, model_timeout=120).run('Q ?')
+    assert calls == ['agent', 'agent', 'answer'] and result.answer == 'Vin3 [E1].'
     assert {'event': 'tools_withdrawn', 'reason': 'research_time'} in result.trace
 
 
@@ -565,6 +600,15 @@ async def test_a_file_and_page_instead_of_an_id_gets_the_correction_turn():
     assert result.answer == 'Vin3 [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']
 
 
+@pytest.mark.asyncio
+async def test_a_corrected_answer_gets_its_references_cleaned_too():
+    # The correction keeps the right ID but writes it with extra parts again.
+    model = Script([('read', {'page': 'd1.p10'})], 'Vin3 [Algebre.pdf, page 10].', 'Vin3 [E1 in d1.p10].')
+    result = await ResearchRunner(CourseTools(ViewFixture()), model).run('Q ?')
+    assert model.purposes[-1] == 'citation_correction'
+    assert result.answer == 'Vin3 [E1].' and [c['evidence_id'] for c in result.citations] == ['E1']
+
+
 def test_handles_next_to_file_names_are_removed_outside_code():
     from backend.app.agent.runner import _without_document_handles as clean
     assert clean('d1 – Algebre_relationnelle_2020.pdf (27 pages) : le cours') == 'Algebre_relationnelle_2020.pdf (27 pages) : le cours'
@@ -589,7 +633,9 @@ def test_lead_pages_count_strong_search_pages_and_grep_pages_only():
     grep = {'name': 'grep', 'arguments': {'document_id': 'b'},
             'result': {'items': [{'page': {'preview_page_no': 7}}]}}
     assert lead_pages(grep, 0.5) == {('b', 7)}
-    assert lead_pages({'name': 'grep', 'result': {'ok': False}}, 0.5) == set()
+    # A failed call did not run: it is not a search without a new page.
+    assert lead_pages({'name': 'grep', 'result': {'ok': False}}, 0.5) is None
+    assert lead_pages({'name': 'search', 'ok': False, 'result': {'ok': False}}, 0.5) is None
     assert lead_pages({'name': 'read', 'result': {'items': [{'page': {'preview_page_no': 7}}]}}, 0.5) is None
 
 
@@ -606,6 +652,15 @@ async def test_searches_without_a_new_page_get_one_note_and_keep_the_tools():
     assert [m['content'] for m in model.seen[4]][-1] == NO_LEAD_TURN.format(n=3)
     assert all(model.with_tools[:-1]) and result.stop_reason == 'finished'
     assert [e for e in result.trace if e.get('event') == 'no_new_leads'] == [{'event': 'no_new_leads', 'calls': 3}]
+
+
+@pytest.mark.asyncio
+async def test_failed_searches_do_not_count_as_searches_without_a_new_page():
+    # One search brings the page, then three calls with bad arguments: no note.
+    model = Script([('search', {'query': 'q0'})], *[[('search', {})] for _ in range(3)],
+                   [('read', {'page': 'd1.p10'})], 'Réponse [E1].')
+    await ResearchRunner(CourseTools(ViewFixture(), max_tool_calls=10), model, max_tool_calls=10).run('Q ?')
+    assert not any(m['role'] == 'user' and m['content'].startswith(NO_LEAD_TURN[:30]) for m in model.seen[-1])
 
 
 @pytest.mark.asyncio

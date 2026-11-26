@@ -9,10 +9,10 @@ This file says what the project is, what it does today and how to run it. The de
 - **Three roles.** An admin manages users, classes, models and monitoring. A teacher owns classes and labs. A student joins a class with an invite code and chats inside a lab. Each role has its own workspace; a user who opens another role's page is sent back to their own.
 - **Class and lab.** A class has an invite code (6 characters). A lab is one activity inside a class (for example one practical session). A chat session always belongs to one lab.
 - **PDF only.** A teacher uploads a PDF to a lab, or to the whole class. A worker reads each page with MinerU (a PDF reading tool), splits the text into passages and indexes them. The new version is published at once when every page was read. Otherwise it stays a draft that the teacher checks and publishes. The teacher can edit blocks, exclude blocks and reread a page.
-- **Three answer modes.** In *Direct* mode the model answers without the course files. In *Search* mode the system makes one search and the model answers from the pages found. In *Research* mode the model searches and reads several times, and may ask the student a question back. Search and Research answers cite the pages they used, and the chat shows each page with the passage highlighted.
-- **Exam mode.** In a class in exam mode, Search and Research look only in the files the teacher allowed for the exam; a lab with no allowed file answers in Direct mode only, whatever the student chooses. New classes start in exam mode (setting `NEW_CLASS_EXAM_MODE`); the teacher turns it off.
-- **Teacher rules.** A teacher writes rules at three levels: class, lab and student. They are added to the instructions of the model in every answer mode. The model can point out two rules of one list that contradict each other.
-- **The TP text.** The files of a lab (the TP statement) are read in full with every question in Search and Direct, within a share of the model's context. A question such as "question 3?" is answered without a search. The lab's Documents tab shows which files fit.
+- **One way to answer.** The research agent decides by itself whether to search the course: a greeting needs no search, a course question does. It searches and reads several times, and may ask the student a question back. An answer cites the pages it used, and the chat shows each page with the passage highlighted. The student can turn on deep research (more time and more tool calls), web search, Python and file uploads, when the teacher allows them. (Until 2026-11-26 there were three modes, Direct, Search and Research.)
+- **Exam mode.** In a class in exam mode, the agent looks only in the files the teacher allowed for the exam. With no allowed file, it has no tools at all and answers from general knowledge, without citations. Web search, Python, uploads and deep research are off. New classes start in exam mode (setting `NEW_CLASS_EXAM_MODE`); the teacher turns it off.
+- **Teacher rules.** A teacher writes rules at three levels: class, lab and student. They are added to the instructions of the model for every answer. The model can point out two rules of one list that contradict each other.
+- **The TP files first.** The files of a lab (the TP statement) come first in the list of course files the agent sees. For a question about the TP itself ("what do we do?", "question 3?") it reads them first.
 - **Answer language.** A small model call names the language of each answer, from the teacher's rules and the student's last messages. The answer is written in that language even when the course pages are in French.
 - **Conversation history.** Each answer sees the earlier messages of the session, within a share of the model's context. Past the limit the oldest turns go, several at once, and the chat page draws a line where the history the model sees begins. A question may have at most 20,000 characters.
 - **Quota.** Each user has a daily token quota. A teacher can give a student a full quota again for the day.
@@ -50,7 +50,7 @@ This file says what the project is, what it does today and how to run it. The de
 | [documentation/LOCAL_SETUP.md](documentation/LOCAL_SETUP.md) | The dev stack step by step, the models to set and how to check that it works. |
 | [documentation/RELEASE_TEACHERS.md](documentation/RELEASE_TEACHERS.md) | The installation that the teachers use (`docker-compose.release.yml`). |
 | [documentation/MONITORING.md](documentation/MONITORING.md) | Grafana, Prometheus and the admin-only access check. |
-| [documentation/M4_AGENT_EVALUATION.md](documentation/M4_AGENT_EVALUATION.md) | The benchmark of the answer modes, its results and how to run it. |
+| [documentation/M4_AGENT_EVALUATION.md](documentation/M4_AGENT_EVALUATION.md) | The benchmark of the research agent (and of the old answer modes), its results and how to run it. |
 | [backend/app/agent/README.md](backend/app/agent/README.md) | The files of the chat agent. |
 | [frontend/README.md](frontend/README.md) | The files of the web app, and its checks. |
 
@@ -73,9 +73,9 @@ polytech_ai_tp/
 │   │   │                      # teacher_students, teacher_reports, teacher_access (shared checks)
 │   │   ├── services/          # business logic: classes, labs, rules, quota, analytics,
 │   │   │                      # reports, document reading and editing, research runs, model clients
-│   │   └── agent/             # the three answer modes: runner.py (Research),
-│   │                          # search.py (Search), direct.py (Direct), their tools,
-│   │                          # the TP text, the answer language and the history limit
+│   │   └── agent/             # the research agent: runner.py (the loop), its tools
+│   │                          # (course, web, Python, tasks), the answer language,
+│   │                          # the history limit, memory, attachments
 │   ├── worker/                # PDF ingestion worker: queue, MinerU, indexing, load gate
 │   ├── tests/                 # pytest suite
 │   ├── seed.py                # first-time data: settings, demo accounts, one class
@@ -87,7 +87,7 @@ polytech_ai_tp/
 │   │   │                      # Admin, SourcePdf; the parts of Chat, Teacher and Admin
 │   │   │                      # are in pages/chat/, pages/teacher/ and pages/admin/
 │   │   ├── components/        # sidebar, document manager, analytics, reports, PDF preview...
-│   │   ├── lib/               # API client, stream events, answer modes, citations (with *.test.js)
+│   │   ├── lib/               # API client, stream events, citations, settings (with *.test.js)
 │   │   └── store/             # Zustand stores
 │   ├── nginx.conf             # nginx for the dev stack
 │   ├── nginx.release.conf     # nginx for the release stack (HTTPS)

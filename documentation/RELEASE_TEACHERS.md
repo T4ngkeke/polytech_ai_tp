@@ -8,7 +8,7 @@ This file describes the installation that the teachers use (`docker-compose.rele
 
 The teachers open `https://<LAN_IP>/` (on Tailscale, `https://<TAILSCALE_IP>/`). The two addresses are `RELEASE_LAN_IP` and `RELEASE_TAILSCALE_IP` in the private env file. It is HTTPS on the default port 443, with the certificate and CA of v6-beta. The v6-beta port 18443 still works, so old links keep working. Plain `http://` on port 80 redirects to HTTPS.
 
-New classes start in exam mode: answers are written directly, without the course files, as in v6. A teacher turns exam mode off for a class to try the rest: course PDFs, Search and Research modes, Test drive, Analytics and AI reports.
+New classes start in exam mode: until the teacher allows files for the exam, the agent answers without the course files, as in v6. A teacher turns exam mode off for a class to try the rest: course PDFs with cited pages, web search, Python, uploads, deep research, Test drive, Analytics and AI reports.
 
 ## What runs
 

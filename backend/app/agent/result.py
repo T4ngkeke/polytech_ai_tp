@@ -64,7 +64,8 @@ class ResearchResult:
     # The Python runs in the student's browser (code_tools.py):
     # [{id, code, stdout, stderr, result, images: [chat file id], status}].
     code_runs: list[dict] | None = None
-    # The answer mode that wrote it: direct, search or research.
+    # Saved as messages.answer_mode. Always research now; answers written before
+    # 2026-11-26, when there were three modes, may say direct or search.
     mode: str = 'research'
 
 

@@ -158,8 +158,8 @@ async def set_exam_mode(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ClassResponse:
     """Turn exam mode on or off. On, students search and open only the files
-    allowed in the exam (PUT .../exam-files); with none, every lab answers in
-    direct mode only. The chat endpoint enforces it."""
+    allowed in the exam (PUT .../exam-files); with none, the agent answers
+    without the course. The chat endpoint enforces it."""
     cls = await _verify_class_ownership(db, class_id, teacher)
     if cls.exam_mode != body.exam_mode:
         await notification_service.notify_class_students(

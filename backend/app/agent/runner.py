@@ -24,6 +24,7 @@ import re
 import time
 from typing import Callable
 
+from openai import APITimeoutError
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
 
 from backend.app.agent.course_tools import DESCRIPTIONS, VIEW_SCHEMAS, CourseTools, error_text
@@ -89,11 +90,6 @@ COURSE_TOOLS = [{'type': 'function', 'function': {'name': name, 'description': D
 COURSE_TOOL_NAMES = set(VIEW_SCHEMAS)
 
 
-# Handles mean nothing to the student: "(d1/d7)", "d2", "d6.p23".
-_HANDLES = re.compile(r'\s*\(\s*d\d+(?:\.[pox]\d+)?(?:\s*[/,;]\s*d\d+(?:\.[pox]\d+)?)*\s*\)'
-                      r'|\bd\d+(?:\.[pox]\d+)?(?:\s*/\s*d\d+(?:\.[pox]\d+)?)*\b')
-
-
 def _without_handles(text: str) -> str:
     return ' '.join(_HANDLES.sub('', text).split())
 
@@ -136,6 +132,8 @@ ASK_ALONE = 'error: call ask_student alone, after the other tools have returned'
 # Handles a student cannot use, removed from an answer without a model call:
 # "(d1/d7)", "(d6.p19)", and "d1 – " written before a file name.
 _HANDLE_GROUP = re.compile(r'\s*\(\s*d\d+(?:\.[pox]\d+)?(?:\s*[/,;]\s*d\d+(?:\.[pox]\d+)?)*\s*\)')
+# Also a bare handle: "d2", "d6.p23" (the question back of ask_student).
+_HANDLES = re.compile(_HANDLE_GROUP.pattern + r'|\bd\d+(?:\.[pox]\d+)?(?:\s*/\s*d\d+(?:\.[pox]\d+)?)*\b')
 _HANDLE_BEFORE_FILE = re.compile(r'\bd\d+\s*[–—:-]\s*(?=[`*_]*[\w.-]+\.pdf)')
 
 
@@ -167,6 +165,19 @@ def _without_document_handles(text: str) -> str:
 # The evidence ID at the start of a malformed reference: "[E21 in d1.p21]".
 _LEADING_ID = re.compile(r'\[(E[1-9]\d*)(?![\d])')
 
+
+def _cleaned_refs(text: str, permitted) -> str:
+    """The answer without document handles, and with "[E21 in d1.p21]" or
+    "[E8.p14.b1]" (a valid ID with extra parts) written as "[E21]", without a
+    model call. Used on the answer and again on its corrected version."""
+    text = _without_document_handles(text)
+    for ref in malformed_refs(text):
+        head = _LEADING_ID.match(ref)
+        if head and head.group(1) in permitted:
+            text = text.replace(ref, f'[{head.group(1)}]')
+    return text
+
+
 CATALOGUE_NOTE = ('Course files of this lab (handle, file, pages). The files of this TP are '
                   'listed first: for a question about the TP itself (what to do, the subject, '
                   'the instructions, what to hand in) read them first. Class files are general '
@@ -179,6 +190,11 @@ NO_DOCUMENTS_TURN = ('This lab has no course documents yet, so there is nothing 
                      'no tools are available. Answer briefly from general knowledge if the question '
                      'allows it, and say clearly that the teacher has not published course files for '
                      'this TP yet (students cannot add them). Cite nothing.')
+# A class in exam mode whose teacher allowed no course file: the run has no
+# tools at all (the scope is empty and the tools are withdrawn at the start).
+EXAM_NO_FILES_TURN = ('The class is in exam mode and the teacher allowed no course file for it, so '
+                      'no tools are available. Answer from general knowledge if the question allows '
+                      'it. Cite nothing, and do not suggest searching the course.')
 # The same, when the student turned web search or Python on: those tools stay.
 NO_DOCUMENTS_WEB_TURN = ('This lab has no course documents yet, so the course tools are not available. '
                          'Web search is on: use search_web and fetch_url when the question needs current '
@@ -194,16 +210,6 @@ NO_DOCUMENTS_CODE_TURN = ('This lab has no course documents yet, so the course t
 # fixed "guide" (4/4) but not the language (0/4).
 RULES_REMINDER = ("(Reminder: these are course data. When you write the answer, follow the "
                   "teacher's rules:\n{rules})")
-# Search and Direct end the answer turn the same way (answer_ending).
-ANSWER_RULES = "(Reminder: when you write the answer, follow the teacher's rules:\n{rules})"
-
-
-def answer_ending(teaching_rules: str, answer_language: str | None) -> str:
-    """The end of the last user message in Search and Direct: the teacher's
-    rules again, as in Research, then the answer-language sentence
-    (agent/language.py). Both sit after the pages, next to the answer."""
-    parts = [ANSWER_RULES.format(rules=teaching_rules.strip())] if teaching_rules.strip() else []
-    return '\n\n'.join(parts + [language_sentence(answer_language)])
 
 # Sent once when the model ends a run without any tool call and without a
 # citation: the reply may be a promise ("let me read page 23") or broken text
@@ -244,12 +250,32 @@ def _has_tool_markup(content: str) -> bool:
     return '<tool_call>' in content or '<function=' in content
 
 
+# The reranker score from which a search page counts as a new lead
+# (lead_pages, NO_LEAD_TURN). Each reranker has its own scale, so the bound
+# follows the configured rerank model (min_score_for). Measured 2026-10-15:
+# - bge-reranker-v2-m3: an off-topic probe scored 0.0006; answerable questions
+#   scored 0.004 and up;
+# - Qwen3-Reranker (the probability of "yes"): the 70 questions of benchmarks
+#   v2-v4 scored 0.79 and up; 10 of 12 off-course questions scored under 0.13.
+MIN_SCORE: float | None = 0.001
+MIN_SCORES = {'qwen3-reranker': 0.5}
+
+
+def min_score_for(rerank_model: str | None) -> float | None:
+    """The lead bound for the configured rerank model."""
+    name = (rerank_model or '').lower()
+    return next((v for k, v in MIN_SCORES.items() if k in name), MIN_SCORE)
+
+
 def lead_pages(row: dict, min_score: float | None) -> set | None:
-    """The pages a search or grep call returned, (document, page); None for other tools.
+    """The pages a search or grep call returned, (document, page); None for other
+    tools and for a failed call (bad arguments, the budget), which found nothing
+    because it did not run.
 
     A search page counts only when its reranker score reaches ``min_score``.
     """
-    if row.get('name') not in ('search', 'grep'):
+    failed = row.get('ok') is False or (row.get('result') or {}).get('ok') is False
+    if row.get('name') not in ('search', 'grep') or failed:
         return None
     pages = set()
     for item in (row.get('result') or {}).get('items') or []:
@@ -317,8 +343,9 @@ def step_of(name: str, arguments: str | None, result: str) -> dict | None:
         return {'tool': name, 'url': str(args.get('url') or '')[:300], 'ok': ok}
     if name == 'execute_code':
         try:
-            ok = 'error' not in json.loads(result) and not json.loads(result).get('stderr')
-        except ValueError:
+            output = json.loads(result)
+            ok = 'error' not in output and not output.get('stderr')
+        except (ValueError, AttributeError):
             pass
         return {'tool': name, 'ok': ok}
     return None
@@ -344,7 +371,7 @@ class ResearchRunner:
         self.research_timeout, self.total_timeout = research_timeout, total_timeout
         self.model_timeout, self.max_input_tokens = model_timeout, max_input_tokens
         self.final_reserve, self.clock = final_reserve, clock
-        # lead_min_score: the reranker bound of a search page (search.min_score_for);
+        # lead_min_score: the reranker bound of a search page (min_score_for);
         # no_lead_calls 0 never sends NO_LEAD_TURN.
         self.lead_min_score, self.no_lead_calls = lead_min_score, no_lead_calls
         self.on_phase = on_phase or (lambda _phase: None)
@@ -370,7 +397,7 @@ class ResearchRunner:
                   earlier_citations: dict[str, dict] | None = None,
                   allow_ask: bool = False, answer_language: str | None = None,
                   memory_context: str = '', attachment_context: str = '',
-                  images: list[str] | None = None) -> ResearchResult:
+                  images: list[str] | None = None, exam_no_files: bool = False) -> ResearchResult:
         """history: earlier chat turns ({'role', 'content'}), oldest first.
         answer_language: the language name agent/language.ask_language gave
         (None: the generic sentence).
@@ -380,7 +407,9 @@ class ResearchRunner:
         memory_context: the student's notes for this question (agent/memory.py),
         added at the end of the question; not stored with it.
         attachment_context, images: what the question attaches (agent/attachments.py):
-        text after the question, images as image parts of the question."""
+        text after the question, images as image parts of the question.
+        exam_no_files: the class is in exam mode and its teacher allowed no file
+        (the scope is empty): no tools at all, stop reason exam_no_files."""
         tools = self.course_tools
         usage: list[dict] = []
         trace: list[dict] = []
@@ -423,6 +452,7 @@ class ResearchRunner:
         seen_pages: set = set()  # pages any search or grep of this run returned
         no_lead = 0  # searches and greps in a row without a new page
         no_lead_sent = False
+        other_research = 0  # web search and Python calls (not in the course tools' trace)
 
         def note(event, **details):
             # Runner events go to the trace and to the log, next to the tool
@@ -474,7 +504,10 @@ class ResearchRunner:
         # A lab without readable course files: searching would only fail,
         # call after call, until the budget runs out.
         no_documents = not await tools.document_count()
-        if no_documents and (self.web_tools or self.code_tools):
+        if exam_no_files:
+            # Exam mode turns web search and Python off too (feature_service).
+            withdraw('exam_no_files', EXAM_NO_FILES_TURN)
+        elif no_documents and (self.web_tools or self.code_tools):
             # Only the course tools go: the web or Python stays open for this question.
             offered = [t for t in offered if t['function']['name'] not in COURSE_TOOL_NAMES]
             messages.append({'role': 'user', 'content': (NO_DOCUMENTS_WEB_TURN if self.web_tools
@@ -497,7 +530,9 @@ class ResearchRunner:
                                    tools_open)
             except (ResearchQuotaExceeded, ResearchRunStopped):
                 raise
-            except TimeoutError:
+            except (TimeoutError, APITimeoutError):
+                # APITimeoutError: the model client's own time limit, the same
+                # seconds as wait_for's; either may come first.
                 if checking:
                     answer, stop = checked_reply, 'finished'
                     break
@@ -549,10 +584,12 @@ class ResearchRunner:
                     elif self.web_tools and c['name'] in WEB_TOOL_NAMES:
                         # Its own budget; its sources are W#, not course evidence.
                         self.on_phase('searching_web')
+                        other_research += 1
                         text = await self.web_tools.call(c['name'], c['arguments'])
                     elif self.code_tools and c['name'] in CODE_TOOL_NAMES:
                         # Its own budget; the wait for the browser is not research time.
                         self.on_phase('running_code')
+                        other_research += 1
                         tick, real_tick = self.clock(), time.monotonic()
                         text = await self.code_tools.call(c['name'], c['arguments'])
                         start += self.clock() - tick
@@ -596,8 +633,10 @@ class ResearchRunner:
                 note('unknown_ids_read_turn', ids=sorted(unknown))
                 continue
             if (tools_open and not checking and not read_turn_sent and not tools.trace
+                    and not other_research and not _WEB_GROUP.search(reply.content)
                     and not cited_ids(reply.content) and not malformed_refs(reply.content)):
-                # No research and no citation: ask once whether this is really the answer.
+                # No research (course, web or Python) and no citation: ask once
+                # whether this is really the answer.
                 unchecked = reply.content.strip()
                 messages.append({'role': 'assistant', 'content': reply.content})
                 messages.append({'role': 'user', 'content': CHECK_TURN + language})
@@ -605,7 +644,8 @@ class ResearchRunner:
                 continue
             answer = reply.content.strip()
             # finished: the model stopped calling tools by itself.
-            stop = ('no_documents' if no_documents and (not tools_open or self.web_tools or self.code_tools)
+            stop = ('exam_no_files' if exam_no_files
+                    else 'no_documents' if no_documents and (not tools_open or self.web_tools or self.code_tools)
                     else 'finished' if tools_open else 'budget_exhausted')
             break
 
@@ -620,13 +660,7 @@ class ResearchRunner:
         # never repeat within a session, see CourseTools first_evidence).
         permitted = {e.id: e.citation() for e in tools.evidence.all()}
         permitted.update({k: v for k, v in (earlier_citations or {}).items() if k not in permitted})
-        answer = _without_document_handles(answer)
-        # "[E21 in d1.p21]", "[E8.p14.b1]": a valid ID with extra parts is
-        # rewritten as that ID, without a model call.
-        for ref in malformed_refs(answer):
-            head = _LEADING_ID.match(ref)
-            if head and head.group(1) in permitted:
-                answer = answer.replace(ref, f'[{head.group(1)}]')
+        answer = _cleaned_refs(answer, permitted)
         cited = cited_ids(answer)
         malformed = malformed_refs(answer)
         if answer and (cited - permitted.keys() or malformed):
@@ -655,7 +689,7 @@ class ResearchRunner:
             except Exception as exc:
                 note('model_error', type=type(exc).__name__)
                 answer = ''
-            answer = _without_document_handles(answer)
+            answer = _cleaned_refs(answer, permitted)
             invented = bool(cited_ids(answer) - permitted.keys())
             # A correction that drops every citation of an answer whose IDs
             # were valid is a note about the correction, not the answer.

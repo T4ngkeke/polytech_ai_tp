@@ -302,7 +302,6 @@ _LLM_CONFIG_STR_FIELDS: dict[str, str] = {
     "agent_total_seconds": "AGENT_TOTAL_SECONDS",
     "agent_call_seconds": "AGENT_CALL_SECONDS",
     "agent_max_input_tokens": "AGENT_MAX_INPUT_TOKENS",
-    "tp_context_percent": "TP_CONTEXT_PERCENT",
     "history_context_percent": "HISTORY_CONTEXT_PERCENT",
 }
 

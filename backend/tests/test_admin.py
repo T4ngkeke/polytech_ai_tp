@@ -411,10 +411,10 @@ class TestLLMConfig:
         """The page sends only changed fields (2026-11-19): the main model
         need not be sent, but it may not be emptied."""
         await admin_client.put("/api/admin/llm/config", json={"base_url": "http://main/v1", "api_key": "k", "model": "m"})
-        resp = await admin_client.put("/api/admin/llm/config", json={"rerank_enabled": "off", "tp_context_percent": "40"})
+        resp = await admin_client.put("/api/admin/llm/config", json={"rerank_enabled": "off", "history_context_percent": "40"})
         assert resp.status_code == 200, resp.text
         got = resp.json()
-        assert (got["rerank_enabled"], got["tp_context_percent"], got["model"], got["api_key"]) == ("off", "40", "m", "k")
+        assert (got["rerank_enabled"], got["history_context_percent"], got["model"], got["api_key"]) == ("off", "40", "m", "k")
         assert (await admin_client.put("/api/admin/llm/config", json={"model": ""})).status_code == 422
         assert (await admin_client.put("/api/admin/llm/config", json={"rerank_enabled": "maybe"})).status_code == 422
 
@@ -452,8 +452,7 @@ class TestLLMConfig:
         # The form shows each default and range from the backend.
         assert got["research_limits"]["agent_max_tool_calls"] == {"default": 30, "min": 1, "max": 40}
         assert got["research_limits"]["agent_max_input_tokens"]["default"] == 28000
-        assert len(got["research_limits"]) == 8
-        assert got["research_limits"]["tp_context_percent"] == {"default": 30, "min": 0, "max": 60}
+        assert len(got["research_limits"]) == 7 and "tp_context_percent" not in got["research_limits"]
         # An empty value goes back to the default.
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m", "agent_max_tool_calls": "",
