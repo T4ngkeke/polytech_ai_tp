@@ -110,54 +110,10 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_legacy_pdf_opens_only_in_own_session(db_session, tmp_path):
-    import pymupdf
-
-    with pymupdf.open() as source:
-        for number in range(1, 10):
-            source.new_page().insert_text((40, 40), f'Course page {number}')
-        pdf_bytes = source.tobytes()
-    db = db_session
-    storage = tmp_path / 'storage'
-    storage.mkdir()
-    app.dependency_overrides[get_storage_root] = lambda: str(storage)
-    try:
-        _, _, lab, _ = await seed(db)
-        student, outsider = make_user(), make_user()
-        db.add_all([student, outsider])
-        await db.flush()
-        db.add(ClassStudent(class_id=lab.class_id, student_id=student.id))
-        own = Session(id=uuid.uuid4(), lab_id=lab.id, user_id=student.id)
-        other = Session(id=uuid.uuid4(), lab_id=lab.id, user_id=outsider.id)
-        db.add_all([own, other])
-        await db.flush()
-        # A document from before the PDF path: a row and its stored file.
-        digest = hashlib.sha256(pdf_bytes).hexdigest()
-        path = storage / f'{digest}_course.pdf'
-        path.write_bytes(pdf_bytes)
-        doc = Document(class_id=lab.class_id, lab_id=lab.id, filename='course.pdf',
-                       storage_path=str(path), content_hash=digest, uploaded_by=student.id)
-        db.add(doc)
-        await db.flush()
-        url = f'/api/documents/{doc.id}/pdf'
-        client = await make_client(db, student)
-        async with client:
-            opened = await client.get(url, params={'session_id': str(own.id)})
-            wrong_session = await client.get(url, params={'session_id': str(other.id)})
-        assert opened.status_code == 200 and opened.content == pdf_bytes
-        assert wrong_session.status_code == 404
-        client = await make_client(db, outsider)
-        async with client:
-            denied = await client.get(url, params={'session_id': str(other.id)})
-        assert denied.status_code == 404
-    finally:
-        app.dependency_overrides.pop(get_storage_root, None)
-
-
-@pytest.mark.asyncio
 async def test_exam_mode_closes_course_documents_to_students(db_session, tmp_path):
     """In exam mode a student cannot open a course PDF, not even one cited in an
-    earlier answer; it opens again once exam mode is off."""
+    earlier answer; the exam check lets it through once the file is allowed or
+    exam mode is off."""
     from backend.app.models import Class
 
     with pymupdf.open() as source:
@@ -184,7 +140,10 @@ async def test_exam_mode_closes_course_documents_to_students(db_session, tmp_pat
         cls = await db.get(Class, lab.class_id)
         cls.exam_mode = True
         await db.flush()
-        url, params = f'/api/documents/{doc.id}/pdf', {'session_id': str(chat.id)}
+        # The whole PDF of a citation needs its revision: an unknown one is a
+        # 404, but only once the exam check has let the request through.
+        url = f'/api/documents/{doc.id}/pdf'
+        params = {'session_id': str(chat.id), 'revision_id': str(uuid.uuid4())}
         image = f'/api/documents/{doc.id}/revisions/{uuid.uuid4()}/pages/1/image'
         client = await make_client(db, student)
         async with client:
@@ -200,7 +159,7 @@ async def test_exam_mode_closes_course_documents_to_students(db_session, tmp_pat
             opened = await client.get(url, params=params)
         assert closed.status_code == 403 and closed.json()['detail'] == 'exam_mode'
         assert closed_image.status_code == 403   # checked before the revision is looked up
-        assert allowed.status_code == 200 and allowed.content == pdf_bytes
-        assert opened.status_code == 200 and opened.content == pdf_bytes
+        assert allowed.status_code == 404 and allowed.json()['detail'] != 'exam_mode'
+        assert opened.status_code == 404 and opened.json()['detail'] != 'exam_mode'
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

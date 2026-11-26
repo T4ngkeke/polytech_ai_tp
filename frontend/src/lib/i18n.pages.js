@@ -102,7 +102,6 @@ const S = {
   'p.docs.loading': { zh: '正在载入文件…', fr: 'Chargement des documents…', en: 'Loading documents…' },
   'p.docs.none': { zh: '还没有文件。请在上面上传课程资料。', fr: 'Aucun document pour le moment. Envoyez le support de cours ci-dessus.', en: 'No documents yet. Upload course material above.' },
   'p.docs.sharedTitle': { zh: '班级共用的文件：请到班级的文件页管理', fr: 'Partagé par la classe : gérez-le dans l’onglet Documents de la classe', en: 'Shared by the class: open the class Documents tab to manage it' },
-  'p.docs.legacyTitle': { zh: '在 PDF 流程之前上传的文件：只能删除', fr: 'Envoyé avant la lecture des PDF : il ne peut qu’être supprimé', en: 'Uploaded before the PDF path: it can only be deleted' },
   'p.docs.scopeLab': { zh: '实验', fr: 'TP', en: 'Lab' },
   'p.docs.processing': { zh: '处理中', fr: 'Traitement', en: 'Processing' },
   'p.docs.pages': { zh: '页数', fr: 'pages', en: 'pages' },

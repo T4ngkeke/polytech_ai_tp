@@ -13,14 +13,13 @@ from sqlalchemy import func
 
 from backend.app.models import (
     Class,
-    DocChunk,
     Document,
     EMBEDDING_DIM,
     Lab,
     UserRole,
 )
 from backend.app.services.retrieval_service import bm25_search, hybrid_search
-from backend.tests.conftest import make_user
+from backend.tests.conftest import add_chunk, add_current_revision, make_user
 
 
 def _unit(index: int) -> list[float]:
@@ -47,26 +46,22 @@ async def _seed_lab(session):
     )
     session.add(doc)
     await session.flush()
+    await add_current_revision(session, doc, teacher.id)
     return cls, lab, doc
 
 
-def _chunk(doc, cls, lab, *, idx, content, emb, ts_config="french"):
-    return DocChunk(
-        id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
-        chunk_index=idx,
-        content=content, embedding=emb, page_no=idx + 1,
-        tsv=func.to_tsvector(ts_config, content),
-    )
+async def _chunk(session, doc, cls, lab, *, idx, content, emb, ts_config="french"):
+    return await add_chunk(session, doc, content=content, page_no=idx + 1, chunk_index=idx,
+                           lab_id=lab.id, embedding=emb, tsv=func.to_tsvector(ts_config, content))
 
 
 @pytest.mark.asyncio
 async def test_hybrid_search_returns_lab_scoped_relevant_chunk(pg_session):
     cls, lab, doc = await _seed_lab(pg_session)
-    pg_session.add_all([
-        _chunk(doc, cls, lab, idx=0, content="about pointers and memory", emb=_unit(0)),
-        _chunk(doc, cls, lab, idx=1, content="about threads and concurrency", emb=_unit(1)),
-        _chunk(doc, cls, lab, idx=2, content="about sorting algorithms", emb=_unit(2)),
-    ])
+    for idx, (content, emb) in enumerate([("about pointers and memory", _unit(0)),
+                                          ("about threads and concurrency", _unit(1)),
+                                          ("about sorting algorithms", _unit(2))]):
+        await _chunk(pg_session, doc, cls, lab, idx=idx, content=content, emb=emb)
     await pg_session.commit()
 
     hits, _all_filtered = await hybrid_search(
@@ -91,10 +86,9 @@ async def test_hybrid_search_does_not_leak_across_labs(pg_session):
     )
     pg_session.add(doc_b)
     await pg_session.flush()
-    pg_session.add_all([
-        _chunk(doc_a, cls, lab_a, idx=0, content="lab A threads", emb=_unit(1)),
-        _chunk(doc_b, cls, lab_b, idx=0, content="lab B threads", emb=_unit(1)),
-    ])
+    await add_current_revision(pg_session, doc_b, doc_a.uploaded_by)
+    await _chunk(pg_session, doc_a, cls, lab_a, idx=0, content="lab A threads", emb=_unit(1))
+    await _chunk(pg_session, doc_b, cls, lab_b, idx=0, content="lab B threads", emb=_unit(1))
     await pg_session.commit()
 
     hits, _all_filtered = await hybrid_search(
@@ -113,11 +107,11 @@ async def test_hybrid_search_does_not_leak_across_labs(pg_session):
 @pytest.mark.asyncio
 async def test_bm25_or_matches_despite_extra_query_words(pg_session):
     cls, lab, doc = await _seed_lab(pg_session)
-    pg_session.add(_chunk(
-        doc, cls, lab, idx=0,
+    await _chunk(
+        pg_session, doc, cls, lab, idx=0,
         content="La recursivite est une methode ou une fonction s'appelle elle-meme.",
         emb=_unit(0),
-    ))
+    )
     await pg_session.commit()
 
     # 'informatique' does not appear in the chunk — AND semantics returns nothing.
@@ -133,11 +127,11 @@ async def test_bm25_or_matches_despite_extra_query_words(pg_session):
 @pytest.mark.asyncio
 async def test_bm25_french_stemming_matches_inflections(pg_session):
     cls, lab, doc = await _seed_lab(pg_session)
-    pg_session.add(_chunk(
-        doc, cls, lab, idx=0,
+    await _chunk(
+        pg_session, doc, cls, lab, idx=0,
         content="Les fonctions recursives sont puissantes et elegantes.",
         emb=_unit(0),
-    ))
+    )
     await pg_session.commit()
 
     # Singular query vs plural document — French stemming bridges the gap.
@@ -152,7 +146,7 @@ async def test_bm25_french_stemming_matches_inflections(pg_session):
 @pytest.mark.asyncio
 async def test_bm25_stopword_only_query_returns_empty(pg_session):
     cls, lab, doc = await _seed_lab(pg_session)
-    pg_session.add(_chunk(doc, cls, lab, idx=0, content="contenu reel", emb=_unit(0)))
+    await _chunk(pg_session, doc, cls, lab, idx=0, content="contenu reel", emb=_unit(0))
     await pg_session.commit()
 
     hits = await bm25_search(
@@ -164,10 +158,8 @@ async def test_bm25_stopword_only_query_returns_empty(pg_session):
 @pytest.mark.asyncio
 async def test_hybrid_search_applies_reranker(pg_session):
     cls, lab, doc = await _seed_lab(pg_session)
-    pg_session.add_all([
-        _chunk(doc, cls, lab, idx=0, content="threads alpha", emb=_unit(1)),
-        _chunk(doc, cls, lab, idx=1, content="threads beta", emb=_unit(1)),
-    ])
+    await _chunk(pg_session, doc, cls, lab, idx=0, content="threads alpha", emb=_unit(1))
+    await _chunk(pg_session, doc, cls, lab, idx=1, content="threads beta", emb=_unit(1))
     await pg_session.commit()
 
     async def fake_rerank(query, documents):

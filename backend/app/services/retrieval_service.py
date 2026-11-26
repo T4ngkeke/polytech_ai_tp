@@ -150,14 +150,13 @@ def _scope(
     bounded to the class — shared material is reachable from every lab of the
     class and never leaks across classes. Without it, strict lab-only.
 
-    No snapshot keeps the legacy chat's current-revision behavior. A supplied
-    snapshot permits only its structured, published/superseded revision pairs.
+    Without a snapshot, each active document's current revision. A supplied
+    snapshot permits only its published/superseded revision pairs.
     """
     if snapshot_revisions is None:
         stmt = stmt.where(select(Document.id).where(
             Document.id == DocChunk.document_id, Document.lifecycle == "active",
-            ((Document.structured.is_(False) & DocChunk.revision_id.is_(None)) |
-             (Document.structured.is_(True) & (Document.current_revision_id == DocChunk.revision_id)))
+            Document.structured.is_(True), Document.current_revision_id == DocChunk.revision_id,
         ).exists())
     else:
         pairs = list(snapshot_revisions.items())

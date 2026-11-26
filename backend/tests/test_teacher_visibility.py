@@ -17,7 +17,7 @@ from backend.app.main import app
 from backend.app.models import (
     Class, DocChunk, Document, DocumentStatus, EMBEDDING_DIM, Lab, UserRole,
 )
-from backend.tests.conftest import make_client, make_user
+from backend.tests.conftest import add_chunk, add_current_revision, make_client, make_user
 
 
 async def _seed_doc(session, *, status=DocumentStatus.indexed, chunks=2):
@@ -38,13 +38,10 @@ async def _seed_doc(session, *, status=DocumentStatus.indexed, chunks=2):
     )
     session.add(doc)
     await session.flush()
+    await add_current_revision(session, doc, teacher.id)
     for i in range(chunks):
-        session.add(DocChunk(
-            id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
-            chunk_index=i,
-            content=f"chunk {i} body", context=f"ctx {i}", section=f"Section {i}",
-            embedding=[0.0] * EMBEDDING_DIM, page_no=i + 1,
-        ))
+        await add_chunk(session, doc, content=f"chunk {i} body", page_no=i + 1, chunk_index=i,
+                        context=f"ctx {i}", section=f"Section {i}", embedding=[0.0] * EMBEDDING_DIM)
     await session.commit()
     return teacher, cls, lab, doc
 

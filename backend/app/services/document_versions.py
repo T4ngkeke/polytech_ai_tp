@@ -101,7 +101,7 @@ async def register_source(db, *, document_id, teacher_id, expected_generation,
     if not re.fullmatch(r'[0-9a-f]{64}', sha256) or format not in ('pdf', 'odp', 'md', 'html'):
         raise ValueError('invalid_source')
     doc = await owned_document(db, document_id, teacher_id)
-    if not doc.structured or doc.lifecycle != 'active':
+    if doc.lifecycle != 'active':
         raise VersionConflict('source_unavailable')
     existing = await db.scalar(select(DocumentSource).where(
         DocumentSource.document_id == doc.id, DocumentSource.sha256 == sha256))

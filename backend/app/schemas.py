@@ -353,7 +353,7 @@ class DocumentResponse(BaseModel):
     lab_id: uuid.UUID | None
     filename: str
     status: str
-    # Filled for structured (PDF) uploads; legacy uploads leave them empty.
+    # Filled for every upload (old-format documents went on 2026-11-26).
     structured: bool = False
     generation: int | None = None
     source_version_id: uuid.UUID | None = None

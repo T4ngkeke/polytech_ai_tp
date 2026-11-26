@@ -172,7 +172,7 @@ This area covers what a teacher does with their classes and labs: classes and st
 | POST | `/api/teacher/classes/{class_id}/documents` | Teacher | Uploads a class-wide PDF, which every lab of the class reads (for example the course handout). Same form and errors as the lab upload, without `shared`. |
 | GET | `/api/teacher/labs/{lab_id}/documents` | Teacher | The documents a lab uses, with status, summary and `ingest_report`: the class-wide documents first, then the lab's own. Each row has `scope` (`class` or `lab`). While a PDF waits or is read, `latest_revision` also has `jobs_ahead` (reading jobs that the worker takes first) or `progress` (`{done, total, seconds_left}`: pages read; `seconds_left` is `null` before 3 pages). |
 | GET | `/api/teacher/classes/{class_id}/documents` | Teacher | The class-wide documents of a class. Same fields as above, with `scope` = `class`. |
-| DELETE | `/api/teacher/documents/{document_id}` | Teacher | Deletes a document. For a structured document the query `expected_generation` is required (`422 expected_generation_required`), and the answer is `202 {"document_id", "state": "pending"}`: the stored files and chunks are removed in the background. |
+| DELETE | `/api/teacher/documents/{document_id}` | Teacher | Deletes a document. The query `expected_generation` is required (`422 expected_generation_required`), and the answer is `202 {"document_id", "state": "pending"}`: the stored files and chunks are removed in the background. |
 
 ## Admin
 
@@ -257,7 +257,7 @@ Teacher endpoints work on drafts and published revisions of an own document. Stu
 | GET | `/api/documents/{document_id}/revisions/{revision_id}/pages/{page_no}/image` | Any user | One page of the revision's PDF as a PNG (at most 1400 px), for the cited-page view. A page the revision does not have gets `404`. Needs `?session_id=`. |
 | GET | `/api/documents/{document_id}/revisions/{revision_id}/assets/{asset_id}` | Any user | A stored image of the revision. Needs `?session_id=`. |
 | GET | `/api/documents/{document_id}/revisions/{revision_id}/preview` | Any user | The PDF used to show the revision. Needs `?session_id=`. |
-| GET | `/api/documents/{document_id}/pdf` | Any user | The complete course PDF, with the session's access checked again. Needs `?session_id=`. Optional `?revision_id=`. |
+| GET | `/api/documents/{document_id}/pdf` | Any user | The complete course PDF of one revision, with the session's access checked again. Needs `?session_id=` and `?revision_id=` (`404` without it; files uploaded before the PDF path went on 2026-11-26). |
 
 The five `/api/documents/` routes above answer `403 exam_mode` when the session's class is in exam mode and the file is not allowed in the exam: a student cannot open it, even pages cited in earlier answers. The owning teacher's test session still opens them. Stored citations are kept and show again when exam mode is off.
 

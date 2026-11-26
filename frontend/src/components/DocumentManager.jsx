@@ -180,8 +180,8 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   const deleteDocument = async (doc) => {
     setConfirming(null);
     try {
-      // A structured document is deleted with the generation the teacher saw.
-      await api.delete(`/api/teacher/documents/${doc.id}${doc.structured ? `?expected_generation=${doc.generation}` : ''}`);
+      // A document is deleted with the generation the teacher saw.
+      await api.delete(`/api/teacher/documents/${doc.id}?expected_generation=${doc.generation}`);
       toast.success(t('p.docs.deleted'));
       if (selected?.id === doc.id) setSelected(null);
       await loadDocuments();
@@ -195,8 +195,7 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
   }
   // In a lab, the class-wide documents are shown but managed at the class level.
   const readOnly = (doc) => !classId && doc.scope === 'class';
-  // Documents from before the PDF path have no reader view; they can be deleted.
-  const opens = (doc) => doc.structured && !readOnly(doc);
+  const opens = (doc) => !readOnly(doc);
 
   if (selected) {
     return (
@@ -281,8 +280,7 @@ export default function DocumentManager({ labId, classId, examMode = false, onOp
                 type="button"
                 onClick={() => setSelected(doc)}
                 disabled={!opens(doc)}
-                title={readOnly(doc) ? t('p.docs.sharedTitle')
-                  : !doc.structured ? t('p.docs.legacyTitle') : undefined}
+                title={readOnly(doc) ? t('p.docs.sharedTitle') : undefined}
                 className="flex min-w-0 flex-1 flex-col gap-1.5 px-3 py-2 text-left disabled:cursor-default"
               >
                 <span className="flex w-full min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">

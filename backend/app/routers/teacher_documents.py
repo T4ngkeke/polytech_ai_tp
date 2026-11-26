@@ -1,7 +1,5 @@
-"""Teacher routes for uploading, listing and deleting documents, and TP text."""
+"""Teacher routes for uploading, listing and deleting documents."""
 
-import contextlib
-import os
 import uuid
 from types import SimpleNamespace
 
@@ -201,26 +199,20 @@ async def delete_document(
     teacher: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db, scope="function"),
 ):
-    """Delete an uploaded document and everything derived from it — its chunks
-    and ingestion jobs — plus the stored file. Ownership-checked."""
+    """Delete a document: students and the agent lose it at once; its files
+    and chunks are removed in the background (document_cleanup). Ownership and
+    the generation the teacher saw are checked."""
+    from fastapi.responses import JSONResponse
+    from backend.app.services.document_cleanup import mark_deleted
+    from backend.app.services.document_versions import VersionConflict
     doc = await _owned_document_or_404(db, document_id, teacher)
-    if doc.structured:
-        from fastapi.responses import JSONResponse
-        from backend.app.services.document_cleanup import mark_deleted
-        from backend.app.services.document_versions import VersionConflict
-        if expected_generation is None:
-            raise HTTPException(422, "expected_generation_required")
-        try:
-            await mark_deleted(db, document_id=doc.id, teacher_id=teacher.id,
-                               expected_generation=expected_generation)
-            await db.commit()
-        except VersionConflict as exc:
-            await db.rollback()
-            raise HTTPException(409, str(exc)) from None
-        return JSONResponse(status_code=202, content={"document_id": str(doc.id), "state": "pending"})
-    storage_path = await document_service.delete_document(db, doc)
-    await db.commit()
-    # Best-effort file cleanup after the row is gone (never fail the request for a
-    # missing/already-removed file).
-    with contextlib.suppress(OSError):
-        os.remove(storage_path)
+    if expected_generation is None:
+        raise HTTPException(422, "expected_generation_required")
+    try:
+        await mark_deleted(db, document_id=doc.id, teacher_id=teacher.id,
+                           expected_generation=expected_generation)
+        await db.commit()
+    except VersionConflict as exc:
+        await db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    return JSONResponse(status_code=202, content={"document_id": str(doc.id), "state": "pending"})

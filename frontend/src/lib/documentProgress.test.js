@@ -26,15 +26,15 @@ test('a document being read shows its pages and, once known, the time left', () 
   assert.equal(readingLine('indexed', {}), null);
 });
 
-test('an unpublished structured document shows its newest revision', () => {
-  const draft = { status: 'pending', structured: true, current_revision_id: null };
+test('an unpublished document shows its newest revision', () => {
+  const draft = { status: 'pending', current_revision_id: null };
   assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'failed' } }), 'failed');
   assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'partial' } }), 'needs_review');
   assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'queued' } }), 'pending');
-  // Published, or an older upload: the document's own status.
+  // Published, or no revision yet: the document's own status.
   assert.equal(displayStatus({ ...draft, current_revision_id: 'r1', status: 'indexed',
     latest_revision: { processing_state: 'failed' } }), 'indexed');
-  assert.equal(displayStatus({ status: 'failed', structured: false }), 'failed');
+  assert.equal(displayStatus({ status: 'failed', current_revision_id: null }), 'failed');
 });
 
 test('statuses fall in three groups', () => {

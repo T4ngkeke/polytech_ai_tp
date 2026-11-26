@@ -25,7 +25,7 @@ from backend.app.models import (
 from backend.app.routers.teacher import get_storage_root
 from backend.app.config import settings
 from backend.tests import pdf_fixtures
-from backend.tests.conftest import make_client, make_user
+from backend.tests.conftest import make_client, make_user, add_current_revision
 
 PDF = pdf_fixtures.course_pdf(1)
 
@@ -155,34 +155,27 @@ async def test_teacher_cannot_upload_to_foreign_lab(db_session, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delete_document_removes_it_and_all_artifacts(db_session, tmp_path):
+async def test_a_delete_needs_the_generation_and_closes_the_document_at_once(db_session, tmp_path):
     teacher, cls, lab = await _teacher_with_lab(db_session)
-    stored = tmp_path / "doc.pdf"
-    stored.write_bytes(b"slides")
     doc = Document(id=uuid.uuid4(), class_id=cls.id, lab_id=lab.id, filename="cm.pdf",
-                   storage_path=str(stored), content_hash=uuid.uuid4().hex,
+                   storage_path="", content_hash=uuid.uuid4().hex,
                    status=DocumentStatus.indexed, uploaded_by=teacher.id)
     db_session.add(doc)
     await db_session.flush()
-    db_session.add_all([
-        DocChunk(id=uuid.uuid4(), document_id=doc.id, class_id=cls.id, lab_id=lab.id,
-                 chunk_index=0, content="a chunk", page_no=1,
-                 embedding=[0.0] * EMBEDDING_DIM),
-        IngestionJob(id=uuid.uuid4(), document_id=doc.id),
-    ])
+    await add_current_revision(db_session, doc, teacher.id)
     await db_session.commit()
 
     client = await make_client(db_session, teacher)
     try:
-        resp = await client.delete(f"/api/teacher/documents/{doc.id}")
+        without = await client.delete(f"/api/teacher/documents/{doc.id}")
+        resp = await client.delete(f"/api/teacher/documents/{doc.id}?expected_generation={doc.generation}")
     finally:
         await client.aclose()
 
-    assert resp.status_code == 204
-    assert (await db_session.get(Document, doc.id)) is None
-    assert (await db_session.execute(
-        select(DocChunk).where(DocChunk.document_id == doc.id))).scalars().all() == []
-    assert not stored.exists()  # stored file removed
+    assert without.status_code == 422 and without.json()["detail"] == "expected_generation_required"
+    assert resp.status_code == 202 and resp.json()["state"] == "pending"
+    await db_session.refresh(doc)
+    assert doc.lifecycle == "deleted"      # the files go in the background (document_cleanup)
 
 
 @pytest.mark.asyncio

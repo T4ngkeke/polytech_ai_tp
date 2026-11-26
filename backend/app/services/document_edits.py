@@ -74,8 +74,6 @@ async def _structured(db, document_id, teacher_id):
     doc = await owned_document(db, document_id, teacher_id)
     if doc.lifecycle == 'deleted':
         raise DocumentNotFound('not_found')
-    if not doc.structured:
-        raise versions.VersionConflict('legacy_document')
     return doc
 
 

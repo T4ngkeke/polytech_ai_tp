@@ -122,8 +122,6 @@ async def _upload_structured(db, *, teacher_id, lab, shared: bool, filename, con
         doc = await owned_document(db, replace_document_id, teacher_id)
         if doc.lifecycle == 'deleted':
             raise DocumentNotFound('not_found')
-        if not doc.structured:
-            raise versions.VersionConflict('legacy_document')
         # Replacing never moves a document to another class or lab.
         if doc.class_id != lab.class_id or doc.lab_id != lab_scope:
             raise versions.VersionConflict('scope_mismatch')

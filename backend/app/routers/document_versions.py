@@ -28,8 +28,6 @@ async def require_structured(db, document_id, teacher_id):
         raise HTTPException(404, 'Document not found') from None
     if doc.lifecycle == 'deleted':
         raise HTTPException(404, 'Document not found')
-    if not doc.structured:
-        raise HTTPException(409, 'legacy_document')
     return doc
 
 

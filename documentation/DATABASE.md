@@ -374,7 +374,7 @@ One row per document of a lab (`lab_id` set) or of a whole class (`lab_id` null)
 | generation | Integer | Default 0. Goes up with each change. A request that carries an old value gets `409`. |
 | current_revision_id | UUID | Nullable. The published revision. |
 | exam_allowed | Boolean | Default false. In exam mode, students may search and open only these files. Added by `m4k_exam_files_v1`. |
-| structured | Boolean | Default false. True for documents read by MinerU. Older documents are false. |
+| structured | Boolean | Default false. True for documents read by MinerU: every document since 2026-11-26, when the older ones (no revision, chunks without `revision_id`) were deleted and the code that read them went. |
 | deleted_at | Timestamp | Nullable. |
 
 ### document_sources

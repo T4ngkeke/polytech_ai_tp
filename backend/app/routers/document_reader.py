@@ -8,7 +8,6 @@ public static URL and no storage path ever leaves the server.
 """
 import asyncio
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -226,24 +225,14 @@ async def student_original_pdf(document_id: uuid.UUID, session_id: uuid.UUID,
                                root: str = Depends(get_storage_root)):
     """Serve the complete course PDF, with current session access checked anew.
 
-    Structured citations pin a published revision; legacy PDFs use their
-    immutable uploaded file. No storage path is exposed to the browser.
+    A citation pins a published revision. No storage path is exposed to the
+    browser.
     """
     await _exam_guard(db, user, session_id, document_id)
     try:
-        doc = await readable_document(db, document_id=document_id, user_id=user.id,
-                                      session_id=session_id)
+        await readable_document(db, document_id=document_id, user_id=user.id, session_id=session_id)
     except DocumentNotFound:
         raise _not_found() from None
-    if doc.structured:
-        if revision_id is None:
-            raise _not_found()
-        return await student_preview(document_id, revision_id, session_id, user, db, root)
-    if revision_id is not None or not doc.filename.lower().endswith('.pdf'):
+    if revision_id is None:
         raise _not_found()
-    path = Path(doc.storage_path).resolve()
-    if not path.is_relative_to(Path(root).resolve()):
-        raise _not_found()
-    if not path.is_file():
-        raise HTTPException(410, 'source_unavailable')
-    return FileResponse(path, media_type='application/pdf', headers=NO_STORE)
+    return await student_preview(document_id, revision_id, session_id, user, db, root)

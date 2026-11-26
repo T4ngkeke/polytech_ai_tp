@@ -6,13 +6,13 @@
  * Documents tab (pages/Admin.jsx).
  */
 
-// A structured document has no published version until it is indexed.
-// Until then its newest revision tells what is going on.
+// A document has no published version until it is indexed. Until then its
+// newest revision tells what is going on.
 const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', partial: 'needs_review', failed: 'failed' };
 
 /** The status to show: pending, processing, parsed, indexed, needs_review, failed… */
 export function displayStatus(doc) {
-  if (doc.structured && !doc.current_revision_id && doc.latest_revision) {
+  if (!doc.current_revision_id && doc.latest_revision) {
     const state = doc.latest_revision.processing_state;
     return REVISION_STATUS[state] || state;
   }

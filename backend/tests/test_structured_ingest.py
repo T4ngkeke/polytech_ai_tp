@@ -187,18 +187,6 @@ async def test_replace_checks_the_generation_and_keeps_the_course_scope(db_sessi
 
 
 @pytest.mark.asyncio
-async def test_replace_is_only_for_structured_documents(db_session, storage, deck_bytes):
-    teacher, _, lab, _ = await seed(db_session)
-    legacy = Document(id=uuid.uuid4(), class_id=lab.class_id, lab_id=lab.id, filename='old.pdf',
-                      storage_path='/x', content_hash=uuid.uuid4().hex, uploaded_by=teacher.id)
-    db_session.add(legacy)
-    await db_session.commit()
-    over_legacy = await upload(db_session, teacher, lab, deck_bytes, mode='replace',
-                               replace_document_id=legacy.id, expected_generation=0)
-    assert over_legacy.status_code == 409 and over_legacy.json()['detail'] == 'legacy_document'
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize('content', [b'not a pdf at all', b'%PDF-1.4 broken'])
 async def test_a_file_that_is_not_a_readable_pdf_is_refused_before_anything_is_stored(db_session, storage, content):
     teacher, _, lab, _ = await seed(db_session)
