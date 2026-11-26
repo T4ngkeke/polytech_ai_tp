@@ -164,8 +164,10 @@ const S = {
   'code.noOutput': { zh: '（没有输出）', fr: '(pas de sortie)', en: '(no output)' },
   'code.figure': { zh: 'Python 画的图', fr: 'Figure Python', en: 'Python figure' },
   'code.footer': { zh: '在你的浏览器里运行 · Python (Pyodide)', fr: 'Exécuté dans votre navigateur · Python (Pyodide)', en: 'Ran in your browser · Python (Pyodide)' },
+  'code.footerServer': { zh: '在服务器上运行 · Python (Pyodide)，没有网络', fr: 'Exécuté sur le serveur · Python (Pyodide), sans réseau', en: 'Ran on the server · Python (Pyodide), no network' },
   'code.runs': { zh: 'Python · 运行了 {n} 次', fr: 'Python · {n} exécution(s)', en: 'Python · {n} run(s)' },
   'code.timeout': { zh: '浏览器没有及时返回结果。', fr: "Le navigateur n'a pas répondu à temps.", en: 'The browser did not answer in time.' },
+  'code.timeoutServer': { zh: '服务器上的运行太久，被停止了。', fr: "L'exécution sur le serveur a pris trop de temps et a été arrêtée.", en: 'The run on the server took too long and was stopped.' },
 
   // Errors
   'error.loadMessages': { zh: '对话没能载入', fr: 'Impossible de charger la conversation', en: 'Could not load the conversation' },

@@ -79,7 +79,7 @@ export function RunOutput({ run }) {
         : <pre key={i} className="whitespace-pre-wrap font-mono text-white/85">{part.text}</pre>))}
       {error && <pre className="mt-1 whitespace-pre-wrap font-mono text-[#fca5a5]">{error}</pre>}
       {!parts.length && !error && <span className="font-mono text-white/50">{t('code.noOutput')}</span>}
-      <div className="mt-2 text-[11px] text-white/40">{t('code.footer')}</div>
+      <div className="mt-2 text-[11px] text-white/40">{t(run.where === 'server' ? 'code.footerServer' : 'code.footer')}</div>
     </div>
   );
 }

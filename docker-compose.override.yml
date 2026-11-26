@@ -26,9 +26,9 @@ services:
       - STRUCTURED_VISION_ENABLED=true
       # Shown in the admin map as the MinerU server the worker uses by default.
       - PDF_MINERU_SERVER_URL=http://edullm-mineru-vlm:8000/v1
-      # Web search (agent/web_tools.py): the searxng service of docker-compose.yml.
+      # Web search (agent/tools/web.py): the searxng service of docker-compose.yml.
       - WEB_SEARCH_URL=http://searxng:8080
-    networks: [default, models]
+    networks: [default, models, sandbox]
 
   worker:
     # PDF extraction: MinerU 3.4.5 in the worker image (WITH_MINERU), its

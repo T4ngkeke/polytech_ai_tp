@@ -24,12 +24,14 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/edudb
       - LLM_BASE_URL=http://host.docker.internal:8001/v1
       - DOCUMENTS_STORAGE_ROOT=/data/documents
+      - PYTHON_RUNNER_URL=http://edullm-python-runner:8000
     volumes:
       - documents_data:/data/documents
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
+    networks: [default, sandbox]
     restart: unless-stopped
 
   # Off-peak ingestion worker. Same image and code as the backend, different
@@ -63,9 +65,29 @@ services:
       - backend
     restart: unless-stopped
 
-  # Web search of the research agent (backend/app/agent/web_tools.py). Only the
+  # Web search of the research agent (backend/app/agent/tools/web.py). Only the
   # backend reaches it, on this network: no published port. The secret key is
   # SEARXNG_SECRET in .env (the settings file in the repo holds none).
+  # The research agent's Python (python_runner/, agent/tools/code.py): one
+  # fresh Pyodide process per run. Only the backend reaches it, on the
+  # internal network sandbox (no internet). Read-only, no rights, small.
+  # Keep node as process 1: a run cannot kill it from inside.
+  python-runner:
+    build:
+      context: .
+      dockerfile: python_runner/Dockerfile
+    container_name: edullm-python-runner
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 1536m
+    cpus: 2
+    networks: [sandbox]
+    restart: unless-stopped
+
   searxng:
     image: searxng/searxng:2026.11.15-2d500cb6b
     container_name: edullm-searxng
@@ -75,6 +97,11 @@ services:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     mem_limit: 512m
     restart: unless-stopped
+
+networks:
+  # No way out: the Python runner talks to the backend only.
+  sandbox:
+    internal: true
 
 volumes:
   postgres_data:

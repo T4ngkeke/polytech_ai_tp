@@ -28,7 +28,9 @@ export function applyToMessage(message, action) {
       return { ...message, tasks: action.tasks };
     // A Python run the page is doing: {id, code, status: loading|running|ok|error, ...output}.
     case 'code':
-      return { ...message, live_runs: [...(message.live_runs || []), { id: action.id, code: action.code, status: 'loading' }] };
+      return { ...message, live_runs: [...(message.live_runs || []),
+        { id: action.id, code: action.code, status: action.server ? 'running' : 'loading',
+          where: action.server ? 'server' : 'browser' }] };
     case 'code_phase':
       return { ...message, live_runs: (message.live_runs || []).map((r) => (r.id === action.id && r.status === 'loading'
         ? { ...r, status: action.phase } : r)) };

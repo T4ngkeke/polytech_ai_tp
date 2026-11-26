@@ -87,6 +87,50 @@ async def test_the_loop_offers_the_tool_and_keeps_the_runs():
 
 
 @pytest.mark.asyncio
+async def test_on_the_server_the_page_only_shows_the_run():
+    events, saved = [], []
+
+    async def server(code):                      # python_runner: stdout with a figure
+        return {'stdout': f'ok\n{ct.IMAGE_LINE}{base64.b64encode(PNG).decode()}\n', 'stderr': '', 'result': '3'}
+
+    async def save(data, n):
+        saved.append(data)
+        return 'file-1'
+    tools = ct.CodeTools(USER, events.append, save_image=save, server=server)
+    reply = json.loads(await tools.call('execute_code', json.dumps({'code': 'print(1 + 2)'})))
+    assert reply['stdout'] == 'ok\n[image 1 shown to the student under the code]\n' and reply['result'] == '3'
+    # The page gets the code (to show it, not to run it), then what came back.
+    assert events[0]['where'] == 'server' and events[0]['code'] == 'print(1 + 2)'
+    assert events[1]['id'] == events[0]['id'] and events[1]['output']['result'] == '3'
+    assert saved == [PNG] and tools.runs[0]['images'] == ['file-1'] and tools.runs[0]['status'] == 'ok'
+    assert tools.note == ct.SERVER_CODE_NOTE and not ct._pending
+    # The model is told where the code runs.
+    model = Script([('execute_code', {'code': 'print(2)'})], 'Deux.')
+    await ResearchRunner(CourseTools(ViewFixture()), model, code_tools=ct.CodeTools(USER, events.append, server=server)).run('Q ?')
+    assert ct.SERVER_CODE_NOTE in model.seen[0][0]['content'] and ct.CODE_NOTE not in model.seen[0][0]['content']
+
+
+@pytest.mark.asyncio
+async def test_the_server_runner_client():
+    import httpx
+    seen = []
+
+    def answer(request):
+        seen.append(json.loads(request.content))
+        code = seen[-1]['code']
+        if code == 'slow':
+            return httpx.Response(200, json={'status': 'timeout', 'stdout': '', 'stderr': 'stopped after 60 s', 'result': ''})
+        if code == 'down':
+            return httpx.Response(502)
+        return httpx.Response(200, json={'status': 'ok', 'stdout': '4\n', 'stderr': '', 'result': ''})
+    runner = ct.ServerPython('http://runner:8000/', transport=httpx.MockTransport(answer))
+    assert await runner('print(4)') == {'stdout': '4\n', 'stderr': '', 'result': ''}
+    assert await runner('slow') == {'error': 'stopped after 60 s'}
+    assert 'not available' in (await runner('down'))['error']
+    assert seen[0] == {'code': 'print(4)'}
+
+
+@pytest.mark.asyncio
 async def test_without_python_the_model_is_told_nothing_runs():
     model = Script('Voici le code, à lancer avec Run.', 'DONE')
     await ResearchRunner(CourseTools(ViewFixture()), model).run('Trace sin(x)')
@@ -139,7 +183,7 @@ async def test_the_chat_streams_the_code_and_takes_the_browser_result(pg_session
     assert response.status_code == 200, response.text
     stream_events = events(response.text)
     code_event = next(payload for name, payload in stream_events if name == 'code')
-    assert code_event == {'id': call_id, 'code': 'print(fact(5))'}
+    assert code_event == {'id': call_id, 'code': 'print(fact(5))', 'where': 'browser'}
     done = next(payload for name, payload in stream_events if name == 'done')
     assert done['code_runs'][0]['stdout'].startswith('120\n[image 1 shown')
     answer = await pg_session.scalar(select(Message).where(Message.session_id == chat.id,
@@ -147,3 +191,37 @@ async def test_the_chat_streams_the_code_and_takes_the_browser_result(pg_session
     assert answer.code_runs[0]['code'] == 'print(fact(5))'
     image = await pg_session.get(ChatFile, uuid.UUID(answer.code_runs[0]['images'][0]))
     assert image.kind == 'image' and image.session_id == chat.id and image.user_id == student.id
+
+
+@pytest.mark.asyncio
+async def test_with_a_runner_the_chat_runs_the_code_on_the_server(pg_session, tmp_path, monkeypatch):
+    from backend.tests.conftest import make_client
+    from backend.tests.test_m4d_chat_pg import events
+    from backend.tests.test_unified_entry import _chat
+    rev, student, chat, seen = await _chat(pg_session, monkeypatch, tmp_path, [
+        ModelReply('', [{'id': 'c1', 'name': 'execute_code',
+                         'arguments': json.dumps({'code': 'print(fact(5))'})}], 'fixture', 50, 20),
+        ModelReply('fact(5) vaut 120.', [], 'fixture', 50, 20)])
+    ran = []
+
+    class Runner:
+        def __init__(self, url):
+            ran.append(url)
+
+        async def __call__(self, code):
+            return {'stdout': '120\n', 'stderr': '', 'result': ''}
+    monkeypatch.setattr(settings, 'PYTHON_RUNNER_URL', 'http://runner:8000')
+    monkeypatch.setattr(ct, 'ServerPython', Runner)
+    async with await make_client(pg_session, student) as client:
+        response = await client.post('/api/chat/stream', json={
+            'session_id': str(chat.id), 'message': 'Que vaut fact(5) ?', 'tools': ['code'],
+            'client_request_id': str(uuid.uuid4())})
+    assert response.status_code == 200, response.text
+    stream_events = events(response.text)
+    code_event = next(payload for name, payload in stream_events if name == 'code')
+    output = next(payload for name, payload in stream_events if name == 'code_output')
+    assert code_event['where'] == 'server' and output == {'id': code_event['id'], 'output': {
+        'stdout': '120\n', 'stderr': '', 'result': ''}}
+    assert ran == ['http://runner:8000'] and ct.SERVER_CODE_NOTE in seen[0][0]['content']
+    done = next(payload for name, payload in stream_events if name == 'done')
+    assert done['code_runs'][0]['stdout'] == '120\n'

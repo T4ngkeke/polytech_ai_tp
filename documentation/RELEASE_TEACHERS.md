@@ -19,6 +19,7 @@ The stack is the Compose project `edullm-release`. The private settings are in `
 | `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`. HTTPS on `<LAN_IP>` and `<TAILSCALE_IP>`, on ports 443 and 18443. Port 80 redirects to HTTPS. Plain HTTP is on 127.0.0.1:18080 only. It also passes `/grafana/` to Grafana for admins (see [MONITORING.md](MONITORING.md)). |
 | `edullm-release-backend`, `edullm-release-worker` | The same code as the dev stack, with `NEW_CLASS_EXAM_MODE` on. The worker is built with MinerU. |
 | `edullm-release-db` | PostgreSQL with `pgvector`, in the volume `edullm-release_release_postgres_data`. |
+| `edullm-release-python-runner` | The research agent's Python (`python_runner/`): Pyodide, one process per run, killed after 60 s. Only the backend reaches it, on the internal network `sandbox` (no internet). Read-only file system, no rights, 1.5 GB. |
 | `edullm-release-searxng` | SearXNG for the web search tool of the agent (`WEB_SEARCH_URL`). Only the backend reaches it; no port. Settings in `searxng/settings.yml`. Students' search queries go from it to public search engines. |
 | `edullm-release-backup` | A checked `pg_dump` every 24 hours in the volume `edullm-release_release_backups`. Dumps are kept for 14 days. |
 

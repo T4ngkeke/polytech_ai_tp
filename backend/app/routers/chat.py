@@ -92,14 +92,16 @@ def _history_budget(context: int | None, limits) -> int:
 def _research_frames(items):
     """SSE frames for queued research events: a phase name is a status event;
     ('draft', text) adds draft text, ('draft', None) withdraws the draft;
-    ('tasks', list) is the model's task checklist as it is now; ('code', {id, code})
-    asks the browser to run Python (agent/tools/code.py); ('step', {...}) is
+    ('tasks', list) is the model's task checklist as it is now; ('code', {id, code,
+    where}) shows a Python run (and asks the browser to run it when where is
+    "browser"), ('code_output', {id, output}) is what a server run returned
+    (agent/tools/code.py); ('step', {...}) is
     what one tool call did (runner.step_of), for the process line;
     ('question', {user_message_id}) is the saved question's id.
     Consecutive draft text goes out as one frame."""
     frames, text = [], ''
     for item in [*items, None]:
-        if isinstance(item, tuple) and item[0] in ('tasks', 'code', 'step', 'question'):
+        if isinstance(item, tuple) and item[0] in ('tasks', 'code', 'code_output', 'step', 'question'):
             if text:
                 frames.append(f"event: draft\ndata: {json.dumps(text)}\n\n")
                 text = ''
@@ -405,7 +407,11 @@ async def chat_stream(
             except Exception as exc:
                 logger.warning('Code output image not saved (%s)', type(exc).__name__)
                 return None
-        code_tools = (agent_code.CodeTools(current_user.id, lambda event: queue.put_nowait(('code', event)),
+        def code_event(event):
+            queue.put_nowait(('code_output' if 'output' in event else 'code', event))
+        code_tools = (agent_code.CodeTools(current_user.id, code_event,
+                                           server=(agent_code.ServerPython(settings.PYTHON_RUNNER_URL)
+                                                   if settings.PYTHON_RUNNER_URL else None),
                                            save_image=save_code_image) if run_code else None)
         yield f"event: status\ndata: {json.dumps({'route': 'agent', 'phase': 'thinking', 'exam_mode': exam_mode})}\n\n"
         preparing = asyncio.create_task(prepare())

@@ -93,6 +93,7 @@ polytech_ai_tp/
 │   ├── nginx.release.conf     # nginx for the release stack (HTTPS)
 │   └── Dockerfile
 ├── model_servers/             # the key check that the vLLM model servers load
+├── python_runner/             # the agent's Python on the server: Pyodide, one process per run
 ├── monitoring/                # Grafana dashboards, Prometheus config, read-only database grants
 ├── scripts/                   # SQL migrations, migrate_document_snapshots.py, benchmark and check scripts
 ├── documentation/             # the files listed above, plus plans and test reports
@@ -155,6 +156,7 @@ The teachers do not use this stack. They use `docker-compose.release.yml` over H
 | `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256`, `480` | Token settings. |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | a local vLLM address (`http://localhost:8001/v1`) | Used only while `system_configs` has no value for them. |
 | `DOCUMENTS_STORAGE_ROOT` | `/data/documents` | Where uploaded files are stored. Backend and worker share this volume. |
+| `PYTHON_RUNNER_URL` | none | The Python runner of the agent's `execute_code` (`python_runner/`, the `python-runner` service: `http://edullm-python-runner:8000`). Empty: the model's code runs in the student's browser. |
 | `NEW_CLASS_EXAM_MODE` | `true` | New classes start in exam mode. |
 | `STRUCTURED_VISION_ENABLED` | `false` | Allows "Write with AI" descriptions of pictures. Turn it on only after the vision model was checked to read images. |
 

@@ -56,9 +56,19 @@ export function interpretStreamEvent(ev) {
       return { type: 'tasks', tasks: Array.isArray(parsed) ? parsed : [] };
     }
     case 'code': {
+      // server: the server runs it (python_runner); else this page runs it.
       const parsed = safeParse(ev.data);
       return parsed && typeof parsed.id === 'string' && typeof parsed.code === 'string'
-        ? { type: 'code', id: parsed.id, code: parsed.code } : { type: 'ignore' };
+        ? { type: 'code', id: parsed.id, code: parsed.code, server: parsed.where === 'server' } : { type: 'ignore' };
+    }
+    case 'code_output': {
+      // What a server run returned: {stdout, stderr, result}, or {error}.
+      const parsed = safeParse(ev.data);
+      if (!parsed || typeof parsed.id !== 'string' || !parsed.output) return { type: 'ignore' };
+      const { stdout = '', stderr = '', result = '', error = null } = parsed.output;
+      const failed = Boolean(error) || /Traceback|Error:/.test(stderr || '');
+      return { type: 'code_output', id: parsed.id,
+        output: { status: failed ? 'error' : 'ok', stdout, stderr: stderr || error || '', result } };
     }
     case 'question': {
       const parsed = safeParse(ev.data);

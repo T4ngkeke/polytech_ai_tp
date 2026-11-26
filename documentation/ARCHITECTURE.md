@@ -13,6 +13,7 @@ This section lists the containers and what each one does.
 | Frontend | nginx serves the React app and passes `/api/` to the backend. It also passes `/grafana/` to Grafana for admins (see [Monitoring](#monitoring)). |
 | Backend | FastAPI. It answers every HTTP request, runs the chat, and writes to PostgreSQL. Code: `backend/app/`. |
 | Worker | The same image and code as the backend, with another start command. It reads uploaded PDFs and indexes them. Code: `backend/worker/`. |
+| Python runner | Runs the research agent's Python (`python_runner/`): Pyodide, one fresh process per run. Only the backend reaches it, on an internal network without internet. |
 | PostgreSQL | One database with `pgvector`. It holds the data, the search indexes and the job queue. |
 | Model servers | They are separate containers on the Docker network `edullm-models`. Each one speaks the OpenAI HTTP format. The backend and the worker call them. |
 
@@ -51,6 +52,14 @@ The first answer of a conversation also gives the conversation its title (`servi
 The research agent (`agent/runner.py`) answers every question. The model works in one conversation and calls the course tools as often as it needs, within limits. A reply without a tool call is the answer. It can end the run with a question to the student (`ask_student`). It decides by itself whether to search: a greeting needs no tool, a course question gets searched. An answer that used no tool and cites nothing gets one check turn ("is this really the answer?"); an answer that used web search or Python does not.
 
 Until 2026-11-26 the student chose one of three modes: Direct (one answer without the course), Search (one search, then one answer) and Research (the agent). The new interface of 2026-11-23 sent Research only, so Direct and Search were removed, with the TP text that they read in full (`TP_CONTEXT_PERCENT`). Old answers keep their mode in `messages.answer_mode`. The agent finds the TP itself: its file list names the TP files first.
+
+### Python
+
+When the student turns Python on, the model may call `execute_code` (`agent/tools/code.py`, ported from Open WebUI). The code runs on the server, in Pyodide (Python compiled to WebAssembly), the same version and packages as in the browser. The `python-runner` container (`python_runner/`) starts one Node process per run and kills it after 60 s; nothing is kept from one run to the next. A figure is saved as a chat file of the conversation, and each run is saved on the answer (`messages.code_runs`). The page shows the code and its output while the answer is written.
+
+Python code can reach Node's own objects through Pyodide's JavaScript proxies (a function's `constructor`), so the WebAssembly sandbox is not the only wall. The run's process has Node's permission model: it may read only Pyodide's files and its own script, and may not write files, start processes or threads. Its environment is empty. The container has a read-only file system, no Linux capabilities, at most 64 processes and 1.5 GB, and sits on an internal network: from a run, the internet, the database and the model servers cannot be reached, only the backend's public routes. Node is process 1 in the container, so a run cannot kill the runner; two runs at the same time could stop each other.
+
+Without `PYTHON_RUNNER_URL`, the code runs in the browser of the person who asked, as in Open WebUI. The Run button under a code block always runs in the browser.
 
 ### The course tools
 

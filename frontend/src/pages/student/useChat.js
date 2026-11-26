@@ -115,8 +115,13 @@ export default function useChat({ getSessionId, tools = [], onDone, onTitle, onS
               update(action);
               if (action.type === 'status') callbacks.current.onStatus?.(action);
               return;
+            case 'code_output':
+              update(action);
+              return;
             case 'code':
               update(action);
+              // Run on the server: this page only shows it (code_output brings the result).
+              if (action.server) return;
               // Python for this browser: run it, send the output back to the agent.
               runForAgent(action.id, action.code, (phase) => update({ type: 'code_phase', id: action.id, phase }))
                 .then((output) => update({ type: 'code_output', id: action.id,

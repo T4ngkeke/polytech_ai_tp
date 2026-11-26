@@ -125,3 +125,15 @@ test('a question changed in another window reloads the conversation', () => {
     assert.equal(refusal.messageKey, 'chat.changedElsewhere');
   }
 });
+
+test('a server Python run is shown, then its output', () => {
+  const code = interpretStreamEvent({ event: 'code', data: '{"id": "r1", "code": "print(1)", "where": "server"}' });
+  assert.deepEqual(code, { type: 'code', id: 'r1', code: 'print(1)', server: true });
+  assert.equal(interpretStreamEvent({ event: 'code', data: '{"id": "r2", "code": "x", "where": "browser"}' }).server, false);
+  const out = interpretStreamEvent({ event: 'code_output', data: '{"id": "r1", "output": {"stdout": "1\\n", "stderr": "", "result": ""}}' });
+  assert.deepEqual(out, { type: 'code_output', id: 'r1', output: { status: 'ok', stdout: '1\n', stderr: '', result: '' } });
+  const failed = interpretStreamEvent({ event: 'code_output', data: '{"id": "r1", "output": {"error": "The Python runner is not available right now."}}' });
+  assert.equal(failed.output.status, 'error');
+  assert.match(failed.output.stderr, /not available/);
+  assert.equal(interpretStreamEvent({ event: 'code_output', data: 'oops' }).type, 'ignore');
+});

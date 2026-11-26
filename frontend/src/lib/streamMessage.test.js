@@ -36,7 +36,10 @@ test('the process line keeps phases (no repeat), steps, tasks and Python runs', 
   m = applyToMessage(m, { type: 'code_phase', id: 'r1', phase: 'running' });
   assert.equal(m.live_runs[0].status, 'running');
   m = applyToMessage(m, { type: 'code_output', id: 'r1', output: { status: 'ok', stdout: '1\n' } });
-  assert.deepEqual(m.live_runs, [{ id: 'r1', code: 'print(1)', status: 'ok', stdout: '1\n' }]);
+  assert.deepEqual(m.live_runs, [{ id: 'r1', code: 'print(1)', status: 'ok', stdout: '1\n', where: 'browser' }]);
+  // A server run starts as running, and says where it ran.
+  const s = applyToMessage({ id: 'b', sender: 'llm', content: '' }, { type: 'code', id: 'r2', code: 'x', server: true });
+  assert.deepEqual(s.live_runs, [{ id: 'r2', code: 'x', status: 'running', where: 'server' }]);
   m = applyToMessage(m, { type: 'done', courseUse: 'none', webSources: null, codeRuns: null, at: 5 });
   assert.equal(m.course_use, 'none');
   assert.deepEqual(applyToMessage(m, { type: 'follow_ups', followUps: ['Et ensuite ?'] }).follow_ups, ['Et ensuite ?']);

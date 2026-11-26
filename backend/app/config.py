@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # http://searxng:8080 on the compose network. Empty: no web search; a
     # question that asks for it is refused (503 web_search_not_configured).
     WEB_SEARCH_URL: str = ""
+    # The Python runner of execute_code (python_runner/, agent/tools/code.py),
+    # e.g. http://edullm-python-runner:8000. Empty: the model's code runs in the
+    # student's browser instead.
+    PYTHON_RUNNER_URL: str = ""
     # A summary of the older part of a long conversation instead of dropping it
     # (agent/context/compaction.py, ported from Open WebUI).
     CONTEXT_COMPACTION_ENABLED: bool = True

@@ -147,8 +147,8 @@ function CodeRuns({ live, stored }) {
               {run.stdout && <pre className="whitespace-pre-wrap font-mono text-white/85">{run.stdout.replace(/\[image \d+ shown to the student under the code\]\n?/g, '')}</pre>}
               {run.images?.map((id) => <StoredImage key={id} fileId={id} />)}
               {run.stderr && <pre className="mt-1 whitespace-pre-wrap font-mono text-[#fca5a5]">{run.stderr}</pre>}
-              {run.status === 'timeout' && <p className="font-mono text-[#fca5a5]">{t('code.timeout')}</p>}
-              <div className="mt-2 text-[11px] text-white/40">{t('code.footer')}</div>
+              {run.status === 'timeout' && <p className="font-mono text-[#fca5a5]">{t(run.where === 'server' ? 'code.timeoutServer' : 'code.timeout')}</p>}
+              <div className="mt-2 text-[11px] text-white/40">{t(run.where === 'server' ? 'code.footerServer' : 'code.footer')}</div>
             </div>
           ) : <RunOutput run={run} />}
         </div>
