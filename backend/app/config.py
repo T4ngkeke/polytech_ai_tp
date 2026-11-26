@@ -16,9 +16,10 @@ class Settings(BaseSettings):
     # AGENTIC_SEARCH_ENABLED went on 2026-11-26: PDF uploads and the research
     # agent are always on (every stack set them true). An old .env that still
     # sets them is ignored (extra="ignore").
-    # New classes start in exam mode (no course file until the teacher allows
-    # some): the safe start for teachers coming from v6. The teacher turns it off.
-    NEW_CLASS_EXAM_MODE: bool = True
+    # New classes start in exam mode when on. Off since 2026-11-26: an uploaded
+    # file no longer goes live by itself (the teacher publishes it), so a new
+    # class needs no exam mode to keep unchecked files away from students.
+    NEW_CLASS_EXAM_MODE: bool = False
     # M2-C: model descriptions of pictures, on a teacher's request only. Turn on
     # only after the configured VLM_MODEL was checked to really read images.
     STRUCTURED_VISION_ENABLED: bool = False

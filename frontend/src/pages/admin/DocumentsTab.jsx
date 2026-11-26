@@ -20,6 +20,7 @@ const DOC_STATUS = {
   indexed: ['ready', 'bg-success-muted text-success'],
   partially_indexed: ['partial', 'bg-warn-soft text-gold'],
   needs_review: ['review', 'bg-warn-soft text-gold'],
+  to_publish: ['toPublish', 'bg-warn-soft text-gold'],
   failed: ['failed', 'bg-danger-muted text-danger'],
 };
 const LOCALES = { zh: 'zh-CN', fr: 'fr-FR', en: 'en-GB' };

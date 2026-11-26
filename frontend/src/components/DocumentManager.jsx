@@ -42,17 +42,19 @@ const STATUS_BADGE = {
   partially_indexed: 'bg-gold-muted text-gold',
   failed: 'bg-danger-muted text-danger',
   needs_review: 'bg-gold-muted text-gold',
+  to_publish: 'bg-gold-muted text-gold',
   parsed: 'bg-ink-hover text-cream-secondary',
 };
 
 // Shown on the warning icon when the server gave no message.
 const WARNING_HINT = {
   needs_review: 'p.docs.hint.needs_review',
+  to_publish: 'p.docs.hint.to_publish',
   partially_indexed: 'p.docs.hint.partially_indexed',
   failed: 'p.docs.hint.failed',
 };
 
-const STATUS_KEYS = new Set(['pending', 'processing', 'indexed', 'parsed', 'needs_review', 'partially_indexed', 'failed']);
+const STATUS_KEYS = new Set(['pending', 'processing', 'indexed', 'parsed', 'to_publish', 'needs_review', 'partially_indexed', 'failed']);
 const IN_PROGRESS = new Set(['pending', 'processing', 'parsed']);
 
 // Upload refusals the server names by a code (routers/teacher.py).

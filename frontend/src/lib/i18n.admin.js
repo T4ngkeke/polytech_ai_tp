@@ -151,6 +151,7 @@ const S = {
   "a.docs.s.ready": { zh: "就绪", fr: "prêt", en: "ready" },
   "a.docs.s.partial": { zh: "部分页面未读取", fr: "pages non lues", en: "some pages not read" },
   "a.docs.s.review": { zh: "需要检查", fr: "à vérifier", en: "needs review" },
+  "a.docs.s.toPublish": { zh: "待发布", fr: "à publier", en: "to publish" },
   "a.docs.s.failed": { zh: "失败", fr: "échec", en: "failed" },
   "a.docs.problem.failed": { zh: "处理失败。", fr: "Le traitement a échoué.", en: "Processing failed." },
   "a.docs.problem.needs_review": { zh: "有些页面读不出来：教师要检查并发布。", fr: "Certaines pages n’ont pas pu être lues : l’enseignant doit les vérifier et publier.", en: "Some pages could not be read: the teacher must check them and publish." },

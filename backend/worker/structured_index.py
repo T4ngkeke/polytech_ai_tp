@@ -1,4 +1,4 @@
-"""M3-B PDF draft index. Embed outside a transaction; publish when every page was read.
+"""M3-B PDF draft index. Embed outside a transaction; an upload waits for the teacher to publish it.
 
 UTF-8 bytes are a conservative, deterministic budget proxy until the embedding
 service exposes its tokenizer. ``token_estimate`` records that proxy, not model
@@ -200,18 +200,21 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
                        'target': TARGET_BYTES, 'hard_limit': HARD_BYTES, 'overlap': 0,
                        'embedding_inputs': len(prepared), 'embedding_elapsed_seconds': round(elapsed_seconds, 3),
                        'embedding_model_tokens': None, 'language': language}
-    # A page MinerU could not read is the only real problem: then the teacher
-    # decides whether to publish. Otherwise the new version goes live at once.
+    # An uploaded file waits for the teacher, who checks it and publishes it
+    # (since 2026-11-26; students never see a file nobody looked at). A new
+    # version the teacher asked for (an edit, a new reading) goes live at once,
+    # unless a page MinerU could not read needs the teacher's decision.
     unread = sorted((await db.scalars(select(DocumentPage.source_slide_no).where(
         DocumentPage.revision_id == rev.id, DocumentPage.state != 'usable'))).all())
+    auto_publish = not unread and rev.reason != 'upload'
     report['index']['unread_pages'] = unread
     report['index_ready'] = True
-    report['next_step'] = 'teacher_review_and_publish' if unread else 'published'
+    report['next_step'] = 'published' if auto_publish else 'teacher_review_and_publish'
     rev.report = report
     rev.processing_state = 'partial' if unread else 'ready'
     rev.index_ready = True
     job.status, job.error_message = JobStatus.done, None
-    if not unread:
+    if auto_publish:
         try:
             async with db.begin_nested():
                 await versions.publish_revision(db, document_id=doc.id, revision_id=rev.id,
@@ -222,9 +225,11 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
             report['next_step'] = 'teacher_review_and_publish'
             rev.report = copy.deepcopy(report)
             rev.processing_state = 'partial'
-    # partial: some pages were not read, or publishing failed; the teacher reviews it.
+    # partial: some pages were not read, or publishing failed; ready and not
+    # published: an upload waiting for the teacher. The teacher reviews it.
     await notification_service.notify_document_teacher(
-        db, doc.id, 'document_ready', partial=rev.processing_state == 'partial')
+        db, doc.id, 'document_ready', partial=rev.processing_state == 'partial',
+        published=rev.publication_state == 'published')
     await db.commit()
     return len(prepared)
 

@@ -31,6 +31,9 @@ test('an unpublished document shows its newest revision', () => {
   assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'failed' } }), 'failed');
   assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'partial' } }), 'needs_review');
   assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'queued' } }), 'pending');
+  // Read and indexed: it waits for the teacher to publish it.
+  assert.equal(displayStatus({ ...draft, latest_revision: { processing_state: 'ready' } }), 'to_publish');
+  assert.equal(statusGroup('to_publish'), 'problem');
   // Published, or no revision yet: the document's own status.
   assert.equal(displayStatus({ ...draft, current_revision_id: 'r1', status: 'indexed',
     latest_revision: { processing_state: 'failed' } }), 'indexed');

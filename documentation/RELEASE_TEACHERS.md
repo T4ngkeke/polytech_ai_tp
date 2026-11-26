@@ -8,7 +8,7 @@ This file describes the installation that the teachers use (`docker-compose.rele
 
 The teachers open `https://<LAN_IP>/` (on Tailscale, `https://<TAILSCALE_IP>/`). The two addresses are `RELEASE_LAN_IP` and `RELEASE_TAILSCALE_IP` in the private env file. It is HTTPS on the default port 443, with the certificate and CA of v6-beta. The v6-beta port 18443 still works, so old links keep working. Plain `http://` on port 80 redirects to HTTPS.
 
-New classes start in exam mode: until the teacher allows files for the exam, the agent answers without the course files, as in v6. A teacher turns exam mode off for a class to try the rest: course PDFs with cited pages, web search, Python, uploads, deep research, Test drive, Analytics and AI reports.
+New classes start without exam mode (since 2026-11-26). An uploaded PDF waits for the teacher: it is read and indexed, then the teacher checks it and clicks Publish, and only then students can use it. Classes created before keep their exam mode until the teacher turns it off.
 
 ## What runs
 
@@ -17,7 +17,7 @@ The stack is the Compose project `edullm-release`. The private settings are in `
 | Container | What |
 | --- | --- |
 | `edullm-release-frontend` | nginx with `frontend/nginx.release.conf`. HTTPS on `<LAN_IP>` and `<TAILSCALE_IP>`, on ports 443 and 18443. Port 80 redirects to HTTPS. Plain HTTP is on 127.0.0.1:18080 only. It also passes `/grafana/` to Grafana for admins (see [MONITORING.md](MONITORING.md)). |
-| `edullm-release-backend`, `edullm-release-worker` | The same code as the dev stack, with `NEW_CLASS_EXAM_MODE` on. The worker is built with MinerU. |
+| `edullm-release-backend`, `edullm-release-worker` | The same code as the dev stack. The worker is built with MinerU. |
 | `edullm-release-db` | PostgreSQL with `pgvector`, in the volume `edullm-release_release_postgres_data`. |
 | `edullm-release-python-runner` | The research agent's Python (`python_runner/`): Pyodide, one process per run, killed after 60 s. Only the backend reaches it, on the internal network `sandbox` (no internet). Read-only file system, no rights, 1.5 GB. |
 | `edullm-release-searxng` | SearXNG for the web search tool of the agent (`WEB_SEARCH_URL`). Only the backend reaches it; no port. Settings in `searxng/settings.yml`. Students' search queries go from it to public search engines. |

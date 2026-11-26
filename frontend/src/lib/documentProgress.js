@@ -6,9 +6,11 @@
  * Documents tab (pages/Admin.jsx).
  */
 
-// A document has no published version until it is indexed. Until then its
-// newest revision tells what is going on.
-const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', partial: 'needs_review', failed: 'failed' };
+// A document has no published version until the teacher publishes it. Until
+// then its newest revision tells what is going on: read and indexed (ready)
+// means it waits for the teacher (to_publish).
+const REVISION_STATUS = { queued: 'pending', processing: 'processing', parsed: 'parsed', ready: 'to_publish',
+  partial: 'needs_review', failed: 'failed' };
 
 /** The status to show: pending, processing, parsed, indexed, needs_review, failed… */
 export function displayStatus(doc) {
@@ -20,9 +22,9 @@ export function displayStatus(doc) {
 }
 
 const WORKING = new Set(['pending', 'processing', 'parsed']);
-const PROBLEM = new Set(['failed', 'needs_review', 'partially_indexed']);
+const PROBLEM = new Set(['failed', 'needs_review', 'partially_indexed', 'to_publish']);
 
-/** 'working' (still being read), 'problem' (failed or pages missing) or 'ready'. */
+/** 'working' (still being read), 'problem' (failed, pages missing, or waiting for the teacher) or 'ready'. */
 export function statusGroup(status) {
   if (WORKING.has(status)) return 'working';
   if (PROBLEM.has(status)) return 'problem';

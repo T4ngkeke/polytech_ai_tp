@@ -20,7 +20,8 @@ export function describe(t, n) {
     case 'lab_locked': return ['lock', t(p.locked ? 'note.labLocked' : 'note.labOpened', { lab: p.lab_name || '' })];
     case 'new_document': return ['file', t(p.updated ? 'note.docUpdated' : 'note.docNew',
       { file: p.filename || '', where: p.lab_name || p.class_name || '' })];
-    case 'document_ready': return ['check', t(p.partial ? 'note.docPartial' : 'note.docReady', { file: p.filename || '' })];
+    case 'document_ready': return ['check', t(p.partial ? 'note.docPartial' : p.published ? 'note.docPublished' : 'note.docReady',
+      { file: p.filename || '' })];
     case 'document_failed': return ['warning', t('note.docFailed', { file: p.filename || '' })];
     case 'quota_request': return ['users', t('note.quotaRequest', { name: p.student_name || '' })];
     case 'quota_reset': return ['refresh', t('note.quotaReset')];

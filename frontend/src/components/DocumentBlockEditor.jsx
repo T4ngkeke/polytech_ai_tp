@@ -131,8 +131,8 @@ export default function StructuredDocumentDetail({ document: doc, onBack, onRefr
     api.post(`/api/teacher/documents/${doc.id}/revisions/${revisionId}/reprocess`,
       { expected_generation: target.expected_generation }));
 
-  // Only a version with pages that were not read waits for the teacher;
-  // every other version is published as soon as it is indexed.
+  // An uploaded version waits for the teacher, and so does a version with
+  // pages that were not read; a teacher's edit is published once indexed.
   const publish = async () => {
     setBusy(true);
     try {

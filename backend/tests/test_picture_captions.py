@@ -225,8 +225,10 @@ async def test_the_backfill_asks_one_reading_per_document_without_captions(db_se
 
         async def embed(texts):
             return [[0.0] * 1023 + [1.0] for _ in texts]
-        assert await process_index_job(db, embed_fn=embed)       # published, no captions
+        assert await process_index_job(db, embed_fn=embed)
         doc_id = doc.id
+        from backend.tests.conftest import publish_upload
+        await publish_upload(db, doc_id)                         # published, no captions
         assert not await caption_backfill.captions_on(db)
         db.add(SystemConfig(key='PICTURE_CAPTIONS', value='on'))
         await db.commit()

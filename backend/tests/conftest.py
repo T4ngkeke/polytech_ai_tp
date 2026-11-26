@@ -128,6 +128,24 @@ def make_user(
     )
 
 
+async def publish_upload(db_session: AsyncSession, document_id) -> uuid.UUID:
+    """Publish the newest indexed draft of an uploaded document, as the teacher
+    does on the Documents page (an upload is not published by the worker since
+    2026-11-26). Returns the revision id."""
+    from sqlalchemy import select
+    from backend.app.models import Document, DocumentRevision
+    from backend.app.services import document_versions
+    doc = await db_session.get(Document, document_id)
+    await db_session.refresh(doc)
+    revision = await db_session.scalar(select(DocumentRevision).where(
+        DocumentRevision.document_id == doc.id, DocumentRevision.publication_state == "draft",
+        DocumentRevision.index_ready.is_(True)).order_by(DocumentRevision.created_at.desc()).limit(1))
+    await document_versions.publish_revision(db_session, document_id=doc.id, revision_id=revision.id,
+                                             teacher_id=doc.uploaded_by, expected_generation=doc.generation)
+    await db_session.commit()
+    return revision.id
+
+
 async def add_current_revision(db_session: AsyncSession, document, teacher_id) -> uuid.UUID:
     """Make ``document`` a PDF document whose current revision is a new draft,
     with its source row but no stored files. Returns the revision id. Add its

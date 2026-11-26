@@ -13,7 +13,7 @@ The worker then runs two jobs on the revision:
 1. **Read.** The worker reads each physical page with MinerU. It normalizes the result into blocks (heading, text, code, formula, table, figure) and records issues. It keeps the original PDF and a preview of each page.
 2. **Index.** The same job becomes an index job. It cuts the blocks into passages, embeds them, and checks the embedding batches. A passage keeps exact character ranges into its block.
 
-When every page was read and the index is ready, the revision is published at once. If a page could not be read, the revision stays a draft and the teacher publishes it from the document view ("Publish anyway"). Uploading or reading alone never publishes a revision when a page failed.
+An upload is never published by the worker: when every page was read and the index is ready, the revision waits as a draft, and the teacher publishes it from the document view ("Publish"). A teacher's edit or a new reading is published at once when every page was read. If a page could not be read, the revision stays a draft and the teacher decides ("Publish anyway").
 
 The reader keeps extracted text, code, formulas and tables. For a figure, it keeps the picture and takes its label from the text of the PDF in the figure region. It does not write a description of the figure. A teacher can ask the vision model for a description of one picture ("Write with AI"). That description is a candidate that the teacher checks. Missing labels, mathematical subscripts and the relations inside a diagram can be lost. The original PDF is the reference.
 

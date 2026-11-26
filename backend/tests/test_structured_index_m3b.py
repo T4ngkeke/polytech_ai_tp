@@ -10,7 +10,7 @@ from backend.app.models import ClassStudent, DocChunk, Document, DocumentBlock, 
 from backend.app.routers.teacher import get_storage_root
 from backend.app.services import document_edits, document_versions
 from backend.app.services.retrieval_service import _scope
-from backend.tests.conftest import make_client, make_user
+from backend.tests.conftest import make_client, make_user, publish_upload
 from backend.tests.test_pdf_reader_m3a import pdf_bytes, items
 from backend.tests.test_structured_ingest import seed
 from backend.worker import structured_ingest as si
@@ -76,9 +76,13 @@ async def test_index_draft_and_teacher_edit_rebuild(db_session,tmp_path,monkeypa
             return [[0.0]*(EMBEDDING_DIM-1)+[1.0] for _ in texts]
         assert await process_index_job(db,embed_fn=embed)
         await db.refresh(rev);await db.refresh(job);await db.refresh(doc);await db.refresh(teacher)
-        # Every page was read: the version is published at once. A figure
-        # without text is normal in a PDF, not a reason to hold it back.
+        # Every page was read: the upload is ready and waits for the teacher,
+        # who publishes it. A figure without text is no reason to hold it back.
         assert rev.processing_state=='ready' and rev.index_ready
+        assert rev.publication_state=='draft' and doc.current_revision_id is None
+        assert rev.report['next_step']=='teacher_review_and_publish'
+        await publish_upload(db,doc.id)
+        await db.refresh(rev);await db.refresh(doc)
         assert rev.publication_state=='published' and doc.current_revision_id==rev.id
         assert doc.status.value=='indexed' and doc.error_message is None
         assert job.status==JobStatus.done

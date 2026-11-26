@@ -82,7 +82,7 @@ A class is owned by one teacher and joined by students with an invite code.
 | teacher_id | UUID | Foreign key to `users.id`. The owner (a teacher, or an admin after a transfer). |
 | invite_code | String(6) | Unique. Students join with it. |
 | is_deleted | Boolean | Default false. Soft delete. |
-| exam_mode | Boolean | Default false. When true, students and the agent may use only the files allowed in the exam (`documents.exam_allowed`); with none, the agent answers without the course. Web search, Python, uploads and deep research are off. New classes get the value of `NEW_CLASS_EXAM_MODE`. Added by migration `m4f_answer_modes_v1`. |
+| exam_mode | Boolean | Default false. When true, students and the agent may use only the files allowed in the exam (`documents.exam_allowed`); with none, the agent answers without the course. Web search, Python, uploads and deep research are off. New classes get the value of `NEW_CLASS_EXAM_MODE` (off by default since 2026-11-26). Added by migration `m4f_answer_modes_v1`. |
 | features | JSON | Default `{}`. What students may use in the class: `upload`, `web`, `code`, `deep`, each true or false. A missing key means on. Added by `m4p_features_v1`. |
 | created_at | Timestamp | |
 
@@ -308,7 +308,7 @@ The notification bell: one row per message for one user. Written by `services/no
 | id | UUID | Primary key. |
 | user_id | UUID | Foreign key to `users.id`. Who sees it. |
 | kind | String(32) | `exam_mode`, `lab_locked`, `new_document` (to the students of the class); `document_ready`, `document_failed` (to the class teacher); `quota_request` (to the student's teachers); `quota_reset`, `quota_ignored` (to the student). |
-| payload | JSON | What the page needs to write the text: names and ids (`class_name`, `lab_name`, `filename`, `student_name`...), and `on`, `locked`, `updated` or `partial`. |
+| payload | JSON | What the page needs to write the text: names and ids (`class_name`, `lab_name`, `filename`, `student_name`...), and `on`, `locked`, `updated`, `partial` or `published` (`document_ready`: false for an upload that waits for the teacher). |
 | created_at | Timestamp | Indexed with `user_id`. |
 | read_at | Timestamp | Nullable. Set when the user marks it read. |
 

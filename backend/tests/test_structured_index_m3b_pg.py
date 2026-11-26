@@ -2,6 +2,8 @@
 import uuid
 
 import pytest
+
+from backend.tests.conftest import publish_upload
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -29,7 +31,10 @@ async def test_pg_pdf_index_and_release_are_revision_scoped(m1_pg,tmp_path,monke
             rev=await db.get(DocumentRevision,ids[1],populate_existing=True)
             job=await db.get(IngestionJob,ids[3],populate_existing=True)
             assert job.status==JobStatus.done and rev.index_ready and rev.processing_state=='ready'
-            assert doc.current_revision_id==rev.id   # every page read: published at once
+            assert doc.current_revision_id is None   # every page read: ready, for the teacher to publish
+            await publish_upload(db,ids[0])
+            doc=await db.get(Document,ids[0],populate_existing=True)
+            assert doc.current_revision_id==rev.id
             chunks=(await db.scalars(select(DocChunk).where(DocChunk.revision_id==rev.id))).all()
             assert chunks and all(c.tsv is not None for c in chunks)
             hits=await bm25_search(db,'Définition',doc.lab_id,class_id=doc.class_id)

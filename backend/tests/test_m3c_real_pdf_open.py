@@ -15,7 +15,7 @@ from sqlalchemy import select
 from backend.app.main import app
 from backend.app.models import ClassStudent, Document, DocumentPage, DocumentRevision, EMBEDDING_DIM, Session
 from backend.app.routers.teacher import get_storage_root
-from backend.tests.conftest import make_client, make_user
+from backend.tests.conftest import publish_upload, make_client, make_user
 from backend.tests.test_structured_ingest import seed
 from backend.worker import structured_ingest as si
 from backend.worker.pdf_reader import read_pdf
@@ -63,6 +63,7 @@ async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path,
             return [[0.0] * (EMBEDDING_DIM - 1) + [1.0] for _ in texts]
 
         assert await process_index_job(db, embed_fn=embed)
+        await publish_upload(db, uuid.UUID(ids['id']))     # the teacher publishes it
         doc = await db.get(Document, uuid.UUID(ids['id']), populate_existing=True)
         rev = await db.get(DocumentRevision, uuid.UUID(ids['revision_id']), populate_existing=True)
         document_id, revision_id = doc.id, rev.id

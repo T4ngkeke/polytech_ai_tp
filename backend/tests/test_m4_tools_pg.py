@@ -15,6 +15,7 @@ from backend.app.agent.tools.access import ResearchTools, create_scope
 from backend.app.services import document_edits
 from backend.app.services.document_access import DocumentNotFound
 from backend.tests.conftest import make_user
+from backend.tests.conftest import publish_upload
 from backend.tests.test_structured_index_m3b import _parsed_pdf
 from backend.worker.structured_index import process_index_job
 
@@ -33,7 +34,8 @@ async def _indexed_pdf(db, tmp_path, monkeypatch, *, language='fr'):
     async def embed(texts):
         return [[0.0] * (EMBEDDING_DIM - 1) + [1.0] for _ in texts]
 
-    assert await process_index_job(db, embed_fn=embed)   # every page read: published
+    assert await process_index_job(db, embed_fn=embed)   # every page read: ready to publish
+    await publish_upload(db, doc_id)                     # the teacher publishes it
     doc = await db.get(Document, doc_id, populate_existing=True)
     await db.refresh(teacher)
     await db.refresh(rev)
