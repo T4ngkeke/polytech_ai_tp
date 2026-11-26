@@ -13,7 +13,6 @@ import pytest
 from sqlalchemy import func, select
 
 from backend.app.agent.tools import ResearchTools, create_scope
-from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import ClassStudent, DocChunk, Document, DocumentRevision, Session
 from backend.app.routers.teacher import get_storage_root
@@ -87,8 +86,6 @@ async def test_four_pdfs_rebuild_and_tool_sources(pg_session, tmp_path, monkeypa
     if not FROZEN.exists():
         pytest.skip('frozen M3-C corpus (local documentation files) not present')
     db = pg_session
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
-    monkeypatch.setattr(settings, 'PDF_STRUCTURED_INGEST_ENABLED', True)
     storage = tmp_path / 'storage'
     storage.mkdir()
     app.dependency_overrides[get_storage_root] = lambda: str(storage)
@@ -173,8 +170,6 @@ async def build_corpus_v3(db, tmp_path, monkeypatch, *, embed_url: str | None = 
     to the v3 cache; later runs read only from the caches.
     """
     import httpx
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
-    monkeypatch.setattr(settings, 'PDF_STRUCTURED_INGEST_ENABLED', True)
     storage = tmp_path / 'storage'
     storage.mkdir()
     app.dependency_overrides[get_storage_root] = lambda: str(storage)

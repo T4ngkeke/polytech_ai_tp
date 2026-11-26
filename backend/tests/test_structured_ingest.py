@@ -5,7 +5,7 @@ and the worker must validate its result like any other. PostgreSQL locking is
 covered by test_structured_ingest_pg.py.
 
 The helpers (seed, upload, run_job, worker_settings) and fixtures (storage,
-structured_on, deck_bytes) are shared with the other structured-document tests.
+deck_bytes) are shared with the other structured-document tests.
 """
 import asyncio
 import hashlib
@@ -33,10 +33,6 @@ from backend.worker import structured_ingest as si
 from backend.worker.queue import claim_structured_job
 
 
-@pytest.fixture(autouse=True)
-def structured_on(monkeypatch):
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
-    monkeypatch.setattr(settings, 'PDF_STRUCTURED_INGEST_ENABLED', True)
 
 
 @pytest.fixture

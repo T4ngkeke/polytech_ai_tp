@@ -7,7 +7,6 @@ import pymupdf
 import pytest
 from sqlalchemy import func, select
 
-from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import Document, DocumentBlock, DocumentPage, DocumentRevision, IngestionJob
 from backend.app.routers.teacher import get_storage_root
@@ -74,8 +73,6 @@ def test_bad_page_identity_and_missing_figure_text_are_exposed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_pdf_upload_and_worker_write_only_a_readable_draft(db_session,tmp_path,monkeypatch):
-    monkeypatch.setattr(settings,'STRUCTURED_INGEST_ENABLED',True)
-    monkeypatch.setattr(settings,'PDF_STRUCTURED_INGEST_ENABLED',True)
     storage=tmp_path/'storage';storage.mkdir()
     app.dependency_overrides[get_storage_root]=lambda:str(storage)
     try:

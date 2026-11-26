@@ -40,9 +40,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://release:${RELEASE_DB_PASSWORD}@edullm-release-db:5432/edudb
       JWT_SECRET: ${RELEASE_JWT_SECRET:?set RELEASE_JWT_SECRET in the private env file}
       DOCUMENTS_STORAGE_ROOT: /data/documents
-      AGENTIC_SEARCH_ENABLED: "true"
-      STRUCTURED_INGEST_ENABLED: "true"
-      PDF_STRUCTURED_INGEST_ENABLED: "true"
       # "Write with AI": VLM_MODEL (Flash-Next) reads images.
       STRUCTURED_VISION_ENABLED: "true"
       NEW_CLASS_EXAM_MODE: "true"

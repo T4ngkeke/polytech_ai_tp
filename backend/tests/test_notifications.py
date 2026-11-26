@@ -136,13 +136,10 @@ async def test_a_class_refill_does_not_tell_students_who_were_not_blocked(db_ses
 # Course files
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def structured(monkeypatch):
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
 
 
 @pytest.mark.asyncio
-async def test_a_published_file_tells_the_students(db_session, tmp_path, structured):
+async def test_a_published_file_tells_the_students(db_session, tmp_path):
     doc, teacher, student, outsider, *_ = await published(db_session, tmp_path)
     got = await kinds(db_session, student)
     assert [(k, p['filename'], p['updated']) for k, p in got] == [('new_document', 'synthetic.odp', False)]
@@ -157,7 +154,7 @@ async def test_a_published_file_tells_the_students(db_session, tmp_path, structu
 
 
 @pytest.mark.asyncio
-async def test_no_file_notice_during_an_exam_for_a_closed_file(db_session, tmp_path, structured):
+async def test_no_file_notice_during_an_exam_for_a_closed_file(db_session, tmp_path):
     doc, teacher, student, *_ = await doc_seed(db_session, tmp_path)
     (await db_session.get(Class, doc.class_id)).exam_mode = True
     await db_session.commit()
@@ -170,7 +167,7 @@ async def test_no_file_notice_during_an_exam_for_a_closed_file(db_session, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_a_failed_file_tells_its_teacher(db_session, tmp_path, structured):
+async def test_a_failed_file_tells_its_teacher(db_session, tmp_path):
     doc, teacher, student, *_ = await doc_seed(db_session, tmp_path)
     rev = await draft(db_session, doc, teacher, tmp_path)
     await versions.set_processing_result(db_session, document_id=doc.id, revision_id=rev.id,
@@ -183,7 +180,7 @@ async def test_a_failed_file_tells_its_teacher(db_session, tmp_path, structured)
 
 
 @pytest.mark.asyncio
-async def test_a_read_file_tells_its_teacher_whether_pages_are_missing(db_session, tmp_path, structured):
+async def test_a_read_file_tells_its_teacher_whether_pages_are_missing(db_session, tmp_path):
     doc, teacher, student, *_ = await doc_seed(db_session, tmp_path)
     await ns.notify_document_teacher(db_session, doc.id, 'document_ready', partial=True)
     await db_session.commit()

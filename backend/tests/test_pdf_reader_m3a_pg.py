@@ -5,7 +5,6 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.config import settings
 from backend.app.models import DocumentBlock, DocumentPage, DocumentRevision, IngestionJob, JobStatus
 from backend.app.services import structured_upload
 from backend.tests.test_document_versions_pg import m1_pg  # noqa: F401
@@ -17,8 +16,6 @@ from backend.worker.pdf_reader import read_pdf
 
 @pytest.mark.asyncio
 async def test_pg_pdf_job_is_fenced_and_persists_draft(m1_pg,tmp_path,monkeypatch):
-    monkeypatch.setattr(settings,'STRUCTURED_INGEST_ENABLED',True)
-    monkeypatch.setattr(settings,'PDF_STRUCTURED_INGEST_ENABLED',True)
     storage=tmp_path/'storage';storage.mkdir()
     factory=async_sessionmaker(m1_pg,expire_on_commit=False)
     async with factory() as db:

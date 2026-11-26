@@ -227,8 +227,7 @@ class LLMConfigResponse(BaseModel):
     picture_captions: str = ""
     picture_caption_priority: str = ""
     picture_caption_budget_seconds: str = ""
-    # Feature flags of the deployment and the worker's own MinerU server (read-only).
-    features: dict[str, bool] = Field(default_factory=dict)
+    # The worker's own MinerU server (read-only).
     mineru_default_url: str = ""
     # Research agent limits — empty means the default.
     agent_max_tool_calls: str = ""

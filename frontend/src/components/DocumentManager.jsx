@@ -60,7 +60,6 @@ const UPLOAD_ERROR = {
   only_pdf: 'p.docs.err.only_pdf',
   odp_not_supported: 'p.docs.err.odp_not_supported',
   file_too_large: 'p.docs.err.file_too_large',
-  structured_ingest_disabled: 'p.docs.err.structured_ingest_disabled',
 };
 const isPdf = (file) => file.name.toLowerCase().endsWith('.pdf');
 const fileSize = (bytes) => (bytes < 1048576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(1)} MB`);

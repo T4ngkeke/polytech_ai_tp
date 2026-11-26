@@ -32,7 +32,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.auth import get_current_user, require_student
-from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.models import Class, ClassStudent, Document, Lab, User
 from backend.app.schemas import (
@@ -309,9 +308,8 @@ async def get_session(
 
     response = SessionWithMessagesResponse.model_validate(session)
     factory = async_sessionmaker(db.bind, expire_on_commit=False)
-    citations = (await ResearchRuns(factory).load_session_citations(
+    citations = await ResearchRuns(factory).load_session_citations(
         session_id=session_id, user_id=current_user.id)
-        if settings.AGENTIC_SEARCH_ENABLED else {})
     for message in response.messages:
         message.citations = citations.get(message.id, [])
     return response

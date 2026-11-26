@@ -18,9 +18,6 @@ from backend.app.services.retrieval_service import _scope
 from backend.tests.conftest import make_user, make_client
 
 
-@pytest.fixture(autouse=True)
-def enable_structured(monkeypatch):
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
 
 
 async def seed(db, tmp_path):
@@ -216,13 +213,6 @@ async def test_published_content_and_source_are_immutable(db_session,tmp_path):
     source=(await db.scalars(select(DocumentSource))).first(); source.storage_key='other'
     with pytest.raises(ValueError,match='immutable_source'): await db.flush()
     await db.rollback()
-
-
-@pytest.mark.asyncio
-async def test_feature_flag_off_disables_new_structured_documents(db_session,tmp_path,monkeypatch):
-    monkeypatch.setattr(settings,'STRUCTURED_INGEST_ENABLED',False)
-    with pytest.raises(versions.VersionConflict,match='disabled'):
-        await versions.new_document(db_session,teacher_id=uuid.uuid4(),class_id=uuid.uuid4(),lab_id=None,filename='x')
 
 
 @pytest.mark.asyncio

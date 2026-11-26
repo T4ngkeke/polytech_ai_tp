@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from backend.app.auth import require_teacher
-from backend.app.config import settings
 from backend.app.services.document_access import DocumentNotFound
 from backend.app.services.research_runs import ResearchRuns
 from backend.app.database import get_db
@@ -146,7 +145,7 @@ async def get_chat_history(
     out = [SessionWithMessagesResponse.model_validate(s) for s in sessions]
     # One conversation opened in the audit: its answers' citations too, as the
     # student sees them (not for the whole list: a few queries per session).
-    if session_id is not None and settings.AGENTIC_SEARCH_ENABLED:
+    if session_id is not None:
         runs = ResearchRuns(async_sessionmaker(db.bind, expire_on_commit=False))
         for row, response in zip(sessions, out):
             try:

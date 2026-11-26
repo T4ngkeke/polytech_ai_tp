@@ -41,7 +41,6 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, Up
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.config import settings
 from backend.app.auth import hash_password_async, require_admin
 from backend.app.database import get_db
 from backend.app.models import (
@@ -330,13 +329,8 @@ async def get_llm_config(
     routing = resolve_model_routing(configs)
     payload["token_alpha"] = routing.token_alpha
     payload["token_beta"] = routing.token_beta
-    # What the map can show but not change: the deployment's feature flags and
-    # the MinerU server the worker uses when the field is empty.
-    payload["features"] = {
-        "research_agent": settings.AGENTIC_SEARCH_ENABLED,
-        "structured_documents": settings.STRUCTURED_INGEST_ENABLED,
-        "pdf_documents": settings.PDF_STRUCTURED_INGEST_ENABLED,
-    }
+    # What the page can show but not change: the MinerU server the worker
+    # uses when the field is empty.
     payload["mineru_default_url"] = os.environ.get("PDF_MINERU_SERVER_URL", "")
     payload["research_limits"] = {
         field: {"default": DEFAULT_LIMITS[LIMIT_KEYS[key][0]],

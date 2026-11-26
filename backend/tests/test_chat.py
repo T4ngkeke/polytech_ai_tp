@@ -200,8 +200,8 @@ class TestGateChecks:
                 resp = await c.post("/api/chat/stream", json={
                     "session_id": str(test_sess.id), "message": "hi",
                 })
-            # Not 403: past the membership check (the agent is off in this test).
-            assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
+            # Not 403: past the membership check, the answer stream starts.
+            assert resp.status_code == 200
         finally:
             app.dependency_overrides.clear()
 
@@ -276,7 +276,7 @@ class TestGateChecks:
         resp = await client1.post("/api/chat/stream", json={
             "session_id": str(seed_chat["sess1"].id), "message": "hi",
         })
-        assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
+        assert resp.status_code == 200        # past the quota check: the stream starts
         # At the limit again the same day: a new request is possible after the reset.
         usage.tokens_used = 200
         await db_session.commit()
@@ -362,15 +362,7 @@ class TestGateChecks:
 
 
 class TestResearchAgentOnly:
-    async def test_chat_needs_the_research_agent(self, client1, seed_chat):
-        """With AGENTIC_SEARCH_ENABLED off there is no other path: a clear 503."""
-        resp = await client1.post("/api/chat/stream", json={
-            "session_id": str(seed_chat["sess1"].id), "message": "hi"})
-        assert resp.status_code == 503 and resp.json()["detail"] == "chat_not_enabled"
-
-    async def test_session_without_lab_is_refused(self, client1, seed_chat, monkeypatch):
-        from backend.app.config import settings
-        monkeypatch.setattr(settings, "AGENTIC_SEARCH_ENABLED", True)
+    async def test_session_without_lab_is_refused(self, client1, seed_chat):
         resp = await client1.post("/api/chat/stream", json={
             "session_id": str(seed_chat["sess_legacy"].id), "message": "hi"})
         assert resp.status_code == 400 and resp.json()["detail"] == "session_without_lab"

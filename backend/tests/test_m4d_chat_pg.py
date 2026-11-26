@@ -63,7 +63,6 @@ async def test_research_http_save_reload_followup_and_pdf(pg_session, tmp_path, 
         db.add_all(models('http://example.invalid/v1'))
         await db.commit()
         import backend.app.routers.chat as chat_api
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         steps = [
             tool_call('search', {'query': 'Définition θ₁'}),
             tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
@@ -222,7 +221,6 @@ async def test_a_greeting_is_saved_and_charged(pg_session, tmp_path, monkeypatch
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
         db.add_all(models('http://example.invalid/v1'))
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         import backend.app.routers.chat as chat_api
         endpoints = []
         class FakeModel:
@@ -272,7 +270,6 @@ async def test_the_answer_language_is_named_first_and_billed(pg_session, tmp_pat
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
         db.add_all(models('http://example.invalid/v1'))
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         import backend.app.routers.chat as chat_api
         seen = []
         class FakeModel:
@@ -346,7 +343,6 @@ async def test_research_history_capped_and_quota_error(pg_session, tmp_path, mon
                             settlement_status='settled', snapshot_map={},
                             user_message_id=question.id, assistant_message_id=answer.id))
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         # The limit itself; what is left out is summarized otherwise (test_compaction.py).
         monkeypatch.setattr(settings, 'CONTEXT_COMPACTION_ENABLED', False)
         import backend.app.routers.chat as chat_api
@@ -428,7 +424,6 @@ async def test_silent_research_sends_keep_alive_comments(pg_session, tmp_path, m
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
         db.add_all(models('http://example.invalid/v1'))
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         import backend.app.routers.chat as chat_api
         monkeypatch.setattr(chat_api, 'KEEPALIVE_SECONDS', 0.2)
         class SlowModel:
@@ -462,7 +457,6 @@ async def test_real_model_direct_student_http(pg_session, tmp_path, monkeypatch)
         _, _, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
         db.add_all(local_models())
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         client = await make_client(db, student)
         async with client:
             response = await client.post('/api/chat/stream', json={
@@ -499,7 +493,6 @@ async def test_real_local_model_student_research_http(pg_session, tmp_path, monk
         doc, rev, _, student, _, chat, _, _ = await _indexed_pdf(db, tmp_path, monkeypatch)
         db.add_all(local_models())
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         # view_image reads the page image from the test's storage.
         monkeypatch.setattr(settings, 'DOCUMENTS_STORAGE_ROOT', str(tmp_path / 'storage'))
         import backend.app.services.research_service as research_service
@@ -580,7 +573,6 @@ async def test_real_vision_http_observation_and_bill(pg_session, tmp_path, monke
             DocumentPage.preview_asset_id.is_not(None)).limit(1))
         db.add_all(local_models())
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         monkeypatch.setattr(settings, 'DOCUMENTS_STORAGE_ROOT', str(tmp_path / 'storage'))
         import backend.app.routers.chat as chat_api
         steps = [tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
@@ -628,7 +620,6 @@ async def test_a_question_back_is_saved_shown_and_answered_in_the_next_turn(pg_s
         db.add_all(models('http://example.invalid/v1'))
         await db.commit()
         import backend.app.routers.chat as chat_api
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         ask = {'question': 'Quelle définition ?', 'options': ['θ₁', 'θ₂']}
         steps = [tool_call('ask_student', ask),
                  tool_call('read', {'page': f'd1.p{page.preview_page_no}'}),
@@ -678,7 +669,6 @@ async def _mode_chat(db, tmp_path, monkeypatch, replies):
     db.add_all(models('http://example.invalid/v1'))
     await db.commit()
     import backend.app.routers.chat as chat_api
-    monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
     calls = []
     class FakeModel:
         def __init__(self, endpoint):

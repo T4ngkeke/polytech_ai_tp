@@ -8,7 +8,6 @@ sleeps when gated or idle. The jobs themselves are replaced by recorders.
 
 import pytest
 
-from backend.app.config import settings
 from backend.worker import structured_index, structured_ingest
 from backend.worker.gpu_gate import ChatLoadGate
 from backend.worker.main import make_fn_builder, run_tick
@@ -61,7 +60,6 @@ async def fake_embed(texts):
 @pytest.fixture
 def jobs(monkeypatch):
     """Record the job steps; `parse` and `index` say whether a job was waiting."""
-    monkeypatch.setattr(settings, "STRUCTURED_INGEST_ENABLED", True)
     state = {"parse": False, "index": False, "calls": []}
 
     async def parse(db, *, settings):
@@ -129,11 +127,3 @@ async def test_an_index_job_runs_when_no_parse_waits(jobs):
 async def test_with_nothing_to_do_the_worker_sweeps_and_sleeps(jobs):
     ran, sleeps = await tick(FakeGate(True))
     assert (ran, sleeps, jobs["calls"]) == (False, [5], ["parse", "index", "sweep"])
-
-
-@pytest.mark.asyncio
-async def test_without_structured_ingestion_there_is_nothing_to_run(jobs, monkeypatch):
-    monkeypatch.setattr(settings, "STRUCTURED_INGEST_ENABLED", False)
-    jobs["parse"] = True
-    ran, sleeps = await tick(FakeGate(True))
-    assert (ran, sleeps, jobs["calls"]) == (False, [5], [])

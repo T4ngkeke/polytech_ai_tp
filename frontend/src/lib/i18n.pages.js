@@ -123,7 +123,6 @@ const S = {
   'p.docs.err.only_pdf': { zh: '只能上传 PDF 文件。', fr: 'Seuls les fichiers PDF sont acceptés.', en: 'Only PDF files can be uploaded.' },
   'p.docs.err.odp_not_supported': { zh: '请先把幻灯片导出成 PDF。', fr: 'Exportez d’abord les diapositives en PDF.', en: 'Export the slides to PDF first.' },
   'p.docs.err.file_too_large': { zh: '文件太大。', fr: 'Le fichier est trop volumineux.', en: 'The file is too large.' },
-  'p.docs.err.structured_ingest_disabled': { zh: '这个服务器暂时不能上传文件。', fr: 'L’envoi de fichiers est désactivé sur ce serveur.', en: 'Uploads are turned off on this server.' },
   'p.docs.waiting': { zh: '等待开始', fr: 'En attente de démarrage', en: 'Waiting to start' },
   'p.docs.waitingAhead': { zh: '等待中：前面还有 {n} 份文件', fr: 'En attente : {n} document(s) avant celui-ci', en: 'Waiting: {n} document(s) ahead' },
   'p.docs.opening': { zh: '正在打开 PDF…', fr: 'Ouverture du PDF…', en: 'Opening the PDF…' },

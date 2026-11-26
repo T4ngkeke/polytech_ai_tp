@@ -21,9 +21,6 @@ services:
       - "127.0.0.1:8000:8000"
       - "${DEV_TAILSCALE_IP:?set DEV_TAILSCALE_IP in .env}:8000:8000"
     environment:
-      - AGENTIC_SEARCH_ENABLED=true
-      - STRUCTURED_INGEST_ENABLED=true
-      - PDF_STRUCTURED_INGEST_ENABLED=true
       # "Write with AI" on a picture: VLM_MODEL (Flash-Next) was checked to read
       # images; Research view_image uses the same model.
       - STRUCTURED_VISION_ENABLED=true
@@ -41,8 +38,6 @@ services:
       args:
         WITH_MINERU: "1"
     environment:
-      - STRUCTURED_INGEST_ENABLED=true
-      - PDF_STRUCTURED_INGEST_ENABLED=true
       - PDF_MINERU_PYTHON=/opt/mineru/bin/python
       - PDF_MINERU_SERVER_URL=http://edullm-mineru-vlm:8000/v1
       - PDF_MINERU_CONFIG=/opt/mineru-data/mineru.json

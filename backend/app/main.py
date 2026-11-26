@@ -72,20 +72,14 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
         if await conn.run_sync(needs_migration):
             raise RuntimeError("Apply scripts/migrate_document_snapshots.py explicitly before starting this version")
         await conn.run_sync(Base.metadata.create_all)
-        from backend.app.config import settings
-        if conn.dialect.name == "postgresql" and (
-                settings.STRUCTURED_INGEST_ENABLED or settings.AGENTIC_SEARCH_ENABLED):
+        if conn.dialect.name == "postgresql":
             from sqlalchemy import text
             ledger = await conn.scalar(text("SELECT to_regclass('document_schema_migrations')"))
             if ledger is None:
-                raise RuntimeError("Structured writes require the explicit M1 migration (including DB guards)")
-            from backend.app.schema_versions import (
-                REQUIRED_SCHEMA_VERSIONS, REQUIRED_STRUCTURED_SCHEMA_VERSIONS,
-            )
+                raise RuntimeError("Apply scripts/migrate_document_snapshots.py before starting (the M1 migration and its DB guards)")
+            from backend.app.schema_versions import REQUIRED_SCHEMA_VERSIONS
             applied = set((await conn.scalars(text("SELECT version FROM document_schema_migrations"))).all())
-            required = (REQUIRED_SCHEMA_VERSIONS if settings.AGENTIC_SEARCH_ENABLED
-                        else REQUIRED_STRUCTURED_SCHEMA_VERSIONS)
-            missing = [version for version in required if version not in applied]
+            missing = [version for version in REQUIRED_SCHEMA_VERSIONS if version not in applied]
             if missing:
                 raise RuntimeError(f"Structured migrations not applied: {', '.join(missing)}")
     # Failures the user does not see, written for monitoring every few seconds.

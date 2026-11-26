@@ -65,8 +65,8 @@ async def run_tick(
         await sleep_fn(gate_seconds)
         return False
 
-    # Structured jobs run only while structured writes are enabled.
-    if structured is not None and settings.STRUCTURED_INGEST_ENABLED:
+    # Structured jobs (PDF reading and indexing).
+    if structured is not None:
         from backend.worker.structured_ingest import process_structured_job, sweep
         from backend.worker.structured_index import process_index_job
 
@@ -258,15 +258,11 @@ async def main() -> None:  # pragma: no cover - entrypoint
         build_fns = make_fn_builder()
         chat_gate = ChatLoadGate()
         gate = GpuGate(util_fn=_pynvml_util)
-        structured = None
-        if settings.STRUCTURED_INGEST_ENABLED:
-            from backend.worker.structured_ingest import StructuredSettings, sweep_task_root
+        from backend.worker.structured_ingest import StructuredSettings, sweep_task_root
 
-            structured = StructuredSettings.from_env(settings.DOCUMENTS_STORAGE_ROOT)
-            # Job folders a crashed run left behind; a live job is never this old.
-            sweep_task_root(structured.task_root, older_than_seconds=structured.lease_seconds)
-        else:
-            logger.warning("STRUCTURED_INGEST_ENABLED is off: the worker has no jobs to run.")
+        structured = StructuredSettings.from_env(settings.DOCUMENTS_STORAGE_ROOT)
+        # Job folders a crashed run left behind; a live job is never this old.
+        sweep_task_root(structured.task_root, older_than_seconds=structured.lease_seconds)
         await run_forever(
             db, gate, build_fns=build_fns,
             chat_gate=chat_gate, chat_load_fn=_recent_chat_count, structured=structured,

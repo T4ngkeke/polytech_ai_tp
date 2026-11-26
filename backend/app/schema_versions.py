@@ -36,7 +36,3 @@ REQUIRED_SCHEMA_VERSIONS = (
     'm5a_context_summary_v1',
 )
 
-# Structured ingestion alone needs the versions before the research ones.
-REQUIRED_STRUCTURED_SCHEMA_VERSIONS = REQUIRED_SCHEMA_VERSIONS[
-    :REQUIRED_SCHEMA_VERSIONS.index('m4c_research_persistence_v1')]
-

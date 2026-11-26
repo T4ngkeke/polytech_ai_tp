@@ -108,7 +108,6 @@ async def discard_staged(db, storage_root, key) -> None:
 async def _upload_structured(db, *, teacher_id, lab, shared: bool, filename, content: bytes,
                              storage_root, mode: str = 'new', replace_document_id=None,
                              expected_generation: int | None = None) -> UploadResult:
-    versions._enabled()
     if mode not in ('new', 'replace'):
         raise UploadRejected('invalid_mode')
     if mode == 'new' and (replace_document_id is not None or expected_generation is not None):

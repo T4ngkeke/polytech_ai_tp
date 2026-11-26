@@ -21,7 +21,7 @@ from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_client
 from backend.tests.m2c_helpers import generation, job_for, parsed, published
 from backend.tests.test_structured_ingest import (  # noqa: F401 - fixtures
-    deck_bytes, other_deck_bytes, run_job, seed, storage, structured_on, upload, worker_settings,
+    deck_bytes, other_deck_bytes, run_job, seed, storage, upload, worker_settings,
 )
 from backend.worker import structured_ingest as si
 

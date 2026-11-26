@@ -259,8 +259,6 @@ async def chat_stream(
     rule_texts = await rule_service.get_active_rule_texts(db, class_id, lab_id, current_user.id)
 
     # The research agent answers every chat.
-    if not settings.AGENTIC_SEARCH_ENABLED:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "chat_not_enabled")
     if 'web' in body.tools and not settings.WEB_SEARCH_URL:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "web_search_not_configured")
     if lab_id is None:

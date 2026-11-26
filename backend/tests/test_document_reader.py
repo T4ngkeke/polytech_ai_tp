@@ -20,7 +20,7 @@ from backend.app.services.document_cleanup import mark_deleted
 from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_client
 from backend.tests.m2c_helpers import generation, parsed, published
-from backend.tests.test_structured_ingest import deck_bytes, storage, structured_on  # noqa: F401 - fixtures
+from backend.tests.test_structured_ingest import deck_bytes, storage  # noqa: F401 - fixtures
 
 T = '/api/teacher/documents'
 S = '/api/documents'

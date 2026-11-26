@@ -15,7 +15,6 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from backend.app.config import settings
 from backend.app.database import Base
 from backend.app.models import Document, DocumentRevision, DocumentBlock, DocumentPage, DocChunk, DocumentSource
 from backend.app.services import document_versions as versions
@@ -30,7 +29,6 @@ async def m1_pg(monkeypatch):
     url=os.environ.get('M1_TEST_PG_URL')
     if not url: pytest.skip('Set explicit M1_TEST_PG_URL to isolated *_test DB')
     assert make_url(url).database.endswith('_test')
-    monkeypatch.setattr(settings,'STRUCTURED_INGEST_ENABLED',True)
     schema='m1_'+uuid.uuid4().hex
     admin=create_async_engine(url,poolclass=NullPool)
     async with admin.begin() as conn: await conn.execute(text(f'CREATE SCHEMA {schema}'))

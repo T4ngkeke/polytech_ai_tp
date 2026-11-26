@@ -8,7 +8,6 @@ import re
 import uuid
 from pathlib import PurePosixPath
 from sqlalchemy import select, update, func
-from backend.app.config import settings
 from backend.app.models import (
     Class, Lab, User, UserRole, Document, DocumentSource, DocumentRevision,
     DocumentPage, DocumentBlock, DocumentBlockAsset, DocumentBlockLink,
@@ -45,14 +44,8 @@ def storage_key(value):
     return value
 
 
-def _enabled():
-    if not settings.STRUCTURED_INGEST_ENABLED:
-        raise VersionConflict('structured_ingest_disabled')
-
-
 async def new_document(db, *, teacher_id, class_id, lab_id, filename, document_id=None):
     """document_id lets an upload stage its file under the id before the row exists."""
-    _enabled()
     cls = await db.scalar(select(Class).join(User, User.id == Class.teacher_id).where(
         Class.id == class_id, Class.teacher_id == teacher_id, Class.is_deleted.is_(False),
         User.is_deleted.is_(False), User.role.in_([UserRole.teacher, UserRole.admin])))
@@ -102,7 +95,6 @@ async def register_source(db, *, document_id, teacher_id, expected_generation,
     by the server, not taken from the uploaded filename. Repeated same-doc hash
     returns the original upload revision without generating another job/revision.
     """
-    _enabled()
     storage_key(key)
     if not key.startswith(f'{document_id}/'):
         raise ValueError('storage_key_must_be_document_scoped')
@@ -139,7 +131,6 @@ async def clone_revision(db, *, document_id, teacher_id, expected_generation,
     teacher edit needs a parent with stored content; a reparse may start from
     any draft, including a failed one.
     """
-    _enabled()
     if reason not in ('teacher_edit', 'reparse'):
         raise ValueError('invalid_reason')
     doc = await owned_document(db, document_id, teacher_id)
@@ -174,7 +165,6 @@ async def clone_revision(db, *, document_id, teacher_id, expected_generation,
 
 async def check_edit_view(db, *, document_id, teacher_id, expected_generation):
     """The checks of clone_revision, for an edit that goes into an existing draft."""
-    _enabled()
     doc = await owned_document(db, document_id, teacher_id)
     await _cas(db, doc, expected_generation)
     return doc

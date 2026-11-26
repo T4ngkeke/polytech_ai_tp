@@ -9,7 +9,7 @@ This file describes every table and column of the PostgreSQL database (with the 
 - **Extension.** `CREATE EXTENSION IF NOT EXISTS vector` must run before the tables exist. The backend does it at startup, and `seed.py` does it too.
 - **New tables.** The backend creates missing tables at startup with `Base.metadata.create_all`. There is no Alembic.
 - **Changes to existing tables.** `create_all` cannot add columns to a table that exists. These changes are SQL files in `scripts/`, applied in order by `python -m scripts.migrate_document_snapshots --database-url URL [--apply]`. The command is a dry run without `--apply`. The script keeps its record in the table `document_schema_migrations` (`version`, `checksum`, `applied_at`), which is not an ORM model.
-- **Startup checks.** The backend stops with an error if an old table lacks a column that a migration adds. With `STRUCTURED_INGEST_ENABLED` or `AGENTIC_SEARCH_ENABLED` on, it also stops if a required migration is missing. The required list is `backend/app/schema_versions.py`.
+- **Startup checks.** The backend stops with an error if an old table lacks a column that a migration adds. On PostgreSQL it also stops if a required migration is missing. The required list is `backend/app/schema_versions.py`.
 - **Tables that came without a migration file.** `quota_grants` and `audit_reports` are new tables, so `create_all` makes them. `quota_reset_requests` and `chat_refusals` are made by `create_all` too, and by the M4-I file. `service_failures` and `citation_opens` are made by `create_all` only.
 - **Types in tests.** The tests run on SQLite for most cases. There a UUID is stored as `CHAR(36)`, and the vector and full-text columns are plain text. Tests of search use PostgreSQL.
 

@@ -397,7 +397,7 @@ class TestLLMConfig:
         monkeypatch.setenv("PDF_MINERU_SERVER_URL", "http://edullm-mineru-vlm:8000/v1")
         got = (await admin_client.get("/api/admin/llm/config")).json()
         assert got["mineru_server_url"] == "" and got["mineru_default_url"] == "http://edullm-mineru-vlm:8000/v1"
-        assert set(got["features"]) == {"research_agent", "structured_documents", "pdf_documents"}
+        assert "features" not in got            # the feature flags went on 2026-11-26
         resp = await admin_client.put("/api/admin/llm/config", json={
             "base_url": "http://main/v1", "api_key": "k", "model": "m",
             "mineru_server_url": "http://other-mineru:8000/v1"})

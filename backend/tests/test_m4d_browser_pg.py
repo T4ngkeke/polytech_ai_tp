@@ -18,7 +18,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.auth import create_access_token
-from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import SystemConfig
@@ -146,8 +145,6 @@ async def real_course_pdf(db, tmp_path, monkeypatch):
     source = ROOT / 'cours/pdf_files/odp_rendered/De_LAlgebre_Relationnel_au_SQL_2022.pdf'
     cache = ROOT / ('documentation/ingestion-agent-acceptance/m3-pdf/'
                     '2026-09-29-m3c/content-list/De_LAlgebre_Relationnel_au_SQL_2022')
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
-    monkeypatch.setattr(settings, 'PDF_STRUCTURED_INGEST_ENABLED', True)
     storage = tmp_path / 'storage'
     storage.mkdir()
     app.dependency_overrides[get_storage_root] = lambda: str(storage)
@@ -210,7 +207,6 @@ async def test_real_model_to_firefox_page_and_refresh(pg_session, tmp_path, monk
                     SystemConfig(key='VLM_BASE_URL', value='http://127.0.0.1:18001/v1'),
                     SystemConfig(key='VLM_MODEL', value='flash-next')])
         await db.commit()
-        monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
         client = await make_client(db, student)
         async with client:
             response = await client.post('/api/chat/stream', json={

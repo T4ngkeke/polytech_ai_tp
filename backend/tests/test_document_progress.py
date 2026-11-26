@@ -18,7 +18,7 @@ from backend.app.services.document_service import reading_progress
 from backend.tests import pdf_fixtures
 from backend.tests.conftest import make_client
 from backend.tests.test_structured_ingest import (  # noqa: F401  (fixtures)
-    run_job, seed, storage, structured_on, upload, worker_settings,
+    run_job, seed, storage, upload, worker_settings,
 )
 from backend.worker import structured_ingest as si
 from backend.worker.queue import claim_structured_job

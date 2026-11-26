@@ -8,7 +8,6 @@ import pymupdf
 import pytest
 from sqlalchemy import select
 
-from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import DocChunk, DocumentBlock, DocumentRevision, PictureCaption
 from backend.app.routers.teacher import get_storage_root
@@ -105,8 +104,6 @@ async def test_the_caption_cache_on_postgresql(pg_session, tmp_path, monkeypatch
 
 
 async def parse_job_with_captions(db, tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
-    monkeypatch.setattr(settings, 'PDF_STRUCTURED_INGEST_ENABLED', True)
     storage = tmp_path / 'storage'
     storage.mkdir()
     app.dependency_overrides[get_storage_root] = lambda: str(storage)
@@ -173,8 +170,6 @@ async def parse_job_with_captions(db, tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_a_model_error_never_fails_the_parse_job(db_session, tmp_path, monkeypatch):
     db = db_session
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
-    monkeypatch.setattr(settings, 'PDF_STRUCTURED_INGEST_ENABLED', True)
     storage = tmp_path / 'storage'
     storage.mkdir()
     app.dependency_overrides[get_storage_root] = lambda: str(storage)

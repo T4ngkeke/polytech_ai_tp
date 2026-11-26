@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import func, select
 
-from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import ClassStudent, DocChunk, Document, DocumentBlock, DocumentPage, DocumentRevision, EMBEDDING_DIM, IngestionJob, JobStatus, Session
 from backend.app.routers.teacher import get_storage_root
@@ -30,8 +29,6 @@ def test_utf8_chunk_ranges_restore_every_character():
 
 
 async def _parsed_pdf(db,tmp_path,monkeypatch):
-    monkeypatch.setattr(settings,'STRUCTURED_INGEST_ENABLED',True)
-    monkeypatch.setattr(settings,'PDF_STRUCTURED_INGEST_ENABLED',True)
     storage=tmp_path/'storage';storage.mkdir()
     app.dependency_overrides[get_storage_root]=lambda:str(storage)
     teacher,_,lab,_=await seed(db)

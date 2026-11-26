@@ -97,7 +97,7 @@ polytech_ai_tp/
 ├── scripts/                   # SQL migrations, migrate_document_snapshots.py, benchmark and check scripts
 ├── documentation/             # the files listed above, plus plans and test reports
 ├── docker-compose.yml         # PostgreSQL, backend, worker, frontend
-├── docker-compose.override.yml # the dev stack: ports, feature flags, MinerU, monitoring
+├── docker-compose.override.yml # the dev stack: ports, MinerU, web search, monitoring
 └── docker-compose.release.yml # the teachers' stack
 ```
 
@@ -112,7 +112,7 @@ docker compose build
 docker compose up -d postgres
 ```
 
-On a new database, create the tables and the demo data once. Then apply the SQL migrations from the host. The backend refuses to start with the feature flags on until they are applied (see [PDF_INGESTION.md](documentation/PDF_INGESTION.md)).
+On a new database, create the tables and the demo data once. Then apply the SQL migrations from the host. On PostgreSQL the backend refuses to start until they are applied (see [PDF_INGESTION.md](documentation/PDF_INGESTION.md)).
 
 ```bash
 docker compose run --rm --no-deps backend python -m backend.seed
@@ -123,7 +123,7 @@ docker compose up -d
 
 `$DB_URL` looks like `postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/edudb`.
 
-`docker compose` also reads `docker-compose.override.yml`. It turns the feature flags on, sets the MinerU settings, serves the site on port 8080 (local and Tailscale addresses only) and adds the monitoring containers. Those need `GRAFANA_ADMIN_PASSWORD` and `GRAFANA_DB_PASSWORD` in an untracked `.env` file (see [MONITORING.md](documentation/MONITORING.md)). Without the override file, the site is on port 80 and the flags are off.
+`docker compose` also reads `docker-compose.override.yml`. It sets the MinerU settings, serves the site on port 8080 (local and Tailscale addresses only) and adds the monitoring containers. Those need `GRAFANA_ADMIN_PASSWORD` and `GRAFANA_DB_PASSWORD` in an untracked `.env` file (see [MONITORING.md](documentation/MONITORING.md)). Without the override file, the site is on port 80.
 
 Demo accounts that `seed.py` creates (change them outside a local test):
 
@@ -155,8 +155,6 @@ The teachers do not use this stack. They use `docker-compose.release.yml` over H
 | `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256`, `480` | Token settings. |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | a local vLLM address (`http://localhost:8001/v1`) | Used only while `system_configs` has no value for them. |
 | `DOCUMENTS_STORAGE_ROOT` | `/data/documents` | Where uploaded files are stored. Backend and worker share this volume. |
-| `STRUCTURED_INGEST_ENABLED`, `PDF_STRUCTURED_INGEST_ENABLED` | `false` | Both must be `true` to accept PDF uploads (otherwise `409 structured_ingest_disabled`). |
-| `AGENTIC_SEARCH_ENABLED` | `false` | Must be `true` for the chat to answer (otherwise `503 chat_not_enabled`). |
 | `NEW_CLASS_EXAM_MODE` | `true` | New classes start in exam mode. |
 | `STRUCTURED_VISION_ENABLED` | `false` | Allows "Write with AI" descriptions of pictures. Turn it on only after the vision model was checked to read images. |
 

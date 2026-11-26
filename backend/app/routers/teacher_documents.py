@@ -16,13 +16,11 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.auth import require_teacher
-from backend.app.config import settings
 from backend.app.database import get_db
-from backend.app.models import Document, User
+from backend.app.models import User
 from backend.app.routers.teacher_access import _verify_class_ownership, get_storage_root
 from backend.app.schemas import DocumentResponse, DocumentSummaryResponse
 from backend.app.services import document_service, lab_service
@@ -98,8 +96,6 @@ async def _store_upload(db, response, *, scope, shared, file, mode,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="odp_not_supported")
     if not name.endswith(".pdf"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="only_pdf")
-    if not (settings.PDF_STRUCTURED_INGEST_ENABLED and settings.STRUCTURED_INGEST_ENABLED):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="structured_ingest_disabled")
     return await _upload_structured(
         db, response, lab=scope, file=file, shared=shared, mode=mode,
         replace_document_id=replace_document_id, expected_generation=expected_generation,
@@ -113,10 +109,6 @@ async def _upload_structured(db, response, *, lab, file, shared, mode,
     from backend.app.services.document_access import DocumentNotFound
     from backend.app.services.document_versions import VersionConflict
 
-    # With the flag off no new structured content is written; legacy formats
-    # keep working and already stored structured documents stay readable.
-    if not settings.STRUCTURED_INGEST_ENABLED:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="structured_ingest_disabled")
     limit = structured_upload.max_upload_bytes()
     content = await file.read(limit + 1)
     if len(content) > limit:

@@ -64,8 +64,7 @@ MOCKS = {
                               'vlm_model': 'flash-next', 'embedding_url': 'http://edullm-embeddings:8000/v1',
                               'embedding_model': 'BAAI/bge-m3', 'rerank_url': 'http://edullm-reranker:8000/rerank',
                               'rerank_model': 'Qwen/Qwen3-Reranker-0.6B', 'picture_captions': 'on',
-                              'mineru_default_url': 'http://edullm-mineru-vlm:8000/v1', 'token_alpha': 0.2, 'token_beta': 1.0,
-                              'features': {'research_agent': True, 'pdf_documents': True}},
+                              'mineru_default_url': 'http://edullm-mineru-vlm:8000/v1', 'token_alpha': 0.2, 'token_beta': 1.0},
     '/api/admin/llm/servers/check': {'status': 'ok', 'served': ['flash-next'], 'max_model_len': 131072},
     '/api/teacher/analytics/classes/class/details': {
         'class_id': 'class', 'lab_id': 'lab', 'period_days': 30,

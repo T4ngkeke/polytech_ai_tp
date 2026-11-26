@@ -12,7 +12,6 @@ from sqlalchemy import select
 
 from backend.app.agent.model import ModelReply
 from backend.app.agent.result import ResearchResult, course_use
-from backend.app.config import settings
 from backend.app.models import DocumentPage, Message, SenderType
 from backend.app.services.research_service import DEEP_NOTE, ResearchLimits, deep_limits
 from backend.tests.conftest import make_client
@@ -44,7 +43,6 @@ async def _chat(db, monkeypatch, tmp_path, steps):
     db.add_all(models('http://example.invalid/v1'))
     await db.commit()
     import backend.app.routers.chat as chat_api
-    monkeypatch.setattr(settings, 'AGENTIC_SEARCH_ENABLED', True)
     seen = []
 
     class FakeModel:

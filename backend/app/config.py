@@ -12,12 +12,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Structured ingestion and the research agent remain opt-in during development.
-    STRUCTURED_INGEST_ENABLED: bool = False
-    PDF_STRUCTURED_INGEST_ENABLED: bool = False
-    AGENTIC_SEARCH_ENABLED: bool = False
-    # New classes start in exam mode (Direct answers, no course search): the
-    # safe start for teachers coming from v6. The teacher turns it off.
+    # The switches STRUCTURED_INGEST_ENABLED, PDF_STRUCTURED_INGEST_ENABLED and
+    # AGENTIC_SEARCH_ENABLED went on 2026-11-26: PDF uploads and the research
+    # agent are always on (every stack set them true). An old .env that still
+    # sets them is ignored (extra="ignore").
+    # New classes start in exam mode (no course file until the teacher allows
+    # some): the safe start for teachers coming from v6. The teacher turns it off.
     NEW_CLASS_EXAM_MODE: bool = True
     # M2-C: model descriptions of pictures, on a teacher's request only. Turn on
     # only after the configured VLM_MODEL was checked to really read images.

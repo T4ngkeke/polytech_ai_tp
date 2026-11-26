@@ -30,10 +30,6 @@ from backend.tests.conftest import make_client, make_user
 PDF = pdf_fixtures.course_pdf(1)
 
 
-@pytest.fixture(autouse=True)
-def structured_on(monkeypatch):
-    monkeypatch.setattr(settings, "STRUCTURED_INGEST_ENABLED", True)
-    monkeypatch.setattr(settings, "PDF_STRUCTURED_INGEST_ENABLED", True)
 
 
 async def _teacher_with_lab(session):
@@ -229,22 +225,6 @@ async def test_markdown_and_html_are_refused(db_session, tmp_path, name, content
 
     assert resp.status_code == 400 and resp.json()["detail"] == "only_pdf"
     assert (await db_session.execute(select(Document))).scalars().all() == []
-
-
-@pytest.mark.asyncio
-async def test_a_pdf_is_refused_while_structured_ingestion_is_off(db_session, tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "STRUCTURED_INGEST_ENABLED", False)
-    teacher, cls, lab = await _teacher_with_lab(db_session)
-    app.dependency_overrides[get_storage_root] = lambda: str(tmp_path)
-    client = await make_client(db_session, teacher)
-    try:
-        resp = await client.post(f"/api/teacher/labs/{lab.id}/documents",
-                                 files={"file": ("cours.pdf", PDF, "application/pdf")})
-    finally:
-        await client.aclose()
-        app.dependency_overrides.clear()
-
-    assert resp.status_code == 409 and resp.json()["detail"] == "structured_ingest_disabled"
 
 
 @pytest.mark.asyncio

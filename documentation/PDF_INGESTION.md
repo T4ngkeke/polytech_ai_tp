@@ -2,7 +2,7 @@
 
 # PDF ingestion
 
-This file says how an uploaded PDF becomes searchable, and how to set up MinerU (a PDF reading tool), the database migrations and the feature flags that this needs. The overview is in [ARCHITECTURE.md](ARCHITECTURE.md).
+This file says how an uploaded PDF becomes searchable, and how to set up MinerU (a PDF reading tool) and the database migrations that this needs. The overview is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Processing path
 
@@ -32,8 +32,7 @@ Ingestion is off by default. Turn it on only in the environment where it should 
    python -m scripts.migrate_document_snapshots --database-url "$DB_URL" --apply
    ```
 
-2. Set `STRUCTURED_INGEST_ENABLED=true` and `PDF_STRUCTURED_INGEST_ENABLED=true`. Without both, an upload gets `409 structured_ingest_disabled`, and the worker has no jobs.
-3. Give the worker the MinerU settings. The variables and their defaults are in [README.md](../README.md): `PDF_MINERU_PYTHON`, `PDF_MINERU_SERVER_URL`, `PDF_MINERU_CONFIG` (an absolute path), `PDF_MINERU_PAGE_TIMEOUT_SECONDS` (240), `PDF_READ_BUDGET_SECONDS` (7200), and the lease and attempt settings. A missing setting or a MinerU version other than 3.4.5 is an explicit failure of the job.
+2. Give the worker the MinerU settings. The variables and their defaults are in [README.md](../README.md): `PDF_MINERU_PYTHON`, `PDF_MINERU_SERVER_URL`, `PDF_MINERU_CONFIG` (an absolute path), `PDF_MINERU_PAGE_TIMEOUT_SECONDS` (240), `PDF_READ_BUDGET_SECONDS` (7200), and the lease and attempt settings. A missing setting or a MinerU version other than 3.4.5 is an explicit failure of the job.
 
 Both compose files set these for the worker.
 

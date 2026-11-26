@@ -13,9 +13,7 @@ model). A document with a reading already waiting is left alone. Captions must
 be on in the admin model map, else nothing is asked. Without --apply it only
 prints what it would ask.
 
-Run it with the stack's feature flags, as the backend has them:
-STRUCTURED_INGEST_ENABLED=true PDF_STRUCTURED_INGEST_ENABLED=true. A document
-that cannot be asked is reported and skipped.
+A document that cannot be asked is reported and skipped.
 """
 import argparse
 import asyncio
@@ -23,7 +21,6 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.app.config import settings
 from backend.app.models import (
     Class, Document, DocumentRevision, DocumentSource, IngestionJob, JobStatus, SystemConfig,
 )
@@ -74,9 +71,6 @@ async def main():
     parser.add_argument('--all', action='store_true')
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()
-    if not (settings.STRUCTURED_INGEST_ENABLED and settings.PDF_STRUCTURED_INGEST_ENABLED):
-        print('STRUCTURED_INGEST_ENABLED and PDF_STRUCTURED_INGEST_ENABLED must be true, as in the stack')
-        return
     engine = create_async_engine(args.database_url)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:

@@ -10,7 +10,6 @@ import pymupdf
 import pytest
 from sqlalchemy import select
 
-from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import DocumentBlock, DocumentPage, DocumentRevision
 from backend.app.routers.teacher import get_storage_root
@@ -29,8 +28,6 @@ async def test_real_mineru_pdf_reaches_teacher_draft(db_session,tmp_path,monkeyp
         one.insert_pdf(original,from_page=20,to_page=20)
         pdf=one.tobytes()
         one.close()
-    monkeypatch.setattr(settings,'STRUCTURED_INGEST_ENABLED',True)
-    monkeypatch.setattr(settings,'PDF_STRUCTURED_INGEST_ENABLED',True)
     storage=tmp_path/'storage';storage.mkdir()
     app.dependency_overrides[get_storage_root]=lambda:str(storage)
     try:

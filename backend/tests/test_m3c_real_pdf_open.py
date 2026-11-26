@@ -12,7 +12,6 @@ import pymupdf
 import pytest
 from sqlalchemy import select
 
-from backend.app.config import settings
 from backend.app.main import app
 from backend.app.models import ClassStudent, Document, DocumentPage, DocumentRevision, EMBEDDING_DIM, Session
 from backend.app.routers.teacher import get_storage_root
@@ -33,8 +32,6 @@ CACHE = (ROOT / 'documentation/ingestion-agent-acceptance/m3-pdf/2026-09-29-m3c'
 @pytest.mark.asyncio
 async def test_real_course_page_nine_auth_and_original_pdf(db_session, tmp_path, monkeypatch):
     db = db_session
-    monkeypatch.setattr(settings, 'STRUCTURED_INGEST_ENABLED', True)
-    monkeypatch.setattr(settings, 'PDF_STRUCTURED_INGEST_ENABLED', True)
     storage = tmp_path / 'storage'
     storage.mkdir()
     app.dependency_overrides[get_storage_root] = lambda: str(storage)
