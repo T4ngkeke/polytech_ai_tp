@@ -68,8 +68,17 @@ A read may return only part of its content; follow the cursor it names.
 For a diagram, call view_image with an image handle and a narrow question.
 Keep visual observations and uncertainties distinct from native text.
 You have at most {tool_calls} course tool calls and {visual_calls} visual calls. Stop early when
-the necessary sources are sufficient. If limits or evidence prevent completion,
-state the specific gap. Ordinary conversation and clarification need no citations.
+the necessary sources are sufficient. If the course does not answer a part the
+student asked about, say so in one short sentence where that part is answered.
+Do not add a section on what the course does not contain, and do not bring up
+topics the student did not ask about. Content that is not from the cited pages
+is general knowledge: present it as such, never as the course's.
+When the student asks about one of your earlier answers (how you know
+something, where a sentence comes from), answer from this conversation, without
+tool calls: its [E#] are the pages read, and you may cite them again; say which
+sentences came from them and which from general knowledge. Search again only
+when the student asks for course support that answer did not give.
+Ordinary conversation and clarification need no citations.
 Answer in the student's language, unless the teacher's rules set the answer language.
 Never expose private reasoning or tool markup.'''
 
@@ -186,7 +195,8 @@ CATALOGUE_NOTE = ('Course files of this lab (handle, file, pages). The files of 
                   'and a page, read that page directly, e.g. d2.p23; otherwise search first.')
 FINISH_TURN = ('Research is over: tools are no longer available. Write your final answer to the '
                'student now, in plain text, citing only evidence IDs already returned [E1]. '
-               'Say which parts the evidence does not cover. Do not write any tool call.')
+               'If the evidence does not cover a part the student asked about, say so in one short '
+               'sentence. Do not write any tool call.')
 NO_DOCUMENTS_TURN = ('This lab has no course documents yet, so there is nothing to search and '
                      'no tools are available. Answer briefly from general knowledge if the question '
                      'allows it, and say clearly that the teacher has not published course files for '
@@ -238,8 +248,8 @@ FINISH_RETRY = ('Tool calls cannot run any more and were ignored. Answer the stu
 NO_LEAD_CALLS = 3
 NO_LEAD_TURN = ('Your last {n} searches found no course page you had not already seen. If the course '
                 'files do not cover the rest of the question, stop searching: answer now with the '
-                'evidence already returned and say which part the course does not cover. Search '
-                'again only for a part you have not looked for yet.')
+                'evidence already returned, and say in one short sentence that the course does not '
+                'cover that part. Search again only for a part you have not looked for yet.')
 SHORTENED = '(result shortened for length; its evidence IDs stay valid)'
 # Input tokens kept free for the final answer when deciding to withdraw the tools.
 FINAL_RESERVE = 2500
