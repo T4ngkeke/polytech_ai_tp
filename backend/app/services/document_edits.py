@@ -299,7 +299,14 @@ def native_text(block) -> str | None:
 
 def _teacher_changed(block) -> bool:
     return bool(block.edited_by_teacher or block.description_origin == 'teacher'
-                or block.index_state == 'excluded')
+                or (block.index_state == 'excluded' and not _excluded_by_reader(block)))
+
+
+def _excluded_by_reader(block) -> bool:
+    """Left out of search by the reader (a repeated navigation text), not by
+    a teacher: a new reading decides it again."""
+    exclusion = (block.structure or {}).get('exclusion') or {}
+    return block.index_state == 'excluded' and exclusion.get('by') is None and bool(exclusion.get('reason'))
 
 
 async def carry_forward(db, *, parent_revision_id, revision) -> dict:

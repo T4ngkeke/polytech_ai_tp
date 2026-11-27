@@ -69,8 +69,9 @@ class ChunkHit:
     page_no: int | None
     document_id: uuid.UUID
     id: uuid.UUID | None = None
-    # The Contextual-Retrieval context — recall matched on the augmented
-    # text, so the reranker must score it too (citations still show content).
+    # The chunk's search text when it differs from content (a table part:
+    # its rows as plain text with the header). Recall matched on it, so the
+    # reranker scores it too; citations still show content.
     context: str | None = None
     revision_id: uuid.UUID | None = None
     block_id: uuid.UUID | None = None
@@ -83,8 +84,8 @@ class ChunkHit:
 
 
 def _augmented_text(hit: ChunkHit) -> str:
-    """Text the reranker scores: same augmentation the indexes were built on."""
-    return f"{hit.context}\n{hit.content}" if hit.context else hit.content
+    """Text the reranker scores: the text the indexes were built on."""
+    return hit.context or hit.content
 
 
 def reciprocal_rank_fusion(
@@ -117,7 +118,7 @@ async def apply_rerank(
 
     Reranking is a best-effort enhancement, never a hard dependency: any
     failure logs a warning and degrades to fusion-only ordering.
-    Scoring reads the augmented text (context + content), the same text
+    Scoring reads the search text (context, else content), the same text
     that recall matched on.
     """
     if not hits:

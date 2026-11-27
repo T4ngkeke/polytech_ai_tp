@@ -171,12 +171,8 @@ def make_tool_dependencies(config):
     async def embed(text):
         digest = hashlib.sha256(text.encode()).hexdigest()
         if digest not in vectors:
-            response = await embedding_client.post(config['embedding_url'], json={
-                'model': 'bge-m3:latest', 'input': text})
-            response.raise_for_status()
-            vector = response.json()['embeddings'][0]
-            if len(vector) != 1024:
-                raise ValueError('unexpected_embedding_dimension')
+            from scripts.bge_m3 import embed_texts
+            vector = (await embed_texts(embedding_client, config['embedding_url'], [text]))[0]
             vectors[digest] = vector
             with shared.open('a') as stream:
                 stream.write(json.dumps({'text_sha256': digest, 'embedding': vector}) + '\n')

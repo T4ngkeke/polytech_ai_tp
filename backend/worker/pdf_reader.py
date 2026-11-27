@@ -76,6 +76,33 @@ def _content(item, page, rect):
     return (None, None, None)
 
 
+# Captions and notes MinerU gives inside a picture, chart, table or code block.
+# Each becomes a text block of its own, so the document view shows it and
+# search finds it: a table's title and a code caption before the block, the
+# rest after it.
+ATTACHED = {
+    'image': (('image_caption', 'after'), ('image_footnote', 'after')),
+    'chart': (('chart_caption', 'after'), ('chart_footnote', 'after')),
+    'table': (('table_caption', 'before'), ('table_footnote', 'after')),
+    'code': (('code_caption', 'before'),),
+}
+
+
+def _attached(item, where: str) -> list[tuple[str, int, str]]:
+    """(field, number, text) of the captions and notes of a MinerU item that
+    go before or after it."""
+    out = []
+    for field, side in ATTACHED.get(item.get('type'), ()):
+        values = item.get(field)
+        if side != where or not isinstance(values, list):
+            continue
+        for number, value in enumerate(values):
+            text = _clean(value).strip() if isinstance(value, str) else ''
+            if text:
+                out.append((field, number, text))
+    return out
+
+
 def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
              extract_page: Callable[[Path, int, Path], list[dict]], *, max_pages: int = 150, budget_seconds: int | None = None,
              preview_scale: float = 1.2, reader_identity: str = IDENTITY_VERSION,
@@ -152,6 +179,17 @@ def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
                     parsed_page.issues.append(ParseIssue(code='content_review',scope='page',page_id=page_id,
                         message='Unknown MinerU block type',detail={'index':index,'type':str(item.get('type'))[:80]}))
                     continue
+                def note(field, number, text):
+                    # A caption or note of this item (ATTACHED), read by MinerU's model.
+                    return ParsedBlock(block_id=stable_id(reader_identity,digest,'block',str(page_no),f'{index}.{field}.{number}'),
+                        page_id=page_id,order_index=len(parsed_page.blocks),kind='text',content=text,content_format='plain',
+                        source_ref=SourceRef(file_sha256=digest,source_slide_no=page_no,format='pdf',
+                            extraction_method='mineru_hybrid',identity_version=reader_identity,bbox=None,bbox_basis='unknown',
+                            content_origin='mineru_model',
+                            legacy_ref={'mineru_bbox_per_mille':item.get('bbox'),'block_index':index,'field':field}),
+                        source_completeness='complete',source_text=text)
+                for field,number,text in _attached(item,'before'):
+                    parsed_page.blocks.append(note(field,number,text))
                 block_id=stable_id(reader_identity,digest,'block',str(page_no),str(index))
                 block=ParsedBlock(block_id=block_id,page_id=page_id,order_index=len(parsed_page.blocks),
                     kind=kind,content=content if isinstance(content,str) else '',content_format=fmt,
@@ -178,6 +216,8 @@ def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
                     block.issues.append(ParseIssue(code='content_review',scope='block',page_id=page_id,
                         block_id=block_id,message='MinerU block content missing or invalid'))
                 parsed_page.blocks.append(block)
+                for field,number,text in _attached(item,'after'):
+                    parsed_page.blocks.append(note(field,number,text))
             if not parsed_page.blocks and parsed_page.state=='usable':
                 parsed_page.state='partial'
                 parsed_page.issues.append(ParseIssue(code='extraction_failure',scope='page',page_id=page_id,

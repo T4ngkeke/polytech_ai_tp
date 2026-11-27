@@ -25,11 +25,13 @@ from backend.app.services import notification_service
 from backend.app.services.document_cleanup import aware
 from backend.app.services.retrieval_service import detect_language
 from backend.worker.queue import claim_structured_job
+from backend.worker.table_chunks import split_table
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 EMBED_BATCH_SIZE = 64
 
-CHUNKER_VERSION = 'm3b-utf8-byte-v1'
+# v2: a table is cut between rows and searched as plain text (table_chunks.py).
+CHUNKER_VERSION = 'm3b-utf8-byte-v2-table-rows'
 TARGET_BYTES = 400
 HARD_BYTES = 600
 
@@ -135,23 +137,30 @@ async def _snapshot(db, claim):
         raise IndexConflict('no_searchable_blocks')
     snapshot = [(b.block_id, b.content, b.source_text, copy.deepcopy(b.source_ref or {}),
                  list(b.section_path or []), b.index_state, b.edited_by_teacher,
-                 p.preview_page_no, b.content_description, b.description_origin) for b, p in rows]
+                 p.preview_page_no, b.content_description, b.description_origin, b.kind) for b, p in rows]
     meta = (doc.id, doc.class_id, doc.lab_id, doc.language, rev.id)
     await db.rollback()  # no read transaction is held while the embedder runs
     return meta, snapshot
 
 
+def search_text(item) -> str:
+    """What the embedder and the BM25 index read for a prepared chunk: its own
+    text, or for a table part the rows as plain text with the header."""
+    return item[10] if item[10] is not None else item[3].content
+
+
 def _prepare(snapshot):
     prepared = []
     for (block_id, content, source_text, source_ref, section_path, index_state, edited, page_no,
-         description, description_origin) in snapshot:
+         description, description_origin, kind) in snapshot:
         section = ' / '.join(str(s) for s in section_path)[:512] or None
         if index_state == 'searchable' and content:
-            parts = split_block(content)
+            # A table is cut between rows and searched as plain text (table_chunks.py).
+            parts = (split_table(content) if kind == 'table' else None) or split_block(content)
             fingerprint = hashlib.sha256((source_text if source_text is not None else content).encode()).hexdigest()
             for i, part in enumerate(parts):
                 prepared.append((block_id, i, len(parts), part, source_text, source_ref,
-                                 fingerprint, section, edited, page_no))
+                                 fingerprint, section, edited, page_no, getattr(part, 'search_text', None)))
         if index_state != 'excluded' and description:
             # Own chunks, pointing into the description: a picture without
             # text (a block still waiting for review) is found by it too.
@@ -160,7 +169,7 @@ def _prepare(snapshot):
             fingerprint = hashlib.sha256(description.encode()).hexdigest()
             for i, part in enumerate(parts):
                 prepared.append((block_id, i, len(parts), part, None, ref,
-                                 fingerprint, section, description_origin == 'teacher', page_no))
+                                 fingerprint, section, description_origin == 'teacher', page_no, None))
     return prepared
 
 
@@ -176,12 +185,12 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
     if meta[:3] != (doc.id, doc.class_id, doc.lab_id) or meta[4] != rev.id:
         raise IndexConflict('tenant_or_revision_changed')
     # The teacher no longer picks the language: BM25 stems with the one the text is in.
-    language = detect_language(item[3].content for item in prepared
+    language = detect_language(search_text(item) for item in prepared
                                if not versions.chunk_of_description(item[5]))
     # Embeddings are complete and validated before any existing draft rows go.
     await db.execute(delete(DocChunk).where(DocChunk.revision_id == rev.id))
     for idx, (item, embedding) in enumerate(zip(prepared, embeddings, strict=True)):
-        block_id, part_index, part_count, part, source_text, source_ref, fingerprint, section, edited, page_no = item
+        block_id, part_index, part_count, part, source_text, source_ref, fingerprint, section, edited, page_no, searched = item
         db.add(DocChunk(
             id=uuid.uuid4(), document_id=doc.id, class_id=doc.class_id, lab_id=doc.lab_id,
             revision_id=rev.id, block_id=block_id, chunk_index=idx,
@@ -189,8 +198,9 @@ async def _commit(db, claim, meta, prepared, embeddings, *, elapsed_seconds):
             content_end=part.end, content=part.content, token_estimate=part.byte_count,
             chunker_version=CHUNKER_VERSION, source_text=source_text,
             source_ref=copy.deepcopy(source_ref), source_fingerprint=fingerprint,
-            section=section, embedding=embedding, tsv=(_tsv_value(db, part.content, language)
-                                     if db.bind.dialect.name == 'postgresql' else part.content),
+            section=section, embedding=embedding, context=searched,
+            tsv=(_tsv_value(db, search_text(item), language)
+                 if db.bind.dialect.name == 'postgresql' else search_text(item)),
             page_no=page_no, edited_by_teacher=bool(edited)))
     await db.flush()
     report = copy.deepcopy(rev.report or {})
@@ -255,7 +265,7 @@ async def process_index_job(db, *, embed_fn, lease_seconds=1800, max_attempts=3)
         meta, snapshot = await _snapshot(db, claim)
         prepared = _prepare(snapshot)
         started = time.monotonic()
-        embeddings = await _embed_batches([item[3].content for item in prepared], embed_fn)
+        embeddings = await _embed_batches([search_text(item) for item in prepared], embed_fn)
         if any(len(vector) != EMBEDDING_DIM for vector in embeddings):
             raise ValueError('embedding_dimension_mismatch')
         await _commit(db, claim, meta, prepared, embeddings,

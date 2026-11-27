@@ -71,24 +71,22 @@ async def test_apply_rerank_degrades_to_fusion_order_when_reranker_fails():
     assert all_filtered is False
 
 
-# --- rerank reads the augmented text -----------------------------------
-# Recall matched on context+content; scoring the bare content would veto exactly
-# the context-poor slide chunks that Contextual Retrieval was built to save.
+# --- rerank reads the search text ---------------------------------------
+# Recall matched on a table part's search text (rows as plain text with the
+# header); the reranker scores that text, not the HTML slice citations show.
 
 @pytest.mark.asyncio
-async def test_apply_rerank_scores_augmented_text():
-    hits = [_hit("fragment", context="CONTEXT: binary coding chapter")]
+async def test_apply_rerank_scores_the_search_text():
+    hits = [_hit("<tr><td>5.00</td></tr>", context="Layer | Content\nConv1 | 5.00"), _hit("plain fragment")]
     seen_docs: list[str] = []
 
     async def capturing_rerank(query, documents):
         seen_docs.extend(documents)
         return [1.0 for _ in documents]
 
-    await apply_rerank("q", hits, capturing_rerank, top_k=1)
+    await apply_rerank("q", hits, capturing_rerank, top_k=2)
 
-    assert len(seen_docs) == 1
-    assert "CONTEXT: binary coding chapter" in seen_docs[0]
-    assert "fragment" in seen_docs[0]
+    assert seen_docs == ["Layer | Content\nConv1 | 5.00", "plain fragment"]
 
 
 def test_language_comes_from_the_text_french_on_a_tie():

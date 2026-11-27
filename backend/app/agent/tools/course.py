@@ -139,8 +139,9 @@ def _page_furniture(item) -> bool:
 
 
 def _snippet_text(snippet) -> str:
-    """A search snippet; one found in a picture description says whose it is."""
-    text = snippet.get('content', '')
+    """A search snippet; one found in a picture description says whose it is.
+    A table part shows its rows as plain text with the header, not its HTML."""
+    text = snippet.get('search_text') or snippet.get('content', '')
     if snippet.get('description_by'):
         note = 'unchecked ' if snippet.get('description_checked') is False else ''
         text = f'({note}picture description by {snippet["description_by"]}) {text}'

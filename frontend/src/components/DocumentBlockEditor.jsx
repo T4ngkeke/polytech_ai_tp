@@ -37,7 +37,12 @@ function useLabels() {
     kind: (v) => (KINDS.includes(v) ? t(`p.block.kind.${v}`) : v),
     // How search treats the block (same cases as lib/documentBlocks.js searchNote).
     searchNote: (block) => {
-      if (block.index_state === 'excluded') return t('p.block.note.excluded');
+      if (block.index_state === 'excluded') {
+        // Left out by the reader: a header or footer repeated on many pages.
+        const auto = block.structure?.exclusion;
+        if (auto && auto.by == null && auto.reason === 'repeated_navigation') return t('p.block.note.repeated', { n: auto.pages });
+        return t('p.block.note.excluded');
+      }
       if (withoutText(block)) return t('p.block.note.noText');
       if (block.index_state === 'needs_review') return t('p.block.note.notSearched');
       if (block.type === 'figure' && block.edited_by_teacher) return t('p.block.note.described');

@@ -957,11 +957,13 @@ class DocChunk(Base):
     source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_ref: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # LLM-generated Contextual-Retrieval context, prepended before embedding.
+    # The chunk's search text when it differs from content: for a table part,
+    # its rows as plain text with the header (worker/table_chunks.py). The
+    # embedding, the tsv and the reranker read it; citations show content.
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Heading/section path the chunk came from.
     section: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    # Embedded over the augmented text (context + content). bge-m3 = 1024 dim.
+    # Embedded over the search text (context, else content). bge-m3 = 1024 dim.
     embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(EMBEDDING_DIM), nullable=False)
     # BM25 full-text index, built over the augmented text at ingest time.
     tsv: Mapped[str | None] = mapped_column(TSVector(), nullable=True)

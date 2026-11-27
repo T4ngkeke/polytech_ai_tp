@@ -31,6 +31,42 @@ def _hash(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def frozen_embedder(vectors: dict, cache_file: Path, embed_url: str | None):
+    """embed(texts) from the frozen vectors. A missing vector (a new chunk text)
+    is computed once with BGE-M3 at embed_url (scripts/bge_m3.py) and appended
+    to cache_file; later runs read only from the caches."""
+    import httpx
+    from scripts.bge_m3 import embed_texts
+
+    async def embed(texts):
+        missing = list(dict.fromkeys(t for t in texts if _hash(t) not in vectors))
+        if missing:
+            if not embed_url:
+                raise AssertionError(f'{len(missing)} chunk vectors are not frozen; set M4_EMBED_URL once')
+            async with httpx.AsyncClient(timeout=120) as client:
+                for start in range(0, len(missing), 64):
+                    batch = missing[start:start + 64]
+                    with cache_file.open('a') as stream:
+                        for text, vector in zip(batch, await embed_texts(client, embed_url, batch)):
+                            vectors[_hash(text)] = vector
+                            stream.write(json.dumps({'text_sha256': _hash(text), 'model': 'bge-m3',
+                                                     'embedding': vector}) + '\n')
+                            embed.added += 1
+        return [vectors[_hash(text)] for text in texts]
+    embed.added = 0
+    return embed
+
+
+def _cached_vectors() -> dict:
+    """The frozen M3-C vectors and those added to the corpus-v3 cache."""
+    vectors = _vectors()
+    cache_file = CORPUS_V3 / 'embedding-cache.jsonl'
+    if cache_file.exists():
+        vectors.update({row['text_sha256']: row['embedding']
+                        for row in map(json.loads, cache_file.read_text().splitlines())})
+    return vectors
+
+
 def _vectors():
     vectors = {}
     for line in (FROZEN / 'embedding-cache.jsonl').read_text().splitlines():
@@ -92,19 +128,19 @@ async def test_four_pdfs_rebuild_and_tool_sources(pg_session, tmp_path, monkeypa
     try:
         mapping = json.loads((FROZEN / 'question-map-reviewed.json').read_text())
         evidence = {e['pdf_path']: e for q in mapping['questions'] for e in q['required_evidence']}
-        vectors = _vectors()
+        vectors = _cached_vectors()
         teacher, _, lab, _ = await seed(db)
         await db.refresh(teacher)
         await db.refresh(lab)
         teacher_id, lab_id, class_id = teacher.id, lab.id, lab.class_id
-        async def cached_embed(texts):
-            return [vectors[_hash(text)] for text in texts]
+        cached_embed = frozen_embedder(vectors, CORPUS_V3 / 'embedding-cache.jsonl', os.getenv('M4_EMBED_URL'))
         for relative, meta in sorted(evidence.items()):
             await publish_frozen_pdf(db, teacher, lab_id, storage, tmp_path, monkeypatch,
                 ROOT / relative, meta['pdf_sha256'], meta['pdf_page_count'],
                 FROZEN / 'content-list', cached_embed)
         count = await db.scalar(select(func.count(DocChunk.id)))
-        assert count == 631
+        # 631 before tables were cut between rows and repeated headers left out of search.
+        assert count == 595
         student = make_user()
         db.add(student)
         await db.flush()
@@ -169,37 +205,11 @@ async def build_corpus_v3(db, tmp_path, monkeypatch, *, embed_url: str | None = 
     missing vector is computed once with the same BGE-M3 service and appended
     to the v3 cache; later runs read only from the caches.
     """
-    import httpx
     storage = tmp_path / 'storage'
     storage.mkdir()
     app.dependency_overrides[get_storage_root] = lambda: str(storage)
     corpus = json.loads((CORPUS_V3 / 'corpus.json').read_text())
-    vectors = _vectors()
-    cache_file = CORPUS_V3 / 'embedding-cache.jsonl'
-    if cache_file.exists():
-        vectors.update({row['text_sha256']: row['embedding']
-                        for row in map(json.loads, cache_file.read_text().splitlines())})
-    added = 0
-
-    async def embed(texts):
-        nonlocal added
-        missing = list(dict.fromkeys(t for t in texts if _hash(t) not in vectors))
-        if missing:
-            if not embed_url:
-                raise AssertionError(f'{len(missing)} chunk vectors are not frozen; pass embed_url once')
-            async with httpx.AsyncClient(timeout=120) as client:
-                for start in range(0, len(missing), 64):
-                    batch = missing[start:start + 64]
-                    response = await client.post(embed_url, json={'model': 'bge-m3:latest', 'input': batch})
-                    response.raise_for_status()
-                    with cache_file.open('a') as stream:
-                        for text, vector in zip(batch, response.json()['embeddings']):
-                            assert len(vector) == 1024
-                            vectors[_hash(text)] = vector
-                            stream.write(json.dumps({'text_sha256': _hash(text), 'model': 'bge-m3:latest',
-                                                     'embedding': vector}) + '\n')
-                            added += 1
-        return [vectors[_hash(text)] for text in texts]
+    embed = frozen_embedder(_cached_vectors(), CORPUS_V3 / 'embedding-cache.jsonl', embed_url)
 
     try:
         teacher, _, lab, _ = await seed(db)
@@ -224,6 +234,6 @@ async def build_corpus_v3(db, tmp_path, monkeypatch, *, embed_url: str | None = 
                              for key in ('written', 'cached', 'skipped_repeated', 'skipped_small',
                                          'failed', 'not_reached')} if captions else None,
                 'chunks': await db.scalar(select(func.count(DocChunk.id))),
-                'new_vectors': added}
+                'new_vectors': embed.added}
     finally:
         app.dependency_overrides.pop(get_storage_root, None)

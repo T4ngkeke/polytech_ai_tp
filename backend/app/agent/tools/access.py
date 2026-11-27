@@ -329,6 +329,10 @@ class ResearchTools:
                 'range': {'start': hit.content_start, 'end': hit.content_end},
                 'content': hit.content,
             }
+            if hit.context:
+                # A table part: its rows as plain text with the header. The
+                # model reads this lead; the range still points into the HTML.
+                snippet['search_text'] = hit.context
             if hit.of_description:
                 snippet['description_by'] = block.description_origin
                 snippet['description_checked'] = description_checked(block)

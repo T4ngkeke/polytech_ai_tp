@@ -20,7 +20,6 @@ async def test_retrieval_eval_export(pg_session, tmp_path, monkeypatch):
     await build_corpus_v3(pg_session, tmp_path, monkeypatch, embed_url=url)
     async with httpx.AsyncClient(timeout=60) as client:
         async def embed(text):
-            response = await client.post(url, json={'model': 'bge-m3:latest', 'input': text})
-            response.raise_for_status()
-            return response.json()['embeddings'][0]
+            from scripts.bge_m3 import embed_texts
+            return (await embed_texts(client, url, [text]))[0]
         print(await export(pg_session, Path(os.environ['RETRIEVAL_EVAL_OUTPUT']).resolve(), embed))

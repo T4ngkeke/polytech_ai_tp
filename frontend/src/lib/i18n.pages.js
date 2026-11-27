@@ -156,6 +156,7 @@ const S = {
   'p.block.kind.navigation': { zh: '导航', fr: 'Navigation', en: 'Navigation' },
   'p.block.picture': { zh: '图片 {n}', fr: 'Image {n}', en: 'Picture {n}' },
   'p.block.note.excluded': { zh: '不参与搜索', fr: 'exclu de la recherche', en: 'left out of search' },
+  'p.block.note.repeated': { zh: '在 {n} 页上重复的页眉或页脚，自动不参与搜索', fr: 'en-tête ou pied de page répété sur {n} pages, exclu de la recherche automatiquement', en: 'header or footer repeated on {n} pages, left out of search automatically' },
   'p.block.note.noText': { zh: '没有文字 · 不会被搜到', fr: 'sans texte · non recherché', en: 'no text · not searched' },
   'p.block.note.notSearched': { zh: '不会被搜到', fr: 'non recherché', en: 'not searched' },
   'p.block.note.described': { zh: '已有说明', fr: 'décrit', en: 'described' },

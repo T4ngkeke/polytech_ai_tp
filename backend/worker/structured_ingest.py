@@ -294,11 +294,35 @@ def _page_issues(page, mapping: dict | None) -> list[dict]:
     return issues
 
 
+# A slide's navigation bar, author and title are repeated on many pages. Such a
+# text, found on this many pages or more, is a template: not searched (the
+# block stays in the document; the teacher can put it back into search). One
+# found on fewer pages stays searchable, since MinerU may mark content as a header.
+REPEATED_NAVIGATION_PAGES = 3
+
+
+def repeated_navigation(document) -> dict[str, int]:
+    """Navigation texts (normalized) found on REPEATED_NAVIGATION_PAGES pages
+    or more, with their page count."""
+    pages: dict[str, set] = {}
+    for page in document.pages:
+        for block in page.blocks:
+            key = _navigation_key(block)
+            if key:
+                pages.setdefault(key, set()).add(page.source_slide_no)
+    return {key: len(found) for key, found in pages.items() if len(found) >= REPEATED_NAVIGATION_PAGES}
+
+
+def _navigation_key(block) -> str:
+    return ' '.join((block.content or '').split()).casefold() if block.kind == 'navigation' else ''
+
+
 def rows_for(outcome: ParseOutcome, claim: StructuredClaim, assets: list[PlannedAsset]):
     """Pages, blocks and block-asset links for one revision, from the IR."""
     by_ir = {asset.ir_id: asset for asset in assets}
     rev, src = claim.revision_id, claim.source_version_id
     pages, blocks, links = [], [], []
+    repeated = repeated_navigation(outcome.document)
     for page in outcome.document.pages:
         preview = by_ir.get(page.preview_asset_id) if page.preview_asset_id else None
         pages.append(DocumentPage(
@@ -319,6 +343,13 @@ def rows_for(outcome: ParseOutcome, claim: StructuredClaim, assets: list[Planned
             if description:
                 structure[CAPTION_UNCHECKED] = True
                 structure['caption'] = block.caption_source
+            index_state = _index_state(block)
+            on_pages = repeated.get(_navigation_key(block))
+            if on_pages and index_state == 'searchable':
+                # By the reader, not a teacher: 'by' is None (document_edits._teacher_changed).
+                index_state = 'excluded'
+                structure['exclusion'] = {'by': None, 'at': None, 'reason': 'repeated_navigation',
+                                          'pages': on_pages}
             blocks.append(DocumentBlock(
                 revision_id=rev, source_version_id=src, block_id=db_id(block.block_id),
                 page_id=db_id(page.page_id), order_index=block.order_index, kind=block.kind,
@@ -326,7 +357,7 @@ def rows_for(outcome: ParseOutcome, claim: StructuredClaim, assets: list[Planned
                 source_ref=block.source_ref.to_dict(), section_path=list(block.section_path),
                 content_description=description or None, description_origin='model' if description else 'none',
                 source_completeness=block.source_completeness,
-                index_state=_index_state(block), issues=[issue.to_dict() for issue in block.issues],
+                index_state=index_state, issues=[issue.to_dict() for issue in block.issues],
                 edited_by_teacher=False, structure=structure))
             for ir_asset_id in dict.fromkeys(block.asset_ids):
                 links.append(DocumentBlockAsset(
