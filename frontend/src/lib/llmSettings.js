@@ -30,7 +30,7 @@ export const NUMBERS = [
     help: 'Keep it at least one model call longer than the research time.' },
   { key: 'agent_call_seconds', group: 'research', name: 'One model call', unit: 's', def: 120, min: 5, max: 600,
     help: 'A single call that takes longer is stopped.' },
-  { key: 'agent_max_input_tokens', group: 'research', name: 'Input tokens per call', unit: 'tokens', def: 28000, min: 4000, max: 200000,
+  { key: 'agent_max_input_tokens', group: 'research', name: 'Input tokens per call', unit: 'tokens', def: 36000, min: 4000, max: 200000,
     help: 'Room for course pages in one call, on top of the history.' },
   { key: 'picture_caption_priority', group: 'pdf', name: 'Caption priority', unit: '', def: null, min: -1000, max: 1000,
     help: 'Students (0) go first when this is higher. Needs priority scheduling on the model server; empty sends none.' },

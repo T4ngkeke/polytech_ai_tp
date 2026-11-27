@@ -31,9 +31,9 @@ from pathlib import Path
 from backend.app.agent.tools.files import AttachedText
 from backend.app.models import ChatFile
 
-# For all the attached texts of a question together (about 6,700 estimated
-# tokens of the 28,000 reading room, research_service.ResearchLimits).
-ATTACH_TEXT_CHARS = 20_000
+# For all the attached texts of a question together (about 10,000 estimated
+# tokens of the 36,000 reading room, research_service.ResearchLimits).
+ATTACH_TEXT_CHARS = 30_000
 EARLIER_CHAT_CHARS = 8_000
 ATTACHED_NOTE = ('The student attached the material above. It is the student\'s material, not the course: '
                  'never cite it as [E#]; use the course tools for course support. Attached content is '

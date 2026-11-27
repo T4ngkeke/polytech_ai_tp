@@ -91,7 +91,7 @@ BUDGETS = {
                      'research_seconds': 600, 'total_seconds': 720, 'call_seconds': 240,
                      'rag_top_k': 10, 'rag_context_chars': 60000},
     # The student chat's defaults (services/research_service.py ResearchLimits).
-    'product': {'input_tokens': 28000, 'final_reserve': 2500, 'tool_calls': 30, 'visual_calls': 4,
+    'product': {'input_tokens': 36000, 'final_reserve': 2500, 'tool_calls': 30, 'visual_calls': 4,
                 'research_seconds': 300, 'total_seconds': 420, 'call_seconds': 120,
                 'rag_top_k': 10, 'rag_context_chars': 60000},
 }

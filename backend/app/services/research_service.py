@@ -42,7 +42,9 @@ class ResearchLimits:
     research_seconds: int = 300
     total_seconds: int = 420
     call_seconds: int = 120
-    input_tokens: int = 28000
+    # 28,000 until 2026-11-27: no run on release came near it (largest call 19,896
+    # real tokens), and four runs of 39k history + 36k + 6k still fit the 340k KV cache.
+    input_tokens: int = 36000
     # Share of the model's context the chat history may use (agent/context/history.py).
     # input_tokens is the room for reading on top of it.
     history_context_percent: int = 30

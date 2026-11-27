@@ -119,7 +119,7 @@ Limits of one research run. Values are whole numbers. An empty or invalid value 
 | `AGENT_RESEARCH_SECONDS` (`agent_research_seconds`) | 300 | 5-1800 | Time for research. After it the tools are withdrawn. At most the total time. |
 | `AGENT_TOTAL_SECONDS` (`agent_total_seconds`) | 420 | 10-1800 | Time for the whole run, answer included. |
 | `AGENT_CALL_SECONDS` (`agent_call_seconds`) | 120 | 5-600 | Time for one model call, `view_image` included. |
-| `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 28000 | 4000-200000 | Estimated input tokens of one research model call, on top of the chat history (the total stays 6,000 tokens under the model's context). |
+| `AGENT_MAX_INPUT_TOKENS` (`agent_max_input_tokens`) | 36000 | 4000-200000 | Estimated input tokens of one research model call, on top of the chat history (the total stays 6,000 tokens under the model's context). |
 | `HISTORY_CONTEXT_PERCENT` (`history_context_percent`) | 30 | 0-50 | Share of the model's context that the chat history may use. Past the limit the oldest turns go, several at once. (`TP_CONTEXT_PERCENT`, the share of the TP text in Search and Direct, went with those modes on 2026-11-26.) |
 
 The system prompt states the tool and image limits. A long answer can take two minutes, so the total time should be at least one model call longer than the research time.

@@ -51,7 +51,7 @@ def test_research_limits_from_admin_values():
         'AGENT_MAX_TOOL_CALLS': ' 12 ', 'AGENT_MAX_VISUAL_CALLS': 'four',
         'AGENT_RESEARCH_SECONDS': '300', 'AGENT_TOTAL_SECONDS': '120',
         'AGENT_MAX_INPUT_TOKENS': '999999'})
-    assert (limits.tool_calls, limits.visual_calls, limits.input_tokens) == (12, 4, 28000)
+    assert (limits.tool_calls, limits.visual_calls, limits.input_tokens) == (12, 4, 36000)
     # Research time never exceeds the total time.
     assert (limits.research_seconds, limits.total_seconds) == (120, 120)
 
