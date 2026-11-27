@@ -170,6 +170,7 @@ The worker also reads these:
 | `PDF_MINERU_CONFIG` | none | Absolute path of `mineru.json`. |
 | `PDF_MINERU_PAGE_TIMEOUT_SECONDS` | `240` | Time allowed for one group of 16 pages, or for one page read alone. |
 | `PDF_READ_BUDGET_SECONDS` | `7200` | Time allowed for reading one PDF. |
+| `PDF_MINERU_GPU_URL` | none | The service that runs MinerU's small models on the GPU (`http://edullm-mineru-gpu:8000`). None: they run on the worker's CPU. |
 | `STRUCTURED_LEASE_SECONDS`, `STRUCTURED_MAX_ATTEMPTS` | `1800`, `3` | How long a worker holds a job, and how often a job is tried. |
 | `STRUCTURED_TASK_ROOT` | system temp folder | Working folder of the worker. |
 

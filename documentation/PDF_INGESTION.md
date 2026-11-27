@@ -38,7 +38,7 @@ Both compose files set these for the worker.
 
 ## MinerU setup
 
-MinerU has three parts. All of them are outside the backend image.
+MinerU has four parts. All of them are outside the backend image. MinerU reads a page with one large model (the VLM, part 1) and three small ones: layout (it finds the formulas inside sentences), formula recognition and OCR line detection.
 
 1. **Server.** vLLM with `opendatalab/MinerU2.5-Pro-2605-1.2B`, on the network `edullm-models` as the container `edullm-mineru-vlm`. The memory is set by size, not by a fraction. The check of a fraction fails when other processes change the shared memory during start-up. The server takes about 4.3 GB. A smaller KV cache only limits how many pages run at once. `mineru-vl-utils` 1.x (the version that MinerU 3.4.5 asks for) is installed with `pip install --no-deps --target` into the folder mounted at `/extra`.
 
@@ -62,7 +62,19 @@ MinerU has three parts. All of them are outside the backend image.
    The mount, the key file and `--middleware` make the server refuse requests without the key ([MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)).
 
 2. **Client.** The worker image built with `--build-arg WITH_MINERU=1` has MinerU 3.4.5 at `/opt/mineru/bin/python`, with CPU torch for the local layout and OCR models. The worker calls MinerU in this separate interpreter. MinerU's own description of each picture (`image_analysis`) is off: nothing used it, and the picture captions come from the main model. An 81-page course took about 5.5 minutes to read (1.5 to 5 seconds per page, most of it the CPU layout pass) and the MinerU process stays under 1.5 GB.
-3. **Models and config.** Run `mineru-models-download -s huggingface -m pipeline` once, with `HOME` and `HF_HOME` in `/home/spark-1/edullm-mineru/home` (2.5 GB). Then write `mineru.json` with the pipeline path as the worker sees it (`/opt/mineru-data/...`) and `"model-source": "local"`. The worker mounts the folder read-only at `/opt/mineru-data`.
+3. **Small models on the GPU (optional, `edullm-mineru-gpu`).** On the worker's CPU the three small models take most of the reading time. This container runs them on the GPU (`backend/worker/pdf_mineru_gpu.py`, image `mineru_gpu/Dockerfile`: the NVIDIA vLLM image for CUDA torch, and the worker's MinerU packages from `mineru_gpu/requirements.txt`). The worker sends it each group of 16 pages when `PDF_MINERU_GPU_URL` is set; when the service fails or is not there, the worker reads the rest of the document on its CPU. One service can serve the dev and release workers, like the VLM server. The 81-page course of the teacher's feedback: reading 100 s on the GPU, 333 s on the CPU, same text and formulas.
+
+   ```sh
+   docker build -f mineru_gpu/Dockerfile -t edullm-mineru-gpu:3.4.5 .
+   docker run -d --name edullm-mineru-gpu --restart unless-stopped --gpus all --network edullm-models \
+     -v /home/spark-1/edullm-mineru:/opt/mineru-data:ro \
+     --env-file /home/spark-1/.local/share/edullm-models/key.env \
+     -e PDF_MINERU_SERVER_URL=http://edullm-mineru-vlm:8000/v1 -e PDF_MINERU_CONFIG=/opt/mineru-data/mineru.json \
+     edullm-mineru-gpu:3.4.5
+   ```
+
+   It refuses a call without the key of the model servers. Memory: this machine's CPU and GPU share one memory, and CUDA can use only the memory that is really free. Loaded, the service takes about 2.2 GB (0.9 GB process, 1.3 GB GPU); while it reads, up to about 5.4 GB. Part of that stays after a document, so the service exits after 10 minutes without a call (`IDLE_EXIT_SECONDS`) and Docker starts it again in about 10 to 40 seconds. cuDNN is off: on this GPU it found no convolution algorithm with little free memory.
+4. **Models and config.** Run `mineru-models-download -s huggingface -m pipeline` once, with `HOME` and `HF_HOME` in `/home/spark-1/edullm-mineru/home` (2.5 GB). Then write `mineru.json` with the pipeline path as the worker sees it (`/opt/mineru-data/...`) and `"model-source": "local"`. The worker mounts the folder read-only at `/opt/mineru-data`.
 
 The MinerU server can change without a restart. The PDF reader row of the admin model settings stores `PDF_MINERU_SERVER_URL` and its key `PDF_MINERU_API_KEY` in `system_configs`, and the worker uses them from its next loop. The key goes to MinerU's client as `MINERU_VL_API_KEY`; when the field is empty, the main model key is used (see [MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)). When it is empty, the worker uses the value of its environment. The client, its models and `mineru.json` are deployment settings.
 

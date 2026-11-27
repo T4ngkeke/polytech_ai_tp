@@ -194,3 +194,126 @@ def test_control_characters_are_removed(tmp_path):
     doc, _ = read_pdf(path, digest, tmp_path / 'work', items)
     block = doc.pages[0].blocks[0]
     assert block.content == block.source_text == 'function <sup>bk</sup> and\ttab\nline'
+
+
+# --------------------------------------------------------------------------
+# The GPU service (pdf_mineru_gpu) and the worker's use of it.
+# --------------------------------------------------------------------------
+
+@pytest.fixture
+def gpu_service():
+    """A pdf_mineru_gpu server on a free port, with a fake MinerU. Returns
+    (url, calls, settings): settings['fail_from'] makes a group from that page fail."""
+    import threading
+    from http.server import ThreadingHTTPServer
+    from backend.worker import pdf_mineru_gpu
+    calls, settings = [], {'fail_from': None}
+    ready = threading.Event()
+
+    def extract(pdf, first, last, out):
+        calls.append((first, last, pdf.read_bytes()[:5]))
+        if settings['fail_from'] is not None and first >= settings['fail_from']:
+            raise RuntimeError('mineru exploded with secret text')
+        return [[{'type': 'text', 'text': f'page {n}', 'bbox': [100, 100, 900, 200], 'page_idx': 0}]
+                for n in range(first, last + 1)]
+    server = ThreadingHTTPServer(('127.0.0.1', 0), pdf_mineru_gpu.make_handler(key='k1', extract=extract, ready=ready))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    ready.set()
+    yield f'http://127.0.0.1:{server.server_address[1]}', calls, settings
+    server.shutdown()
+
+
+def gpu_extractor(fake, url, key='k1'):
+    extractor = fake(api_key=key)
+    extractor.gpu_url = url
+    return extractor
+
+
+def test_the_gpu_service_reads_every_group(tmp_path, fake, gpu_service):
+    url, calls, _ = gpu_service
+    extractor = gpu_extractor(fake, url)
+    doc = read(tmp_path, extractor, 40)
+    assert texts(doc) == [[f'page {n}'] for n in range(1, 41)]
+    assert [(a, b) for a, b, _ in calls] == [(1, 16), (17, 32), (33, 40)]
+    assert all(head == b'%PDF-' for _, _, head in calls)
+    assert fake.runs() == []                      # no MinerU process on the CPU
+    assert extractor.gpu_read == 40 and extractor.gpu_error is None
+
+
+def test_after_a_gpu_failure_the_rest_is_read_on_the_cpu(tmp_path, fake, gpu_service):
+    url, calls, settings = gpu_service
+    settings['fail_from'] = 17
+    extractor = gpu_extractor(fake, url)
+    doc = read(tmp_path, extractor, 40)
+    assert texts(doc) == [[f'page {n}'] for n in range(1, 41)]
+    assert [(a, b) for a, b, _ in calls] == [(1, 16), (17, 32)]
+    assert fake.runs() == [{'page': None, 'first': '17', 'last': '40', 'key': 'k1'}]
+    assert extractor.gpu_read == 16 and extractor.gpu_error == 'HTTPError'
+
+
+def test_a_wrong_key_or_no_service_falls_back_to_the_cpu(tmp_path, fake, gpu_service):
+    url, calls, _ = gpu_service
+    extractor = gpu_extractor(fake, url, key='wrong')
+    doc = read(tmp_path, extractor, 3)
+    assert texts(doc) == [['page 1'], ['page 2'], ['page 3']] and calls == []
+    assert extractor.gpu_error == 'HTTPError'
+    extractor = gpu_extractor(fake, 'http://127.0.0.1:9')
+    (tmp_path / 'work').rename(tmp_path / 'work-1')
+    read(tmp_path, extractor, 3)
+    assert extractor.gpu_error == 'URLError'
+
+
+def test_the_gpu_service_checks_its_requests(gpu_service):
+    import urllib.error
+    import urllib.request
+    url, calls, settings = gpu_service
+
+    def post(path, data=b'%PDF-1.4 x', key='k1'):
+        request = urllib.request.Request(url + path, data=data, method='POST',
+                                         headers={'Authorization': f'Bearer {key}'} if key else {})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+    assert post('/pages?first=1&last=2', key=None)[0] == 401
+    assert post('/pages?first=1&last=2', key='k2')[0] == 401
+    assert post('/pages?first=2&last=1')[0] == 400
+    assert post('/pages?first=1&last=65')[0] == 400
+    assert post('/pages?first=1&last=2', data=b'not a pdf')[0] == 400
+    assert post('/pages?first=1')[0] == 400
+    assert post('/pages?first=1&last=2') == (200, {'pages': [
+        [{'type': 'text', 'text': 'page 1', 'bbox': [100, 100, 900, 200], 'page_idx': 0}],
+        [{'type': 'text', 'text': 'page 2', 'bbox': [100, 100, 900, 200], 'page_idx': 0}]]})
+    settings['fail_from'] = 1
+    assert post('/pages?first=1&last=2') == (500, {'error': 'RuntimeError'})   # no message: it may hold document text
+    with urllib.request.urlopen(url + '/health', timeout=5) as response:
+        assert response.status == 200
+
+
+def test_the_gpu_service_exits_when_idle_after_a_call():
+    import threading
+    from backend.worker.pdf_mineru_gpu import Activity, exit_when_idle
+    activity, exits, now = Activity(), [], [0.0]
+
+    def run(seconds):
+        stop = threading.Event()
+        thread = threading.Thread(target=exit_when_idle, args=(activity, 600),
+                                  kwargs={'exit': exits.append, 'clock': lambda: now[0], 'every': 0.01, 'stop': stop})
+        thread.start()
+        time.sleep(seconds)
+        stop.set()
+        thread.join()
+    now[0] = 10_000
+    run(0.05)
+    assert exits == []                      # no call yet: the models stay loaded
+    activity.last, activity.busy = 9_000, True
+    run(0.05)
+    assert exits == []                      # a call is running
+    activity.busy = False
+    activity.last = 9_500
+    run(0.05)
+    assert exits == []                      # idle 500 s only
+    activity.last = 9_000
+    run(0.05)
+    assert exits == [0]

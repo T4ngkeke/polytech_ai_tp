@@ -89,10 +89,14 @@ class DocumentExtractor:
     page to the end and writes page-<n>.json as each group of pages is done.
     A failed or stalled group (no page for timeout_seconds) stops the process;
     the pages of that group are read one process per page, and the next group
-    starts a new process. close() stops a process still running."""
+    starts a new process. close() stops a process still running.
+
+    With gpu_url (the service of pdf_mineru_gpu: MinerU's small models on the
+    GPU), each group is read there instead. When it fails once, the rest of the
+    document is read here, on the CPU, as above; gpu_error says why."""
 
     def __init__(self, *, python_executable: str, server_url: str, config_path: str,
-                 timeout_seconds: int, api_key: str = ''):
+                 timeout_seconds: int, api_key: str = '', gpu_url: str = ''):
         self.base = [python_executable, '-m', 'backend.worker.pdf_mineru_cli',
                      '--server-url', server_url, '--config', config_path]
         self.env = dict(os.environ, HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
@@ -105,8 +109,20 @@ class DocumentExtractor:
         self.out: Path | None = None
         self.progress = 0.0
         self.alone: set[int] = set()
+        self.api_key = api_key
+        self.gpu_url = gpu_url.rstrip('/')
+        self.gpu_pages: dict[int, list[dict]] = {}
+        self.gpu_read = 0
+        self.gpu_error: str | None = None
+        self.pdf: tuple[Path, bytes, int] | None = None
 
     def __call__(self, path: Path, page_no: int, output_dir: Path) -> list[dict]:
+        if self.gpu_url and self.gpu_error is None:
+            try:
+                return self._from_gpu(Path(path), page_no)
+            except Exception as exc:  # noqa: BLE001 - the rest of the document is read on the CPU
+                self.gpu_error = type(exc).__name__
+                self.gpu_pages.clear()
         if page_no not in self.alone:
             try:
                 return self._from_group(Path(path), page_no, Path(output_dir))
@@ -121,6 +137,27 @@ class DocumentExtractor:
         if self.process is not None:
             _stop(self.process)
             self.process = None
+
+    def _from_gpu(self, path: Path, page_no: int) -> list[dict]:
+        import urllib.request
+        if page_no not in self.gpu_pages:
+            if self.pdf is None or self.pdf[0] != path:
+                import pymupdf
+                with pymupdf.open(path) as pdf:
+                    count = len(pdf)
+                self.pdf = (path, path.read_bytes(), count)
+            last = min(self.pdf[2], page_no + PAGES_PER_CALL - 1)
+            request = urllib.request.Request(
+                f'{self.gpu_url}/pages?first={page_no}&last={last}', data=self.pdf[1], method='POST',
+                headers={'Content-Type': 'application/pdf', 'Authorization': f'Bearer {self.api_key}'})
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                pages = json.loads(response.read())['pages']
+            if not isinstance(pages, list) or len(pages) != last - page_no + 1 \
+                    or not all(isinstance(blocks, list) for blocks in pages):
+                raise ValueError('mineru_gpu_reply_invalid')
+            self.gpu_pages = dict(enumerate(pages, start=page_no))
+        self.gpu_read += 1
+        return self.gpu_pages.pop(page_no)
 
     def _start(self, path: Path, page_no: int, output_dir: Path) -> None:
         import pymupdf
@@ -175,11 +212,12 @@ class DocumentExtractor:
 
 
 def subprocess_extractor(*, python_executable: str, server_url: str, config_path: str,
-                         timeout_seconds: int = 240, api_key: str = '') -> DocumentExtractor:
+                         timeout_seconds: int = 240, api_key: str = '', gpu_url: str = '') -> DocumentExtractor:
     """Use a separate interpreter so MinerU does not load into the main worker."""
     if not Path(python_executable).is_file():
         raise MinerUUnavailable('mineru_python_unavailable')
     if not Path(config_path).is_absolute() or not Path(config_path).is_file():
         raise MinerUUnavailable('mineru_config_unavailable')
     return DocumentExtractor(python_executable=python_executable, server_url=server_url,
-                             config_path=config_path, timeout_seconds=timeout_seconds, api_key=api_key)
+                             config_path=config_path, timeout_seconds=timeout_seconds, api_key=api_key,
+                             gpu_url=gpu_url)

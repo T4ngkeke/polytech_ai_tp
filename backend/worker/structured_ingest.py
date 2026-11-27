@@ -111,6 +111,8 @@ class StructuredSettings:
     pdf_api_key: str = ""
     pdf_config_path: str = ""
     pdf_page_timeout_seconds: int = 240
+    # MinerU's small models on the GPU (pdf_mineru_gpu); empty: on the CPU.
+    pdf_gpu_url: str = ""
     # The longest a PDF may take to read; the pages after it are kept as not
     # read. Not tied to the lease, which the reading extends.
     pdf_read_budget_seconds: int = 7200
@@ -132,6 +134,7 @@ class StructuredSettings:
                    pdf_server_url=env.get('PDF_MINERU_SERVER_URL') or '',
                    pdf_api_key=env.get('PDF_MINERU_API_KEY') or '',
                    pdf_config_path=env.get('PDF_MINERU_CONFIG') or '',
+                   pdf_gpu_url=env.get('PDF_MINERU_GPU_URL') or '',
                    pdf_page_timeout_seconds=int(env.get('PDF_MINERU_PAGE_TIMEOUT_SECONDS') or 240),
                    pdf_read_budget_seconds=int(env.get('PDF_READ_BUDGET_SECONDS') or 7200))
 
@@ -169,7 +172,7 @@ def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
             extractor = subprocess_extractor(
                 python_executable=settings.pdf_python, server_url=settings.pdf_server_url,
                 config_path=settings.pdf_config_path, timeout_seconds=settings.pdf_page_timeout_seconds,
-                api_key=settings.pdf_api_key)
+                api_key=settings.pdf_api_key, gpu_url=settings.pdf_gpu_url)
         except MinerUUnavailable as exc:
             raise JobFailed(str(exc)) from exc
     model_config_sha = (hashlib.sha256(Path(settings.pdf_config_path).read_bytes()).hexdigest()
@@ -190,6 +193,11 @@ def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
     if model_config_sha:
         metrics['model_config_sha256'] = model_config_sha
     metrics['mineru_version'] = '3.4.5' if frozen_mineru else None
+    if getattr(extractor, 'gpu_url', ''):
+        # Pages read by the GPU service, and why it stopped, if it did.
+        metrics['mineru_gpu'] = {'pages': extractor.gpu_read, 'error': extractor.gpu_error}
+        if extractor.gpu_error:
+            failure_log.record('mineru_gpu', extractor.gpu_error)
     return ParseOutcome(document=document,
                         render={'status':'source_pdf','extractor':metrics},
                         mapping={'kind':'same_pdf_physical_page','pages':len(document.pages)},

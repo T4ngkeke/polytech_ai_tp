@@ -33,13 +33,16 @@ services:
   worker:
     # PDF extraction: MinerU 3.4.5 in the worker image (WITH_MINERU), its
     # server edullm-mineru-vlm on edullm-models, and the local models and
-    # mineru.json in /home/spark-1/edullm-mineru (see PDF_INGESTION.md).
+    # mineru.json in /home/spark-1/edullm-mineru (see PDF_INGESTION.md). The
+    # small models run on the GPU in edullm-mineru-gpu; the worker's own MinerU
+    # reads on the CPU when that service is not there or fails.
     build:
       args:
         WITH_MINERU: "1"
     environment:
       - PDF_MINERU_PYTHON=/opt/mineru/bin/python
       - PDF_MINERU_SERVER_URL=http://edullm-mineru-vlm:8000/v1
+      - PDF_MINERU_GPU_URL=http://edullm-mineru-gpu:8000
       - PDF_MINERU_CONFIG=/opt/mineru-data/mineru.json
     volumes:
       - /home/spark-1/edullm-mineru:/opt/mineru-data:ro
