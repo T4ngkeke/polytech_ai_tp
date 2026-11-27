@@ -21,6 +21,11 @@ FROZEN_MINERU_VERSION = '3.4.5'
 # Pages in one MinerU call. MinerU keeps the page images of a call in memory:
 # 16 pages stay well under 1.5 GB; 64 went over 3 GB on an 81-page PDF.
 PAGES_PER_CALL = 16
+# On the GPU service (pdf_mineru_gpu): at most this many pages per call, the
+# pages spread evenly over the calls (81 pages: 27, 27, 27, no single last
+# page). 81 pages read in 93 and 101 s with 32, 108 and 114 s with 16, 103 s
+# with 64; 32 takes about 0.5 GB more GPU memory than 16.
+GPU_PAGES_PER_CALL = 32
 POLL_SECONDS = 0.2
 
 
@@ -71,6 +76,13 @@ def extract_pages(path: Path, first: int, last: int, output_dir: Path, *,
 
 def extract_page(path: Path, page_no: int, output_dir: Path, *, server_url: str, config_path: str) -> list[dict]:
     return extract_pages(path, page_no, page_no, output_dir, server_url=server_url, config_path=config_path)[0]
+
+
+def even_group_size(pages: int, most: int) -> int:
+    """The size of the next group when `pages` pages are left: as few groups
+    as `most` allows, of nearly equal size."""
+    groups = -(-pages // most)
+    return -(-pages // groups)
 
 
 def _stop(process: subprocess.Popen) -> None:
@@ -146,7 +158,7 @@ class DocumentExtractor:
                 with pymupdf.open(path) as pdf:
                     count = len(pdf)
                 self.pdf = (path, path.read_bytes(), count)
-            last = min(self.pdf[2], page_no + PAGES_PER_CALL - 1)
+            last = page_no + even_group_size(self.pdf[2] - page_no + 1, GPU_PAGES_PER_CALL) - 1
             request = urllib.request.Request(
                 f'{self.gpu_url}/pages?first={page_no}&last={last}', data=self.pdf[1], method='POST',
                 headers={'Content-Type': 'application/pdf', 'Authorization': f'Bearer {self.api_key}'})

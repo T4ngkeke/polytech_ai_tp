@@ -19,7 +19,7 @@ The reader keeps extracted text, code, formulas and tables. For a figure, it kee
 
 Teachers can inspect drafts, edit blocks, leave blocks out of search and read a page again. A change never alters a revision. It makes a new draft. The student's PDF view opens the complete course PDF at the cited page. Version and permission checks protect every reader endpoint and file. The endpoints are in [API.md](API.md).
 
-Limits of an upload: 200 MB, at most 150 pages, no password. The nginx in front of the backend accepts a request body of 50 MB (`client_max_body_size` in `frontend/nginx.conf` and `frontend/nginx.release.conf`).
+Limits of an upload: 200 MB, at most 150 pages, no password. The nginx in front of the backend accepts a request body of 200 MB (`client_max_body_size` in `frontend/nginx.conf` and `frontend/nginx.release.conf`).
 
 ## Configuration and migration
 
@@ -62,7 +62,7 @@ MinerU has four parts. All of them are outside the backend image. MinerU reads a
    The mount, the key file and `--middleware` make the server refuse requests without the key ([MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)).
 
 2. **Client.** The worker image built with `--build-arg WITH_MINERU=1` has MinerU 3.4.5 at `/opt/mineru/bin/python`, with CPU torch for the local layout and OCR models. The worker calls MinerU in this separate interpreter. MinerU's own description of each picture (`image_analysis`) is off: nothing used it, and the picture captions come from the main model. An 81-page course took about 5.5 minutes to read (1.5 to 5 seconds per page, most of it the CPU layout pass) and the MinerU process stays under 1.5 GB.
-3. **Small models on the GPU (optional, `edullm-mineru-gpu`).** On the worker's CPU the three small models take most of the reading time. This container runs them on the GPU (`backend/worker/pdf_mineru_gpu.py`, image `mineru_gpu/Dockerfile`: the NVIDIA vLLM image for CUDA torch, and the worker's MinerU packages from `mineru_gpu/requirements.txt`). The worker sends it each group of 16 pages when `PDF_MINERU_GPU_URL` is set; when the service fails or is not there, the worker reads the rest of the document on its CPU. One service can serve the dev and release workers, like the VLM server. The 81-page course of the teacher's feedback: reading 100 s on the GPU, 333 s on the CPU, same text and formulas.
+3. **Small models on the GPU (optional, `edullm-mineru-gpu`).** On the worker's CPU the three small models take most of the reading time. This container runs them on the GPU (`backend/worker/pdf_mineru_gpu.py`, image `mineru_gpu/Dockerfile`: the NVIDIA vLLM image for CUDA torch, and the worker's MinerU packages from `mineru_gpu/requirements.txt`). The worker sends it the pages in even groups of at most 32 (81 pages: 27, 27, 27) when `PDF_MINERU_GPU_URL` is set; when the service fails or is not there, the worker reads the rest of the document on its CPU. One service can serve the dev and release workers, like the VLM server. The 81-page course of the teacher's feedback: reading 87 s on the GPU, 333 s on the CPU, same text and formulas.
 
    ```sh
    docker build -f mineru_gpu/Dockerfile -t edullm-mineru-gpu:3.4.5 .
@@ -73,7 +73,7 @@ MinerU has four parts. All of them are outside the backend image. MinerU reads a
      edullm-mineru-gpu:3.4.5
    ```
 
-   It refuses a call without the key of the model servers. Memory: this machine's CPU and GPU share one memory, and CUDA can use only the memory that is really free. Loaded, the service takes about 2.2 GB (0.9 GB process, 1.3 GB GPU); while it reads, up to about 5.4 GB. Part of that stays after a document, so the service exits after 10 minutes without a call (`IDLE_EXIT_SECONDS`) and Docker starts it again in about 10 to 40 seconds. cuDNN is off: on this GPU it found no convolution algorithm with little free memory.
+   It refuses a call without the key of the model servers. Memory: this machine's CPU and GPU share one memory, and CUDA can use only the memory that is really free. At start the service reads a small two-page PDF once, so the first document does not pay the GPU's first-run cost (about 10 s); it then takes about 3.5 GB (2.3 GB process, 1.25 GB GPU), and while it reads up to about 6.5 GB. Part of the working memory stays after a document, so the service exits after 10 minutes without a call (`IDLE_EXIT_SECONDS`) and Docker starts it again in about 20 seconds. cuDNN is off: on this GPU it found no convolution algorithm with little free memory.
 4. **Models and config.** Run `mineru-models-download -s huggingface -m pipeline` once, with `HOME` and `HF_HOME` in `/home/spark-1/edullm-mineru/home` (2.5 GB). Then write `mineru.json` with the pipeline path as the worker sees it (`/opt/mineru-data/...`) and `"model-source": "local"`. The worker mounts the folder read-only at `/opt/mineru-data`.
 
 The MinerU server can change without a restart. The PDF reader row of the admin model settings stores `PDF_MINERU_SERVER_URL` and its key `PDF_MINERU_API_KEY` in `system_configs`, and the worker uses them from its next loop. The key goes to MinerU's client as `MINERU_VL_API_KEY`; when the field is empty, the main model key is used (see [MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)). When it is empty, the worker uses the value of its environment. The client, its models and `mineru.json` are deployment settings.

@@ -234,7 +234,7 @@ def test_the_gpu_service_reads_every_group(tmp_path, fake, gpu_service):
     extractor = gpu_extractor(fake, url)
     doc = read(tmp_path, extractor, 40)
     assert texts(doc) == [[f'page {n}'] for n in range(1, 41)]
-    assert [(a, b) for a, b, _ in calls] == [(1, 16), (17, 32), (33, 40)]
+    assert [(a, b) for a, b, _ in calls] == [(1, 20), (21, 40)]      # 40 pages: two even groups
     assert all(head == b'%PDF-' for _, _, head in calls)
     assert fake.runs() == []                      # no MinerU process on the CPU
     assert extractor.gpu_read == 40 and extractor.gpu_error is None
@@ -242,13 +242,13 @@ def test_the_gpu_service_reads_every_group(tmp_path, fake, gpu_service):
 
 def test_after_a_gpu_failure_the_rest_is_read_on_the_cpu(tmp_path, fake, gpu_service):
     url, calls, settings = gpu_service
-    settings['fail_from'] = 17
+    settings['fail_from'] = 21
     extractor = gpu_extractor(fake, url)
     doc = read(tmp_path, extractor, 40)
     assert texts(doc) == [[f'page {n}'] for n in range(1, 41)]
-    assert [(a, b) for a, b, _ in calls] == [(1, 16), (17, 32)]
-    assert fake.runs() == [{'page': None, 'first': '17', 'last': '40', 'key': 'k1'}]
-    assert extractor.gpu_read == 16 and extractor.gpu_error == 'HTTPError'
+    assert [(a, b) for a, b, _ in calls] == [(1, 20), (21, 40)]
+    assert fake.runs() == [{'page': None, 'first': '21', 'last': '40', 'key': 'k1'}]
+    assert extractor.gpu_read == 20 and extractor.gpu_error == 'HTTPError'
 
 
 def test_a_wrong_key_or_no_service_falls_back_to_the_cpu(tmp_path, fake, gpu_service):
@@ -317,3 +317,14 @@ def test_the_gpu_service_exits_when_idle_after_a_call():
     activity.last = 9_000
     run(0.05)
     assert exits == [0]
+
+
+@pytest.mark.parametrize('pages, sizes', [(81, [27, 27, 27]), (40, [20, 20]), (32, [32]), (33, [17, 16]),
+                                          (1, [1]), (65, [22, 22, 21])])
+def test_gpu_groups_are_even(pages, sizes):
+    got, left = [], pages
+    while left:
+        size = pdf_mineru.even_group_size(left, pdf_mineru.GPU_PAGES_PER_CALL)
+        got.append(size)
+        left -= size
+    assert got == sizes

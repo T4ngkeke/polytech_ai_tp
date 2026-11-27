@@ -64,6 +64,33 @@ def prepare_gpu() -> None:
     HybridModelSingleton().get_model(lang=None, formula_enable=True)
 
 
+def warm_up(extract) -> None:
+    """Read a small two-page PDF once, so that the first call of a teacher's
+    document does not pay the GPU's first-run cost (about 10 s). A failure
+    changes nothing: the models are loaded."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    work = Path(tempfile.mkdtemp(prefix='mineru-gpu-warm-'))
+    try:
+        pdf = work / 'warm.pdf'
+        page = canvas.Canvas(str(pdf), pagesize=A4)
+        for n in (1, 2):
+            page.setFont('Helvetica-Bold', 20)
+            page.drawString(72, 760, f'Warm-up page {n}')
+            page.setFont('Helvetica', 12)
+            page.drawString(72, 720, 'A sentence with a formula x2 + y2 = z2 and a second line of text.')
+            page.drawString(72, 700, 'The convolution of f and g sums f(k) g(n - k) over k.')
+            page.showPage()
+        page.save()
+        extract(pdf, 1, 2, work / 'out')
+        print('mineru-gpu: warm-up done', flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f'mineru-gpu: warm-up failed ({type(exc).__name__})', flush=True)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        give_back_memory()
+
+
 def give_back_memory() -> None:
     """Return the freed memory of a call (page images) to the system: without
     this the process kept about 0.7 GB more after each document."""
@@ -157,6 +184,7 @@ def main() -> None:
     server = ThreadingHTTPServer(('0.0.0.0', int(os.environ.get('PORT', '8000'))),
                                  make_handler(key=key, extract=extract, ready=ready, activity=activity))
     prepare_gpu()
+    warm_up(extract)        # not a call: it does not start the idle clock
     ready.set()
     idle = int(os.environ.get('IDLE_EXIT_SECONDS') or IDLE_EXIT_SECONDS)
     threading.Thread(target=exit_when_idle, args=(activity, idle), daemon=True).start()
