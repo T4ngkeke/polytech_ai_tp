@@ -16,6 +16,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const DIR = process.env.PYODIDE_DIR || '/pyodide/0.29.3/';
+// A font with Chinese characters (Dockerfile, fetch-font.mjs); none: DejaVu Sans only.
+const FONT_FILE = process.env.FONT_FILE || '';
+const FONT_IN_PYODIDE = '/fonts/cjk.otf';
 
 // Pyodide asks process.binding('constants').fs for the file open flags. The
 // Node permission model (server.mjs) forbids process.binding: give it the same
@@ -40,6 +43,16 @@ os.environ["MPLBACKEND"] = "AGG"
 import matplotlib
 matplotlib.use("AGG")
 import matplotlib.pyplot
+# Chinese text: DejaVu Sans first, then the Chinese font for the characters it
+# lacks (matplotlib's font fallback, 3.6 or later).
+if os.path.exists("${FONT_IN_PYODIDE}"):
+    from matplotlib import font_manager
+    font_manager.fontManager.addfont("${FONT_IN_PYODIDE}")
+    _cjk = font_manager.FontProperties(fname="${FONT_IN_PYODIDE}").get_name()
+    matplotlib.rcParams["font.family"] = ["DejaVu Sans", _cjk]
+    matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", _cjk] + [
+        f for f in matplotlib.rcParams["font.sans-serif"] if f not in ("DejaVu Sans", _cjk)]
+    del _cjk, font_manager
 def _edullm_show(*, block=None):
     buf = BytesIO()
     matplotlib.pyplot.savefig(buf, format="png")
@@ -107,7 +120,13 @@ async function main() {
     pyodide.setStdin({ error: true });
     await loadImports(pyodide, code);
     await pyodide.runPythonAsync(PANDAS_QUIET);
-    if (code.includes('matplotlib')) await pyodide.runPythonAsync(MATPLOTLIB_SHOW);
+    if (code.includes('matplotlib')) {
+      if (FONT_FILE && fs.existsSync(FONT_FILE)) {
+        pyodide.FS.mkdirTree('/fonts');
+        pyodide.FS.writeFile(FONT_IN_PYODIDE, fs.readFileSync(FONT_FILE));
+      }
+      await pyodide.runPythonAsync(MATPLOTLIB_SHOW);
+    }
     // The Pyodide API (file system mounts, Node access) is out of reach from here on.
     pyodide.runPython("import sys\nsys.modules.pop('pyodide_js', None)");
     pyodide.unregisterJsModule('pyodide_js');

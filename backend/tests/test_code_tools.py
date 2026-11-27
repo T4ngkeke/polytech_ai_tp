@@ -45,7 +45,7 @@ async def test_a_run_returns_the_browser_output_and_keeps_it():
                     'stderr': '', 'result': 'None'})
     reply = json.loads(await tools.call('execute_code', json.dumps({'code': '```py\nprint(fact(5))\n```'})))
     assert reply['status'] == 'success' and reply['stdout'].startswith('fact(5) = 120')
-    assert '[image 1 shown to the student under the code]' in reply['stdout'] and 'base64' not in reply['stdout']
+    assert '[image 1 shown to the student under your answer]' in reply['stdout'] and 'base64' not in reply['stdout']
     assert saved == [(PNG, 1)]
     run = tools.runs[0]
     assert run['code'] == 'print(fact(5))' and run['images'] == ['file-1'] and run['status'] == 'ok'
@@ -98,7 +98,7 @@ async def test_on_the_server_the_page_only_shows_the_run():
         return 'file-1'
     tools = ct.CodeTools(USER, events.append, save_image=save, server=server)
     reply = json.loads(await tools.call('execute_code', json.dumps({'code': 'print(1 + 2)'})))
-    assert reply['stdout'] == 'ok\n[image 1 shown to the student under the code]\n' and reply['result'] == '3'
+    assert reply['stdout'] == 'ok\n[image 1 shown to the student under your answer]\n' and reply['result'] == '3'
     # The page gets the code (to show it, not to run it), then what came back.
     assert events[0]['where'] == 'server' and events[0]['code'] == 'print(1 + 2)'
     assert events[1]['id'] == events[0]['id'] and events[1]['output']['result'] == '3'

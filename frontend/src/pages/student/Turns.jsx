@@ -1,9 +1,10 @@
 /**
  * Turns.jsx — the conversation of the new student chat: each turn is the
  * student's question (right, light bubble; edit and copy; versions ‹ 1/2 ›)
- * and the answer (no bubble): the process line, the task checklist, the
- * draft while sources are checked, the answer with [E#] / [W#] pills, the
- * Python runs, the course and web sources, the "not from the course" labels,
+ * and the answer (no bubble): the process line (with the Python runs' code
+ * and output, closed), the task checklist, the draft while sources are
+ * checked, the answer with [E#] / [W#] pills, the figures the runs drew,
+ * the course and web sources, the "not from the course" labels,
  * the action row, and the suggested follow-ups under the last answer.
  */
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,9 +14,8 @@ import Icon from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { distinctImages, groupCitations, linkCitations, linkWeb } from '../../lib/citations';
 import { processSummary } from '../../lib/turns';
-import { runPython } from '../../lib/python';
+import { outputParts, runPython } from '../../lib/python';
 import { FeedbackButtons, VisualEvidenceCard, sourceOf } from '../../components/ChatMessage';
-import { RunOutput } from '../../components/MessageContent';
 
 const loadContent = () => import('../../components/MessageContent');
 const MessageContent = lazy(loadContent);
@@ -47,6 +47,7 @@ function ProcessLine({ answer, live }) {
   const [open, setOpen] = useState(false);
   const steps = answer.steps || [];
   const phase = (answer.phases || []).at(-1);
+  const { runs, stored } = answerRuns(answer);
   if (live) {
     return (
       <div className="mb-3 space-y-1 text-[13.5px] text-cream-secondary" role="status" aria-live="polite">
@@ -60,6 +61,7 @@ function ProcessLine({ answer, live }) {
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cream-faint border-t-cream-secondary" />
           <span>{t(PHASE_KEYS[phase] || 'phase.thinking')}</span>
         </div>
+        <RunsToggle runs={runs} stored={stored} />
       </div>
     );
   }
@@ -73,14 +75,15 @@ function ProcessLine({ answer, live }) {
   if (!parts.length) return null;
   return (
     <div className="mb-2">
-      <button type="button" onClick={() => setOpen(!open)} disabled={!steps.length}
+      <button type="button" onClick={() => setOpen(!open)} disabled={!steps.length && !runs.length}
         className="inline-flex items-center gap-1 text-[13px] text-cream-muted hover:text-cream-secondary disabled:hover:text-cream-muted">
         {parts.join(' · ')}
-        {steps.length > 0 && <Icon name={open ? 'chevronDown' : 'chevronRight'} className="h-3.5 w-3.5" />}
+        {(steps.length > 0 || runs.length > 0) && <Icon name={open ? 'chevronDown' : 'chevronRight'} className="h-3.5 w-3.5" />}
       </button>
       {open && (
         <div className="mt-1.5 space-y-1 border-l border-border-default pl-3 text-[13px] text-cream-secondary">
           {steps.map((s, i) => <div key={i} className="truncate">{stepText(t, s)}</div>)}
+          <RunsToggle runs={runs} stored={stored} />
         </div>
       )}
     </div>
@@ -115,6 +118,7 @@ function TaskList({ tasks }) {
 
 /** An image a Python run printed, saved as a chat file (fetched with the session token). */
 function StoredImage({ fileId }) {
+  const t = useT();
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let url;
@@ -126,34 +130,82 @@ function StoredImage({ fileId }) {
     }).catch(() => {});
     return () => { current = false; if (url) URL.revokeObjectURL(url); };
   }, [fileId]);
-  return src ? <img src={src} alt="" className="my-2 max-h-80 rounded bg-white" /> : null;
+  return src ? <img src={src} alt={t('code.figure')} className="max-h-[28rem] max-w-full" /> : null;
 }
 
-function CodeRuns({ live, stored }) {
+// The note the backend writes in a stored run's output where a figure was (agent/tools/code.py).
+const FIGURE_NOTE = /\[image \d+ shown to the student under (?:the code|your answer)\]\n?/g;
+
+/** The runs to show: the stored ones once the answer is saved, else the ones the page saw. */
+function answerRuns(answer) {
+  const stored = answer.code_runs?.length ? answer.code_runs : null;
+  return { runs: stored || answer.live_runs || [], stored: !!stored };
+}
+
+/** One Python run in the process: its code, its text output and errors.
+ * Its figures are under the answer (RunFigures). */
+function RunDetail({ run, stored }) {
   const t = useT();
-  const runs = stored?.length ? stored : live || [];
-  const [open, setOpen] = useState(!stored?.length);
+  const busy = run.status === 'loading' || run.status === 'running';
+  const parts = stored ? [] : [...outputParts(run.stdout), ...outputParts(run.result && run.result !== 'None' ? run.result : '')];
+  const text = stored
+    ? [(run.stdout || '').replace(FIGURE_NOTE, '').trim(), run.result && run.result !== 'None' ? run.result : ''].filter(Boolean).join('\n')
+    : parts.filter((p) => p.kind === 'text').map((p) => p.text).join('\n');
+  const figures = stored ? (run.images?.length || 0) : parts.filter((p) => p.kind === 'image').length;
+  const error = run.error || run.stderr;
+  return (
+    <div className="mt-2 overflow-hidden rounded-xl bg-[#0f1115]">
+      <pre className="overflow-x-auto px-4 py-3 font-mono text-[12.5px] leading-relaxed text-white/85"><code>{run.code}</code></pre>
+      <div className="border-t border-white/10 bg-[#16181d] px-4 py-3 text-[12.5px]">
+        {busy ? <span className="font-mono text-white/60">{t(`code.${run.status}`)}</span> : (
+          <>
+            {text && <pre className="whitespace-pre-wrap font-mono text-white/85">{text}</pre>}
+            {figures > 0 && <p className="text-white/60">{t('code.figureBelow')}</p>}
+            {error && <pre className="mt-1 whitespace-pre-wrap font-mono text-[#fca5a5]">{error}</pre>}
+            {run.status === 'timeout' && <p className="font-mono text-[#fca5a5]">{t(run.where === 'server' ? 'code.timeoutServer' : 'code.timeout')}</p>}
+            {!text && !figures && !error && run.status !== 'timeout' && <span className="font-mono text-white/50">{t('code.noOutput')}</span>}
+          </>
+        )}
+        <div className="mt-2 text-[11px] text-white/40">{t(run.where === 'server' ? 'code.footerServer' : 'code.footer')}</div>
+      </div>
+    </div>
+  );
+}
+
+/** "Code and output" in the process line: the runs, closed until asked. */
+function RunsToggle({ runs, stored }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
   if (!runs.length) return null;
   return (
-    <div className="my-3">
-      <button type="button" onClick={() => setOpen(!open)} className="inline-flex items-center gap-1.5 text-[13px] text-cream-secondary hover:text-cream">
-        <Icon name="terminal" className="h-4 w-4" />
-        {t('code.runs', { n: runs.length })}
+    <div>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="inline-flex items-center gap-1 text-[13px] text-accent hover:text-accent-hover">
+        <Icon name="terminal" className="h-3.5 w-3.5" />
+        {t('code.details')}{runs.length > 1 ? ` (${runs.length})` : ''}
         <Icon name={open ? 'chevronDown' : 'chevronRight'} className="h-3.5 w-3.5" />
       </button>
-      {open && runs.map((run) => (
-        <div key={run.id} className="mt-2 overflow-hidden rounded-xl bg-[#0f1115]">
-          <pre className="overflow-x-auto px-4 py-3 font-mono text-[12.5px] leading-relaxed text-white/85"><code>{run.code}</code></pre>
-          {stored?.length ? (
-            <div className="border-t border-white/10 bg-[#16181d] px-4 py-3 text-[12.5px]">
-              {run.stdout && <pre className="whitespace-pre-wrap font-mono text-white/85">{run.stdout.replace(/\[image \d+ shown to the student under the code\]\n?/g, '')}</pre>}
-              {run.images?.map((id) => <StoredImage key={id} fileId={id} />)}
-              {run.stderr && <pre className="mt-1 whitespace-pre-wrap font-mono text-[#fca5a5]">{run.stderr}</pre>}
-              {run.status === 'timeout' && <p className="font-mono text-[#fca5a5]">{t(run.where === 'server' ? 'code.timeoutServer' : 'code.timeout')}</p>}
-              <div className="mt-2 text-[11px] text-white/40">{t(run.where === 'server' ? 'code.footerServer' : 'code.footer')}</div>
-            </div>
-          ) : <RunOutput run={run} />}
-        </div>
+      {open && runs.map((run) => <RunDetail key={run.id} run={run} stored={stored} />)}
+    </div>
+  );
+}
+
+/** The figures the runs drew, under the answer: what the student asked to see. */
+function RunFigures({ answer }) {
+  const t = useT();
+  const { runs, stored } = answerRuns(answer);
+  const figures = stored
+    ? runs.flatMap((run) => (run.images || []).map((id) => ({ key: id, id })))
+    : runs.flatMap((run) => [...outputParts(run.stdout), ...outputParts(run.result && run.result !== 'None' ? run.result : '')]
+      .filter((p) => p.kind === 'image').map((p, i) => ({ key: `${run.id}-${i}`, src: p.src })));
+  if (!figures.length) return null;
+  return (
+    <div className="mt-3 flex flex-col items-start gap-3">
+      {figures.map((f) => (
+        <figure key={f.key} className="m-0 overflow-hidden rounded-xl border border-border-subtle bg-white p-2">
+          {f.id ? <StoredImage fileId={f.id} /> : <img src={f.src} alt={t('code.figure')} className="max-h-[28rem] max-w-full" />}
+          <figcaption className="px-1 pt-1 text-[12px] text-cream-muted">{t('code.figure')}</figcaption>
+        </figure>
       ))}
     </div>
   );
@@ -299,7 +351,6 @@ export const Answer = memo(function Answer({ answer, live, isLast, sessionId, on
           <p className="mt-2 text-[12.5px] text-cream-muted">{t('draft.note')}</p>
         </div>
       )}
-      <CodeRuns live={answer.live_runs} stored={answer.code_runs} />
       {hasText ? (
         <Suspense fallback={<p className="whitespace-pre-wrap text-[16px] leading-[1.75]">{answer.content}</p>}>
           <MessageContent content={content} onCite={onCite} citeInfo={citeInfo} webSources={webSources} onRun={onRun} />
@@ -310,6 +361,7 @@ export const Answer = memo(function Answer({ answer, live, isLast, sessionId, on
           {onAskAgain && <button type="button" onClick={onAskAgain} className="not-italic text-cream underline">{t('answer.askAgain')}</button>}
         </p>
       )}
+      <RunFigures answer={answer} />
       {answer.clarification?.options?.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label={t('clarify.options')}>
           {answer.clarification.options.map((option) => (

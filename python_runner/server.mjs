@@ -35,12 +35,14 @@ function execute(code) {
   return new Promise((resolve) => {
     // The Node permission model: Python can reach Node's own objects through
     // the JS proxies (a function's constructor), so the process may read only
-    // Pyodide's files and run.cjs, and may not write files, start processes or
+    // Pyodide's files, run.cjs and the font, and may not write files, start processes or
     // workers. No environment and a scratch folder: it sees nothing of the server.
     const dir = process.env.PYODIDE_DIR || '/pyodide/0.29.3/';
+    const font = process.env.FONT_FILE || '';
     const child = spawn(process.execPath, ['--experimental-permission', `--allow-fs-read=${dir}*`,
-      `--allow-fs-read=${RUN}`, '--no-warnings', '--max-old-space-size=768', RUN], {
-      cwd: '/tmp', env: { PYODIDE_DIR: dir },
+      `--allow-fs-read=${RUN}`, ...(font ? [`--allow-fs-read=${font}`] : []),
+      '--no-warnings', '--max-old-space-size=768', RUN], {
+      cwd: '/tmp', env: { PYODIDE_DIR: dir, FONT_FILE: font },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let out = '';
