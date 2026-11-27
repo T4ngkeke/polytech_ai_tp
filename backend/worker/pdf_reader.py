@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -22,6 +23,16 @@ CONFIG_HASH = hashlib.sha256(json.dumps(CONFIG, sort_keys=True).encode()).hexdig
 
 class PDFReadError(ValueError):
     pass
+
+
+# Control characters that a PDF text layer can map TeX glyphs to (a big
+# parenthesis as U+0000). PostgreSQL refuses U+0000 in text, which failed the
+# whole document; none of them is readable text.
+CONTROL_CHARACTERS = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+
+def _clean(value):
+    return CONTROL_CHARACTERS.sub('', value) if isinstance(value, str) else value
 
 
 def _rect(value, page):
@@ -135,6 +146,7 @@ def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
                     continue
                 rect=_rect(item.get('bbox'),page)
                 kind,content,fmt=_content(item,page,rect)
+                content=_clean(content)
                 if kind is None:
                     parsed_page.state='partial'
                     parsed_page.issues.append(ParseIssue(code='content_review',scope='page',page_id=page_id,
@@ -152,7 +164,7 @@ def read_pdf(path: Path, expected_sha256: str, work_dir: Path,
                     source_completeness='unknown' if kind in ('figure','formula','table','code') or not content else 'complete',
                     preview_required=kind=='figure',preview_scope='page',
                     source_text=content if kind in ('figure','heading','text','navigation') and isinstance(content,str) else None,
-                    model_candidate=item.get('content') if kind=='figure' and isinstance(item.get('content'),str) else None,
+                    model_candidate=_clean(item.get('content')) if kind=='figure' and isinstance(item.get('content'),str) else None,
                     figure_type=str(item.get('sub_type'))[:40] if kind=='figure' and item.get('sub_type') else None)
                 if kind=='figure':
                     block.asset_ids=(preview_id,)

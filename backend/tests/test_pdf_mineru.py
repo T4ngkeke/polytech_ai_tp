@@ -182,3 +182,15 @@ def test_footnotes_and_references_are_text(tmp_path):
     assert page.state == 'usable'
     assert [(b.kind, b.content) for b in page.blocks] == [
         ('text', 'ref_text'), ('text', 'page_footnote'), ('text', 'aside_text'), ('text', 'phonetic')]
+
+
+def test_control_characters_are_removed(tmp_path):
+    path = tmp_path / 'tex.pdf'
+    digest = make_pdf(path, 1)
+
+    def items(*_):
+        return [{'type': 'text', 'text': 'function \x00<sup>bk</sup>\x01 and\ttab\nline', 'bbox': [100, 100, 900, 200],
+                 'page_idx': 0}]
+    doc, _ = read_pdf(path, digest, tmp_path / 'work', items)
+    block = doc.pages[0].blocks[0]
+    assert block.content == block.source_text == 'function <sup>bk</sup> and\ttab\nline'
