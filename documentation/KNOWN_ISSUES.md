@@ -4,20 +4,20 @@
 
 This file lists the problems we know of and have not fixed yet: what the user sees, why it happens, and where in the code. Found on 2026-11-26 from a teacher's feedback on the release stack (an 81-page Beamer PDF of a deep learning course) and from checks on the release database and logs.
 
-## 1. "Some pages were not read" (fixed in 6233dad, not yet on release)
+## 1. "Some pages were not read" (fixed in 6233dad, on release since 2026-11-27)
 
 - **What the teacher saw.** The document was marked "some pages not read".
 - **Why.** MinerU (the PDF reader) returned a block type that our reader did not know: `page_footnote`, `aside_text`, `ref_text` or `phonetic`. An unknown type marked the whole page as not fully read, even when its text was read.
 - **Fix.** `_content()` in `backend/worker/pdf_reader.py` keeps these four types as text. On dev, the 81-page course now has every page read, with its footnotes.
 - **How much.** On release, 2 of 21 documents.
 
-## 2. "Page non ouverte" in the answer's steps (fixed in 518d699, not yet on release)
+## 2. "Page non ouverte" in the answer's steps (fixed in 518d699, on release since 2026-11-27)
 
 - **What the teacher saw.** A step "Could not open the page" while the agent works.
 - **Why.** The model called `read` with a `cursor` and also a `document`, and the argument check refused that ("a cursor needs no document"). The model also sometimes gave a cursor from `open` to `read` ("unknown read cursor"). It tried again and read the page, so nothing was lost; only the step list showed a failure.
 - **Fix.** A cursor of the run already names its tool, document and place: `follow_cursor()` in `backend/app/agent/tools/course.py` continues it with the cursor alone, by the tool that made it. A cursor with another anchor (a page) is still refused.
 
-## 3. Some formulas are shown as red LaTeX source (fixed in 2baf8f1, not yet on release)
+## 3. Some formulas are shown as red LaTeX source (fixed in 2baf8f1, on release since 2026-11-27)
 
 - **What the teacher saw.** Two numbered formulas (`\tag{11}`, `\tag{12}`) were not drawn.
 - **Why.** The model writes `$$ … $$` on one line. `remark-math` 6 reads that as a formula inside a sentence, and `\tag` only works in a formula on its own lines, so KaTeX showed the source in red.
@@ -31,14 +31,14 @@ This file lists the problems we know of and have not fixed yet: what the user se
 - **Why it is not enough.** The teacher's PI asks for no such sentence at all: the course's formula is the definition, and nothing it lacks needs saying. Later prompt versions still open 5 or 6 answers of 6 with "the course gives no formal definition, it defines it by its formula", because the model first looks for a "Definition" box. With the PI's own follow-up on the release answer, the model still searches the course (9 to 31 tool calls) before saying the formula was its general knowledge.
 - **Next.** A check of the finished answer that removes such sentences, and a small model call that tells a question about the previous answer from a question about the course (then no tools).
 
-## 5. Tables are shown as HTML code (fixed in 53f75ea and 21c63b4, not yet on release)
+## 5. Tables are shown as HTML code (fixed in 53f75ea and 21c63b4, on release since 2026-11-27)
 
 - **What the teacher saw.** In the document view, a table block showed `<table><tr><td>…`, with `&#x27;` instead of quotes. Formula blocks showed their LaTeX. Search cut a table every 400 to 600 bytes, often inside a cell, without its header: 89 of the 153 parts of release's 64 tables.
 - **Fix: the display (53f75ea).** `frontend/src/components/BlockContent.jsx` draws table and formula blocks: rehype-raw parses the HTML, rehype-sanitize keeps what GitHub keeps (table elements, rowspan, colspan), `lib/cellMath.js` marks the `$…$` in cells for rehype-katex. On release: 64 tables (19 with merged cells) and 355 formulas drawn, none with an error. `<img>` stays allowed by GitHub's rules; it could be removed too.
 - **Fix: search (21c63b4).** `backend/worker/table_chunks.py` cuts a table only between rows; each part is still an exact slice of the block. Search reads it as plain text (cells joined by " | ", entities decoded, merged cells repeated, the header row in front), stored in `doc_chunks.context`: the embedding, the tsv and the reranker read it, and the model sees it in search leads.
-- **Existing documents.** The display changes at once; search needs the index built again.
+- **Existing documents.** All release PDFs were read again on 2026-11-27, so their search uses the new parts.
 
-## 6. Reading a PDF is slow (improved in 6233dad and f7b9c4d, not yet on release)
+## 6. Reading a PDF is slow (improved in 6233dad and f7b9c4d, on release since 2026-11-27)
 
 - **What the teacher saw.** The 81-page PDF took about 25 minutes before it could be published.
 - **Where the time went.** MinerU reading the pages: about 20 minutes (15 s per page on average, 9 to 37 s). Picture descriptions: 90 s. Indexing: about 10 s. Waiting in the queue: 2 s.
@@ -48,20 +48,20 @@ This file lists the problems we know of and have not fixed yet: what the user se
 - **Measured and not faster.** Skipping the layout model (it loses the formulas inside sentences: 46 of 335 text blocks of this course), more MinerU processes at once, a larger KV cache, lower image resolution, `effort='medium'`, picture descriptions at the same time as the reading.
 - **Also fixed (13e9258).** A PDF text layer can contain control characters (U+0000); PostgreSQL refused them and the whole document failed. The reader now removes them.
 
-## 7. Captions and notes of pictures and tables were not kept (fixed in 21c63b4, not yet on release)
+## 7. Captions and notes of pictures and tables were not kept (fixed in 21c63b4, on release since 2026-11-27)
 
 - **What the teacher and students saw.** A picture's caption ("118 telescopes, 210 000 TB of data per year") or a table's title ("Table: Total learnable parameters…") was in neither the document view nor search.
 - **Why.** MinerU gives them as fields inside the block (`image_caption`, `image_footnote`, `table_caption`, `table_footnote`, `chart_caption`, `chart_footnote`, `code_caption`); the reader kept only the block's body.
 - **Fix.** `backend/worker/pdf_reader.py` (`ATTACHED`, `_attached()`) makes each one a text block next to its block: a table's title and a code caption before it, the others after it. On dev, the 81-page course now has 114 such blocks.
-- **Existing documents.** They must be read again.
+- **Existing documents.** All release PDFs were read again on 2026-11-27.
 
-## 8. Slide headers and footers repeated on every page were searched (fixed in 21c63b4, not yet on release)
+## 8. Slide headers and footers repeated on every page were searched (fixed in 21c63b4, on release since 2026-11-27)
 
 - **What students saw.** A search for a section name ("Affect measure") found the same navigation bar on many pages before the page that teaches it.
 - **Why.** MinerU marks a Beamer slide's navigation bar, author, title and page counter as `header`, `footer` and `page_number`; the reader keeps them as `navigation` blocks, and every one with text was searched.
 - **Fix.** `backend/worker/structured_ingest.py` (`repeated_navigation()`): a navigation text found on 3 pages or more is left out of search when the document is read (`index_state` excluded, `structure.exclusion.by` None: not a teacher's change, so a new reading decides again). One found on fewer pages stays searchable, since MinerU may mark content as a header. The teacher sees why and can put a block back.
 - **Result on dev.** The 81-page course: 482 navigation blocks left out, 96 still searched; chunks for "Affect measure": 3 instead of 14; 855 chunks instead of 1248.
-- **Existing documents.** They must be read again.
+- **Existing documents.** All release PDFs were read again on 2026-11-27.
 
 ## 9. Files that students attach in the chat (limits of the current design; long files improved in f55e8ed)
 
