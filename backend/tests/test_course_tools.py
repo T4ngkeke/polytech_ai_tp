@@ -223,6 +223,25 @@ async def test_next_page_and_cursor_handles_resolve_without_navigate():
 
 
 @pytest.mark.asyncio
+async def test_a_cursor_with_its_document_or_given_to_another_tool_still_continues():
+    tools = ViewFixture()
+    course = CourseTools(tools)
+    await course.call('read', {'page': 'd1.p9'})                    # makes c1, a read cursor
+    text, ok = await course.call('read', {'cursor': 'c1', 'document': 'd1'})
+    assert ok and tools.calls[-1] == ('read', {'document_id': str(tools.doc), 'page_id': str(tools.p9),
+                                               'cursor': 'signed-page-cursor'})
+    await course.call('open', {'page': 'd1.p9'})                    # makes c2, an open cursor
+    text, ok = await course.call('read', {'cursor': 'c2'})
+    assert ok and tools.calls[-1] == ('open', {'document_id': str(tools.doc), 'cursor': 'signed-open-cursor'})
+    assert course.trace[-1]['name'] == 'open'
+    # A cursor with another anchor is still refused, and so is an unknown cursor.
+    text, ok = await course.call('read', {'cursor': 'c1', 'page': 'd1.p10'})
+    assert not ok and 'exactly one of page, block or cursor' in text
+    text, ok = await course.call('read', {'cursor': 'c9'})
+    assert not ok and "unknown read cursor 'c9'" in text
+
+
+@pytest.mark.asyncio
 async def test_failed_visual_calls_do_not_use_the_visual_budget():
     tools = ViewFixture()
     real = tools.execute

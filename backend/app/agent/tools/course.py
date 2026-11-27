@@ -291,6 +291,17 @@ class ToolView:
                                        'cursor': cursor})
         return handle
 
+    def follow_cursor(self, name: str, arguments: dict) -> tuple[str, dict]:
+        """A cursor of this run already names its tool, document and place.
+        Models add the document again (read cursor="c3" document="d1"), or give
+        an open cursor to read. Both are continued with the cursor alone, by the
+        tool that made it. A cursor with another anchor (a page, a pattern) is
+        left to the argument check, which refuses it."""
+        cursor = (arguments or {}).get('cursor')
+        if not isinstance(cursor, str) or cursor not in self.cursors or set(arguments) - {'cursor', 'document'}:
+            return name, arguments
+        return self.cursors[cursor][0], {'cursor': cursor}
+
     def translate(self, name: str, arguments: dict) -> dict:
         """Model arguments with handles -> ResearchTools arguments. Raises HandleError."""
         schema = VIEW_SCHEMAS.get(name)
@@ -597,6 +608,7 @@ class CourseTools:
     async def call(self, name: str, arguments: dict) -> tuple[str, bool]:
         """One model call with handles: translate, execute, render compact text."""
         await self._load_view()
+        name, arguments = self.view.follow_cursor(name, arguments)
         try:
             raw = self.view.translate(name, arguments)
         except HandleError as exc:
