@@ -50,6 +50,7 @@ from backend.app.schemas import ChatStreamRequest, CitationOpenedRequest, CodeRe
 from backend.app.services import chat_file_service, feature_service, memory_service, quota_service, rule_service
 from backend.app.services.session_service import visible_in_exam
 from backend.app.agent.context import attachments as agent_attachments
+from backend.app.agent.tools.files import FileTools
 from backend.app.agent.context import memory as agent_memory
 from backend.app.agent import follow_ups as agent_follow_ups
 from backend.app.agent.context import compaction as agent_compaction
@@ -313,7 +314,7 @@ async def chat_stream(
             history, _, _ = await runs.load_context(replace(full_scope, session_id=session_id),
                                                     limit=HISTORY_MESSAGES)
             return history
-        attachment_block, images, _ = await agent_attachments.build(
+        attachment_block, images, _, long_files = await agent_attachments.build(
             db, attachments, storage_root=get_storage_root(),
             earlier_chat=earlier_chat)
         # Only what fits the history limit is sent, with the citations of
@@ -442,6 +443,7 @@ async def chat_stream(
             teaching_rules=teaching_rules, research_note=DEEP_NOTE if deep else '',
             memory_context=memory_block, attachment_context=attachment_block, images=images,
             web_tools=WebTools(settings.WEB_SEARCH_URL) if web else None, code_tools=code_tools,
+            file_tools=FileTools(long_files) if long_files else None,
             embed_fn=embed_query,
             rerank_fn=_make_rerank_fn(llm_config),
             embed_model=llm_config['embedding_model'],

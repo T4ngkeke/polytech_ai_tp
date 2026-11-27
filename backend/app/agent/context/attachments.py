@@ -5,8 +5,9 @@ resolve_attachments). As in Open WebUI:
 
 - An image goes to the model inside the question (an image part).
 - A PDF or text file goes in as text when it is short; a long one is cut at
-  ATTACH_TEXT_CHARS, with a note (Open WebUI gives a short file whole and
-  searches a long one; here the student is asked for the part that matters).
+  ATTACH_TEXT_CHARS. Its handle (f1…) lets the model read the rest
+  (agent/tools/files.py: read_file, grep_file), as ChatGPT or Claude put the
+  start of a long file in the prompt and search the rest.
   A scanned PDF has no text: the model is told to ask for a screenshot.
 - A course file limits the course search of this question to it (the chat
   narrows the research scope).
@@ -25,6 +26,7 @@ import re
 import uuid
 from pathlib import Path
 
+from backend.app.agent.tools.files import AttachedText
 from backend.app.models import ChatFile
 
 ATTACH_TEXT_CHARS = 20_000
@@ -69,11 +71,12 @@ def _earlier_chat(history: list[dict]) -> str:
 
 
 async def build(db, attachments: list[dict] | None, *, storage_root: str,
-                earlier_chat=None) -> tuple[str, list[str], list[str]]:
-    """(text block, image data URLs, names of the course files the search is limited to).
+                earlier_chat=None) -> tuple[str, list[str], list[str], dict[str, AttachedText]]:
+    """(text block, image data URLs, names of the course files the search is
+    limited to, the long files by handle for agent/tools/files.FileTools).
     earlier_chat(session_id) -> the safe history of an attached chat
     (ResearchRuns.load_context); None: attached chats are left out."""
-    blocks, images, documents = [], [], []
+    blocks, images, documents, long_files = [], [], [], {}
     for item in attachments or ():
         if item['kind'] == 'document':
             documents.append(item['name'])
@@ -97,12 +100,19 @@ async def build(db, attachments: list[dict] | None, *, storage_root: str,
         else:
             text = row.text or ''
             if row.text_chars > ATTACH_TEXT_CHARS or len(text) > ATTACH_TEXT_CHARS:
-                text = (text[:ATTACH_TEXT_CHARS] + f'\n[Cut: the file has {row.text_chars} characters. '
-                        'If the answer needs another part, ask the student which part matters.]')
+                handle = f'f{len(long_files) + 1}'
+                long_files[handle] = AttachedText(row.filename, text, row.text_chars)
+                text = (text[:ATTACH_TEXT_CHARS] + f'\n[Cut: the file {handle} has {row.text_chars} characters; '
+                        f'the first {ATTACH_TEXT_CHARS} are above. read_file(file="{handle}", '
+                        f'start={ATTACH_TEXT_CHARS}) reads on; grep_file(file="{handle}", pattern=...) '
+                        'finds a passage.]')
+                blocks.append(f'<file name="{_escape(row.filename)}" handle="{handle}">\n{_content(text)}\n</file>')
+                continue
             blocks.append(f'<file name="{_escape(row.filename)}">\n{_content(text)}\n</file>')
     if documents:
         blocks.append('The student asked to search only in these course files: '
                       + ', '.join(_escape(d) for d in documents) + '.')
     if not blocks:
-        return '', images, documents
-    return '<attachments>\n' + '\n'.join(blocks) + '\n</attachments>\n' + ATTACHED_NOTE, images, documents
+        return '', images, documents, long_files
+    return ('<attachments>\n' + '\n'.join(blocks) + '\n</attachments>\n' + ATTACHED_NOTE,
+            images, documents, long_files)

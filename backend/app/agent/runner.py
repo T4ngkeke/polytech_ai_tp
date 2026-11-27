@@ -34,6 +34,7 @@ from backend.app.agent.tools.code import CODE_TOOL_NAMES, CODE_TOOLS, NO_CODE_NO
 from backend.app.agent.visuals import VISUAL_NOTE
 from backend.app.agent.tools.tasks import TASK_TOOL_NAMES, TASK_TOOLS, TaskList
 from backend.app.agent.tools.web import WEB_NOTE, WEB_TOOL_NAMES, WEB_TOOLS, WebTools
+from backend.app.agent.tools.files import FILE_NOTE, FILE_TOOL_NAMES, FILE_TOOLS, FileTools
 from backend.app.agent.result import (
     ResearchQuotaExceeded, ResearchResult, ResearchRunStopped, call_usage, cited_ids, cited_sources,
     malformed_refs,
@@ -333,6 +334,12 @@ def step_of(name: str, arguments: str | None, result: str) -> dict | None:
         number = re.match(r'page (\d+)', page)
         return {'tool': name, 'file': parts[1] if len(parts) > 1 and ok else None,
                 'page': int(number.group(1)) if number else None, 'ok': ok}
+    if name == 'read_file':
+        # 'f1 · notes.pdf · characters 20000-28000 of 91000'
+        parts = [p.strip() for p in first.split(' · ')]
+        return {'tool': name, 'file': parts[1] if len(parts) > 2 and ok else None, 'ok': ok}
+    if name == 'grep_file':
+        return {'tool': name, 'query': str(args.get('pattern') or '')[:120], 'ok': ok}
     if name == 'search_web':
         try:
             count = len(json.loads(result)) if ok else None
@@ -364,6 +371,7 @@ class ResearchRunner:
                  offer_tasks: bool = True,
                  web_tools: WebTools | None = None,
                  code_tools: CodeTools | None = None,
+                 file_tools: FileTools | None = None,
                  clock: Callable[[], float] = time.monotonic):
         # model: model.ResearchModel, or a wrapper with the same call (billing, tests).
         self.course_tools, self.model = course_tools, model
@@ -391,6 +399,8 @@ class ResearchRunner:
         # Python in the student's browser (tools/code.py, from Open WebUI): only
         # when the student turned it on and the lab allows it; None otherwise.
         self.code_tools = code_tools
+        # The student's long attached files (tools/files.py); None: no file was cut.
+        self.file_tools = file_tools
 
     async def run(self, question: str, *, history: list[dict] | None = None,
                   teaching_rules: str = '', research_note: str = '',
@@ -422,6 +432,7 @@ class ResearchRunner:
         system = (system_prompt(self.max_tool_calls, tools.max_visual_calls)
                   + (('\n' + CATALOGUE_NOTE + '\n' + catalogue) if catalogue else '')
                   + ('\n' + WEB_NOTE if self.web_tools else '')
+                  + ('\n' + FILE_NOTE if self.file_tools else '')
                   + '\n' + (self.code_tools.note if self.code_tools else NO_CODE_NOTE)
                   + '\n' + VISUAL_NOTE
                   + '\n' + teaching_rules + '\n' + research_note)
@@ -446,7 +457,8 @@ class ResearchRunner:
         read_turn_sent = False
         drafted = False  # draft text was sent and not withdrawn
         offered = (COURSE_TOOLS + ([ASK_STUDENT] if allow_ask else []) + (TASK_TOOLS if self.offer_tasks else [])
-                   + (WEB_TOOLS if self.web_tools else []) + (CODE_TOOLS if self.code_tools else []))
+                   + (WEB_TOOLS if self.web_tools else []) + (CODE_TOOLS if self.code_tools else [])
+                   + (FILE_TOOLS if self.file_tools else []))
         checklist = TaskList(self.on_tasks)
         clarification = None
         seen_pages: set = set()  # pages any search or grep of this run returned
@@ -586,6 +598,10 @@ class ResearchRunner:
                         self.on_phase('searching_web')
                         other_research += 1
                         text = await self.web_tools.call(c['name'], c['arguments'])
+                    elif self.file_tools and c['name'] in FILE_TOOL_NAMES:
+                        # The student's file: its own budget, never course evidence.
+                        other_research += 1
+                        text = await self.file_tools.call(c['name'], c['arguments'])
                     elif self.code_tools and c['name'] in CODE_TOOL_NAMES:
                         # Its own budget; the wait for the browser is not research time.
                         self.on_phase('running_code')

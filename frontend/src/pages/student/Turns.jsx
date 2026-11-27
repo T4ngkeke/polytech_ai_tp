@@ -32,6 +32,8 @@ function stepText(t, s) {
     case 'search_web': return t('step.web', { q: s.query }) + (s.count != null ? ` · ${t('step.webFound', { n: s.count })}` : '');
     case 'fetch_url': { let host = s.url; try { host = new URL(s.url).hostname; } catch { /* keep */ } return t('step.fetch', { url: host }); }
     case 'execute_code': return t('step.code');
+    case 'read_file': return s.file ? t('step.readFile', { file: s.file }) : t('step.readFileFailed');
+    case 'grep_file': return t('step.grepFile', { q: s.query });
     default: return s.tool;
   }
 }
