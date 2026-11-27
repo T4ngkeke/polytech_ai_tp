@@ -33,6 +33,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import { displayMathOnOwnLines } from '../lib/displayMath.js';
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-async';
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
 import { outputParts } from '../lib/python';
@@ -175,10 +176,12 @@ function makeComponents({ streaming, onCite, citeInfo, webSources, onRun }) {
 function MessageContent({ content, streaming = false, onCite = null, citeInfo = null, webSources = null, onRun = null }) {
   const components = useMemo(() => makeComponents({ streaming, onCite, citeInfo, webSources, onRun }),
     [streaming, onCite, citeInfo, webSources, onRun]);
+  // `$$ … $$` on one line would be drawn as a formula inside a sentence (lib/displayMath.js).
+  const markdown = useMemo(() => displayMathOnOwnLines(content), [content]);
   return (
     <div className="prose-chat break-words">
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
-        {content}
+        {markdown}
       </ReactMarkdown>
     </div>
   );
