@@ -33,6 +33,7 @@ This file says what the project is, what it does today and how to run it. The de
 
 ### Known gaps
 
+- The problems found from users' feedback and not fixed yet are listed in [KNOWN_ISSUES.md](documentation/KNOWN_ISSUES.md).
 - The vector index (HNSW) and the full-text index (GIN) are not created by any code. Both searches read the whole table. Results are correct, but they will slow down as the material grows. See [DATABASE.md](documentation/DATABASE.md).
 - There is no migration tool for ordinary tables. The tables are created with `create_all`. Changes to existing tables are SQL files applied by `scripts/migrate_document_snapshots.py`.
 - `backend/requirements.txt` still lists some packages that no code imports any more.
@@ -50,6 +51,7 @@ This file says what the project is, what it does today and how to run it. The de
 | [documentation/LOCAL_SETUP.md](documentation/LOCAL_SETUP.md) | The dev stack step by step, the models to set and how to check that it works. |
 | [documentation/RELEASE_TEACHERS.md](documentation/RELEASE_TEACHERS.md) | The installation that the teachers use (`docker-compose.release.yml`). |
 | [documentation/MONITORING.md](documentation/MONITORING.md) | Grafana, Prometheus and the admin-only access check. |
+| [documentation/KNOWN_ISSUES.md](documentation/KNOWN_ISSUES.md) | Problems we know of and have not fixed yet: what users see, why, and where in the code. |
 | [documentation/M4_AGENT_EVALUATION.md](documentation/M4_AGENT_EVALUATION.md) | The benchmark of the research agent (and of the old answer modes), its results and how to run it. |
 | [backend/app/agent/README.md](backend/app/agent/README.md) | The files of the chat agent. |
 | [frontend/README.md](frontend/README.md) | The files of the web app, and its checks. |
@@ -168,9 +170,9 @@ The worker also reads these:
 | `PDF_MINERU_SERVER_URL` | none | MinerU model server. The admin can switch it in the model settings. |
 | `PDF_MINERU_API_KEY` | none | Key of the MinerU server. Used only when the model settings have no key for MinerU and no main model key. |
 | `PDF_MINERU_CONFIG` | none | Absolute path of `mineru.json`. |
+| `PDF_MINERU_GPU_URL` | none | The service that runs MinerU's small models on the GPU (`http://edullm-mineru-gpu:8000`). None: they run on the worker's CPU. |
 | `PDF_MINERU_PAGE_TIMEOUT_SECONDS` | `240` | Time allowed for one group of 16 pages, or for one page read alone. |
 | `PDF_READ_BUDGET_SECONDS` | `7200` | Time allowed for reading one PDF. |
-| `PDF_MINERU_GPU_URL` | none | The service that runs MinerU's small models on the GPU (`http://edullm-mineru-gpu:8000`). None: they run on the worker's CPU. |
 | `STRUCTURED_LEASE_SECONDS`, `STRUCTURED_MAX_ATTEMPTS` | `1800`, `3` | How long a worker holds a job, and how often a job is tried. |
 | `STRUCTURED_TASK_ROOT` | system temp folder | Working folder of the worker. |
 
