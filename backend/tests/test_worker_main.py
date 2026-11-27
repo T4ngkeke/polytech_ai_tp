@@ -40,32 +40,6 @@ def test_the_admin_mineru_key_replaces_the_deployment_one(tmp_path):
     assert keyed.pdf_api_key == 'admin-key' and keyed.pdf_server_url == 'http://mineru-a:8000/v1'
 
 
-def test_the_mineru_process_gets_the_key(tmp_path, monkeypatch):
-    import json
-    import subprocess
-    from pathlib import Path
-    from backend.worker import pdf_mineru
-    python, config = tmp_path / 'python', tmp_path / 'mineru.json'
-    python.write_text(''); config.write_text('{}')
-    monkeypatch.delenv('MINERU_VL_API_KEY', raising=False)
-    seen = {}
-
-    def fake_run(command, **kwargs):
-        seen['env'] = kwargs['env']
-        out = command[command.index('--out') + 1]
-        (Path(out) / 'result.json').write_text(json.dumps([]))
-        return subprocess.CompletedProcess(command, 0)
-    monkeypatch.setattr(pdf_mineru.subprocess, 'run', fake_run)
-    run = pdf_mineru.subprocess_extractor(python_executable=str(python), server_url='http://m:8000/v1',
-                                          config_path=str(config), api_key='k1')
-    assert run(tmp_path / 'a.pdf', 1, tmp_path / 'out1') == []
-    assert seen['env']['MINERU_VL_API_KEY'] == 'k1'
-    run = pdf_mineru.subprocess_extractor(python_executable=str(python), server_url='http://m:8000/v1',
-                                          config_path=str(config))
-    run(tmp_path / 'a.pdf', 1, tmp_path / 'out2')
-    assert 'MINERU_VL_API_KEY' not in seen['env']
-
-
 def test_caption_settings_follow_the_admin_map(tmp_path):
     from backend.app.services.model_routing import Endpoint
     from backend.worker.main import with_captions

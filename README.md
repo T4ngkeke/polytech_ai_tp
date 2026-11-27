@@ -168,7 +168,7 @@ The worker also reads these:
 | `PDF_MINERU_SERVER_URL` | none | MinerU model server. The admin can switch it in the model settings. |
 | `PDF_MINERU_API_KEY` | none | Key of the MinerU server. Used only when the model settings have no key for MinerU and no main model key. |
 | `PDF_MINERU_CONFIG` | none | Absolute path of `mineru.json`. |
-| `PDF_MINERU_PAGE_TIMEOUT_SECONDS` | `240` | Time allowed for one page. |
+| `PDF_MINERU_PAGE_TIMEOUT_SECONDS` | `240` | Time allowed for one group of 16 pages, or for one page read alone. |
 | `PDF_READ_BUDGET_SECONDS` | `7200` | Time allowed for reading one PDF. |
 | `STRUCTURED_LEASE_SECONDS`, `STRUCTURED_MAX_ATTEMPTS` | `1800`, `3` | How long a worker holds a job, and how often a job is tried. |
 | `STRUCTURED_TASK_ROOT` | system temp folder | Working folder of the worker. |

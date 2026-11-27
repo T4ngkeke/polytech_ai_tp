@@ -10,7 +10,7 @@ A teacher uploads a PDF to a lab or to a class. The upload creates an immutable 
 
 The worker then runs two jobs on the revision:
 
-1. **Read.** The worker reads each physical page with MinerU. It normalizes the result into blocks (heading, text, code, formula, table, figure) and records issues. It keeps the original PDF and a preview of each page.
+1. **Read.** The worker reads the physical pages with MinerU: one MinerU process for the whole document, 16 pages per MinerU call. When a group of 16 pages fails, its pages are read again one process per page, so a bad page costs only itself. It normalizes the result into blocks (heading, text, code, formula, table, figure) and records issues. It keeps the original PDF and a preview of each page.
 2. **Index.** The same job becomes an index job. It cuts the blocks into passages, embeds them, and checks the embedding batches. A passage keeps exact character ranges into its block.
 
 An upload is never published by the worker: when every page was read and the index is ready, the revision waits as a draft, and the teacher publishes it from the document view ("Publish"). A teacher's edit or a new reading is published at once when every page was read. If a page could not be read, the revision stays a draft and the teacher decides ("Publish anyway").
@@ -32,7 +32,7 @@ Ingestion is off by default. Turn it on only in the environment where it should 
    python -m scripts.migrate_document_snapshots --database-url "$DB_URL" --apply
    ```
 
-2. Give the worker the MinerU settings. The variables and their defaults are in [README.md](../README.md): `PDF_MINERU_PYTHON`, `PDF_MINERU_SERVER_URL`, `PDF_MINERU_CONFIG` (an absolute path), `PDF_MINERU_PAGE_TIMEOUT_SECONDS` (240), `PDF_READ_BUDGET_SECONDS` (7200), and the lease and attempt settings. A missing setting or a MinerU version other than 3.4.5 is an explicit failure of the job.
+2. Give the worker the MinerU settings. The variables and their defaults are in [README.md](../README.md): `PDF_MINERU_PYTHON`, `PDF_MINERU_SERVER_URL`, `PDF_MINERU_CONFIG` (an absolute path), `PDF_MINERU_PAGE_TIMEOUT_SECONDS` (240: the time allowed for one group of pages, or for a page read alone), `PDF_READ_BUDGET_SECONDS` (7200), and the lease and attempt settings. A missing setting or a MinerU version other than 3.4.5 is an explicit failure of the job.
 
 Both compose files set these for the worker.
 
@@ -61,7 +61,7 @@ MinerU has three parts. All of them are outside the backend image.
 
    The mount, the key file and `--middleware` make the server refuse requests without the key ([MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)).
 
-2. **Client.** The worker image built with `--build-arg WITH_MINERU=1` has MinerU 3.4.5 at `/opt/mineru/bin/python`, with CPU torch for the local layout and OCR models. The worker calls MinerU in this separate interpreter. One page takes 15 to 20 seconds and at most 0.8 GB.
+2. **Client.** The worker image built with `--build-arg WITH_MINERU=1` has MinerU 3.4.5 at `/opt/mineru/bin/python`, with CPU torch for the local layout and OCR models. The worker calls MinerU in this separate interpreter. MinerU's own description of each picture (`image_analysis`) is off: nothing used it, and the picture captions come from the main model. An 81-page course took about 5.5 minutes to read (1.5 to 5 seconds per page, most of it the CPU layout pass) and the MinerU process stays under 1.5 GB.
 3. **Models and config.** Run `mineru-models-download -s huggingface -m pipeline` once, with `HOME` and `HF_HOME` in `/home/spark-1/edullm-mineru/home` (2.5 GB). Then write `mineru.json` with the pipeline path as the worker sees it (`/opt/mineru-data/...`) and `"model-source": "local"`. The worker mounts the folder read-only at `/opt/mineru-data`.
 
 The MinerU server can change without a restart. The PDF reader row of the admin model settings stores `PDF_MINERU_SERVER_URL` and its key `PDF_MINERU_API_KEY` in `system_configs`, and the worker uses them from its next loop. The key goes to MinerU's client as `MINERU_VL_API_KEY`; when the field is empty, the main model key is used (see [MODEL_SERVERS.md](MODEL_SERVERS.md#the-key)). When it is empty, the worker uses the value of its environment. The client, its models and `mineru.json` are deployment settings.

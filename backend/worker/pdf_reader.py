@@ -15,7 +15,7 @@ from backend.worker.document_ir import (ParsedAsset, ParsedBlock, ParsedDocument
 IDENTITY_VERSION = 'pdf-block-v1'
 READER_VERSION = 'mineru-text-m3a-1'
 CONFIG = {'backend': 'hybrid-http-client', 'parse_method': 'auto', 'formula_enable': True,
-          'table_enable': True, 'lang': 'ch', 'effort': 'high', 'image_analysis': True,
+          'table_enable': True, 'lang': 'ch', 'effort': 'high', 'image_analysis': False,
           'figure_text': 'native_pdf_region'}
 CONFIG_HASH = hashlib.sha256(json.dumps(CONFIG, sort_keys=True).encode()).hexdigest()
 
@@ -58,6 +58,10 @@ def _content(item, page, rect):
         return ('navigation', item.get('text'), 'plain')
     if kind == 'text':
         return ('heading' if item.get('text_level') else 'text', item.get('text'), 'plain')
+    # The other text blocks MinerU writes: references, footnotes, margin text,
+    # pronunciation notes. Text the student may look for, so not navigation.
+    if kind in ('ref_text', 'page_footnote', 'aside_text', 'phonetic'):
+        return ('text', item.get('text'), 'plain')
     return (None, None, None)
 
 

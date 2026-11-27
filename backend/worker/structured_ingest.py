@@ -182,6 +182,11 @@ def run_pdf_pipeline(source: Path, expected_sha256: str, work_dir: Path, *,
                                      on_page=on_page)
     except PDFReadError as exc:
         raise JobFailed(str(exc)) from exc
+    finally:
+        # The MinerU process reads ahead; stop it when reading ends early.
+        close = getattr(extractor, 'close', None)
+        if close is not None:
+            close()
     if model_config_sha:
         metrics['model_config_sha256'] = model_config_sha
     metrics['mineru_version'] = '3.4.5' if frozen_mineru else None
@@ -430,7 +435,7 @@ async def _write_progress(db, claim: StructuredClaim, progress: PageProgress, st
     """Store the progress in the job row, and extend the lease, until `stop`
     is set. Runs only while the job waits for the reader thread, so it never
     shares the session with other work. A write that fails is skipped; the
-    next one tries again (a page takes at most the page timeout, far below
+    next one tries again (a group of pages waits at most the page timeout, far below
     the lease)."""
     written = None
     while True:
