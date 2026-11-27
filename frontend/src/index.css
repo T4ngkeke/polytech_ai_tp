@@ -213,6 +213,8 @@
   .prose-chat .katex-display { overflow-x: auto; overflow-y: hidden; }
   .prose-chat th, .prose-chat td { border-bottom: 1px solid rgb(var(--line) / var(--line-default)); padding: 0.4rem 0.75rem; text-align: left; }
   .prose-chat th { font-weight: 600; }
+  /* Tables of a document (BlockContent): merged cells need every border. */
+  .prose-chat.prose-table th, .prose-chat.prose-table td { border: 1px solid rgb(var(--line) / var(--line-default)); vertical-align: top; }
   .prose-chat a { word-break: break-word; }
   .prose-chat hr { border: 0; border-top: 1px solid rgb(var(--line) / var(--line-default)); }
   /* Old chat bubbles and the teacher's pages keep the smaller text. */

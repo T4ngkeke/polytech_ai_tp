@@ -7,7 +7,7 @@
  * the version shown is never changed. Nothing here publishes: a draft first
  * needs its index (M3).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 
 import api, { responseError } from '../lib/api';
@@ -16,6 +16,10 @@ import {
 } from '../lib/documentBlocks';
 import { useT } from '../lib/i18n';
 import Icon from './Icon';
+
+// Tables and formulas drawn (KaTeX, filtered HTML); loaded only when a page shows one.
+const BlockContent = lazy(() => import('./BlockContent'));
+const DRAWN = new Set(['table', 'formula']);
 
 const KINDS = ['heading', 'text', 'code', 'formula', 'table', 'figure', 'navigation'];
 const DESCRIBABLE = new Set(['figure', 'formula', 'table']);
@@ -232,6 +236,10 @@ function DisplayText({ text, kind }) {
         : <span key={i}>{piece.text}</span>));
 }
 
+function SourceText({ block }) {
+  return <pre className="whitespace-pre-wrap break-words font-mono text-sm text-cream-secondary"><DisplayText text={block.content} kind={block.type} /></pre>;
+}
+
 function RevisionSummary({ revision }) {
   const t = useT();
   const label = useLabels();
@@ -429,7 +437,9 @@ function BlockCard({ block, number, busy, change, docId, preview, pageRatio, act
             </div>
           ) : (
             block.content
-              ? <pre className="whitespace-pre-wrap break-words font-mono text-sm text-cream-secondary"><DisplayText text={block.content} kind={block.type} /></pre>
+              ? (DRAWN.has(block.type)
+                ? <Suspense fallback={<SourceText block={block} />}><BlockContent kind={block.type} content={block.content} /></Suspense>
+                : <SourceText block={block} />)
               : !bare && <p className="text-[14px] text-cream-muted">—</p>
           )}
           {block.content_description && !editing && <p className="mt-1 text-[13px] italic text-cream-secondary"><DisplayText text={block.content_description} /></p>}
