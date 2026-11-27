@@ -69,9 +69,11 @@ async def test_each_kind_of_attachment(db_session, tmp_path):
     assert images and images[0].startswith('data:image/png;base64,')
     assert '<file name="fib.py">\ndef fib(n):\n    return fib(n + 1)\n</file>' in block
     # A long file: its start, a handle and how to read the rest (agent/tools/files.py).
+    # It shares the budget with the short file and the earlier chat, which come whole.
     assert '<file name="notes.txt" handle="f1">' in block
     assert f'[Cut: the file f1 has {at.ATTACH_TEXT_CHARS + 50} characters;' in block
-    assert f'read_file(file="f1", start={at.ATTACH_TEXT_CHARS})' in block
+    cut = int(block.split('read_file(file="f1", start=')[1].split(')')[0])
+    assert at.ATTACH_TEXT_CHARS - 200 < cut < at.ATTACH_TEXT_CHARS
     assert list(long_files) == ['f1'] and long_files['f1'].name == 'notes.txt'
     assert long_files['f1'].total_chars == at.ATTACH_TEXT_CHARS + 50
     assert at.NO_TEXT_NOTE in block
@@ -181,3 +183,29 @@ def test_an_earlier_chat_whose_last_message_is_too_long_keeps_its_start():
     assert len(text) == at.EARLIER_CHAT_CHARS
     short = at._earlier_chat([{'role': 'user', 'content': 'Q ?'}, {'role': 'assistant', 'content': 'R.'}])
     assert short == 'student: Q ?\n\nassistant: R.'
+
+
+def test_a_short_text_takes_what_it_needs_and_the_long_ones_share_the_rest():
+    assert at.share_out([], 100) == []
+    assert at.share_out([10, 500, 30], 100) == [10, 60, 30]
+    assert at.share_out([500, 500, 500, 500, 500], 100) == [20, 20, 20, 20, 20]
+    assert at.share_out([40, 40], 100) == [40, 40]
+    assert sum(at.share_out([7, 900, 3, 250, 66], 1000)) <= 1000
+
+
+@pytest.mark.asyncio
+async def test_five_long_files_together_stay_within_the_budget(db_session, tmp_path):
+    user = make_user(username='tom')
+    db_session.add(user)
+    await db_session.flush()
+    refs = []
+    for n in range(5):
+        row = await cfs.save(db_session, root=str(tmp_path), user_id=user.id, lab_id=None,
+                             filename=f'long{n}.txt', data=(f'Fichier {n}\n' + 'x' * 30_000).encode())
+        refs.append(ref('file', row, f'long{n}.txt'))
+    await db_session.commit()
+    block, _, _, long_files = await at.build(db_session, refs, storage_root=str(tmp_path))
+    assert list(long_files) == ['f1', 'f2', 'f3', 'f4', 'f5']
+    share = at.ATTACH_TEXT_CHARS // 5
+    assert all(f'read_file(file="f{n}", start={share})' in block for n in range(1, 6))
+    assert len(block) < at.ATTACH_TEXT_CHARS + 3_000      # the texts, plus tags and notes

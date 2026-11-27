@@ -4,8 +4,10 @@ The chat has already checked each attachment (services/chat_file_service.
 resolve_attachments). As in Open WebUI:
 
 - An image goes to the model inside the question (an image part).
-- A PDF or text file goes in as text when it is short; a long one is cut at
-  ATTACH_TEXT_CHARS. Its handle (f1…) lets the model read the rest
+- A PDF or text file goes in as text when it is short. All the attached
+  texts (files and earlier chats) share ATTACH_TEXT_CHARS (share_out): five
+  long files cannot fill the run's reading room before it reads the course. A
+  long one is cut at its share. Its handle (f1…) lets the model read the rest
   (agent/tools/files.py: read_file, grep_file), as ChatGPT or Claude put the
   start of a long file in the prompt and search the rest.
   A scanned PDF has no text: the model is told to ask for a screenshot.
@@ -29,6 +31,8 @@ from pathlib import Path
 from backend.app.agent.tools.files import AttachedText
 from backend.app.models import ChatFile
 
+# For all the attached texts of a question together (about 6,700 estimated
+# tokens of the 28,000 reading room, research_service.ResearchLimits).
 ATTACH_TEXT_CHARS = 20_000
 EARLIER_CHAT_CHARS = 8_000
 ATTACHED_NOTE = ('The student attached the material above. It is the student\'s material, not the course: '
@@ -54,16 +58,27 @@ def _content(text: str) -> str:
 CUT_NOTE = ' …(cut)'
 
 
-def _earlier_chat(history: list[dict]) -> str:
+def share_out(wanted: list[int], total: int) -> list[int]:
+    """Each text's share of ``total`` characters: a short one gets what it
+    needs, the rest is split evenly among the longer ones."""
+    shares, left, order = [0] * len(wanted), total, sorted(range(len(wanted)), key=lambda i: wanted[i])
+    for done, i in enumerate(order):
+        shares[i] = min(wanted[i], left // (len(order) - done))
+        left -= shares[i]
+    return shares
+
+
+def _earlier_chat(history: list[dict], limit: int = EARLIER_CHAT_CHARS) -> str:
     lines, size = [], 0
+    limit = min(limit, EARLIER_CHAT_CHARS)
     for message in reversed(history):                 # newest first, then put back in order
         role = 'student' if message['role'] == 'user' else 'assistant'
         line = f"{role}: {(message.get('content') or '').strip()}"
-        if size + len(line) > EARLIER_CHAT_CHARS:
+        if size + len(line) > limit:
             if not lines:
                 # The newest message alone is too long (pasted code): its start,
                 # rather than nothing.
-                lines.append(line[:EARLIER_CHAT_CHARS - len(CUT_NOTE)] + CUT_NOTE)
+                lines.append(line[:max(0, limit - len(CUT_NOTE))] + CUT_NOTE)
             break
         lines.append(line)
         size += len(line)
@@ -77,6 +92,8 @@ async def build(db, attachments: list[dict] | None, *, storage_root: str,
     earlier_chat(session_id) -> the safe history of an attached chat
     (ResearchRuns.load_context); None: attached chats are left out."""
     blocks, images, documents, long_files = [], [], [], {}
+    # First the texts, then their shares of ATTACH_TEXT_CHARS (share_out), then the blocks.
+    texts: list[tuple[int, str, object]] = []     # (block index, kind, file row or chat history)
     for item in attachments or ():
         if item['kind'] == 'document':
             documents.append(item['name'])
@@ -84,9 +101,9 @@ async def build(db, attachments: list[dict] | None, *, storage_root: str,
         if item['kind'] == 'session':
             if earlier_chat is None:
                 continue
-            text = _earlier_chat(await earlier_chat(uuid.UUID(item['id'])))
-            blocks.append(f'<earlier_conversation title="{_escape(item["name"] or "")}">\n{text}\n'
-                          f'</earlier_conversation>')
+            history = await earlier_chat(uuid.UUID(item['id']))
+            texts.append((len(blocks), 'session', history))
+            blocks.append(item)
             continue
         row = await db.get(ChatFile, uuid.UUID(item['id']))
         if row is None:
@@ -98,17 +115,27 @@ async def build(db, attachments: list[dict] | None, *, storage_root: str,
         elif not row.has_text:
             blocks.append(f'<file name="{_escape(row.filename)}">({NO_TEXT_NOTE})</file>')
         else:
-            text = row.text or ''
-            if row.text_chars > ATTACH_TEXT_CHARS or len(text) > ATTACH_TEXT_CHARS:
-                handle = f'f{len(long_files) + 1}'
-                long_files[handle] = AttachedText(row.filename, text, row.text_chars)
-                text = (text[:ATTACH_TEXT_CHARS] + f'\n[Cut: the file {handle} has {row.text_chars} characters; '
-                        f'the first {ATTACH_TEXT_CHARS} are above. read_file(file="{handle}", '
-                        f'start={ATTACH_TEXT_CHARS}) reads on; grep_file(file="{handle}", pattern=...) '
-                        'finds a passage.]')
-                blocks.append(f'<file name="{_escape(row.filename)}" handle="{handle}">\n{_content(text)}\n</file>')
-                continue
-            blocks.append(f'<file name="{_escape(row.filename)}">\n{_content(text)}\n</file>')
+            texts.append((len(blocks), 'file', row))
+            blocks.append(row)
+    wanted = [len(_earlier_chat(source)) if kind == 'session' else len(source.text or '')
+              for _, kind, source in texts]
+    for (index, kind, source), share in zip(texts, share_out(wanted, ATTACH_TEXT_CHARS)):
+        if kind == 'session':
+            item = blocks[index]
+            blocks[index] = (f'<earlier_conversation title="{_escape(item["name"] or "")}">\n'
+                             f'{_earlier_chat(source, share)}\n</earlier_conversation>')
+            continue
+        row, text = source, source.text or ''
+        if row.text_chars > share or len(text) > share:
+            handle = f'f{len(long_files) + 1}'
+            long_files[handle] = AttachedText(row.filename, text, row.text_chars)
+            text = (text[:share] + f'\n[Cut: the file {handle} has {row.text_chars} characters; '
+                    f'the first {share} are above. read_file(file="{handle}", '
+                    f'start={share}) reads on; grep_file(file="{handle}", pattern=...) '
+                    'finds a passage.]')
+            blocks[index] = f'<file name="{_escape(row.filename)}" handle="{handle}">\n{_content(text)}\n</file>'
+        else:
+            blocks[index] = f'<file name="{_escape(row.filename)}">\n{_content(text)}\n</file>'
     if documents:
         blocks.append('The student asked to search only in these course files: '
                       + ', '.join(_escape(d) for d in documents) + '.')
