@@ -73,6 +73,9 @@ services:
       <<: *app-env
       PDF_MINERU_PYTHON: /opt/mineru/bin/python
       PDF_MINERU_CONFIG: /opt/mineru-data/mineru.json
+      # MinerU's small models on the GPU, shared with dev (documentation/PDF_INGESTION.md);
+      # the worker reads on its CPU when the service is not there.
+      PDF_MINERU_GPU_URL: http://edullm-mineru-gpu:8000
     volumes:
       - release_documents:/data/documents
       - /home/spark-1/edullm-mineru:/opt/mineru-data:ro
