@@ -43,16 +43,22 @@ os.environ["MPLBACKEND"] = "AGG"
 import matplotlib
 matplotlib.use("AGG")
 import matplotlib.pyplot
-# Chinese text: DejaVu Sans first, then the Chinese font for the characters it
-# lacks (matplotlib's font fallback, 3.6 or later).
+# Chinese text: the Chinese font is the last fallback of every font the code
+# asks for (matplotlib's font fallback, 3.6 or later), so a character DejaVu
+# Sans lacks is drawn, whatever font.family the code sets (models often set
+# SimHei or Noto Sans CJK SC, which do not exist here). A font name that does
+# not exist is not logged: the model would spend a run looking for fonts.
 if os.path.exists("${FONT_IN_PYODIDE}"):
+    import logging
     from matplotlib import font_manager
+    logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
     font_manager.fontManager.addfont("${FONT_IN_PYODIDE}")
-    _cjk = font_manager.FontProperties(fname="${FONT_IN_PYODIDE}").get_name()
-    matplotlib.rcParams["font.family"] = ["DejaVu Sans", _cjk]
-    matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", _cjk] + [
-        f for f in matplotlib.rcParams["font.sans-serif"] if f not in ("DejaVu Sans", _cjk)]
-    del _cjk, font_manager
+    _edullm_find = font_manager.FontManager._find_fonts_by_props
+    def _edullm_with_cjk(self, *args, **kwargs):
+        paths = _edullm_find(self, *args, **kwargs)
+        return paths if "${FONT_IN_PYODIDE}" in paths else [*paths, "${FONT_IN_PYODIDE}"]
+    font_manager.FontManager._find_fonts_by_props = _edullm_with_cjk
+    del font_manager, logging
 def _edullm_show(*, block=None):
     buf = BytesIO()
     matplotlib.pyplot.savefig(buf, format="png")
